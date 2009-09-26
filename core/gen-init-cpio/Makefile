@@ -1,12 +1,12 @@
 
 DESTDIR =
-PREFIX = /
+PREFIX = /opt/
 
-MKDIR = /bin/mkdir
-INSTALL = /bin/install -c -m 755
+MKDIR = /opt/bin/mkdir
+INSTALL = /opt/bin/install -c -m 755
 
-CC   = /usr/bin/gcc 
-LD   = /usr/bin/gcc
+CC   = /opt/bin/gcc 
+LD   = /opt/bin/gcc
 
 CFLAGS += -Wall -Wstrict-prototypes -Wsign-compare -Wchar-subscripts \
            -Wpointer-arith -Wcast-align -Wsign-compare

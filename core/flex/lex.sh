@@ -1,3 +1,3 @@
 #!/bin/sh
 
-exec /usr/bin/flex -l "$@"
+exec /opt/bin/flex -l "$@"
