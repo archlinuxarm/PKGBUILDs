@@ -1,4 +1,4 @@
-prefix = /usr
+prefix = /opt
 DESTDIR =
 DEBUG = false
 FETCH_WITH_INET6 = true
