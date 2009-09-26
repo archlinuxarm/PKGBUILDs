@@ -1,0 +1,73 @@
+# Maintainer: Alexander Foremny <alexanderforemny@gmail.com>
+
+pkgbase=gcc
+pkgname=('gcc' 'gcc-libs')
+pkgver=4.4.1
+pkgrel=3
+pkgdesc='The GNU Compiler Collection'
+arch=(arm)
+license=(GPL LGPL custom)
+url='http://gcc.gnu.org'
+makedepends=(flex 'gcc>=3.4' 'gawk>=3.1.5' 'make>=3.80')
+source=(ftp://gcc.gnu.org/pub/gcc/releases/gcc-$pkgver/gcc-{core,g++,fortran,objc}-$pkgver.tar.bz2)
+md5sums=('d19693308aa6b2052e14c071111df59f'
+         'd449047b5761348ceec23739f5553e0b'
+         '47b92407bd15703a0ebb9e36e0314615'
+         'f7b2a606394036e81433b2f4c3251cba')
+options=('!libtool')
+
+build() {
+  mkdir -p $srcdir/gcc-build
+  cd $srcdir/gcc-build
+
+  ../gcc-$pkgver/configure --prefix=/usr \
+       --enable-languages=c,c++,fortran,objc,obj-c++ \
+       --build=i686-pc-linux-gnu \
+       --host=arm-softfloat-linux-gnueabi \
+       --target=arm-softfloat-linux-gnueabi \
+       --disable-libstdcxx-pch \
+       --enable-__cxa_atexit \
+       --with-arch=armv4t \
+       --disable-multilib \
+       --enable-threads=posix || return 1
+  make || return 1
+}
+
+package_gcc() {
+  depends=("gcc-libs==$pkgver-$pkgrel" 'binutils>=2.19.1' 'mpfr>=2.4.1' 'cloog-ppl>=0.15.3')
+  groups=(base-devel)
+  license=(GPL)
+
+  cd $srcdir/gcc-build
+  make DESTDIR=$pkgdir install || return 1
+
+  ln -sf gcc $pkgdir/usr/bin/cc
+  ln -sf g++ $pkgdir/usr/bin/c++
+
+  # Remove libraries provided by gcc-libs.
+  rm -f $pkgdir/usr/lib/lib*
+}
+
+package_gcc-libs() {
+  depends=('glibc>=2.10.1')
+  groups=(base)
+  pkgdesc='Runtime libraries shipped by GCC for C and C++ languages'
+  license=(LGPL custom)
+
+  cd $srcdir/gcc-build
+  make DESTDIR=$pkgdir install-target-libgcc install-target-libmudflap install-target-libssp install-target-libstdc++-v3 install-target-libgomp install-target-libgfortran install-target-libobjc || return 1
+
+  # make target `install-target-libstdc++-v3' installs include files. 
+  # Those are provided by gcc.
+  rm -rf $pkgdir/usr/include
+
+  # make target `install-target-libgomp' installs include files as well.
+  # Those, too, should be provided by gcc.
+  rm -rf $pkgdir/usr/lib/gcc
+
+  # Install Runtime Library Exception license.
+  install -Dm644 ../gcc-$pkgver/COPYING.RUNTIME \
+                 $pkgdir/usr/share/licenses/$pkgname/RUNTIME.LIBRARY.EXCEPTION
+}
+
+# vim: set ft=sh ts=2 sw=2 et:

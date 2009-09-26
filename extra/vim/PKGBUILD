@@ -1,0 +1,78 @@
+# $Id: PKGBUILD 43552 2009-06-25 06:55:21Z tobias $
+# Maintainer: tobias [ tobias at archlinux org ]
+
+pkgname=vim
+_srcver=7.2
+_patchlevel=218
+pkgver=${_srcver}.${_patchlevel}
+pkgrel=1
+pkgdesc='Vi Improved, a highly configurable, improved version of the vi text editor'
+arch=(arm)
+license=('custom:vim')
+url="http://www.vim.org"
+groups=('base')
+depends=('coreutils')
+makedepends=('wget' 'sed' 'grep' 'gettext' 'perl')
+optdepends=('perl:    the runtime provides a view useful perl scripts')
+backup=(etc/vimrc)
+install=${pkgname}.install
+# we need the extra-stuff to get all patches applied smoothly
+source=(ftp://ftp.vim.org/pub/vim/unix/vim-${_srcver}.tar.bz2 \
+        ftp://ftp.vim.org/pub/vim/extra/vim-${_srcver}-extra.tar.gz \
+        ftp://ftp.vim.org/pub/vim/extra/vim-${_srcver}-lang.tar.gz \
+        fetch_patches.sh fetch_runtime.sh vimrc archlinux.vim)
+md5sums=('f0901284b338e448bfd79ccca0041254' '35e04482f07c57221c9a751aaa3b8dac' \
+         'd8884786979e0e520c112faf2e176f05' '6d7e8d7868e8bfaa9a5880cd9c439320' \
+         '45c1c3c6aff7de0d8fc2a9d8cd5cec7d' '29125bedc96f2a58c772ee0455a333bc' \
+         'da4ce6d451ed7d36d82ed79188005b5d')
+
+build()
+{
+  _versiondir="vim"$(echo ${_srcver} | sed "s/\.//")
+  # pull in patches from vim.org (or the src cache alternatively)
+  . ${srcdir}/fetch_patches.sh
+  . ${srcdir}/fetch_runtime.sh
+  get_patches || return 1
+  cd ${srcdir}/${_versiondir}
+  sed -i 's|^.*\(#define SYS_.*VIMRC_FILE.*"\) .*$|\1|' src/feature.h
+  sed -i 's|^.*\(#define VIMRC_FILE.*"\) .*$|\1|' src/feature.h
+  # build party
+  ./configure --prefix=/usr --localstatedir=/var/lib/vim --mandir=/usr/share/man \
+    --with-compiledby=ArchLinux --with-features=big \
+    --disable-gpm --enable-acl --with-x=no --disable-gui \
+    --enable-multibyte --enable-cscope \
+    --enable-perlinterp
+    #--with-global-runtime=/usr/share/vim --with-vim-name=vim \
+  make || return 1
+  make  VIMRCLOC=/etc DESTDIR=${pkgdir} install
+  cd ${pkgdir}/usr/bin
+  rm ex view          # provided by (n)vi in core
+  mv vim vim-normal   # we create a vim-symlink on post_install
+  ln -sf vim-normal vim
+  # ... make g* related symlinks point directly to the actual binary
+  ln -sf vim-normal rview
+  ln -sf vim-normal rvim
+  ln -sf vim-normal vimdiff
+
+  # delete some manpages
+  find ${pkgdir}/usr/share/man -type d -name 'man1' 2> /dev/null | \
+   while read mandir; do
+    cd ${mandir}
+    rm -f ex.1 view.1       # provided by (n)vi
+    rm -f evim.1            # this does not make sense in the console version
+  done
+
+  _runtimedir="${pkgdir}/usr/share/vim/${_versiondir}/"
+  update_runtime
+  cd ${pkgdir}/usr/share/vim
+  ln -s ${_versiondir} vimcurrent
+  cd ${srcdir}/${_versiondir}
+  #install -Dm644 ${_runtimedir}/vimrc_example.vim \
+  #  ${pkgdir}/etc/vimrc
+  install -Dm644 ${srcdir}/vimrc  ${pkgdir}/etc/vimrc
+  install -Dm644 ${srcdir}/archlinux.vim  \
+                 ${pkgdir}/usr/share/vim/vimcurrent/archlinux.vim
+  install -dm755 ${pkgdir}/usr/share/licenses/vim
+  cd ${pkgdir}/usr/share/licenses/vim
+  ln -s ../../vim/${_versiondir}/doc/uganda.txt license.txt
+}

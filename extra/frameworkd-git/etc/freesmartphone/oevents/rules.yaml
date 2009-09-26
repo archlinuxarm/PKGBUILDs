@@ -1,0 +1,146 @@
+
+# This file is in YAML format (http://www.yaml.org/)
+# We define a list of rules that will be automatically loaded
+# When we start the oevents module of the framework daemon
+#
+# The attributes of a rule are :
+# - trigger     : trigger object
+# - filters     : filters object or list of filters objects
+# - actions     : action object or list of actions objects
+#
+# We define the following functions :
+# - CallStatus()            : create a trigger object activated on a call status event
+# - PowerStatus()           : create a trigger object activated on a power status event
+# - HasAttr(name, value)    : create a filter that accept signal with a given attribute
+# - Not(filter)             : create a neg filter
+# - PlaySound(file)         : Action that starts to play an audio file
+# - StopSound(file)         : Action that stop an audio file
+# - SetScenario(name)       : Action that sets an audio scenario
+# - StartVibration
+# - StopVibration
+# - RingTone(cmd)           : cmd can be 'start' or 'stop'
+# - Time(hour, min)         : create a trigger activated at the given time
+# - Debug(msg)              : Action that prints a debug message (only for debuging)
+-
+    trigger: Time(12,29)
+    actions: Debug("A Test")
+-
+    #
+    # Suspend Handling
+    #
+    trigger: InputEvent()
+    filters:
+             - HasAttr(switch, "POWER")
+             - HasAttr(event, "released")
+             - HasAttr(duration, 0)
+    actions: Suspend()
+-
+    #
+    # Call -> Audio Scenario Handling
+    #
+    trigger: IncomingMessage()
+    actions: MessageTone(play)
+
+-
+    while: CallListContains("incoming")
+    filters: Not(CallListContains("active"))
+    actions:
+             - RingTone()
+             - SetDisplayBrightness("0", 90)
+
+-
+    while: CallStatus()
+    filters: Not(HasAttr(status, "release"))
+    actions:
+            - OccupyResource(CPU)
+-
+    while: CallStatus()
+    filters:
+            - Or(HasAttr(status, "outgoing"), HasAttr(status, "active"))
+            - Not(BTHeadsetIsConnected())
+    actions:
+            - SetScenario(gsmhandset)
+-
+    while: CallStatus()
+    filters:
+            - Or(HasAttr(status, "outgoing"), HasAttr(status, "active"))
+            - BTHeadsetIsConnected()
+    actions:
+            - SetScenario(gsmbluetooth)
+            - BTHeadsetPlaying()
+
+-
+    while: PowerStatus()
+    filters: HasAttr(status, "charging")
+    actions: SetLed("gta02_power_orange", "light")
+
+#-
+#    while: PowerStatus()
+#    filters: Not(HasAttr(status, "discharging"))
+#    actions: OccupyResource(Display)
+
+-
+    while: PowerStatus()
+    filters: HasAttr(status, "critical")
+    actions: SetLed("gta02_power_orange", "blink")
+-
+    while: PowerStatus()
+    filters: HasAttr(status, "full")
+    actions: SetLed("gta02_power_blue", "light")
+-
+    trigger: PowerStatus()
+    filters: HasAttr(status, "empty")
+    actions: Command('poweroff')
+
+    #
+    # Headset Audio Scenario Support
+    #
+-
+    trigger: InputEvent()
+    filters:
+             - HasAttr(switch, "HEADSET")
+             - HasAttr(event, "pressed")
+    actions: Command('amixer -d sset "Amp Spk" mute')
+-
+    trigger: InputEvent()
+    filters:
+             - HasAttr(switch, "HEADSET")
+             - HasAttr(event, "released")
+    actions: Command('amixer -d sset "Amp Spk" unmute')
+
+    #
+    # A few testing rules :
+    #
+
+    # This rule will only be enabled in silent mode
+    # According to the preferences rules conf files.
+-
+    name: 'test-rule'
+    trigger: IdleState()
+    filters: HasAttr(status, "busy")
+    actions: Debug("Hello This is a test")
+-
+    trigger: Test("test")
+    actions: Debug("trigger test")
+-
+    while: Test("test2")
+    actions: RingTone()
+-
+    trigger: DbusTrigger(system, 'org.freesmartphone.odeviced', 0, 'org.freesmartphone.Device.IdleNotifier', 'State')
+    actions: Debug("dbus trigger test")
+-
+
+    #
+    # Idleness Brightness Handling
+    #
+    trigger: IdleState()
+    filters: HasAttr(status, "busy")
+    actions: SetDisplayBrightness("0", 90)
+-
+    trigger: IdleState()
+    filters: HasAttr(status, "idle_dim")
+    actions: SetDisplayBrightness("0", 20)
+-
+    trigger: IdleState()
+    filters: HasAttr(status, "idle_prelock")
+    actions: SetDisplayBrightness("0", 0)

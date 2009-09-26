@@ -1,0 +1,66 @@
+# Maintainer: Geoffroy Carrier <geoffroy@archlinux.org>
+pkgname=bluez
+pkgver=4.39
+pkgrel=1
+pkgdesc="Libraries and tools for the Bluetooth protocol stack"
+url="http://www.bluez.org/"
+arch=(arm)
+license=('GPL2')
+depends=('dbus-core' 'glib2>=2.20.1')
+makedepends=('alsa-lib' 'libnl')
+optdepends=('alsa-lib' 'libnl' 'dbus-python')
+conflicts=('bluez-libs' 'bluez-utils')
+provides=('bluez-libs' 'bluez-utils')
+replaces=('bluez-libs' 'bluez-utils')
+options=(!libtool)
+backup=(etc/bluetooth/{main,rfcomm,audio,network,input}.conf
+        etc/conf.d/bluetooth)
+source=(http://www.kernel.org/pub/linux/bluetooth/${pkgname}-${pkgver}.tar.bz2
+	bluez-activate-wacom-mode2.patch
+	bluez-try-utf8-harder.patch
+        bluetooth.conf.d
+        rc.bluetooth)
+md5sums=('3f7671a3939eabbc261d3a92da83445f'
+         '240e81c89840f181da658f4b6bd2cc0f'
+         '726e6811cfe2d9b1bde34814bb29ec9f'
+         'd12be5b494525bb1ba6eac5c3983dd3e'
+         'b67bd953082befea6ae57c6fe25993e8')
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  patch -Np1 -i "${srcdir}/bluez-activate-wacom-mode2.patch" || return 1
+  patch -Np1 -i "${srcdir}/bluez-try-utf8-harder.patch" || return 1
+  ./configure --prefix=/usr \
+        --sysconfdir=/etc \
+        --localstatedir=/var \
+        --libexecdir=/lib \
+        --mandir=/usr/share/man \
+        --enable-alsa \
+        --enable-netlink \
+        --enable-tools \
+        --enable-bccmd \
+        --enable-hid2hci \
+        --enable-dfutool \
+        --enable-hidd \
+        --enable-pand \
+        --enable-dund \
+        --enable-cups \
+        --enable-manpages \
+        --enable-configfiles || return 1
+  make || return 1
+  make DESTDIR="${pkgdir}" install || return 1
+
+  install -m755 -d "${pkgdir}/etc/bluetooth"
+  install -m755 -d "${pkgdir}/etc/rc.d"
+  install -m755 -d "${pkgdir}/etc/conf.d"
+  install -m644 network/network.conf input/input.conf audio/audio.conf "${pkgdir}/etc/bluetooth/" || return 1
+  install -m755 "${srcdir}/rc.bluetooth" "${pkgdir}/etc/rc.d/bluetooth" || return 1
+  install -m644 "${srcdir}/bluetooth.conf.d" "${pkgdir}/etc/conf.d/bluetooth" || return 1
+
+  install -m755 -d "${pkgdir}/etc/udev/rules.d"
+  install -m755 -d "${pkgdir}/lib/udev/"
+  install -m755 scripts/bluetooth_serial "${pkgdir}/lib/udev/" || return 1
+  install -m644 scripts/bluetooth.rules "${pkgdir}/etc/udev/rules.d/97-bluetooth-serial.rules" || return 1
+
+  install -m755 test/simple-agent "${pkgdir}/usr/bin/bluez-simple-agent" || return 1
+}
