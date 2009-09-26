@@ -1,2 +1,2 @@
 # Set path to perl scripts.
-export PATH="${PATH}:/usr/bin/perlbin/site:/usr/bin/perlbin/vendor:/usr/bin/perlbin/core"
+export PATH="${PATH}:/opt/bin/perlbin/site:/opt/bin/perlbin/vendor:/opt/bin/perlbin/core"
