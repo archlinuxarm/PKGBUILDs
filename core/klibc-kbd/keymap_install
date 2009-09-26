@@ -1,0 +1,76 @@
+# vim: set ft=sh:
+
+# this is needed because kbd utilities compiled with klibc cannot use gunzip
+add_ucfile ()
+{
+    temp=$(mktemp ${TMPDIR}/kbd.XXXX)
+    dest=$(echo "${1}" | sed 's|/usr||' | sed 's|.gz||')
+    name=$(echo "${1}" | sed 's|.*/||')
+
+    if [ $(echo "${1}" | grep '.gz$') ]; then
+        gunzip -c ${1} > ${temp}
+        add_file ${temp} ${dest}
+    else
+        add_file ${1} ${dest}
+    fi
+}
+
+add_includes()
+{
+    for i in $(zgrep -e '^include ".*"' ${1} | cut -d '"' -f 2); do
+        for j in $(find /usr/share/kbd/keymaps -name "${i}" -o -name "${i}.*"); do
+            add_ucfile ${j}
+            add_includes ${j}
+        done
+    done
+}
+
+install ()
+{
+    MODULES=""
+    BINARIES=""
+    FILES=""
+    SCRIPT="keymap"
+    KEYMAP_FILE="$(mktemp ${TMPDIR}/keymap.XXXXXX)"
+    add_file /lib/initcpio/kbd/loadkeys /bin/loadkeys
+    add_file /lib/initcpio/kbd/kbd_mode /bin/kbd_mode
+    add_file /lib/initcpio/kbd/setfont /bin/setfont
+    eval "$(grep -e "^LOCALE=" -e "^KEYMAP=" -e "^CONSOLEFONT=" -e "^CONSOLEMAP=" /etc/rc.conf)"
+    echo "KEYMAP='${KEYMAP}'" >> ${KEYMAP_FILE}
+    echo "CONSOLEFONT='${CONSOLEFONT}'" >> ${KEYMAP_FILE}
+    echo "CONSOLEMAP='${CONSOLEMAP}'" >> ${KEYMAP_FILE}
+    if [ -n "$(echo ${LOCALE} | grep -i utf)" ]; then
+        echo "UTF8='yes'" >> ${KEYMAP_FILE}
+    fi
+    . ${KEYMAP_FILE}
+    add_file ${KEYMAP_FILE} /keymap
+    if [ -n "${KEYMAP}" ]; then
+        for i in $(echo ${KEYMAP}); do
+            for j in $(find /usr/share/kbd/keymaps -name "${i}.map.gz"); do
+                add_ucfile ${j}
+                add_includes ${j}
+            done
+        done
+    fi
+    if [ -n "${CONSOLEFONT}" ]; then
+        for i in $(find /usr/share/kbd/consolefonts -name "${CONSOLEFONT}.*gz"); do
+            add_ucfile ${i}
+        done
+    fi
+    if [ -n "${CONSOLEMAP}" ]; then
+        for i in $(find /usr/share/kbd/unimaps -name "${CONSOLEMAP}.uni"); do
+            add_ucfile ${i}
+        done
+        for i in $(find /usr/share/kbd/consoletrans -name "${CONSOLEMAP}.trans" -o -name "${CONSOLEMAP}"); do
+            add_ucfile ${i}
+        done
+    fi
+}
+
+help ()
+{
+cat<<HELPEOF
+  This hook loads keymap(s) and consolefont specified in rc.conf
+  during early userspace.
+HELPEOF
+}

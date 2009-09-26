@@ -1,0 +1,87 @@
+# $Id: PKGBUILD 40111 2009-05-28 08:14:53Z pierre $
+# Maintainer: Pierre Schmitz <pierre@archlinux.de>
+
+pkgname=qt
+pkgver=4.5.1
+pkgrel=3
+_qtcopyver=971278
+pkgdesc='A cross-platform application and UI framework'
+arch=(arm)
+url='http://www.qtsoftware.com/'
+license=('GPL3' 'LGPL')
+depends=('libpng' 'mesa' 'fontconfig' 'libtiff' 'libmng' 'sqlite3' 'libxrandr' 'glib2' 'libxi' 'dbus' 'libxcursor' 'libxinerama' 'libxrender')
+optdepends=()
+makedepends=('inputproto' 'cups' 'libxfixes')
+provides=("qt4=${pkgver}")
+replaces=('qt4')
+conflicts=('qt4')
+options=('!libtool')
+_pkgfqn="qt-x11-opensource-src-${pkgver}"
+# svn export -r${_qtcopyver} svn://anonsvn.kde.org/home/kde/trunk/qt-copy/patches/ qt-copy-patches-${_qtcopyver}
+source=("ftp://ftp.qtsoftware.com/qt/source/${_pkgfqn}.tar.bz2"
+        "ftp://ftp.archlinux.org/other/qt/qt-copy-patches-${_qtcopyver}.tar.bz2"
+        'assistant.desktop' 'designer.desktop' 'linguist.desktop' 'qtconfig.desktop'
+        'qdoc3.patch')
+md5sums=('afc43e566341cf3e5ed0bcb974f0c3b2'
+         '2f2e6381ba92acbcd0384ec249b4944b'
+         'b352b4b70faba2571af3fce5d119580a'
+         '491a96682faa03407f768a53cca71db5'
+         'cda7ed7e132689991dc2968a0043b4b0'
+         '717669b728a0a795217d2f52969e454c'
+         '868056a3edab09fbac0f82ec8b4a4be3')
+
+build() {
+	unset QMAKESPEC
+	export QT4DIR=$srcdir/$_pkgfqn
+	export PATH=${QT4DIR}/bin:${PATH}
+	export LD_LIBRARY_PATH=${QT4DIR}/lib:${LD_LIBRARY_PATH}
+
+	cd $srcdir/$_pkgfqn
+	for i in $srcdir/qt-copy-patches-${_qtcopyver}/*; do
+		echo "applying $i"
+		patch -p0 -i $i || return 1
+	done
+
+	patch -p1 -i $srcdir/qdoc3.patch
+
+	sed -i "s|-O2|$CXXFLAGS|" mkspecs/common/g++.conf
+	sed -i "/^QMAKE_RPATH/s| -Wl,-rpath,||g" mkspecs/common/g++.conf
+
+	./configure -confirm-license -opensource \
+		-silent \
+		-prefix /usr \
+		-sysconfdir /etc \
+		-plugindir /usr/lib/qt/plugins \
+		-translationdir /usr/share/qt/translations \
+		-datadir /usr/share/qt \
+		-docdir /usr/share/doc/qt \
+		-examplesdir /usr/share/doc/qt/examples \
+		-demosdir /usr/share/doc/qt/demos \
+		-no-separate-debug-info \
+		-plugin-sql-sqlite \
+		-system-sqlite \
+		-openssl-linked \
+		-nomake demos \
+		-nomake examples \
+		-nomake docs \
+		-no-phonon \
+		-optimized-qmake \
+		-reduce-relocations
+
+	make
+	make INSTALL_ROOT=$pkgdir install
+
+	install -D -m644 tools/assistant/tools/assistant/images/assistant.png ${pkgdir}/usr/share/pixmaps/assistant.png
+	install -D -m644 tools/linguist/linguist/images/appicon.png ${pkgdir}/usr/share/pixmaps/linguist.png
+	install -D -m644 tools/designer/src/designer/images/designer.png ${pkgdir}/usr/share/pixmaps/designer.png
+	install -D -m644 src/gui/dialogs/images/qtlogo-64.png ${pkgdir}/usr/share/pixmaps/qtlogo.png
+	install -d ${pkgdir}/usr/share/applications
+	install -m644 ${srcdir}/{linguist,designer,assistant,qtconfig}.desktop ${pkgdir}/usr/share/applications/
+	install -D -m644 LGPL_EXCEPTION.txt ${pkgdir}/usr/share/licenses/qt/LGPL_EXCEPTION.txt
+
+	# cleanup and path fixes
+	find $pkgdir/usr/lib -type f -name '*prl' -print -exec sed -i -e "/^QMAKE_PRL_BUILD_DIR/d" {} \;
+	sed -i -e "s|-L$srcdir/${_pkgfqn}/lib||g" $pkgdir/usr/lib/pkgconfig/*.pc
+	sed -i -e "s|$srcdir/${_pkgfqn}/bin/moc|/usr/bin/moc|g" $pkgdir/usr/lib/pkgconfig/*.pc
+	sed -i -e "s|$srcdir/${_pkgfqn}/bin/uic|/usr/bin/uic|g" $pkgdir/usr/lib/pkgconfig/*.pc
+}
