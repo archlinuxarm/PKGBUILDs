@@ -1,0 +1,363 @@
+# vim: set ft=sh ts=2 sw=2 et:
+# file: /etc/bash_completion.d/pacman
+
+# Bash completion for pacman
+# Original: Manolis Tzanidakis <mtzanidakis@freemail.gr>
+#
+# Distributed under the terms of the GNU General Public License, v2 or later.
+#
+
+## initial functions
+
+rem_selected ()
+{
+  # (Adapted from bash_completion by Ian Macdonald <ian@caliban.org>)
+  # This removes any options from the list of completions that have
+  # already been specified on the command line.
+  COMPREPLY=($(echo "${COMP_WORDS[@]}" | \
+    (while read -d ' ' i; do
+      [ "${i}" == "" ] && continue
+      # flatten array with spaces on either side,
+      # otherwise we cannot grep on word boundaries of
+      # first and last word
+      COMPREPLY=" ${COMPREPLY[@]} "
+      # remove word from list of completions
+      COMPREPLY=(${COMPREPLY/ ${i%% *} / })
+    done
+    echo ${COMPREPLY[@]})))
+  return 0
+}
+
+_available_repos ()
+{
+  COMPREPLY=( $( compgen -W "$(grep '\[' /etc/pacman.conf | grep -v -e 'options' -e '^#' | tr -d '[]' )" -- $cur ) )
+}
+
+_installed_pkgs ()
+{
+  local installed_pkgs
+  installed_pkgs=$( ls /var/lib/pacman/local/ )
+  COMPREPLY=( $( compgen -W "$( for i in $installed_pkgs; do echo ${i%-*-*}; done )" -- $cur ) )
+}
+
+_available_pkgs ()
+{
+  #find balks easilly on a find /foo/*/* type dir, especially one like
+  #   /var/lib/pacman/*/*
+  # This little change-up removes the find *and* only uses enabled repos
+  local available_pkgs
+  local enabled_repos
+  enabled_repos=$( grep '\[' /etc/pacman.conf | grep -v -e 'options' -e '^#' | tr -d '[]' )
+  available_pkgs=$( for r in $enabled_repos; do echo /var/lib/pacman/sync/$r/*; done )
+  COMPREPLY=( $( compgen -W "$( for i in $available_pkgs; do j=${i##*/}; echo ${j%-*-*}; done )" -- $cur ) )
+}
+
+_installed_groups ()
+{
+  local installed_groups
+  installed_groups=$( find /var/lib/pacman/local -name desc -exec sed -ne '/%GROUPS%/,/^$/{//d; p}' {} \; | sort -u )
+  COMPREPLY=( $( compgen -W "$( for i in $installed_groups; do echo ${i%-*-*}; done )" -- $cur ) )
+}
+
+_available_groups ()
+{
+  #find balks easilly on a find /foo/*/* type dir, especially one like
+  #   /var/lib/pacman/*/*
+  # This little change-up removes the find *and* only uses enabled repos
+  local available_groups
+  local enabled_repos
+  enabled_repos=$( grep '\[' /etc/pacman.conf | grep -v -e 'options' -e '^#' | tr -d '[]' )
+  available_groups=$( for r in $enabled_repos; do sed '/%GROUPS%/,/^$/{//d; p}' /var/lib/pacman/sync/$r/*/desc | sort -u; done )
+  COMPREPLY=( $( compgen -W "$( for i in $available_groups; do echo ${i%-*-*}; done )" -- $cur ) )
+}
+
+## makepkg completion
+
+_makepkg ()
+{
+  local cur prev
+  COMPREPLY=()
+  cur=${COMP_WORDS[COMP_CWORD]}
+  prev=${COMP_WORDS[COMP_CWORD-1]}
+
+  case "$prev" in
+    -p)
+      _filedir
+      return 0
+    ;;
+    --help|--cleancache)
+      COMPREPLY=''
+      return 0
+    ;;
+  esac
+
+  if [[ "$cur" == -* ]]; then
+    COMPREPLY=( $( compgen -W '\
+      -A --ignorearch \
+      -b --builddeps \
+      -c --clean \
+      -C --cleancache \
+      -d --nodeps \
+      -e --noextract \
+      -f --force \
+      -g --geninteg \
+      -h --help \
+      -i --install \
+      -L --log \
+      -m --nocolor \
+      -o --nobuild \
+      -p \
+      -r --rmdeps \
+      -s --syncdeps \
+      --asroot \
+      --source \
+      --noconfirm \
+      --noprogressbar' -- $cur ) )
+  fi
+
+  rem_selected
+}
+complete -o default -F _makepkg makepkg
+
+## pacman completion
+
+_instring ()
+{
+  str="${1}"
+  shift 1
+  for c in "${@}"; do
+    if [ $(expr index "${str}" "${c}") -gt 0 ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+_pacman ()
+{
+  local a arg toparse op mod cur
+  COMPREPLY=()
+
+  # This argument parsing is done so we can check for flag existance later
+  #  right now it's a tad crappy, but does the job
+  for (( i=1; i < ${#COMP_WORDS[@]}-1; i++ )); do
+    a=${COMP_WORDS[i]}
+    arg="${a:0:2}"
+    toparse="${a:2}"
+
+    case "${arg}" in
+      -@(U|R|S|Q|h|V))
+        op="${arg/-}"
+        mod="${mod}${a:2}"
+        ;;
+      --)
+        arg="${a:2}"
+        case "${arg}" in
+          remove) op="R" ;;
+          upgrade) op="U" ;;
+          query) op="Q" ;;
+          sync) op="S" ;;
+          help) op="h" ;;
+          version) op="V" ;;
+          verbose) mod="${mod}v" ;;
+          root) mod="${mod}r" ;;
+          dbpath) mod="${mod}b" ;;
+          nodeps) mod="${mod}d" ;;
+          force) mod="${mod}f" ;;
+          groups) mod="${mod}g" ;;
+          info) mod="${mod}i" ;;
+          list) mod="${mod}l" ;;
+          print-uris) mod="${mod}p" ;;
+          search) mod="${mod}s" ;;
+          sysupgrade) mod="${mod}u" ;;
+          upgrades) mod="${mod}u" ;;
+          downloadonly) mod="${mod}w" ;;
+          refresh) mod="${mod}y" ;;
+          changelog) mod="${mod}c" ;;
+          deps) mod="${mod}d" ;;
+          explicit) mod="${mod}e" ;;
+          unrequired) mod="${mod}t" ;;
+          foreign) mod="${mod}m" ;;
+          owns) mod="${mod}o" ;;
+          file) mod="${mod}p" ;;
+          search) mod="${mod}s" ;;
+          upgrades) mod="${mod}u" ;;
+          cascade) mod="${mod}c" ;;
+          dbonly) mod="${mod}k" ;;
+          nosave) mod="${mod}n" ;;
+          recursive) mod="${mod}s" ;;
+          unneeded) mod="${mod}u" ;;
+        esac ;;
+      *) toparse="${a}" ;;
+    esac
+
+    arglen=$(( ${#toparse}-1 ))
+    for c in $(seq 0 "${arglen}"); do
+      arg=${toparse:$c:1}
+      [ "${arg}" != "-" ] && mod="${mod}${arg}"
+    done
+  done
+
+  cur=${COMP_WORDS[COMP_CWORD]}
+
+  if [ $COMP_CWORD -eq 1 ] && [[ "$cur" == -* ]]; then
+    COMPREPLY=( $( compgen -W '\
+      -h --help \
+      -Q --query \
+      -R --remove \
+      -S --sync \
+      -U --upgrade \
+      -V --version \
+      ' -- $cur ) )
+    rem_selected
+    return 0
+  fi
+
+  if [[ "$cur" == -* ]]; then
+    case "${op}" in
+      U)
+        COMPREPLY=( $( compgen -W '\
+          --asdeps \
+          --asexplicit \
+          -d --nodeps \
+          -f --force \
+          -h --help \
+          --config \
+          --logfile \
+          --noconfirm \
+          --noprogressbar \
+          --noscriptlet \
+          -v --verbose \
+          -r --root \
+          -b --dbpath \
+          --cachedir \
+          ' -- $cur ) )
+        return 0
+        ;;
+      R)
+        COMPREPLY=( $( compgen -W '\
+          -c --cascade \
+          -d --nodeps \
+          -h --help \
+          -k --dbonly \
+          -n --nosave \
+          -s --recursive \
+          -u --unneeded \
+          --config \
+          --logfile \
+          --noconfirm \
+          --noprogressbar \
+          --noscriptlet \
+          -v --verbose \
+          -r --root \
+          -b --dbpath \
+          --cachedir \
+          ' -- $cur ) )
+        return 0
+        ;;
+      S)
+        COMPREPLY=( $( compgen -W '\
+          --asdeps \
+          --asexplicit \
+          -c --clean \
+          -d --nodeps \
+          -f --force \
+          -g --groups \
+          -h --help \
+          -i --info \
+          -l --list \
+          -p --print-uris \
+          -s --search \
+          -u --sysupgrade \
+          -w --downloadonly \
+          -y --refresh \
+          --needed \
+          --ignore \
+          --ignoregroup \
+          --config \
+          --logfile \
+          --noconfirm \
+          --noprogressbar \
+          --noscriptlet \
+          -v --verbose \
+          -r --root \
+          -b --dbpath \
+          --cachedir \
+          ' -- $cur ) )
+        return 0
+        ;;
+      Q)
+        COMPREPLY=( $( compgen -W '\
+          -c --changelog \
+          -d --deps \
+          -e --explicit \
+          -g --groups \
+          -h --help \
+          -i --info \
+          -l --list \
+          -m --foreign \
+          -o --owns \
+          -p --file \
+          -s --search \
+          -t --unrequired \
+          -u --upgrades \
+          --config \
+          --logfile \
+          --noconfirm \
+          --noprogressbar \
+          --noscriptlet \
+          -v --verbose \
+          -r --root \
+          -b --dbpath \
+          --cachedir \
+          ' -- $cur ) )
+        return 0
+        ;;
+    esac
+    rem_selected
+  else
+    case "${op}" in
+      U)
+        COMPREPLY=( $( compgen -d -- "$cur" ) \
+                    $( compgen -f -X '!*.pkg.tar.gz' -- "$cur" ) )
+        return 0
+        ;;
+      h|V)
+        COMPREPLY=''
+        return 0
+        ;;
+      Q)
+        if _instring $mod g; then
+          _installed_groups
+        elif _instring $mod o; then
+          COMPREPLY=( $( compgen -d -- "$cur" ) \
+                      $( compgen -f -- "$cur" ) )
+        elif _instring $mod p; then
+          COMPREPLY=( $( compgen -d -- "$cur" ) \
+                      $( compgen -f -X '!*.pkg.tar.gz' -- "$cur" ) )
+        elif _instring $mod u; then
+          COMPREPLY=''
+          return 0
+        else
+          _installed_pkgs
+        fi
+        return 0
+        ;;
+      R)
+        _installed_pkgs
+        return 0
+        ;;
+      S)
+        if _instring $mod l; then
+          _available_repos
+        else
+          _available_pkgs
+        fi
+        return 0
+        ;;
+    esac
+  fi
+
+  rem_selected
+}
+complete -o filenames -F _pacman pacman
