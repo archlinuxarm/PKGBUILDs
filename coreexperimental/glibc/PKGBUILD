@@ -1,0 +1,89 @@
+# Maintainer: Alexander Foremny <alexanderforemny@gmail.com>
+
+# toolchain build order:
+# kernel-headers -> glibc -> binutils -> gcc-libs -> gcc -> binutils -> glibc
+
+pkgname=glibc
+pkgver=2.10.1
+pkgrel=2
+install=glibc.install
+backup=(etc/locale.gen
+        etc/nscd.conf)
+pkgdesc="GNU C Library"
+arch=('arm')
+license=('GPL' 'LGPL')
+url="http://www.gnu.org/software/libc"
+groups=('base' 'small-base')
+depends=('kernel-headers>=2.6.29' 'tzdata')
+makedepends=('gcc>=4.4.0')
+source=(http://ftp.gnu.org/gnu/glibc/glibc-ports-$pkgver.tar.gz
+        http://ftp.gnu.org/gnu/glibc/glibc-$pkgver.tar.gz
+        nscd locale.gen.txt locale-gen)
+
+build() {
+  cd $srcdir/glibc-$pkgver
+  ln -s $srcdir/glibc-ports-$pkgver .
+
+  install -dm755 $pkgdir/etc
+  touch $pkgdir/etc/ld.so.conf
+
+  # Remove timezone from build targets. This is supplied by the tzdata
+  # package.
+  sed -i '/^all-subdirs =/,/^$/s/timezone //' Makeconfig
+
+  mkdir glibc-build
+  cd glibc-build
+
+  echo "slibdir=/lib" >> configparms
+
+  ../configure --prefix=/usr \
+      --host=arm-unknown-linux-gnueabi \
+      --build=arm-unknown-linux-gnueabi \
+      --enable-add-ons \
+      --enable-kernel=2.6.16 \
+      --enable-bind-now \
+      --disable-profile \
+      --disable-debug \
+      --disable-gd \
+      --libexecdir=/usr/lib \
+      --libdir=/usr/lib \
+      --with-tls \
+      --with-__thread \
+      --with-headers=/usr/include \
+      --without-cvs \
+      --without-gd \
+      --without-fp \
+      --without-selinux || return 1
+
+  make || return 1
+  make install_root="$pkgdir" install || return 1
+
+  rm -f "$pkgdir/etc/ld.so.cache" "$pkgdir/etc/ld.so.conf" \
+        "$pkgdir/etc/localtime"
+
+  install -dm755 ${pkgdir}/etc/rc.d
+  install -dm755 ${pkgdir}/usr/sbin
+  install -dm755 ${pkgdir}/usr/lib/locale
+  install -Dm644 "$srcdir/glibc-$pkgver/nscd/nscd.conf" \
+                 "$pkgdir/etc/nscd.conf"
+  install -Dm755 "$srcdir/nscd" "$pkgdir/etc/rc.d/nscd"
+  install -Dm755 "$srcdir/locale-gen" "$pkgdir/usr/sbin/locale-gen"
+
+  sed -i -e 's/^\tserver-user/#\tserver-user/' \
+            "$pkgdir/etc/nscd.conf" || return 1
+
+  # Create /etc/locale.gen
+  install -m644 "$srcdir/locale.gen.txt" "$pkgdir/etc/locale.gen"
+  sed -i 's|/| |g' "$srcdir/libc/localedata/SUPPORTED"
+  sed -i 's|\\| |g' "$srcdir/libc/localedata/SUPPORTED"
+  sed -i 's|SUPPORTED-LOCALES=||' "$srcdir/libc/localedata/SUPPORTED"
+  cat "$srcdir/libc/localedata/SUPPORTED" >> "$pkgdir/etc/locale.gen"
+  sed -i 's|^|#|g' "$pkgdir/etc/locale.gen"
+}
+
+# vim: set ft=sh ts=2 sw=2 et:
+md5sums=('3daabbcd79f88866cdce4e7a93388459'
+         'f95368cff696baa854fd41ba69d70f3a'
+         'b587ee3a70c9b3713099295609afde49'
+         '07ac979b6ab5eeb778d55f041529d623'
+         '476e9113489f93b348b21e144b6a8fcf')
