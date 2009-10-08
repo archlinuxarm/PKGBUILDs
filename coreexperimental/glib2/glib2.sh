@@ -1,1 +1,0 @@
-export G_BROKEN_FILENAMES=1
