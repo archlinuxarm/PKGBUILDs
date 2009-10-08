@@ -1,0 +1,116 @@
+#!/bin/sh
+#
+# Kernel building helper script (C)2008 Openmoko, Inc
+# Andy Green <andy@openmoko.org>
+#
+# Licensed under GPLv3 or later
+#
+#
+# you need to run this from the top level source dir, but it creates all
+# object files into a subdir given in the first argument, eg
+#
+# ./build GTA02
+#
+# this radically speeds up swapping between build contexts.  Note the config
+# for each build lives in the subdir.
+
+PARALLEL=16
+
+if [ -z "$1" ] ; then
+	echo "Specify the build subdir, eg, GTA02 which contains the .config"
+	echo "and will hold the object files"
+	exit 1
+fi
+
+mkdir -p $1
+
+#export CROSS_COMPILE=/usr/local/openmoko/arm/bin/arm-angstrom-linux-gnueabi-
+make O=$1 ARCH=arm silentoldconfig
+
+#
+# figure out what we are building
+#
+
+PRODUCT=
+
+if [ ! -z "`grep CONFIG_MACH_NEO1973_GTA01=y $1/.config`" ] ; then
+	START=30008000
+	PRODUCT=GTA01
+fi
+
+if [ ! -z "`grep CONFIG_MACH_NEO1973_GTA02=y $1/.config`" ] ; then
+	START=30008000
+	PRODUCT=GTA02
+fi
+
+if [ ! -z "`grep CONFIG_MACH_OPENMOKO_GTA03=y $1/.config`" ] ; then
+        START=50008000
+        PRODUCT=GTA03
+fi
+
+if [ ! -z "`grep CONFIG_MACH_SMDK6410=y $1/.config`" ] ; then
+        START=50008000
+        PRODUCT=SMDK6410
+fi
+
+if [ ! -z "`grep CONFIG_MACH_M800=y $1/.config`" ] ; then
+	START=30008000
+	PRODUCT=M800
+fi
+
+if [ -z "$PRODUCT" ] ; then
+	echo "Unable to figure out what we are building from the config"
+	exit 1
+fi
+
+#
+# get the branch and head hash for the version we are building to
+# allow source tracability
+#
+
+VERSION=
+if [ -d .git ] ; then
+ HEAD=`git show --pretty=oneline | head -n1 | cut -d' ' -f1 | cut -b1-16`
+ BRANCH=andy-tracking
+ VERSION=-$PRODUCT\_$BRANCH
+fi
+
+
+echo $MKIMAGECMD
+
+#
+# actually make it
+#
+
+echo make -j$PARALLEL O=$1 ARCH=arm CONFIG_DEBUG_SECTION_MISMATCH=y EXTRAVERSION=$VERSION;
+
+if make -j$PARALLEL O=$1 ARCH=arm CONFIG_DEBUG_SECTION_MISMATCH=y EXTRAVERSION=$VERSION; then
+
+	#
+	# if the build is happy, postprocess it by strip and with U-Boot header wrapper
+	# you can get mkimage from U-Boot or Qi build
+	#
+
+	${CROSS_COMPILE}objcopy -O binary -R .note -R .comment -S $1/arch/arm/boot/compressed/vmlinux $1/linux.bin
+	mkimage -A arm -O linux -T kernel -C none -a $START -e $START -n "OM $PRODUCT $BRANCH""_$HEAD" -d $1/linux.bin $1/uImage-$PRODUCT.bin
+
+	# we can see if it is an "moredrivers" build by looking for USB Eth gadget
+	# if it is then keep a stamped copy of last build
+
+	if [ ! -z "`grep CONFIG_USB_USBNET=y $1/.config`" ] ; then
+		rm -f $1/uImage-moredrivers-$PRODUCT*.bin $1/modules-$PRODUCT*.tar.gz
+		cp $1/uImage-$PRODUCT.bin $1/uImage-moredrivers$VERSION-$HEAD.bin
+		rm -rf $1/staging
+		mkdir -p $1/staging
+		if [ ! -z "$2" ] ; then
+			make O=$1 ARCH=arm modules_install INSTALL_MOD_PATH=staging
+			cd $1/staging
+			tar czf ../modules$VERSION-$HEAD.tar.gz .
+			cd ../..
+		fi
+	fi
+	exit 0
+else
+	exit 1
+fi
+

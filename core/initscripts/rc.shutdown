@@ -1,0 +1,149 @@
+#!/bin/bash
+#
+# /etc/rc.shutdown
+#
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+
+# avoid staircase effect
+/bin/stty onlcr
+
+echo " "
+printhl "Initiating Shutdown..."
+echo " "
+
+# avoid NIS hanging syslog-ng on shutdown by unsetting the domainname
+if [ -x /bin/domainname ]; then
+	/bin/domainname ""
+fi
+
+if [ -x /etc/rc.local.shutdown ]; then
+	/etc/rc.local.shutdown
+fi
+
+if [ "$PREVLEVEL" = "3" -o "$PREVLEVEL" = "5" ]; then
+	# Find daemons NOT in the DAEMONS array. Shut these down first
+	if [ -d /var/run/daemons ]; then
+		for daemon in $(/bin/ls -1t /var/run/daemons); do
+		  if ! in_array $daemon ${DAEMONS[@]}; then
+				stop_daemon $daemon
+		  fi
+		done
+	fi
+	# Shutdown daemons in reverse order
+	let i=${#DAEMONS[@]}-1
+	while [ $i -ge 0 ]; do
+		if [ "${DAEMONS[$i]:0:1}" != '!' ]; then
+			ck_daemon ${DAEMONS[$i]#@} || stop_daemon ${DAEMONS[$i]#@}
+		fi
+		let i=i-1
+	done
+fi
+
+# Terminate all processes
+stat_busy "Sending SIGTERM To Processes"
+/sbin/killall5 -15 &> /dev/null
+/bin/sleep 5
+stat_done
+
+stat_busy "Sending SIGKILL To Processes"
+/sbin/killall5 -9 &> /dev/null
+/bin/sleep 1
+stat_done
+
+stat_busy "Saving Random Seed"
+RANDOM_SEED=/var/lib/misc/random-seed
+[ -d $(dirname $RANDOM_SEED) ] || mkdir -p $(dirname $RANDOM_SEED)
+: > $RANDOM_SEED
+/bin/chmod 0600 $RANDOM_SEED
+POOL_FILE=/proc/sys/kernel/random/poolsize
+if [ -r $POOL_FILE ]; then
+	POOL_SIZE=$(/bin/cat $POOL_FILE)
+else
+	POOL_SIZE=512
+fi
+/bin/dd if=/dev/urandom of=$RANDOM_SEED count=1 bs=$POOL_SIZE &> /dev/null
+stat_done
+
+stat_busy "Saving System Clock"
+if [ "$TIMEZONE" != "" -a -e "/usr/share/zoneinfo/$TIMEZONE" ]; then
+	/bin/rm -f /etc/localtime
+	/bin/cp "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+fi
+
+HWCLOCK_PARAMS="--systohc"
+if [ "$HARDWARECLOCK" = "UTC" ]; then
+	HWCLOCK_PARAMS="$HWCLOCK_PARAMS --utc"
+elif [ "$HARDWARECLOCK" = "localtime" ]; then
+	HWCLOCK_PARAMS="$HWCLOCK_PARAMS --localtime"
+else
+	HWCLOCK_PARAMS=""
+fi
+if [ -n "$HWCLOCK_PARAMS" ]; then
+	/sbin/hwclock $HWCLOCK_PARAMS
+fi
+stat_done
+
+# removing psmouse module to fix some reboot issues on newer laptops
+/sbin/modprobe -r psmouse >/dev/null 2>&1
+
+# Write to wtmp file before unmounting
+/sbin/halt -w
+
+stat_busy "Deactivating Swap"
+/sbin/swapoff -a
+stat_done
+
+stat_busy "Unmounting Filesystems"
+/bin/umount -a -r -t noramfs,notmpfs,nosysfs,noproc -O no_netdev
+stat_done
+
+# Kill non-root encrypted partition mappings
+if [ -f /etc/crypttab -a -n "$(/bin/grep -v ^# /etc/crypttab | /bin/grep -v ^$)" ]; then
+	stat_busy "Deactivating encrypted volumes:"
+	CS=/sbin/cryptsetup.static
+	do_uncrypt() {
+		if [ $# -ge 3 ]; then
+			stat_append "${1}.."
+			$CS remove $1 >/dev/null 2>&1
+			if [ $? -ne 0 ]; then
+				stat_append "failed "
+			else
+				stat_append "ok "
+			fi
+		fi
+	}
+	while read line; do
+		eval do_uncrypt "$line"
+	done </etc/crypttab
+	stat_done
+fi
+
+if [ "$USELVM" = "yes" -o "$USELVM" = "YES" ]; then
+	if [ -x /sbin/lvm -a -d /sys/block ]; then
+		stat_busy "Deactivating LVM2 groups"
+		/sbin/lvm vgchange --ignorelockingfailure -an >/dev/null 2>&1
+		stat_done
+	fi
+fi
+
+stat_busy "Remounting Root Filesystem Read-only"
+/bin/mount -n -o remount,ro /
+stat_done
+
+# Power off or reboot
+if [ "$RUNLEVEL" = "0" ]; then
+	printsep
+	printhl "${C_H2}POWER OFF"
+	/sbin/poweroff -d -f -h -i
+else
+	printsep
+	printhl "${C_H2}REBOOTING"
+	# if kexec is installed and a kernel is loaded, use it
+	[ -x /sbin/kexec ] && /sbin/kexec -e > /dev/null 2>&1
+	/sbin/reboot -d -f -i
+fi
+
+# End of file
+# vim: set ts=2 sw=2 noet:

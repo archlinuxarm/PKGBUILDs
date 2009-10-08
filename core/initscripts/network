@@ -1,0 +1,263 @@
+#!/bin/bash
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+
+# wireless settings
+[ -f /etc/conf.d/wireless ] && . /etc/conf.d/wireless
+# ethernet bonding settings
+[ -f /etc/conf.d/bonding ] && . /etc/conf.d/bonding
+# bridge settings
+[ -f /etc/conf.d/bridges ] && . /etc/conf.d/bridges
+# dhcpcd settings
+[ -f /etc/conf.d/dhcpcd ] && . /etc/conf.d/dhcpcd
+
+ifup()
+{
+	if [ "$1" = "" ]; then
+		echo "usage: $0 ifup <interface_name>"
+		return 1
+	fi
+
+	/sbin/ifconfig $1 up
+
+	wi_up $1 || return 1
+
+	eval ifcfg="\$${1}"
+	if [ "$ifcfg" = "dhcp" ]; then
+		# remove the .pid file if it exists
+		/bin/rm -f /var/run/dhcpcd-${1}.pid >/dev/null 2>&1
+		/bin/rm -f /var/run/dhcpcd-${1}.cache >/dev/null 2>&1
+		/sbin/dhcpcd $DHCPCD_ARGS ${1}
+	else
+		/sbin/ifconfig $ifcfg
+	fi
+	return $?
+}
+
+wi_up()
+{
+	eval iwcfg="\$wlan_${1}"
+	[ "$iwcfg" = "" ] && return 0
+
+	/usr/sbin/iwconfig $iwcfg
+	[[ -z "$WIRELESS_TIMEOUT" ]] && WIRELESS_TIMEOUT=2
+	sleep $WIRELESS_TIMEOUT
+
+	bssid=`iwgetid $1 -ra`
+	if [[ "$bssid" = "00:00:00:00:00:00" ]]; then
+		printhl "Could not associate $1 - try increasing WIRELESS_TIMEOUT and check network is WEP or has no security"
+		return 1
+	fi
+	return 0
+}
+
+ifdown()
+{
+	if [ "$1" = "" ]; then
+		echo "usage: $0 ifdown <interface_name>"
+		return 1
+	fi
+	eval ifcfg="\$${1}"
+	if [ "$ifcfg" = "dhcp" ]; then
+		if [ -f /var/run/dhcpcd-${1}.pid ]; then
+			/bin/kill $(cat /var/run/dhcpcd-${1}.pid)
+		fi
+	fi
+	# Always bring the interface itself down
+	/sbin/ifconfig ${1} down >/dev/null 2>&1
+	return $?
+}
+
+iflist()
+{
+	for ifline in ${INTERFACES[@]}; do
+		if [ "$ifline" = "${ifline#!}" ]; then
+			printf " $ifline:\t"
+		else
+			printf "$ifline:\t"
+		fi
+		eval real_ifline=\$${ifline#!}
+		echo $real_ifline
+	done
+}
+
+rtup()
+{
+	if [ "$1" = "" ]; then
+		echo "usage: $0 rtup <route_name>"
+		return 1
+	fi
+	eval routecfg="\$${1}"
+	if grep -q :: <<< $routecfg; then
+			/sbin/route -A inet6 add $routecfg
+	else
+			/sbin/route add $routecfg
+	fi
+	return $?
+}
+
+rtdown()
+{
+	if [ "$1" = "" ]; then
+		echo "usage: $0 rtdown <route_name>"
+		return 1
+	fi
+	eval routecfg="\$${1}"
+	if grep -q :: <<< $routecfg; then
+			/sbin/route -A inet6 del $routecfg
+	else
+			/sbin/route del $routecfg
+	fi
+	return $?
+}
+
+rtlist()
+{
+	for rtline in ${ROUTES[@]}; do
+		if [ "$rtline" = "${rtline#!}" ]; then
+			printf " $rtline:\t"
+		else
+			printf "$rtline:\t"
+		fi
+		eval real_rtline=\$${rtline#!}
+		echo $real_rtline
+	done
+}
+
+bond_up()
+{
+	for ifline in ${BOND_INTERFACES[@]}; do
+		if [ "$ifline" = "${ifline#!}" ]; then
+			eval bondcfg="\$bond_${ifline}"
+			if [ -n "${bondcfg}" ]; then
+				/sbin/ifenslave $ifline $bondcfg || error=1
+			fi
+		fi
+	done
+}
+
+bond_down()
+{
+	for ifline in ${BOND_INTERFACES[@]}; do
+		if [ "$ifline" = "${ifline#!}" ]; then
+			eval bondcfg="\$bond_${ifline}"
+			/sbin/ifenslave -d $ifline $bondcfg || error=1
+		fi
+	done
+}
+
+bridge_up()
+{
+	for br in ${BRIDGE_INTERFACES[@]}; do
+		if [ "$br" = "${br#!}" ]; then
+			# if the bridge already exists, remove it
+			if [ "$(/sbin/ifconfig $br 2>/dev/null)" ]; then
+				/sbin/ifconfig $br down
+				/usr/sbin/brctl delbr $br
+			fi
+			/usr/sbin/brctl addbr $br
+			eval brifs="\$bridge_${br}"
+			for brif in $brifs; do
+				if [ "$brif" = "${brif#!}" ]; then
+					for ifline in ${BOND_INTERFACES[@]}; do
+						if [ "$brif" = "$ifline" ] && [ "$ifline" = "${ifline#!}" ]; then
+							ifup $ifline
+							eval bondcfg="\$bond_${ifline}"
+							/sbin/ifenslave $ifline $bondcfg || error=1
+							unset bond_${ifline}
+						fi
+					done
+
+					/usr/sbin/brctl addif $br $brif || error=1
+				fi
+			done
+		fi
+	done
+}
+
+bridge_down()
+{
+	for br in ${BRIDGE_INTERFACES[@]}; do
+		if [ "$br" = "${br#!}" ]; then
+			/usr/sbin/brctl delbr $br
+		fi
+	done
+}
+
+
+case "$1" in
+	start)
+		if ! ck_daemon network; then
+			echo "Network is already running.  Try 'network restart'"
+			exit
+		fi
+
+		stat_busy "Starting Network"
+		error=0
+		# bring up bridge interfaces
+		bridge_up
+		# bring up ethernet interfaces
+		for ifline in ${INTERFACES[@]}; do
+			if [ "$ifline" = "${ifline#!}" ]; then
+				ifup $ifline || error=1
+			fi
+		done
+		# bring up bond interfaces
+		bond_up
+		# bring up routes
+		for rtline in "${ROUTES[@]}"; do
+			if [ "$rtline" = "${rtline#!}" ]; then
+				rtup $rtline || error=1
+			fi
+		done
+		if [ $error -eq 0 ]; then
+			add_daemon network
+			stat_done
+		else
+			stat_fail
+		fi
+		;;
+	stop)
+		#if ck_daemon network; then
+		#	echo "Network is not running.  Try 'network start'"
+		#	exit
+		#fi
+
+		stat_busy "Stopping Network"
+		rm_daemon network
+		error=0
+		for rtline in "${ROUTES[@]}"; do
+			if [ "$rtline" = "${rtline#!}" ]; then
+				rtdown $rtline || error=1
+			fi
+		done
+		# bring down bond interfaces
+		bond_down
+		for ifline in ${INTERFACES[@]}; do
+			if [ "$ifline" = "${ifline#!}" ]; then
+				ifdown $ifline || error=1
+			fi
+		done
+		# bring down bridge interfaces
+		bridge_down
+		if [ $error -eq 0 ]; then
+			stat_done
+		else
+			stat_fail
+		fi
+		;;
+	restart)
+		$0 stop
+		/bin/sleep 2
+		$0 start
+		;;
+	ifup|ifdown|iflist|rtup|rtdown|rtlist)
+		$1 $2
+		;;
+	*)
+		echo "usage: $0 {start|stop|restart}"  
+		echo "       $0 {ifup|ifdown|iflist|rtup|rtdown|rtlist}"
+esac
+
+# vim: set ts=2 noet:
