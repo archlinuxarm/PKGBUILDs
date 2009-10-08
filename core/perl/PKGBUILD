@@ -1,0 +1,95 @@
+# Maintainer: Krzysztof "hiciu" Warzecha <kwarzecha7@gmail.com>
+pkgname=perl
+pkgver=5.10.0
+pkgrel=1
+pkgdesc="Practical Extraction and Report Language"
+arch=(arm)
+license=('GPL' 'PerlArtistic')
+url="http://www.perl.org"
+groups=('base')
+depends=('gdbm' 'db>=4.7' 'coreutils' 'glibc' 'sh')
+# for site_perl this is needed!
+#test without options=('emptydirs')
+source=(http://www.perl.com/CPAN/src/perl-${pkgver}.tar.gz
+#   http://search.cpan.org/CPAN/authors/id/P/PM/PMQS/DB_File-1.814.tar.gz
+    perlbin.sh perl-5.8.6-picdl.patch0
+    perl-5.10.0-archlinux-inc-order.patch)
+install=perl.install
+provides=(
+# extra
+perl-archive-tar perl-compress-raw-zlib perl-compress-zlib
+perl-extutils-cbuilder perl-io-compress-base perl-io-compress-zlib perl-io-zlib
+perl-module-pluggable perl-pod-escapes perl-pod-simple perl-module-build
+perl-version
+
+# aur
+perl-archive-extract perl-cpanplus perl-digest-sha perl-extutils-parsexs
+perl-file-fetch perl-ipc-cmd perl-locale-maketext-simple perl-log-message
+perl-log-message-simple perl-module-corelist perl-module-load
+perl-module-load-conditional perl-module-loaded perl-module-pluggable
+perl-object-accessor perl-params-check perl-term-ui perl-time-piece
+)
+md5sums=('d2c39b002ebfd2c3c5dba589365c5a71'
+         '9c4e3e56d71f123e92a68986df5ea924'
+         '319b56a7ce715fb7a494fe4d5cb9474c'
+         '0e4853bd75ee36b8f4c70b78c707b2fa')
+
+build() {
+  cd ${startdir}/src/${pkgname}-${pkgver}
+
+  # Update some modules provided with perl:
+  # replace the old DB_File with the newest one from CPAN,
+  # since it supports sleepycat's db 4.1.x
+#  cd ext
+#  rm -rf DB_File
+#  mv $startdir/src/DB_File-1.814 ./DB_File
+
+  cd ${startdir}/src/${pkgname}-${pkgver}
+  patch -Np0 -i ../perl-5.10.0-archlinux-inc-order.patch
+
+  arch_opts=""
+  ./Configure -des -Dusethreads -Doptimize="${CFLAGS}" -Dprefix=/usr \
+    -Dinstallprefix=${startdir}/pkg/usr -Dvendorprefix=/usr \
+    -Dprivlib=/usr/share/perl5/core_perl \
+    -Darchlib=/usr/lib/perl5/core_perl \
+    -Dsitelib=/usr/share/perl5/site_perl/${pkgver} \
+    -Dsitearch=/usr/lib/perl5/site_perl/${pkgver} \
+    -Dvendorlib=/usr/share/perl5/vendor_perl \
+    -Dvendorarch=/usr/lib/perl5/vendor_perl \
+    -Dotherlibdirs=/usr/lib/perl5/current:/usr/lib/perl5/site_perl/current \
+    -Dscriptdir='/usr/bin/perlbin/core' \
+    -Dsitescript='/usr/bin/perlbin/site' \
+    -Dvendorscript='/usr/bin/perlbin/vendor' \
+    -Dman1ext=1perl -Dman3ext=3perl ${arch_opts}
+
+  make || return 1
+  make install
+
+  ### Perl Settings ###
+  # Change man page extensions for site and vendor module builds.
+  sed -e '/^man1ext=/ s/1perl/1p/' -e '/^man3ext=/ s/3perl/3pm/' \
+      -i ${startdir}/pkg/usr/lib/perl5/core_perl/Config_heavy.pl
+
+  ### CPAN Settings ###
+  # Set CPAN default config to use the site directories.
+  sed -e '/(makepl_arg =>/   s/""/"INSTALLDIRS=site"/' \
+      -e '/(mbuildpl_arg =>/ s/""/"installdirs=site"/' \
+      -i ${startdir}/pkg/usr/share/perl5/core_perl/CPAN/FirstTime.pm
+
+  ### CPANPLUS Settings ###
+  # Set CPANPLUS default config to use the site directories.
+  sed -e "/{'makemakerflags'}/ s/'';/'INSTALLDIRS=site';/" \
+      -e "/{'buildflags'}/     s/'';/'installdirs=site';/" \
+      -i ${startdir}/pkg/usr/share/perl5/core_perl/CPANPLUS/Config.pm
+
+  # Profile script so set paths to perl scripts.
+  install -D -m755 ${startdir}/src/perlbin.sh \
+                   ${startdir}/pkg/etc/profile.d/perlbin.sh
+
+  (cd ${startdir}/pkg/usr/bin; mv perl${pkgver} perl)
+  (cd ${startdir}/pkg/usr/bin/perlbin/core; \
+      ln -sf c2ph pstruct; ln -sf s2p psed)
+  grep -Rl "${startdir}/pkg" ${startdir}/pkg/usr | \
+      xargs sed -i "s^${startdir}/pkg^^g"
+
+}

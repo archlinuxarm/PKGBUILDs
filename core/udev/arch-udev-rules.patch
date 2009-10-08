@@ -1,0 +1,78 @@
+diff -Nur rules.d/50-udev-default.rules rules.d.arch/50-udev-default.rules
+--- rules.d/50-udev-default.rules	2009-03-07 22:22:48.200242883 +0100
++++ rules.d.arch/50-udev-default.rules	2009-03-07 22:23:26.134434516 +0100
+@@ -64,20 +64,20 @@
+ 
+ # floppy
+ KERNEL=="fd[0-9]", GROUP="floppy"
+-KERNEL=="fd[0-9]", ACTION=="add", ATTRS{cmos}=="?*", RUN+="create_floppy_devices -c -t $attr{cmos} -m %M -M 0640 -G floppy $root/%k"
+-KERNEL=="hd*", SUBSYSTEMS=="ide", ATTRS{media}=="floppy", OPTIONS+="all_partitions"
++KERNEL=="fd[0-9]", ACTION=="add", ATTRS{cmos}=="?*", RUN+="create_floppy_devices -c -t $attr{cmos} -m %M -M 0660 -G floppy $root/%k"
++KERNEL=="hd*", SUBSYSTEMS=="ide", ATTRS{media}=="floppy", OPTIONS+="all_partitions", GROUP="floppy"
+ 
+ # cdrom
+-SUBSYSTEM=="block", KERNEL=="sr[0-9]*", SYMLINK+="scd%n", GROUP="cdrom"
+-SUBSYSTEM=="block", KERNEL=="hd*", SUBSYSTEMS=="ide", ATTRS{media}=="cdrom", GROUP="cdrom"
+-SUBSYSTEM=="scsi_generic", SUBSYSTEMS=="scsi", ATTRS{type}=="4|5", GROUP="cdrom"
+-KERNEL=="pktcdvd[0-9]*", NAME="pktcdvd/%k", GROUP="cdrom"
+-KERNEL=="pktcdvd", NAME="pktcdvd/control", GROUP="cdrom"
++SUBSYSTEM=="block", KERNEL=="sr[0-9]*", SYMLINK+="scd%n", GROUP="optical", MODE="0660"
++SUBSYSTEM=="block", KERNEL=="hd*", SUBSYSTEMS=="ide", ATTRS{media}=="cdrom", GROUP="optical", MODE="0660"
++SUBSYSTEM=="scsi_generic", SUBSYSTEMS=="scsi", ATTRS{type}=="4|5", GROUP="optical", MODE="0660"
++KERNEL=="pktcdvd[0-9]*", NAME="pktcdvd/%k", GROUP="optical", MODE="0660"
++KERNEL=="pktcdvd", NAME="pktcdvd/control", GROUP="optical", MODE="0660"
+ 
+ # tape
+-KERNEL=="ht[0-9]*|nht[0-9]*", GROUP="tape"
+-KERNEL=="pt[0-9]*|npt[0-9]*|pht[0-9]*", GROUP="tape"
+-SUBSYSTEM=="scsi_generic|scsi_tape", SUBSYSTEMS=="scsi", ATTRS{type}=="1|8", GROUP="tape"
++KERNEL=="ht[0-9]*|nht[0-9]*", GROUP="storage", MODE="0660"
++KERNEL=="pt[0-9]*|npt[0-9]*|pht[0-9]*", GROUP="storage", MODE="0660"
++SUBSYSTEM=="scsi_generic|scsi_tape", SUBSYSTEMS=="scsi", ATTRS{type}=="1|8", GROUP="storage", MODE="0660"
+ 
+ # block-releated
+ KERNEL=="sch[0-9]*", GROUP="disk"
+@@ -116,5 +116,4 @@
+ KERNEL=="cpad[0-9]*",		NAME="usb/%k"
+ 
+ # do not delete static device nodes
+-ACTION=="remove", NAME=="?*", TEST=="/lib/udev/devices/$name", OPTIONS+="ignore_remove"
+-ACTION=="remove", NAME=="", TEST=="/lib/udev/devices/%k", OPTIONS+="ignore_remove"
++ACTION=="remove", PROGRAM="ignore-remove.sh %r", OPTIONS+="ignore_remove"
+diff -Nur rules.d/60-persistent-storage.rules rules.d.arch/60-persistent-storage.rules
+--- rules.d/60-persistent-storage.rules	2009-03-07 22:22:48.200242883 +0100
++++ rules.d.arch/60-persistent-storage.rules	2009-03-07 22:22:54.757744454 +0100
+@@ -10,7 +10,7 @@
+ SUBSYSTEM!="block", GOTO="persistent_storage_end"
+ 
+ # skip rules for inappropriate block devices
+-KERNEL=="fd*|mtd*|nbd*|gnbd*|btibm*|dm-*|md*", GOTO="persistent_storage_end"
++KERNEL=="fd*|mtd*|nbd*|gnbd*|md*|btibm*", GOTO="persistent_storage_end"
+ 
+ # never access non-cdrom removable ide devices, the drivers are causing event loops on open()
+ KERNEL=="hd*[!0-9]", ATTR{removable}=="1", SUBSYSTEMS=="ide", ATTRS{media}=="disk|floppy", GOTO="persistent_storage_end"
+diff -Nur rules.d/80-drivers.rules rules.d.arch/80-drivers.rules
+--- rules.d/80-drivers.rules	2009-03-07 22:22:48.200242883 +0100
++++ rules.d.arch/80-drivers.rules	2009-03-07 22:22:54.757744454 +0100
+@@ -2,13 +2,14 @@
+ 
+ ACTION!="add", GOTO="drivers_end"
+ 
+-DRIVER!="?*", ENV{MODALIAS}=="?*", RUN{ignore_error}+="/sbin/modprobe -b $env{MODALIAS}"
+-SUBSYSTEM=="tifm", ENV{TIFM_CARD_TYPE}=="SD", RUN+="/sbin/modprobe -b tifm_sd"
+-SUBSYSTEM=="tifm", ENV{TIFM_CARD_TYPE}=="MS", RUN+="/sbin/modprobe -b tifm_ms"
+-SUBSYSTEM=="memstick", RUN+="/sbin/modprobe -b --all ms_block mspro_block"
+-SUBSYSTEM=="i2o", RUN+="/sbin/modprobe -b i2o_block"
+-SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", TEST!="[module/sg]", RUN+="/sbin/modprobe -b sg"
+-SUBSYSTEM=="module", KERNEL=="parport_pc", RUN+="/sbin/modprobe -b ppdev"
++DRIVER!="?*", ENV{MODALIAS}=="?*", RUN{ignore_error}+="/lib/udev/load-modules.sh $env{MODALIAS}"
++SUBSYSTEM=="tifm", ENV{TIFM_CARD_TYPE}=="SD", RUN+="/lib/udev/load-modules.sh tifm_sd"
++SUBSYSTEM=="tifm", ENV{TIFM_CARD_TYPE}=="MS", RUN+="/lib/udev/load-modules.sh tifm_ms"
++SUBSYSTEM=="memstick", RUN+="/lib/udev/load-modules.sh ms_block"
++SUBSYSTEM=="memstick", RUN+="/lib/udev/load-modules.sh mspro_block"
++SUBSYSTEM=="i2o", RUN+="/lib/udev/load-modules.sh i2o_block"
++SUBSYSTEM=="scsi", ENV{DEVTYPE}=="scsi_device", TEST!="[module/sg]", RUN+="/lib/udev/load-modules.sh sg"
++SUBSYSTEM=="module", KERNEL=="parport_pc", RUN+="/lib/udev/load-modules.sh ppdev"
+ 
+ LABEL="drivers_end"
+ 
