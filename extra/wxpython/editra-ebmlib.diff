@@ -1,0 +1,1417 @@
+diff -Naur wxPython-src-2.8.10.1-orig/wxPython/setup.py wxPython-src-2.8.10.1/wxPython/setup.py
+--- wxPython-src-2.8.10.1-orig/wxPython/setup.py        2009-06-06 14:43:00.000000000 -0400
++++ wxPython-src-2.8.10.1/wxPython/setup.py    2009-06-06 14:43:55.000000000 -0400
+@@ -882,6 +882,7 @@
+                     'wx.tools.Editra',
+                     'wx.tools.Editra.src',
+                     'wx.tools.Editra.src.autocomp',
++                    'wx.tools.Editra.src.ebmlib',
+                     'wx.tools.Editra.src.eclib',
+                     'wx.tools.Editra.src.extern',
+                     'wx.tools.Editra.src.syntax',
+diff -Naur wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/__init__.py wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/__init__.py
+--- wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/__init__.py	1969-12-31 19:00:00.000000000 -0500
++++ wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/__init__.py	2009-06-06 03:48:10.000000000 -0400
+@@ -0,0 +1,33 @@
++###############################################################################
++# Name: __init__.py                                                           #
++# Purpose: Editra Buisness Model Library                                      #
++# Author: Cody Precord <cprecord@editra.org>                                  #
++# Copyright: (c) 2009 Cody Precord <staff@editra.org>                         #
++# Licence: wxWindows Licence                                                  #
++###############################################################################
++
++"""
++Editra Buisness Model Library:
++
++"""
++
++__author__ = "Cody Precord <cprecord@editra.org>"
++__cvsid__ = "$Id: __init__.py 60840 2009-05-31 16:00:50Z CJP $"
++__revision__ = "$Revision: 60840 $"
++
++#-----------------------------------------------------------------------------#
++
++# Text Utils
++from searcheng import *
++from fchecker import *
++from fileutil import *
++from fileimpl import *
++
++from backupmgr import *
++
++# Storage Classes
++from histcache import *
++from clipboard import *
++
++# Misc
++from miscutil import *
+diff -Naur wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/backupmgr.py wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/backupmgr.py
+--- wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/backupmgr.py	1969-12-31 19:00:00.000000000 -0500
++++ wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/backupmgr.py	2009-06-06 03:48:10.000000000 -0400
+@@ -0,0 +1,160 @@
++###############################################################################
++# Name: backupmgr.py                                                          #
++# Purpose: File Backup Manager                                                #
++# Author: Cody Precord <cprecord@editra.org>                                  #
++# Copyright: (c) 2009 Cody Precord <staff@editra.org>                         #
++# Licence: wxWindows Licence                                                  #
++###############################################################################
++
++"""
++Editra Buisness Model Library: FileBackupMgr
++
++Helper class for managing and creating backups of files.
++
++"""
++
++__author__ = "Cody Precord <cprecord@editra.org>"
++__cvsid__ = "$Id: backupmgr.py 60581 2009-05-10 02:56:00Z CJP $"
++__revision__ = "$Revision: 60581 $"
++
++__all__ = [ 'FileBackupMgr', ]
++
++#-----------------------------------------------------------------------------#
++# Imports
++import os
++import shutil
++
++# Local Imports
++import fileutil
++import fchecker
++
++#-----------------------------------------------------------------------------#
++
++class FileBackupMgr(object):
++    """File backup creator and manager"""
++    def __init__(self, header=None, template=u"%s~"):
++        """Create a BackupManager
++        @keyword header: header to id backups with (Text files only!!)
++        @keyword template: template string for naming backup file with
++
++        """
++        object.__init__(self)
++
++        # Attributes
++        self.checker = fchecker.FileTypeChecker()
++        self.header = header       # Backup id header
++        self.template = template   # Filename template
++
++    def _CheckHeader(self, fname):
++        """Check if the backup file has a header that matches the
++        header used to identify backup files.
++        @param fname: name of file to check
++        @return: bool (True if header is ok, False otherwise)
++
++        """
++        isok = False
++        try:
++            handle = open(fname)
++            line = handle.readline()
++            isok = line.startswith(self.header)
++        except:
++            isok = False
++        finally:
++            handle.close()
++        return isok
++
++    def GetBackupFilename(self, fname):
++        """Get the unique name for the files backup copy
++        @param fname: string (file path)
++        @return: string
++
++        """
++        rname = self.template % fname
++        if self.header is not None and \
++           not self.checker.IsBinary(fname) and \
++           os.path.exists(rname):
++            # Make sure that the template backup name does not match
++            # an existing file that is not a backup file.
++            while not self._CheckHeader(rname):
++                rname = self.template % rname
++                
++        return rname
++
++    def GetBackupWriter(self, fileobj):
++        """Create a backup filewriter method to backup a files contents
++        with.
++        @param fileobj: object implementing fileimpl.FileObjectImpl interface
++        @return: callable(text) to create backup with
++
++        """
++        nfile = fileobj.Clone()
++        fname = self.GetBackupFilename(nfile.GetPath())
++        nfile.SetPath(fname)
++        # Write the header if it is enabled
++        if self.header is not None and not self.checker.IsBinary(fname):
++            nfile.Write(self.header + os.linesep)
++        return nfile.Write
++
++    def HasBackup(self, fname):
++        """Check if a given file has a backup file available or not
++        @param fname: string (file path)
++
++        """
++        backup = self.GetBackupFilename(fname)
++        return os.path.exists(backup)
++
++    def IsBackupNewer(self, fname):
++        """Is the backup of this file newer than the saved version
++        of the file?
++        @param fname: string (file path)
++        @return: bool
++
++        """
++        backup = self.GetBackupFilename(fname)
++        if os.path.exists(fname) and os.path.exists(backup):
++            mod1 = fileutil.GetFileModTime(backup)
++            mod2 = fileutil.GetFileModTime(fname)
++            return mod1 > mod2
++        else:
++            return False
++
++    def MakeBackupCopy(self, fname):
++        """Create a backup copy of the given filename
++        @param fname: string (file path)
++        @return: bool (True == Success)
++
++        """
++        backup = self.GetBackupFilename(fname)
++        try:
++            if os.path.exists(backup):
++                os.remove(backup)
++
++            shutil.copy2(fname, backup)
++        except:
++            return False
++        else:
++            return True
++
++    def MakeBackupCopyAsync(self, fname):
++        """Do the backup asyncronously
++        @param fname: string (file path)
++        @todo: Not implemented yet
++
++        """
++        raise NotImplementedError("TODO: implement once threadpool is finished")
++
++    def SetBackupFileTemplate(self, tstr):
++        """Set the filename template for generating the backupfile name
++        @param tstr: template string i.e) %s~
++
++        """
++        assert tstr.count("%s") == 1, "Format statment must only have one arg"
++        self.template = tstr
++
++    def SetHeader(self, header):
++        """Set the header string for identifying a file as a backup
++        @param header: string (single line only)
++
++        """
++        assert '\n' not in header, "Header must only be a single line"
++        self.header = header
+diff -Naur wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/clipboard.py wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/clipboard.py
+--- wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/clipboard.py	1969-12-31 19:00:00.000000000 -0500
++++ wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/clipboard.py	2009-06-06 03:48:10.000000000 -0400
+@@ -0,0 +1,135 @@
++###############################################################################
++# Name: histcache.py                                                          #
++# Purpose: History Cache                                                      #
++# Author: Cody Precord <cprecord@editra.org>                                  #
++# Copyright: (c) 2009 Cody Precord <staff@editra.org>                         #
++# Licence: wxWindows Licence                                                  #
++###############################################################################
++
++"""
++Editra Buisness Model Library: Clipboard
++
++Clipboard helper class
++
++"""
++
++__author__ = "Hasan Aljudy"
++__cvsid__ = "$Id: clipboard.py 60681 2009-05-17 10:41:42Z CJP $"
++__revision__ = "$Revision: 60681 $"
++
++__all__ = [ 'Clipboard',]
++
++#-----------------------------------------------------------------------------#
++# Imports
++import wx
++
++#-----------------------------------------------------------------------------#
++
++class Clipboard(object):
++    """Multiple clipboards as named registers (as per vim)
++
++    " is an alias for system clipboard and is also the default clipboard.
++
++    @note: The only way to access multiple clipboards right now is through
++           Normal mode when Vi(m) emulation is enabled.
++
++    """
++    NAMES = list(u'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_')
++    registers = {}
++    current = u'"'
++
++    @classmethod
++    def Switch(cls, reg):
++        """Switch to register
++        @param reg: char
++
++        """
++        if reg in cls.NAMES or reg == u'"':
++            cls.current = reg
++        else:
++            raise Exception(u"Switched to invalid register name")
++
++    @classmethod
++    def NextFree(cls, reg):
++        """Switch to the next free register. If current register is free, no
++        switching happens.
++
++        A free register is one that's either unused or has no content
++
++        @param reg: char
++        @note: This is not used yet.
++
++        """
++        if cls.Get() == u'':
++            return
++
++        for name in cls.NAMES:
++            if cls.registers.get(name, u'') == u'':
++                cls.Switch(name)
++                break
++
++    @classmethod
++    def AllUsed(cls):
++        """Get a dictionary mapping all used clipboards (plus the system
++        clipboard) to their content.
++
++        @note: This is not used yet.
++
++        """
++        cmd_map = { u'"': cls.SystemGet() }
++        for name in cls.NAMES:
++            if cls.registers.get(name, u''):
++                cmd_map[name] = cls.registers[name]
++        return cmd_map
++
++    @classmethod
++    def Get(cls):
++        """Get the content of the current register. Used for pasting"""
++        if cls.current == u'"':
++            return cls.SystemGet()
++        else:
++            return cls.registers.get( cls.current, u'' )
++
++    @classmethod
++    def Set(cls, text):
++        """Set the content of the current register
++        @param text: string
++
++        """
++        if cls.current == u'"':
++            return cls.SystemSet(text)
++        else:
++            cls.registers[cls.current] = text
++
++    @classmethod
++    def SystemGet(cls):
++        """Get text from the system clipboard
++        @return: string
++
++        """
++        text = None
++        if wx.TheClipboard.Open():
++            if wx.TheClipboard.IsSupported(wx.DataFormat(wx.DF_TEXT)):
++                text = wx.TextDataObject()
++                wx.TheClipboard.GetData(text)
++
++            wx.TheClipboard.Close()
++
++        if text is not None:
++            return text.GetText()
++        else:
++            return u''
++
++    @classmethod
++    def SystemSet(cls, text):
++        """Set text into the system clipboard
++        @param text: string
++        @return: bool
++
++        """
++        ok = False
++        if wx.TheClipboard.Open():
++            wx.TheClipboard.SetData(wx.TextDataObject(text))
++            wx.TheClipboard.Close()
++            ok = True
++        return ok
+\ No newline at end of file
+diff -Naur wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/fchecker.py wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/fchecker.py
+--- wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/fchecker.py	1969-12-31 19:00:00.000000000 -0500
++++ wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/fchecker.py	2009-06-06 03:48:10.000000000 -0400
+@@ -0,0 +1,82 @@
++###############################################################################
++# Name: fchecker.py                                                           #
++# Purpose: Filetype checker object.                                           #
++# Author: Cody Precord <cprecord@editra.org>                                  #
++# Copyright: (c) 2009 Cody Precord <staff@editra.org>                         #
++# Licence: wxWindows Licence                                                  #
++###############################################################################
++
++"""
++Editra Buisness Model Library: FileTypeChecker
++
++Helper class for checking what kind of a content a file contains.
++
++"""
++
++__author__ = "Cody Precord <cprecord@editra.org>"
++__cvsid__ = "$Id: fchecker.py 60505 2009-05-03 19:18:21Z CJP $"
++__revision__ = "$Revision: 60505 $"
++
++__all__ = [ 'FileTypeChecker', ]
++
++#-----------------------------------------------------------------------------#
++# Imports
++import os
++
++#-----------------------------------------------------------------------------#
++
++class FileTypeChecker(object):
++    """File type checker and recognizer"""
++    TXTCHARS = ''.join(map(chr, [7, 8, 9, 10, 12, 13, 27] + range(0x20, 0x100)))
++    ALLBYTES = ''.join(map(chr, range(256)))
++
++    def __init__(self, preread=4096):
++        """Create the FileTypeChecker
++        @keyword preread: number of bytes to read for checking file type
++
++        """
++        object.__init__(self)
++
++        # Attributes
++        self._preread = preread
++
++    @staticmethod
++    def _GetHandle(fname):
++        """Get a file handle for reading
++        @param fname: filename
++        @return: file object or None
++
++        """
++        try:
++            handle = open(fname, 'rb')
++        except:
++            handle = None
++        return handle
++
++    def IsBinary(self, fname):
++        """Is the file made up of binary data
++        @param fname: filename to check
++        @return: bool
++
++        """
++        handle = self._GetHandle(fname)
++        if handle is not None:
++            bytes = handle.read(self._preread)
++            handle.close()
++            nontext = bytes.translate(FileTypeChecker.ALLBYTES,
++                                      FileTypeChecker.TXTCHARS)
++            return bool(nontext)
++        else:
++            return False
++
++    def IsReadableText(self, fname):
++        """Is the given path readable as text. Will return True if the
++        file is accessable by current user and is plain text.
++        @param fname: filename
++        @return: bool
++
++        """
++        f_ok = False
++        if os.access(fname, os.R_OK):
++            f_ok = not self.IsBinary(fname)
++        return f_ok
+diff -Naur wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/fileimpl.py wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/fileimpl.py
+--- wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/fileimpl.py	1969-12-31 19:00:00.000000000 -0500
++++ wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/fileimpl.py	2009-06-06 03:48:10.000000000 -0400
+@@ -0,0 +1,215 @@
++###############################################################################
++# Name: Cody Precord                                                          #
++# Purpose: File Object Interface Implementation                               #
++# Author: Cody Precord <cprecord@editra.org>                                  #
++# Copyright: (c) 2009 Cody Precord <staff@editra.org>                         #
++# License: wxWindows License                                                  #
++###############################################################################
++
++"""
++Editra Buisness Model Library: FileObjectImpl
++
++Implementation of a file object interface class. Objects and methods inside
++of this library expect a file object that derives from this interface.
++
++"""
++
++__author__ = "Cody Precord <cprecord@editra.org>"
++__svnid__ = "$Id: fileimpl.py 60582 2009-05-10 04:24:30Z CJP $"
++__revision__ = "$Revision: 60582 $"
++
++#--------------------------------------------------------------------------#
++# Imports
++import os
++
++# Editra Buisness Model Imports
++import fileutil
++
++#--------------------------------------------------------------------------#
++
++class FileObjectImpl(object):
++    """File Object Interface implementation base class"""
++    def __init__(self, path=u'', modtime=0):
++        object.__init__(self)
++
++        # Attributes
++        self._path = path
++        self._modtime = modtime
++
++        self._handle = None
++        self.open = False
++
++        self.last_err = None
++
++    def ClearLastError(self):
++        """Reset the error marker on this file"""
++        del self.last_err
++        self.last_err = None
++
++    def Clone(self):
++        """Clone the file object
++        @return: FileObject
++
++        """
++        fileobj = FileObjectImpl(self._path, self._modtime)
++        fileobj.SetLastError(self.last_err)
++        return fileobj
++
++    def Close(self):
++        """Close the file handle
++        @note: this is normally done automatically after a read/write operation
++
++        """
++        try:
++            self._handle.close()
++        except:
++            pass
++
++        self.open = False
++
++    def DoOpen(self, mode):
++        """Opens and creates the internal file object
++        @param mode: mode to open file in
++        @return: True if opened, False if not
++        @postcondition: self._handle is set to the open handle
++
++        """
++        if not len(self._path):
++            return False
++
++        try:
++            file_h = open(self._path, mode)
++        except (IOError, OSError), msg:
++            self.last_err = msg
++            return False
++        else:
++            self._handle = file_h
++            self.open = True
++            return True
++
++    def GetExtension(self):
++        """Get the files extension if it has one else simply return the
++        filename minus the path.
++        @return: string file extension (no dot)
++
++        """
++        fname = os.path.split(self._path)
++        return fname[-1].split(os.extsep)[-1].lower()
++
++    def GetHandle(self):
++        """Get this files handle"""
++        return self._handle
++
++    def GetLastError(self):
++        """Return the last error that occured when using this file
++        @return: err traceback or None
++
++        """
++        return unicode(self.last_err).replace("u'", "'")
++
++    def GetModtime(self):
++        """Get the timestamp of this files last modification"""
++        return self._modtime
++
++    def GetPath(self):
++        """Get the path of the file
++        @return: string
++
++        """
++        return self._path
++
++    def GetSize(self):
++        """Get the size of the file
++        @return: int
++
++        """
++        if self._path:
++            return fileutil.GetFileSize(self._path)
++        else:
++            return 0
++
++    @property
++    def Handle(self):
++        """Raw file handle property"""
++        return self._handle
++
++    def IsOpen(self):
++        """Check if file is open or not
++        @return: bool
++
++        """
++        return self.open
++
++    def IsReadOnly(self):
++        """Is the file Read Only
++        @return: bool
++
++        """
++        if os.path.exists(self._path):
++            return not os.access(self._path, os.R_OK|os.W_OK)
++        else:
++            return False
++
++    @property
++    def Modtime(self):
++        """File modification time propery"""
++        return self.GetModtime()
++
++    @property
++    def ReadOnly(self):
++        """Is the file read only?"""
++        return self.IsReadOnly()
++
++    def ResetAll(self):
++        """Reset all file attributes"""
++        self._handle = None
++        self.open = False
++        self._path = u''
++        self._modtime = 0
++        self.last_err = None
++
++    def SetLastError(self, err):
++        """Set the last error
++        @param err: exception object / msg
++
++        """
++        self.last_err = err
++
++    def SetPath(self, path):
++        """Set the path of the file
++        @param path: absolute path to file
++
++        """
++        self._path = path
++
++    def SetModTime(self, mtime):
++        """Set the modtime of this file
++        @param mtime: long int to set modtime to
++
++        """
++        self._modtime = mtime
++
++    #--- SHould be overridden by subclass ---#
++
++    def Read(self):
++        """Open/Read the file
++        @return: string (file contents)
++
++        """
++        txt = u''
++        if self.DoOpen('rb'):
++            try:
++                txt = self._handle.read()
++            except:
++                pass
++
++        return txt
++    
++    def Write(self, value):
++        """Open/Write the value to disk
++        @param value: string
++
++        """
++        if self.DoOpen('wb'):
++            self._handle.write(value)
++            self._handle.close()
+diff -Naur wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/fileutil.py wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/fileutil.py
+--- wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/fileutil.py	1969-12-31 19:00:00.000000000 -0500
++++ wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/fileutil.py	2009-06-06 03:48:10.000000000 -0400
+@@ -0,0 +1,180 @@
++###############################################################################
++# Name: fileutil.py                                                           #
++# Purpose: File Management Utilities.                                         #
++# Author: Cody Precord <cprecord@editra.org>                                  #
++# Copyright: (c) 2009 Cody Precord <staff@editra.org>                         #
++# Licence: wxWindows Licence                                                  #
++###############################################################################
++
++"""
++Editra Buisness Model Library: File Utilities
++
++Utility functions for managing and working with files.
++
++"""
++
++__author__ = "Cody Precord <cprecord@editra.org>"
++__svnid__ = "$Id: fileutil.py 60523 2009-05-05 18:49:31Z CJP $"
++__revision__ = "$Revision: 60523 $"
++
++__all__ = [ 'GetFileModTime', 'GetFileSize', 'GetUniqueName', 'MakeNewFile',
++            'MakeNewFolder', 'GetFileExtension', 'GetFileName', 'GetPathName',
++            'ResolveRealPath', 'IsLink' ]
++
++#-----------------------------------------------------------------------------#
++# Imports
++import os
++import platform
++import stat
++
++UNIX = WIN = False
++if platform.system().lower() in ['windows', 'microsoft']:
++    WIN = True
++    try:
++        # Check for if win32 extensions are available
++        import win32com.client as win32client
++    except ImportError:
++        win32client = None
++else:
++    UNIX = True
++
++#-----------------------------------------------------------------------------#
++
++def GetFileExtension(file_str):
++    """Gets last atom at end of string as extension if
++    no extension whole string is returned
++    @param file_str: path or file name to get extension from
++
++    """
++    return file_str.split('.')[-1]
++
++def GetFileModTime(file_name):
++    """Returns the time that the given file was last modified on
++    @param file_name: path of file to get mtime of
++
++    """
++    try:
++        mod_time = os.path.getmtime(file_name)
++    except (OSError, EnvironmentError):
++        mod_time = 0
++    return mod_time
++
++def GetFileName(path):
++    """Gets last atom on end of string as filename
++    @param path: full path to get filename from
++
++    """
++    return os.path.split(path)[-1]
++
++def GetFileSize(path):
++    """Get the size of the file at a given path
++    @param path: Path to file
++    @return: long
++
++    """
++    try:
++        return os.stat(path)[stat.ST_SIZE]
++    except:
++        return 0
++
++def GetPathName(path):
++    """Gets the path minus filename
++    @param path: full path to get base of
++
++    """
++    return os.path.split(path)[0]
++
++def IsLink(path):
++    """Is the file a link
++    @return: bool
++
++    """
++    if WIN:
++        return path.endswith(".lnk") or os.path.islink(path)
++    else:
++        return os.path.islink(path)
++
++def ResolveRealPath(link):
++    """Return the real path of the link file
++    @param link: path of link file
++    @return: string
++
++    """
++    assert IsLink(link), "ResolveRealPath expects a link file!"
++    realpath = link
++    if WIN and win32client is not None:
++        shell = win32client.Dispatch("WScript.Shell")
++        shortcut = shell.CreateShortCut(link)
++        realpath = shortcut.Targetpath
++    else:
++        realpath = os.path.realpath(link)
++    return realpath
++
++#-----------------------------------------------------------------------------#
++
++def GetUniqueName(path, name):
++    """Make a file name that will be unique in case a file of the
++    same name already exists at that path.
++    @param path: Root path to folder of files destination
++    @param name: desired file name base
++    @return: string
++
++    """
++    tmpname = os.path.join(path, name)
++    if os.path.exists(tmpname):
++        if '.' not in name:
++            ext = ''
++            fbase = name
++        else:
++            ext = '.' + name.split('.')[-1]
++            fbase = name[:-1 * len(ext)]
++
++        inc = len([x for x in os.listdir(path) if x.startswith(fbase)])
++        tmpname = os.path.join(path, "%s-%d%s" % (fbase, inc, ext))
++        while os.path.exists(tmpname):
++            inc = inc + 1
++            tmpname = os.path.join(path, "%s-%d%s" % (fbase, inc, ext))
++
++    return tmpname
++
++
++#-----------------------------------------------------------------------------#
++
++def MakeNewFile(path, name):
++    """Make a new file at the given path with the given name.
++    If the file already exists, the given name will be changed to
++    a unique name in the form of name + -NUMBER + .extension
++    @param path: path to directory to create file in
++    @param name: desired name of file
++    @return: Tuple of (success?, Path of new file OR Error message)
++
++    """
++    if not os.path.isdir(path):
++        path = os.path.dirname(path)
++    fname = GetUniqueName(path, name)
++
++    try:
++        open(fname, 'w').close()
++    except (IOError, OSError), msg:
++        return (False, str(msg))
++
++    return (True, fname)
++
++def MakeNewFolder(path, name):
++    """Make a new folder at the given path with the given name.
++    If the folder already exists, the given name will be changed to
++    a unique name in the form of name + -NUMBER.
++    @param path: path to create folder on
++    @param name: desired name for folder
++    @return: Tuple of (success?, new dirname OR Error message)
++
++    """
++    if not os.path.isdir(path):
++        path = os.path.dirname(path)
++    folder = GetUniqueName(path, name)
++    try:
++        os.mkdir(folder)
++    except (OSError, IOError), msg:
++        return (False, str(msg))
++
++    return (True, folder)
+diff -Naur wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/histcache.py wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/histcache.py
+--- wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/histcache.py	1969-12-31 19:00:00.000000000 -0500
++++ wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/histcache.py	2009-06-06 03:48:10.000000000 -0400
+@@ -0,0 +1,131 @@
++###############################################################################
++# Name: histcache.py                                                          #
++# Purpose: History Cache                                                      #
++# Author: Cody Precord <cprecord@editra.org>                                  #
++# Copyright: (c) 2009 Cody Precord <staff@editra.org>                         #
++# Licence: wxWindows Licence                                                  #
++###############################################################################
++
++"""
++Editra Buisness Model Library: HistoryCache
++
++History cache that acts as a stack for managing a history list o
++
++"""
++
++__author__ = "Cody Precord <cprecord@editra.org>"
++__cvsid__ = "$Id: histcache.py 60613 2009-05-13 02:27:21Z CJP $"
++__revision__ = "$Revision: 60613 $"
++
++__all__ = [ 'HistoryCache', 'HIST_CACHE_UNLIMITED']
++
++#-----------------------------------------------------------------------------#
++# Imports
++
++#-----------------------------------------------------------------------------#
++# Globals
++HIST_CACHE_UNLIMITED = -1
++
++#-----------------------------------------------------------------------------#
++
++class HistoryCache(object):
++    def __init__(self, max_size=HIST_CACHE_UNLIMITED):
++        object.__init__(self)
++
++        # Attributes
++        self._list = list()
++        self.cpos = -1
++        self.max_size = max_size
++
++    def _Resize(self):
++        """Adjust cache size based on max size setting"""
++        if self.max_size != HIST_CACHE_UNLIMITED:
++            lsize = len(self._list)
++            if lsize:
++                adj = self.max_size - lsize 
++                if adj < 0:
++                    self._list.pop(0)
++                    self.cpos = len(self._list) - 1 
++
++    def Clear(self):
++        """Clear the history cache"""
++        del self._list
++        self._list = list()
++        self.cpos = -1
++
++    def GetSize(self):
++        """Get the current size of the cache
++        @return: int (number of items in the cache)
++
++        """
++        return len(self._list)
++
++    def GetMaxSize(self):
++        """Get the max size of the cache
++        @return: int
++
++        """
++        return self.max_size
++
++    def GetNextItem(self):
++        """Get the next item in the history cache, moving the
++        current postion towards the end of the cache.
++        @return: object or None if at end of list
++
++        """
++        item = None
++        if self.cpos < len(self._list) - 1:
++            self.cpos += 1
++            item = self._list[self.cpos]
++        return item
++
++    def GetPreviousItem(self):
++        """Get the previous item in the history cache, moving the
++        current postion towards the begining of the cache.
++        @return: object or None if at start of list
++
++        """
++        item = None
++        if self.cpos >= 0:
++            item = self._list[self.cpos]
++            self.cpos -= 1
++        return item
++
++    def HasPrevious(self):
++        """Are there more items to the left of the current position
++        @return: bool
++
++        """
++        more = self.cpos >= 0
++        return more
++
++    def HasNext(self):
++        """Are there more items to the right of the current position
++        @return: bool
++
++        """
++        if self.cpos == -1 and len(self._list):
++            more = True
++        else:
++            more = self.cpos >= 0 and self.cpos < len(self._list)
++        return more
++
++    def PutItem(self, item):
++        """Put an item on the top of the cache
++        @param item: object
++
++        """
++        if self.cpos != len(self._list) - 1:
++            self._list = self._list[:self.cpos]
++        self._list.append(item)
++        self.cpos += 1
++        self._Resize()
++
++    def SetMaxSize(self, max_size):
++        """Set the maximum size of the cache
++        @param max_size: int (HIST_CACHE_UNLIMITED for unlimited size)
++
++        """
++        assert max_size > 0 or max_size == 1, "Invalid max size"
++        self.max_size = max_size
++        self._Resize()
+diff -Naur wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/miscutil.py wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/miscutil.py
+--- wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/miscutil.py	1969-12-31 19:00:00.000000000 -0500
++++ wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/miscutil.py	2009-06-06 03:48:10.000000000 -0400
+@@ -0,0 +1,33 @@
++###############################################################################
++# Name: miscutil.py                                                           #
++# Purpose: Various helper functions.                                          #
++# Author: Cody Precord <cprecord@editra.org>                                  #
++# Copyright: (c) 2009 Cody Precord <staff@editra.org>                         #
++# Licence: wxWindows Licence                                                  #
++###############################################################################
++
++"""
++Editra Buisness Model Library: MiscUtil
++
++Various helper functions
++
++"""
++
++__author__ = "Cody Precord <cprecord@editra.org>"
++__cvsid__ = "$Id: miscutil.py 60840 2009-05-31 16:00:50Z CJP $"
++__revision__ = "$Revision: 60840 $"
++
++__all__ = [ 'MinMax', ]
++
++#-----------------------------------------------------------------------------#
++# Imports
++
++#-----------------------------------------------------------------------------#
++
++def MinMax(arg1, arg2):
++    """Return an ordered tuple of the minumum and maximum value
++    of the two args.
++    @return: tuple
++
++    """
++    return min(arg1, arg2), max(arg1, arg2)
+diff -Naur wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/searcheng.py wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/searcheng.py
+--- wxPython-src-2.8.10.1-orig/wxPython/wx/tools/Editra/src/ebmlib/searcheng.py	1969-12-31 19:00:00.000000000 -0500
++++ wxPython-src-2.8.10.1/wxPython/wx/tools/Editra/src/ebmlib/searcheng.py	2009-06-06 03:48:10.000000000 -0400
+@@ -0,0 +1,400 @@
++###############################################################################
++# Name: searcheng.py                                                          #
++# Purpose: Text search engine and utilities                                   #
++# Author: Cody Precord <cprecord@editra.org>                                  #
++# Copyright: (c) 2009 Cody Precord <staff@editra.org>                         #
++# Licence: wxWindows Licence                                                  #
++###############################################################################
++
++"""
++Editra Buisness Model Library: SearchEngine
++
++Text Search Engine for finding text and grepping files
++
++"""
++
++__author__ = "Cody Precord <cprecord@editra.org>"
++__cvsid__ = "$Id: searcheng.py 60680 2009-05-17 20:31:58Z CJP $"
++__revision__ = "$Revision: 60680 $"
++
++__all__ = [ 'SearchEngine', ]
++
++#-----------------------------------------------------------------------------#
++# Imports
++import os
++import re
++import fnmatch
++import types
++from StringIO import StringIO
++
++# Local imports
++import fchecker
++
++#-----------------------------------------------------------------------------#
++
++class SearchEngine(object):
++    """Text Search Engine
++    All Search* methods are iterable generators
++    All Find* methods do a complete search and return the match collection
++    @summary: Text Search Engine
++    @todo: Add file filter support
++
++    """
++    def __init__(self, query, regex=True, down=True,
++                  matchcase=True, wholeword=False):
++        """Initialize a search engine object
++        @param query: search string
++        @keyword regex: Is a regex search
++        @keyword down: Search down or up
++        @keyword matchcase: Match case
++        @keyword wholeword: Match whole word
++
++        """
++        object.__init__(self)
++
++        # Attributes
++        self._isregex = regex
++        self._next = down
++        self._matchcase = matchcase
++        self._wholeword = wholeword
++        self._unicode = False
++        self._query = query
++        self._regex = u''
++        self._pool = u''
++        self._lmatch = None             # Last match object
++        self._filters = None            # File Filters
++        self._formatter = lambda f, l, m: u"%s %d: %s" % (f, l+1, m)
++        self._CompileRegex()
++
++    def _CompileRegex(self):
++        """Prepare and compile the regex object based on the current state
++        and settings of the engine.
++        @postcondition: the engines regular expression is created
++
++        """
++        tmp = self._query
++        if not self._isregex:
++            tmp = re.escape(tmp)
++
++        if self._wholeword:
++            tmp = "\\b%s\\b" % tmp
++
++        flags = re.MULTILINE
++
++        if not self._matchcase:
++            flags |= re.IGNORECASE
++
++        if self._unicode:
++            flags |= re.UNICODE
++
++        try:
++            self._regex = re.compile(tmp, flags)
++        except:
++            self._regex = None
++
++    def ClearPool(self):
++        """Clear the search pool"""
++        del self._pool
++        self._pool = u""
++
++    def Find(self, spos=0):
++        """Find the next match based on the state of the search engine
++        @keyword spos: search start position
++        @return: tuple (match start pos, match end pos) or None if no match
++        @note: L{SetSearchPool} has been called to set search string
++
++        """
++        if self._regex is None:
++            return None
++
++        if self._next:
++            return self.FindNext(spos)
++        else:
++            if spos == 0:
++                spos = -1
++            return self.FindPrev(spos)
++
++    def FindAll(self):
++        """Find all the matches in the current context
++        @return: list of tuples [(start1, end1), (start2, end2), ]
++
++        """
++        if self._regex is None:
++            return list()
++
++        matches = [match for match in self._regex.finditer(self._pool)]
++        return matches
++
++    def FindAllLines(self):
++        """Find all the matches in the current context
++        @return: list of strings
++
++        """
++        rlist = list()
++        if self._regex is None:
++            return rlist
++
++        for lnum, line in enumerate(StringIO(self._pool)):
++            if self._regex.search(line) is not None:
++                rlist.append(self._formatter(u"Untitled", lnum, line))
++
++        return rlist
++
++    def FindNext(self, spos=0):
++        """Find the next match of the query starting at spos
++        @keyword spos: search start position in string
++        @return: tuple (match start pos, match end pos) or None if no match
++        @note: L{SetSearchPool} has been called to set the string to search in.
++
++        """
++        if self._regex is None:
++            return None
++
++        if spos < len(self._pool):
++            match = self._regex.search(self._pool[spos:])
++            if match is not None:
++                self._lmatch = match
++                return match.span()
++        return None
++
++    def FindPrev(self, spos=-1):
++        """Find the previous match of the query starting at spos
++        @keyword spos: search start position in string
++        @return: tuple (match start pos, match end pos)
++
++        """
++        if self._regex is None:
++            return None
++
++        if spos+1 < len(self._pool):
++            matches = [match for match in
++                       self._regex.finditer(self._pool[:spos])]
++            if len(matches):
++                lmatch = matches[-1]
++                self._lmatch = lmatch
++                return (lmatch.start(), lmatch.end())
++        return None
++
++    def GetLastMatch(self):
++        """Get the last found match object from the previous L{FindNext} or
++        L{FindPrev} action.
++        @return: match object or None
++
++        """
++        return self._lmatch
++
++    def GetOptionsString(self):
++        """Get a string describing the search engines options"""
++        rstring = u"\"%s\" [ " % self._query
++        for desc, attr in (("regex: %s", self._isregex),
++                           ("match case: %s", self._matchcase),
++                           ("whole word: %s", self._wholeword)):
++            if attr:
++                rstring += (desc % u"on; ")
++            else:
++                rstring += (desc % u"off; ")
++        rstring += u"]"
++
++        return rstring
++
++    def GetQuery(self):
++        """Get the raw query string used by the search engine
++        @return: string
++
++        """
++        return self._query
++
++    def GetQueryObject(self):
++        """Get the regex object used for the search. Will return None if
++        there was an error in creating the object.
++        @return: pattern object
++
++        """
++        return self._regex
++
++    def GetSearchPool(self):
++        """Get the search pool string for this L{SearchEngine}.
++        @return: string
++
++        """
++        return self._pool
++
++    def IsMatchCase(self):
++        """Is the engine set to a case sensitive search
++        @return: bool
++
++        """
++        return self._matchcase
++
++    def IsRegEx(self):
++        """Is the engine searching with the query as a regular expression
++        @return: bool
++
++        """
++        return self._isregex
++
++    def IsWholeWord(self):
++        """Is the engine set to search for wholeword matches
++        @return: bool
++
++        """
++        return self._wholeword
++
++    def SearchInBuffer(self, sbuffer):
++        """Search in the buffer
++        @param sbuffer: buffer like object
++        @todo: implement
++
++        """
++        raise NotImplementedError
++
++    def SearchInDirectory(self, directory, recursive=True):
++        """Search in all the files found in the given directory
++        @param directory: directory path
++        @keyword recursive: search recursivly
++
++        """
++        if self._regex is None:
++            return
++
++        # Get all files in the directories
++        paths = [os.path.join(directory, fname)
++                for fname in os.listdir(directory) if not fname.startswith('.')]
++
++        # Filter out files that don't match the current filter(s)
++        if self._filters is not None and len(self._filters):
++            filtered = list()
++            for fname in paths:
++                if os.path.isdir(fname):
++                    filtered.append(fname)
++                    continue
++
++                for pat in self._filters:
++                    if fnmatch.fnmatch(fname, pat):
++                        filtered.append(fname)
++            paths = filtered
++
++        # Begin searching in the paths
++        for path in paths:
++            if recursive and os.path.isdir(path):
++                # Recursive call to decend into directories
++                for match in self.SearchInDirectory(path, recursive):
++                    yield match
++            else:
++                for match in self.SearchInFile(path):
++                    yield match
++        return
++
++    def SearchInFile(self, fname):
++        """Search in a file for all lines with matches of the set query and
++        yield the results as they are found.
++        @param fname: filename
++        @todo: unicode handling
++
++        """
++        if self._regex is None:
++            return
++
++        checker = fchecker.FileTypeChecker()
++        if checker.IsReadableText(fname):
++            try:
++                fobj = open(fname, 'rb')
++            except (IOError, OSError):
++                return
++            else:
++                # Special token to signify start of a search
++                yield (None, fname)
++
++            for lnum, line in enumerate(fobj):
++                if self._regex.search(line) is not None:
++                    yield self._formatter(fname, lnum, line)
++            fobj.close()
++        return
++
++    def SearchInFiles(self, flist):
++        """Search in a list of files and yield results as they are found.
++        @param flist: list of file names
++
++        """
++        if self._regex is None:
++            return
++
++        for fname in flist:
++            for match in self.SearchInFile(fname):
++                yield match
++        return
++
++    def SearchInString(self, sstring, startpos=0):
++        """Search in a string
++        @param sstring: string to search in
++        @keyword startpos: search start position
++
++        """
++        raise NotImplementedError
++
++    def SetFileFilters(self, filters):
++        """Set the file filters to specify what type of files to search in
++        the filter should be a list of wild card patterns to match.
++        @param filters: list of strings ['*.py', '*.pyw']
++
++        """
++        self._filters = filters
++
++    def SetFlags(self, isregex=None, matchcase=None, wholeword=None, down=None):
++        """Set the search engine flags. Leaving the parameter set to None
++        will not change the flag. Setting it to non None will change the value.
++        @keyword isregex: is regex search
++        @keyword matchcase: matchcase search
++        @keyword wholeword: wholeword search
++        @keyword down: search down or up
++
++        """
++        for attr, val in (('_isregex', isregex), ('_matchcase', matchcase),
++                          ('_wholeword', wholeword), ('_next', down)):
++            if val is not None:
++                setattr(self, attr, val)
++        self._CompileRegex()
++
++    def SetMatchCase(self, case=True):
++        """Set whether the engine will use case sensative searches
++        @keyword case: bool
++
++        """
++        self._matchcase = case
++        self._CompileRegex()
++
++    def SetResultFormatter(self, funct):
++        """Set the result formatter function
++        @param funct: callable(filename, linenum, matchstr)
++
++        """
++        assert callable(funct)
++        self._formatter = funct
++
++    def SetSearchPool(self, pool):
++        """Set the search pool used by the Find methods
++        @param pool: string to search in
++
++        """
++        del self._pool
++        self._pool = pool
++        if isinstance(self._pool, types.UnicodeType):
++            self._unicode = True
++            self._CompileRegex()
++
++    def SetQuery(self, query):
++        """Set the search query
++        @param query: string
++
++        """
++        self._query = query
++        self._CompileRegex()
++
++    def SetUseRegex(self, use=True):
++        """Set whether the engine is using regular expresion searches or
++        not.
++        @keyword use: bool
++
++        """
++        self._isregex = use
++        self._CompileRegex()

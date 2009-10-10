@@ -1,0 +1,127 @@
+# $Id: PKGBUILD 46731 2009-07-20 00:29:04Z tobias $
+# Contributor: John Sowiak <john@archlinux.org>
+# Maintainer: tobias <tobias@archlinux.org>
+
+# TODO:
+# - consider switching to scons when it is better supported
+
+# Apparently, the blender guys refuse to release source tarballs for
+# intermediate releases that deal mainly with binaries but incorporate tiny
+# minor changes from cvs. Since I'm sick and tired of the urges of users that
+# look for release numbers only we make a messy PKGBUILD that can checkout cvs
+# tags if necessary.
+#cvs=true
+cvs=false
+
+pkgname=blender
+pkgver=2.49a
+pkgrel=1
+pkgdesc="A fully integrated 3D graphics creation suite"
+arch=(i686 x86_64)
+license=(GPL)
+url="http://blender3d.org"
+depends=('libjpeg' 'libpng' 'openexr' 'sdl' 'python>=2.6' 'desktop-file-utils' \
+         'gettext' 'libxi' 'libxmu' 'mesa' 'freetype2' 'openal')
+makedepends=('freeglut' 'libtiff' 'librsvg' 'yasm' 'csv')
+options=('!makeflags')
+install=blender.install
+source=($pkgname.desktop $pkgname.svg)
+if [ ! $cvs -o $cvs = false ]; then
+  source=(${source[@]} http://download.blender.org/source/$pkgname-$pkgver.tar.gz)
+  makedepends=('freeglut' 'libtiff' 'librsvg' 'yasm')
+fi
+
+build() {
+  if [ $cvs = true ]; then
+    cd $startdir/src/
+    #cvs -d:pserver:anonymous@cvs.blender.org:/cvsroot/bf-blender login
+    cvs -z3 -d:pserver:anonymous@cvs.blender.org:/cvsroot/bf-blender checkout $pkgname || return 1
+    _cvsrel=$pkgname-$(echo $pkgver | sed 's/\./-/')-release
+    cvs -d:pserver:anonymous@cvs.blender.org:/cvsroot/bf-blender update -r $_cvsrel || return 1
+    find $pkgname/{bin,release/scripts} -name 'CVS' -exec rm -rf {} \; 2> /dev/null
+    cd $pkgname
+  else
+    cd $startdir/src/$pkgname-$pkgver
+  fi
+
+ rm -f user-def.mk
+
+ ##########################################################################
+ # tweak the makefiles to prepare build for ArchLinux
+   # disable static binaries and enable blenderplayer binary
+  sed -i "s|^.*\(BINTARGETS += blenderstatic\)|    #\1|g" source/Makefile
+  sed -i "s|^#\(.*BINTARGETS += blenderplayer\)|\1|g" source/Makefile
+  # link freetype and openal dynamically
+  sed -i 's|LOPTS)|LOPTS) -lfreetype -lopenal|g' source/Makefile
+  sed -i 's|COMLIB.*libfreetype\.a|#\0|g' source/Makefile
+  sed -i 's|NAN_SND_LIBS.*libopenal\.a|#\0|g' source/Makefile
+   # make ode (alternative physics engine)
+   # does not work for Arch64
+   #[ "$CARCH" = "i686" ] && sed -i 's|^\(DIRS.*\)$|\1 ode|' extern/Makefile
+   # make the nan_makefiles happy
+  export NAN_PYTHON_VERSION=2.6
+  export INTERNATIONAL=true
+  export WITH_FREETYPE2=true
+  export NAN_FREETYPE=/usr
+  export WITH_ICONV=true
+
+  export NAN_NO_PLUGIN=true
+
+  export NAN_OPENAL=/usr
+  export NAN_FMOD=/usr
+  export NAN_JPEG=/usr
+  export NAN_PNG=/usr
+  export WITH_OPENEXR=true
+  export NAN_OPENEXR=/usr
+  export NAN_ODE=/usr
+  export NAN_OPENEXR_LIBS=$(pkg-config --libs-only-l OpenEXR)
+
+  export NAN_SDL=/usr
+  export NAN_ZLIB=/usr
+  export NAN_MESA=/usr
+
+  export NAN_USE_BULLET=true
+  export NAN_USE_FFMPEG_CONFIG=true
+  export WITH_BF_VERSE=true
+  export WITH_VERSE=true
+  export WITH_BF_OPENMP=true
+  # there is an issue with a file
+  export NAN_DEBUG=-O
+ ###########################################################################
+ # build
+  make || return 1
+ ###########################################################################
+#  mkdir -p $startdir/pkg/usr/share/
+  cd obj/linux-glibc2*/bin
+
+# common part
+
+ mkdir -p $startdir/pkg/usr/share/
+
+ # install binaries
+ install -Dm755 blender $startdir/pkg/usr/bin/blender
+ install -Dm755 blenderplayer $startdir/pkg/usr/bin/blenderplayer
+
+ # install internationalization support
+ cd ../../../bin/.blender
+ install -D -m644 .Blanguages \
+   $startdir/pkg/usr/share/$pkgname/.Blanguages
+ install -D -m644 .bfont.ttf \
+   $startdir/pkg/usr/share/$pkgname/.bfont.ttf
+
+ cp -R locale $startdir/pkg/usr/share/
+
+ # install scripts
+ cd ../../release/
+ cp -R scripts $startdir/pkg/usr/share/$pkgname/
+
+ # install all additional stuff
+ # install a freedesktop.org compliant menu entry
+ install -Dm644 $startdir/src/$pkgname.desktop $startdir/pkg/usr/share/applications/$pkgname.desktop
+ # install some freedesktop.org compatibility
+ install -D -m644 $startdir/src/$pkgname.svg $startdir/pkg/usr/share/pixmaps/$pkgname.svg
+ # finally we render a png as fallback for not svg aware menu applications
+ # Attention: always make sure you check the dimensions of the source-svg,
+ # you can read the dimensions via inkscapes export funktion
+ rsvg -w 64 -h 64 -f png $startdir/pkg/usr/share/pixmaps/$pkgname.svg $startdir/pkg/usr/share/pixmaps/$pkgname.png
+}

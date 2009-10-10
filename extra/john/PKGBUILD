@@ -1,0 +1,78 @@
+# $Id: PKGBUILD 41998 2009-06-08 23:48:25Z andrea $
+# Maintainer: Andrea Scarpino <andrea@archlinux.org>
+# Contributor: Dale Blount <dale@archlinux.org>
+# Contributor: Tom Newsom <Jeepster@gmx.co.uk>
+# Contributor: Michal Krenek <mikos@sg1.cz>
+
+pkgname=john
+pkgver=1.7.0.2
+pkgrel=5
+pkgdesc="John The Ripper - A fast password cracker. Additional patches (NTLM, MySQL, Kerberos V5, etc.) included."
+arch=(i686 x86_64)
+url="http://www.openwall.com/$pkgname/"
+license=('GPL2' 'custom')
+depends=('openssl')
+source=(http://www.openwall.com/$pkgname/f/$pkgname-$pkgver.tar.gz \
+	http://www.openwall.com/john/contrib/john-1.7-all-4.diff.gz \
+	http://www2.psy.uq.edu.au/~ftp/Crypto/DES/libdes-4.04b.tar.gz \
+	params.h.patch)
+md5sums=('084fa03f265491ef7e32c05e9fb027db'
+         '4429722ba242a5a33ca8ebf45fd42797'
+         '41bd2e1225c038ce9993ceb485991f0e'
+         'f69ed632eba8fb9e45847a4b4a323787')
+
+build() {
+	# jumbo patch
+	cd ${srcdir}/$pkgname-$pkgver
+	patch -p0 < ${srcdir}/$pkgname-1.7-all-4.diff || return 1
+	cd ${srcdir}/john-$pkgver/src/
+
+	# patch default params
+	patch -p0 < ${srcdir}/params.h.patch || return 1
+	if [ "$CARCH" == "x86_64" ]; then
+	    sed -i 's|CFLAGS = -c -Wall -O2|CFLAGS = -c -Wall -O2 -march=x86-64 -DJOHN_SYSTEMWIDE=1|' Makefile || return 1
+	    sed -i 's|^LDFLAGS =\(.*\)|LDFLAGS =\1 -lm|' Makefile || return 1
+	    sed -i -e 's|-m486||g' Makefile || return 1
+	  else sed -i 's|CFLAGS = -c -Wall -O2|CFLAGS = -c -Wall -O2 -march=i686 -DJOHN_SYSTEMWIDE=1|' Makefile || return 1
+	fi
+	sed -i 's|LIBS = -ldes|LIBS = -ldes -Ldes|' Makefile || return 1
+	sed -i 's|#include <des.h>|#include "des/des.h"|' KRB5_fmt.c || return 1
+	sed -i 's|#include <des.h>|#include "des/des.h"|' KRB5_std.h || return 1
+
+	# build john
+	if [ "$CARCH" == "x86_64" ]; then
+	    make linux-x86-64 || return 1
+	  else make linux-x86-mmx || return 1
+	fi
+
+	# config file
+	install -d ${pkgdir}/etc/john
+	sed -i 's|$JOHN|/usr/share/john|g' ${srcdir}/john-$pkgver/run/john.conf || return 1
+	install -m644 ${srcdir}/john-$pkgver/run/john.conf ${pkgdir}/etc/john/john.conf
+	
+	# docs
+	install -d ${pkgdir}/usr/share/doc/john
+	install -m644 ${srcdir}/john-$pkgver/doc/* ${pkgdir}/usr/share/doc/john
+	install -m644 ${srcdir}/john-$pkgver/run/*.chr ${pkgdir}/usr/share/john/	
+	install -m644 ${srcdir}/john-$pkgver/run/password.lst ${pkgdir}/usr/share/john/	
+	install -D -m644 ${srcdir}/john-$pkgver/doc/LICENSE ${pkgdir}/usr/share/licenses/$pkgname/LICENSE
+
+	# install password list and charset files
+	install -d ${pkgdir}/usr/share/john/
+	install -m644 ${srcdir}/${pkgname}-${pkgver}/run/{{all,alnum,alpha,digits,lanman}.chr,password.lst} \
+          ${pkgdir}/usr/share/john/ || return 1
+
+	# install binaries
+	install -d ${pkgdir}/usr/bin
+	if [ "$CARCH" == "x86_64" ]; then
+	    make linux-x86-64 || return 1
+	  else 	make linux-x86-mmx || return 1
+	fi
+	install -m755 ${srcdir}/john-$pkgver/run/john ${pkgdir}/usr/bin/john
+	install -m755 ${srcdir}/john-$pkgver/run/mailer ${pkgdir}/usr/bin/john-mailer
+	cd ${pkgdir}/usr/bin
+	ln -s john unafs
+	ln -s john unique
+	ln -s john unshadow
+	ln -s john undrop
+}

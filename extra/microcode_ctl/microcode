@@ -1,0 +1,55 @@
+#!/bin/bash
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+
+DEVICE=/dev/cpu/microcode
+RETVAL=0
+MODULE=0
+
+case "$1" in
+start|restart|load)
+	stat_busy "Applying Intel IA32 Microcode update"
+	# Lets just be sure we have a device file...
+	if [ ! -e $DEVICE ]; then
+		modprobe microcode
+		if [ $? -le 0 ]; then
+			MODULE=1
+		else
+			stat_fail
+			echo "$0: microcode device $DEVICE doesn't exist"
+			exit 1
+		fi
+	fi
+
+	if [ ! -c $DEVICE ]; then
+		echo "$0: $DEVICE not a character device"
+		stat_fail
+		exit 1
+	fi
+
+	/usr/sbin/microcode_ctl -Qu
+	RETVAL=$?
+	if [ $RETVAL -le 0 ]; then
+		stat_done
+		if [ $MODULE = 1 ]; then
+			modprobe -r microcode
+		fi
+	else
+		stat_fail
+		# trap the most common cases
+		if [ $RETVAL -eq 3 ]; then
+			echo "$0: Cannot find source file \"/etc/microcode.dat\""
+		elif [ $RETVAL -eq 19 ]; then
+			grep MICROCODE /usr/include/linux/autoconf.h | grep -q ^#define
+			if [ $? -ne 0 ]; then
+				echo "$0: This kernel doesn't appear to have microcode device support"
+			fi
+		fi
+	fi
+	;;
+stop)
+	;;
+*)
+	echo "usage: $0 {start|restart}"  
+esac

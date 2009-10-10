@@ -1,0 +1,83 @@
+# $Id: PKGBUILD 53936 2009-10-04 02:15:01Z andrea $
+# Maintainer: Andrea Scarpino <andrea@archlinux.org>
+# Contributor: Pierre Schmitz <pierre@archlinux.de>
+
+pkgname=apache
+pkgver=2.2.14
+pkgrel=1
+pkgdesc='A high performance Unix-based HTTP server'
+arch=('i686' 'x86_64')
+options=('!libtool')
+url='http://www.apache.org/dist/httpd'
+license=('APACHE')
+backup=(etc/httpd/conf/httpd.conf
+        etc/httpd/conf/extra/httpd-{autoindex,dav,default,info,languages}.conf
+        etc/httpd/conf/extra/httpd-{manual,mpm,multilang-errordoc}.conf
+        etc/httpd/conf/extra/httpd-{ssl,userdir,vhosts}.conf
+        etc/logrotate.d/httpd)
+depends=('openssl' 'zlib' 'apr-util' 'pcre')
+optdepends=('lynx: apachectl status')
+source=("http://www.apache.org/dist/httpd/httpd-${pkgver}.tar.bz2"
+        'httpd.logrotate' 'httpd' 'arch.layout')
+md5sums=('a5226203aaf97e5b941c41a71c112704'
+         'f4d627c64024c1b7b95efb5ffbaa625e'
+         'bddd84dafa770d74df1dc1f96bd71823'
+         '3d659d41276ba3bfcb20c231eb254e0c')
+
+build() {
+	cd ${srcdir}/httpd-${pkgver}
+
+	# set default user
+	sed -e 's#User daemon#User http#' \
+	    -e 's#Group daemon#Group http#' \
+	    -i docs/conf/httpd.conf.in
+
+	cat ${srcdir}/arch.layout >> config.layout
+	./configure --enable-layout=Arch \
+		--enable-modules=all \
+		--enable-mods-shared=all \
+		--enable-so \
+		--enable-suexec \
+		--with-suexec-caller=http \
+		--with-suexec-docroot=/srv/http \
+		--with-suexec-logfile=/var/log/httpd/suexec.log \
+		--with-suexec-bin=/usr/sbin/suexec \
+		--with-suexec-uidmin=99 --with-suexec-gidmin=99 \
+		--enable-ldap --enable-authnz-ldap \
+		--enable-cache --enable-disk-cache --enable-mem-cache --enable-file-cache \
+		--enable-ssl --with-ssl \
+		--enable-deflate --enable-cgid \
+		--enable-proxy --enable-proxy-connect \
+		--enable-proxy-http --enable-proxy-ftp \
+		--enable-dbd \
+		--with-apr=/usr/bin/apr-1-config \
+		--with-apr-util=/usr/bin/apu-1-config \
+		--with-pcre=/usr
+
+	make || return 1
+
+	make DESTDIR=${pkgdir} install
+	install -D -m755 ${srcdir}/httpd ${pkgdir}/etc/rc.d/httpd
+	install -D -m644 ${srcdir}/httpd.logrotate ${pkgdir}/etc/logrotate.d/httpd
+
+	# symlinks for /etc/httpd
+	ln -fs /var/log/httpd ${pkgdir}/etc/httpd/logs
+	ln -fs /var/run/httpd ${pkgdir}/etc/httpd/run
+	ln -fs /usr/lib/httpd/modules ${pkgdir}/etc/httpd/modules
+	ln -fs /usr/lib/httpd/build ${pkgdir}/etc/httpd/build
+
+	# set sane defaults
+	sed -e 's#/usr/lib/httpd/modules/#modules/#' \
+	    -e 's|#\(Include conf/extra/httpd-multilang-errordoc.conf\)|\1|' \
+	    -e 's|#\(Include conf/extra/httpd-autoindex.conf\)|\1|' \
+	    -e 's|#\(Include conf/extra/httpd-languages.conf\)|\1|' \
+	    -e 's|#\(Include conf/extra/httpd-userdir.conf\)|\1|' \
+	    -e 's|#\(Include conf/extra/httpd-default.conf\)|\1|' \
+	    -i ${pkgdir}/etc/httpd/conf/httpd.conf
+
+	# cleanup
+	rm -rf ${pkgdir}/usr/share/httpd/manual
+	rm -rf ${pkgdir}/etc/httpd/conf/original
+	rm -rf ${pkgdir}/srv/http
+	rmdir ${pkgdir}/usr/bin
+}

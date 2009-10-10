@@ -1,0 +1,136 @@
+#! /bin/sh
+# Created by Tobias Powalowski <tpowa@archlinux.org>
+# Settings
+APPNAME=$(basename "${0}")
+CONFIG="/etc/mksyslinux.conf"
+export TEMPDIR=$(mktemp /tmp/mksyslinux.XXX)
+TMPDIR=$(mktemp -d /tmp/mksyslinux-image.XXX)
+
+usage ()
+{
+    echo "${APPNAME}: usage"
+    echo "WRITING TO DEVICE:"
+    echo "- PREPARATION: Your device must have a bootable first partition in FAT16 format!"
+    echo "- ATTENTION: The MBR of your DEVICE will be overwritten! You have been warned!"
+    echo ""
+    echo "CREATING AN IMAGE FILE:"
+    echo "- For creating an image file use the -i=IMAGEFILE switch"
+    echo "- use 'dd if=<yourimage> of=<yourdevice>' to write to your device afterwards."
+    echo ""
+    echo "PARAMETERS:"
+    echo "  -d=DEVICE        Your DEVICE first partition from /dev/xxx tree to install"
+    echo "  -i=IMAGENAME     Your IMAGENAME"
+    echo "  -c=CONFIG        Use CONFIG file. default: /etc/mksyslinux.conf"
+    echo "  -h               This message."
+    exit 1
+}
+
+[ "$1" == "" ] && usage && exit 1
+
+
+while [ $# -gt 0 ]; do
+	case $1 in
+		-c=*|--c=*) CONFIG="$(echo $1 | awk -F= '{print $2;}')" ;;
+		-d=*|--d=*) DEVICE="$(echo $1 | awk -F= '{print $2;}')" ;;
+		-i=*|--i=*) IMAGENAME="$(echo $1 | awk -F= '{print $2;}')" ;;
+		-h|--h|?) usage ;; 
+		*) usage ;;
+		esac
+	shift
+done
+
+if [ ! -f "${CONFIG}" ]; then
+	echo "config file '${CONFIG}' cannot be found, aborting..."
+    exit 1
+fi
+
+if [ "${IMAGENAME}" = "" ]; then
+	if [ "${DEVICE}" = "" ]; then 
+		echo "ERROR: No DEVICE name specified, please use the -d option"
+	 	exit 1
+	fi
+fi
+
+if ! [ $UID -eq 0 ]; then 
+	echo "ERROR: only works when run as root!"
+	exit 1
+fi
+
+. "${CONFIG}"
+# export for mkinitcpio
+[ -n "${APPENDBOOTMESSAGE}" ] && export APPENDBOOTMESSAGE
+[ -n "${APPENDBOOTMESSAGE_SYSLINUX}" ] && export APPENDBOOTMESSAGE_SYSLINUX
+[ -n "${APPENDBOOTMESSAGE_SYSLINUX_LOWMEM}" ] && export APPENDBOOTMESSAGE_SYSLINUX_LOWMEM
+[ -n "${APPENDOPTIONSBOOTMESSAGE}" ] && export APPENDOPTIONSBOOTMESSAGE
+
+MBRDEVICE="$(echo ${DEVICE} | sed -e 's/[0-9]//g')"
+
+export RUNPROGRAM="${APPNAME}"
+[ "${BOOTMESSAGE}" = "" ] && export BOOTMESSAGE=$(mktemp /tmp/bootmessage.XXXX)
+[ "${OPTIONSBOOTMESSAGE}" = "" ] && export OPTIONSBOOTMESSAGE=$(mktemp /tmp/optionsbootmessage.XXXX)
+export USEKERNEL=${VERSION}
+# begin script
+[ -e ${TEMPDIR} ] && rm -r ${TEMPDIR}
+mkdir -p ${TEMPDIR}
+echo ":: Mounting ${DEVICE} ..."
+if ! [ "${IMAGENAME}" = "" ]; then
+	modprobe loop
+else
+	mount ${DEVICE} ${TEMPDIR} || exit 1
+fi
+# create syslinux.cfg
+echo ":: Creating syslinux.cfg ..."
+if [ "${SYSLINUXCFG}" = "" ]; then
+	[ -e ${TEMPDIR}/syslinux.cfg ] && rm ${TEMPDIR}/syslinux.cfg
+	echo "prompt ${PROMPT}" >> ${TEMPDIR}/syslinux.cfg
+	echo "timeout ${TIMEOUT}" >> ${TEMPDIR}/syslinux.cfg
+	echo "display boot.msg" >> ${TEMPDIR}/syslinux.cfg
+	echo "F1 boot.msg" >>  ${TEMPDIR}/syslinux.cfg
+	echo "F2 options.msg" >>  ${TEMPDIR}/syslinux.cfg
+	echo "default arch"  >> ${TEMPDIR}/syslinux.cfg
+	echo "label arch" >> ${TEMPDIR}/syslinux.cfg
+	echo "kernel vmlinuz" >> ${TEMPDIR}/syslinux.cfg
+	echo "append initrd=initrd.img ${KERNEL_BOOT_OPTIONS}" >> ${TEMPDIR}/syslinux.cfg
+else
+	sed "s|@@PROMPT@@|${PROMPT}|g;s|@@TIMEOUT@@|${TIMEOUT}|g;s|@@KERNEL_BOOT_OPTIONS@@|${KERNEL_BOOT_OPTIONS}|g" \
+		${SYSLINUXCFG} > ${TEMPDIR}/syslinux.cfg
+fi
+[ ! -s ${TEMPDIR}/syslinux.cfg ] && echo "No syslinux.cfg found" && exit 1
+echo ":: Calling mkinitcpio CONFIG=${MKINITCPIO_CONFIG} KERNEL=${VERSION} ..." 
+# generate initramdisk
+echo ":: Creating initramdisk ..."
+	mkinitcpio -c ${MKINITCPIO_CONFIG} -k ${VERSION} -g ${TEMPDIR}/initrd.img
+echo ":: Using ${KERNEL} as image kernel ..."
+	install -m644 ${KERNEL} ${TEMPDIR}/vmlinuz
+	install -m644 ${BOOTMESSAGE} ${TEMPDIR}/boot.msg
+	install -m644 ${OPTIONSBOOTMESSAGE} ${TEMPDIR}/options.msg
+	[ ! -s ${TEMPDIR}/boot.msg ] && echo 'ERROR:no boot.msg found, aborting!' && exit 1
+	[ ! -s ${TEMPDIR}/options.msg ] && echo 'ERROR:no options.msg found, aborting!' && exit 1
+if ! [ "${IMAGENAME}" = "" ]; then
+	# ext2 overhead's upper bound is 6%
+	# empirically tested up to 1GB
+	rootsize=$(du -bs ${TEMPDIR}|cut -f1)
+	IMGSZ=$(( (${rootsize}*106)/100/512 + 1)) # image size in sectors
+	# create the filesystem image file
+	dd if=/dev/zero of="${IMAGENAME}" bs=512 count="${IMGSZ}"
+	# create a filesystem on the image
+	mkfs.vfat "${IMAGENAME}"
+	mount -o loop ${IMAGENAME} ${TMPDIR} || exit 1
+	cp -r "${TEMPDIR}"/* "$TMPDIR"
+	umount ${TMPDIR}
+else
+	echo ":: Unmounting ${DEVICE} ..."
+	umount ${TEMPDIR} || exit 1
+fi
+if ! [ "${IMAGENAME}" = "" ]; then
+	echo ":: Installing SYSLINUX on ${IMAGENAME} ..."
+	/usr/bin/syslinux ${IMAGENAME} && echo "Installation completed."
+else
+	echo ":: Installing MBR on ${MBRDEVICE} ..."
+	cat ${MBR} > ${MBRDEVICE}
+	echo ":: Installing SYSLINUX on ${DEVICE} ..."
+	/usr/bin/syslinux -o offset ${DEVICE} && echo "Installation completed."
+fi
+# clean /tmp
+rm -r ${TEMPDIR}
+! [ ${IMAGENAME} = "" ] && rm -r ${TMPDIR}

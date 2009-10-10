@@ -1,0 +1,62 @@
+PKGNAME="texlive-pictures"
+UPDMAP="/usr/share/texmf-config/web2c/updmap.cfg"
+SYNCWITHTREES=''
+NEWMAPS=`mktemp`
+cat <<EOF > $NEWMAPS
+MixedMap xypic.map
+EOF
+
+pre_install() {
+	cat $NEWMAPS >> $UPDMAP
+}
+
+post_install() {
+	echo    ">>> texlive: updating the filename database..."
+	texconfig-sys rehash
+	echo    ">>> texlive: updating the fontmap files with updmap..."
+	updmap-sys --quiet --nohash
+	echo    " done." 
+}
+
+
+pre_upgrade() {
+  OLDMAPS="/usr/share/texmf-var/arch/installedpkgs/$PKGNAME.maps"
+  if [ -f $OLDMAPS ] ; then
+    MAPSDIFF=`mktemp`
+    TOADD=`mktemp`
+    diff -B $OLDMAPS $NEWMAPS | sed 's/\s\+/ /g' > $MAPSDIFF
+    TOREMOVE=`cat $MAPSDIFF | egrep '^<' | cut -d' ' -f3`
+    cat $MAPSDIFF | egrep '^>' | sed 's/^> //' > $TOADD
+    if [ "x$TOREMOVE" != "x" ]; then
+      for map in $TOREMOVE; do
+        sed -i "/\s$map/d" $UPDMAP
+      done
+    fi
+    if [ -s $TOADD ]; then
+       cat $TOADD >> $UPDMAP
+    fi
+  else
+    echo "Warning: file $PKGNAME.maps not found" 
+    echo "(ignore the above if updating from TL2008 or from TL2009 in testing)"
+    SYNCWITHTREES="--syncwithtrees"
+  fi
+}
+
+
+post_upgrade() {
+	echo    ">>> texlive: updating the filename database..."
+	texconfig-sys rehash
+	echo    ">>> texlive: updating the fontmap files with updmap..."
+	updmap-sys --quiet --nohash $SYNCWITHTREES
+	echo    " done." 
+}
+
+pre_remove() {
+for m in `cut -d' ' -f2 $NEWMAPS`; do 
+  sed -i "/\s$m/d" $UPDMAP ; 
+done
+}
+
+post_remove() {
+  post_install
+}

@@ -1,0 +1,194 @@
+diff -Naur mc-4.6.1.orig/intl/loadmsgcat.c mc-4.6.1/intl/loadmsgcat.c
+--- mc-4.6.1.orig/intl/loadmsgcat.c	2005-07-23 18:52:57.000000000 +0200
++++ mc-4.6.1/intl/loadmsgcat.c	2006-03-19 17:11:14.000000000 +0100
+@@ -1002,7 +1002,7 @@
+       /* The magic number is wrong: not a message catalog file.  */
+ #ifdef HAVE_MMAP
+       if (use_mmap)
+-	munmap ((caddr_t) data, size);
++	munmap ((void *) data, size);
+       else
+ #endif
+ 	free (data);
+@@ -1271,7 +1271,7 @@
+ 	free (domain->malloced);
+ #ifdef HAVE_MMAP
+       if (use_mmap)
+-	munmap ((caddr_t) data, size);
++	munmap ((void *) data, size);
+       else
+ #endif
+ 	free (data);
+@@ -1306,7 +1306,7 @@
+ 
+ # ifdef _POSIX_MAPPED_FILES
+   if (domain->use_mmap)
+-    munmap ((caddr_t) domain->data, domain->mmap_size);
++    munmap ((void *) domain->data, domain->mmap_size);
+   else
+ # endif	/* _POSIX_MAPPED_FILES */
+     free ((void *) domain->data);
+diff -Naur mc-4.6.1.orig/src/view.c mc-4.6.1/src/view.c
+--- mc-4.6.1.orig/src/view.c	2005-05-27 16:19:18.000000000 +0200
++++ mc-4.6.1/src/view.c	2006-03-19 17:10:34.000000000 +0100
+@@ -76,6 +76,12 @@
+ #define vwidth (view->widget.cols - (view->have_frame ? 2 : 0))
+ #define vheight (view->widget.lines - (view->have_frame ? 2 : 0))
+ 
++#if GLIB_MAJOR_VERSION >= 2
++#  define my_g_malloc g_try_malloc
++#else
++#  define my_g_malloc g_malloc
++#endif
++
+ /* Offset in bytes into a file */
+ typedef unsigned long offset_type;
+ #define INVALID_OFFSET ((offset_type) -1)
+@@ -560,8 +566,8 @@
+ 	view->data = mc_mmap (0, view->s.st_size, PROT_READ,
+ 			      MAP_FILE | MAP_SHARED, view->file, 0);
+     else
+-	view->data = (caddr_t) -1;
+-    if ((caddr_t) view->data != (caddr_t) - 1) {
++	view->data = (void *) -1;
++    if (view->data != (void *)-1) {
+ 	/* mmap worked */
+ 	view->first = 0;
+ 	view->bytes_read = view->s.st_size;
+@@ -573,6 +579,9 @@
+     /* For the OSes that don't provide mmap call, try to load all the
+      * file into memory (alex@bcs.zaporizhzhe.ua).  Also, mmap can fail
+      * for any reason, so we use this as fallback (pavel@ucw.cz) */
++     
++    /* If large file support is enabled, st_size is a 64 bit value and
++     * will thus on 32 bit platforms possibly be beyond the range of gulong */
+ 
+     /* Make sure view->s.st_size is not truncated when passed to g_malloc */
+     if ((gulong) view->s.st_size == view->s.st_size)
+diff -Naur mc-4.6.1.orig/vfs/local.c mc-4.6.1/vfs/local.c
+--- mc-4.6.1.orig/vfs/local.c	2004-09-25 01:00:18.000000000 +0200
++++ mc-4.6.1/vfs/local.c	2006-03-19 17:00:45.000000000 +0100
+@@ -243,8 +243,8 @@
+ }
+ 
+ #ifdef HAVE_MMAP
+-caddr_t
+-local_mmap (struct vfs_class *me, caddr_t addr, size_t len, int prot, int flags, void *data, off_t offset)
++void *
++local_mmap (struct vfs_class *me, void *addr, size_t len, int prot, int flags, void *data, off_t offset)
+ {
+     int fd = * (int *)data;
+ 
+@@ -252,7 +252,7 @@
+ }
+ 
+ int
+-local_munmap (struct vfs_class *me, caddr_t addr, size_t len, void *data)
++local_munmap (struct vfs_class *me, void *addr, size_t len, void *data)
+ {
+     return munmap (addr, len);
+ }
+diff -Naur mc-4.6.1.orig/vfs/local.h mc-4.6.1/vfs/local.h
+--- mc-4.6.1.orig/vfs/local.h	2004-08-17 11:17:43.000000000 +0200
++++ mc-4.6.1/vfs/local.h	2006-03-19 17:01:35.000000000 +0100
+@@ -13,9 +13,9 @@
+ extern int local_errno (struct vfs_class *me);
+ extern int local_lseek (void *data, off_t offset, int whence);
+ #ifdef HAVE_MMAP
+-extern caddr_t local_mmap (struct vfs_class *me, caddr_t addr, size_t len,
++extern void *local_mmap (struct vfs_class *me, void *addr, size_t len,
+                            int prot, int flags, void *data, off_t offset);
+-extern int local_munmap (struct vfs_class *me, caddr_t addr, size_t len, void *data);
++extern int local_munmap (struct vfs_class *me, void *addr, size_t len, void *data);
+ #endif
+ 
+ #endif
+diff -Naur mc-4.6.1.orig/vfs/samba/lib/util.c mc-4.6.1/vfs/samba/lib/util.c
+--- mc-4.6.1.orig/vfs/samba/lib/util.c	2005-05-27 16:19:19.000000000 +0200
++++ mc-4.6.1/vfs/samba/lib/util.c	2006-03-19 17:06:39.000000000 +0100
+@@ -1836,7 +1836,7 @@
+ 	
+   /* Look up the host address in the address list we just got. */
+   for (i = 0; hp->h_addr_list[i]; i++) {
+-    if (memcmp(hp->h_addr_list[i], (caddr_t) & addr, sizeof(addr)) == 0)
++    if (memcmp(hp->h_addr_list[i], &addr, sizeof(addr)) == 0)
+       return True;
+   }
+ 
+diff -Naur mc-4.6.1.orig/vfs/vfs.c mc-4.6.1/vfs/vfs.c
+--- mc-4.6.1.orig/vfs/vfs.c	2005-05-27 16:19:19.000000000 +0200
++++ mc-4.6.1/vfs/vfs.c	2006-03-19 17:03:48.000000000 +0100
+@@ -740,27 +740,27 @@
+ 
+ #ifdef HAVE_MMAP
+ static struct mc_mmapping {
+-    caddr_t addr;
++    void *addr;
+     void *vfs_info;
+     struct vfs_class *vfs;
+     struct mc_mmapping *next;
+ } *mc_mmaparray = NULL;
+ 
+-caddr_t
+-mc_mmap (caddr_t addr, size_t len, int prot, int flags, int fd, off_t offset)
++void *
++mc_mmap (void *addr, size_t len, int prot, int flags, int fd, off_t offset)
+ {
+     struct vfs_class *vfs;
+-    caddr_t result;
++    void *result;
+     struct mc_mmapping *mcm;
+ 
+     if (fd == -1)
+-	return (caddr_t) -1;
++	return (void *) -1;
+     
+     vfs = vfs_op (fd);
+-    result = vfs->mmap ? (*vfs->mmap)(vfs, addr, len, prot, flags, vfs_info (fd), offset) : (caddr_t)-1;
+-    if (result == (caddr_t)-1){
++    result = vfs->mmap ? (*vfs->mmap)(vfs, addr, len, prot, flags, vfs_info (fd), offset) : (void *)-1;
++    if (result == (void *)-1){
+ 	errno = ferrno (vfs);
+-	return (caddr_t)-1;
++	return (void *)-1;
+     }
+     mcm =g_new (struct mc_mmapping, 1);
+     mcm->addr = result;
+@@ -772,7 +772,7 @@
+ }
+ 
+ int
+-mc_munmap (caddr_t addr, size_t len)
++mc_munmap (void *addr, size_t len)
+ {
+     struct mc_mmapping *mcm, *mcm2 = NULL;
+     
+diff -Naur mc-4.6.1.orig/vfs/vfs.h mc-4.6.1/vfs/vfs.h
+--- mc-4.6.1.orig/vfs/vfs.h	2004-11-16 17:16:08.000000000 +0100
++++ mc-4.6.1/vfs/vfs.h	2006-03-19 17:05:57.000000000 +0100
+@@ -49,8 +49,8 @@
+ int mc_ctl (int fd, int ctlop, void *arg);
+ int mc_setctl (const char *path, int ctlop, void *arg);
+ #ifdef HAVE_MMAP
+-caddr_t mc_mmap (caddr_t, size_t, int, int, int, off_t);
+-int mc_munmap (caddr_t addr, size_t len);
++void *mc_mmap (void *, size_t, int, int, int, off_t);
++int mc_munmap (void *addr, size_t len);
+ #endif				/* HAVE_MMAP */
+ 
+ /* Operations for mc_ctl - on open file */
+diff -Naur mc-4.6.1.orig/vfs/vfs-impl.h mc-4.6.1/vfs/vfs-impl.h
+--- mc-4.6.1.orig/vfs/vfs-impl.h	2004-09-02 15:57:59.000000000 +0200
++++ mc-4.6.1/vfs/vfs-impl.h	2006-03-19 17:12:01.000000000 +0100
+@@ -72,9 +72,9 @@
+     int (*setctl) (struct vfs_class *me, const char *path, int ctlop,
+ 		   void *arg);
+ #ifdef HAVE_MMAP
+-    caddr_t (*mmap) (struct vfs_class *me, caddr_t addr, size_t len,
++    void *(*mmap) (struct vfs_class *me, void *addr, size_t len,
+ 		     int prot, int flags, void *vfs_info, off_t offset);
+-    int (*munmap) (struct vfs_class *me, caddr_t addr, size_t len,
++    int (*munmap) (struct vfs_class *me, void *addr, size_t len,
+ 		   void *vfs_info);
+ #endif
+ };

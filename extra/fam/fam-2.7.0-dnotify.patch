@@ -1,0 +1,975 @@
+--- fam-2.7.0/src/DNotify.c++	2004-01-30 00:00:00.000000000 +0100
++++ fam-2.7.0.dnotify/src/DNotify.c++	2004-01-30 00:00:00.000000000 +0100
+@@ -0,0 +1,582 @@
++//  Copyright (C) 2001 Red Hat, Inc.  All Rights Reserved.
++//  Copyright (C) 1999 Silicon Graphics, Inc.  All Rights Reserved.
++//  
++//  This program is free software; you can redistribute it and/or modify it
++//  under the terms of version 2 of the GNU General Public License as
++//  published by the Free Software Foundation.
++//
++//  This program is distributed in the hope that it would be useful, but
++//  WITHOUT ANY WARRANTY; without even the implied warranty of
++//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  Further, any
++//  license provided herein, whether implied or otherwise, is limited to
++//  this program in accordance with the express provisions of the GNU
++//  General Public License.  Patent licenses, if any, provided herein do not
++//  apply to combinations of this program with other product or programs, or
++//  any other product whatsoever.  This program is distributed without any
++//  warranty that the program is delivered free of the rightful claim of any
++//  third person by way of infringement or the like.  See the GNU General
++//  Public License for more details.
++//
++//  You should have received a copy of the GNU General Public License along
++//  with this program; if not, write the Free Software Foundation, Inc., 59
++//  Temple Place - Suite 330, Boston MA 02111-1307, USA.
++
++#define _GNU_SOURCE  
++#include <fcntl.h>
++
++#include <string.h>
++#include <signal.h>
++#include <stdio.h>
++#include <unistd.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <libgen.h>
++
++#include "DNotify.h"
++
++#include "Interest.h"
++#include "Log.h"
++#include "Scheduler.h"
++#include <memory>
++
++
++int DNotify::pipe_write_fd = -2;
++int DNotify::pipe_read_fd = -2;
++volatile sig_atomic_t DNotify::queue_overflowed = 0;
++volatile sig_atomic_t DNotify::queue_changed = 0;
++int DNotify::change_queue[QUEUESIZE];
++volatile int DNotify::queue_head = 0; // Only modified by read handler
++volatile int DNotify::queue_tail = 0; // Only modified by signal handler
++DNotify::EventHandler DNotify::ehandler;
++
++DNotify::DirWatch *DNotify::dir_hash[DIR_HASHSIZE];
++DNotify::FileWatch *DNotify::file_hash[FILE_HASHSIZE];
++
++struct DNotify::FileWatch
++{
++    DirWatch *dir_watch;
++    dev_t file_dev;
++    ino_t file_ino;
++    FileWatch *next; // The DirWatch.watches list
++    FileWatch *hash_link;
++};
++
++struct DNotify::DirWatch
++{
++    int fd;
++    dev_t dir_dev;
++    ino_t dir_ino;
++    
++    DirWatch *hash_link;
++    FileWatch *watches;
++};
++
++struct DNotify::ChangeEventData
++{
++    dev_t file_dev;
++    ino_t file_ino;
++};    
++
++DNotify::DNotify(EventHandler h)
++{
++    assert(ehandler == NULL);
++    ehandler = h;
++}
++
++DNotify::~DNotify()
++{
++    if (pipe_read_fd >= 0)
++    {
++	//  Tell the scheduler.
++
++	(void) Scheduler::remove_read_handler(pipe_read_fd);
++
++	//  Close the pipe.
++
++	if (close(pipe_read_fd) < 0)
++	    Log::perror("can't pipe read end");
++	else
++	    Log::debug("closed pipe read end");
++	
++	if (close(pipe_write_fd) < 0)
++	    Log::perror("can't pipe write end");
++	else
++	    Log::debug("closed pipe write end");
++	pipe_read_fd = -1;
++    }
++    ehandler = NULL;
++}
++
++void
++DNotify::overflow_signal_handler(int sig, siginfo_t *si, void *data)
++{
++  char c = 'x';
++
++  {
++    char *str = "*************** overflow sigqueue ***********************\n";
++    write (STDERR_FILENO, str, strlen(str));
++  }
++
++  if (!queue_overflowed)
++  {
++      queue_overflowed = 1;
++      // Trigger the read handler
++      write(pipe_write_fd, &c, 1);
++  }
++}
++
++void
++DNotify::signal_handler(int sig, siginfo_t *si, void *data)
++{
++  int left;
++  char c = 'x';
++
++  if (queue_head <= queue_tail)
++    left = (QUEUESIZE + queue_head) - queue_tail;
++  else 
++    left = queue_head - queue_tail;
++  
++  // Must leave at least one item unused to see difference
++  // Betweeen empty and full
++  if (left <= 1)
++  {
++      queue_overflowed = 1;
++      {
++	char *str = "*************** overflow famqueue ****************\n";
++	write (STDERR_FILENO, str, strlen(str));
++      }
++  }
++  else
++  {
++      change_queue[queue_tail] = si->si_fd;
++      queue_tail = (queue_tail + 1) % QUEUESIZE;
++  }
++  
++  if (!queue_changed)
++  {
++      queue_changed = 1;
++      // Trigger the read handler
++      write(pipe_write_fd, &c, 1);
++  }
++}
++
++bool
++DNotify::is_active()
++{
++    if (pipe_read_fd == -2)
++    {
++        int filedes[2];
++	int res;
++	
++	res = pipe (filedes);
++	if (res >= 0)
++	{   Log::debug("opened pipe");
++   	    pipe_read_fd = filedes[0];
++   	    pipe_write_fd = filedes[1];
++
++	    // Setup signal handler:
++	    struct sigaction act;
++	    
++	    act.sa_sigaction = signal_handler;
++	    sigemptyset(&act.sa_mask);
++	    act.sa_flags = SA_SIGINFO;
++	    sigaction(SIGRTMIN, &act, NULL);
++
++	    // When the RT queue overflows we get a SIGIO
++	    act.sa_sigaction = overflow_signal_handler;
++	    sigemptyset(&act.sa_mask);
++	    sigaction(SIGIO, &act, NULL);
++
++	    (void) Scheduler::install_read_handler(pipe_read_fd, read_handler, NULL);
++	}
++    }
++    return pipe_read_fd >= 0;
++}
++
++DNotify::DirWatch *
++DNotify::lookup_dirwatch (int fd)
++{
++  DirWatch **p;
++  DirWatch *w;
++
++  p = dir_hashchain (fd);
++
++  while (*p)
++    {
++      w = *p;
++
++      if (w->fd == fd)
++	return w;
++
++      p = &w->hash_link;
++    }
++  
++  return *p;
++}
++
++// This colud be made faster by using another hash table.
++// But it's not that bad, since it is only used by express/revoke
++DNotify::DirWatch *
++DNotify::lookup_dirwatch (dev_t dir_dev, ino_t dir_ino)
++{
++  DirWatch *p;
++  int i;
++
++  for (i=0;i<DIR_HASHSIZE;i++)
++    {
++      p = dir_hash[i];
++      
++      while (p)
++	{
++	  if (p->dir_dev == dir_dev && p->dir_ino == dir_ino)
++	    return p;
++	  
++	  p = p->hash_link;
++	}
++    }
++  
++  return NULL;
++}
++
++DNotify::FileWatch *
++DNotify::lookup_filewatch (dev_t dev, ino_t ino)
++{
++  FileWatch **p;
++  FileWatch *w;
++
++  p = file_hashchain (dev, ino);
++
++  while (*p)
++    {
++      w = *p;
++
++      if (w->file_dev == dev && w->file_ino == ino)
++	return w;
++
++      p = &w->hash_link;
++    }
++  
++  return *p;
++}
++
++// Make sure w is not already in the hash table before calling
++// this function.
++void
++DNotify::hash_dirwatch(DirWatch *w)
++{
++  DirWatch **p;
++  p = dir_hashchain (w->fd);
++  w->hash_link = *p;
++  *p = w;
++}
++
++// Make sure w is not already in the hash table before calling
++// this function.
++void
++DNotify::hash_filewatch(FileWatch *w)
++{
++  FileWatch **p;
++  p = file_hashchain (w->file_dev, w->file_ino);
++  w->hash_link = *p;
++  *p = w;
++}
++
++void
++DNotify::unhash_dirwatch(DirWatch *w)
++{
++  DirWatch **p;
++  
++  p = dir_hashchain (w->fd);
++  
++  while (*p)
++    {
++      if (*p == w)
++	{
++	  *p = w->hash_link;
++	  break;
++	}
++      p = &(*p)->hash_link;
++    }
++  w->hash_link = NULL;
++}
++
++void
++DNotify::unhash_filewatch(FileWatch *w)
++{
++  FileWatch **p;
++  
++  p = file_hashchain (w->file_dev, w->file_ino);
++  
++  while (*p)
++    {
++      if (*p == w)
++	{
++	  *p = w->hash_link;
++	  break;
++	}
++      p = &(*p)->hash_link;
++    }
++  w->hash_link = NULL;
++}
++
++DNotify::Status
++DNotify::watch_dir(const char *notify_dir, dev_t file_dev, ino_t file_ino)
++{
++  struct stat stat;
++  dev_t dir_dev;
++  ino_t dir_ino;
++  DirWatch *dwatch;
++  FileWatch *fw;
++    
++  if (lstat (notify_dir, &stat) == -1)
++      return BAD;
++  
++  dwatch = lookup_dirwatch(stat.st_dev, stat.st_ino);
++  if (!dwatch)
++    {
++      Log::debug ("New DirWatch for %s (%x %x)\n",
++		  notify_dir, (int)stat.st_dev, (int)stat.st_ino);
++      dwatch = new DirWatch;
++      dwatch->watches = NULL;
++      dwatch->hash_link = NULL;
++      dwatch->dir_dev = stat.st_dev;
++      dwatch->dir_ino = stat.st_ino;
++      
++      dwatch->fd = open(notify_dir, O_RDONLY);
++      fcntl (dwatch->fd, F_SETSIG, SIGRTMIN);
++      if (fcntl (dwatch->fd, F_NOTIFY,
++                 (DN_MODIFY|DN_CREATE|DN_DELETE|DN_RENAME|DN_ATTRIB) 
++		  | DN_MULTISHOT) == -1) {
++	      return BAD;
++      }
++      hash_dirwatch (dwatch);
++    }
++
++  fw = lookup_filewatch (file_dev, file_ino);
++  if (fw && fw->dir_watch == dwatch)
++	return OK;
++  
++  // No old FileWatch, need to add one:
++  Log::debug("New FileWatch for %x %x\n", (int)file_dev, (int)file_ino);
++  fw = new FileWatch;
++  fw->next = dwatch->watches;
++  dwatch->watches = fw;
++  fw->file_dev = file_dev;
++  fw->file_ino = file_ino;
++  fw->dir_watch = dwatch;
++  hash_filewatch(fw);
++  return OK;
++}
++
++char *
++dirname_dup (const char *name)
++{
++  char *copy = strdup(name);
++  char *res = dirname(copy);
++  res = strdup(res);
++  free (copy);
++  return res;
++}
++
++DNotify::Status
++DNotify::express(const char *name, struct stat *status)
++{
++    struct stat stat;
++    char *notify_dir;
++    int res;
++    Status s;
++    dev_t dev;
++    ino_t ino;
++
++    Log::debug("express() name: %s\n", name);
++
++    if (!is_active())
++	return BAD;
++
++    if (::lstat (name, &stat) == -1)
++      return BAD;
++
++    dev = stat.st_dev;
++    ino = stat.st_ino;
++    
++    if ((stat.st_mode & S_IFMT) != S_IFDIR)
++	notify_dir = dirname_dup (name);
++    else
++	notify_dir = (char *)name;
++
++    s = watch_dir (notify_dir, dev, ino);
++    if (notify_dir != name)
++        free (notify_dir);
++    if (s)
++      return s;
++
++    // Check for a race condition; if someone removed or changed the
++    // file at the same time that we are expressing interest in it,
++    // revoke the interest so we don't get notifications about changes
++    // to a recycled inode that we don't otherwise care about.
++    //
++    struct stat st;
++    if (status == NULL) {
++	status = &st;
++    }
++    if (::lstat(name, status) == -1) {
++	Log::perror("stat on \"%s\" failed", name);
++	revoke(name, stat.st_dev, stat.st_ino);
++	return BAD;
++    }
++    if (status->st_dev != stat.st_dev
++	|| status->st_ino != stat.st_ino) {
++	Log::error("File \"%s\" changed between express and stat",
++		   name);
++	revoke(name, stat.st_dev, stat.st_ino);
++	return BAD;
++    }	
++
++    Log::debug("told dnotify to monitor \"%s\" = dev %d/%d, ino %d", name,
++	       major(status->st_dev), minor(status->st_dev),
++	       status->st_ino);
++    return OK;
++}
++
++DNotify::Status
++DNotify::revoke(const char *name, dev_t dev, ino_t ino)
++{
++    FileWatch *fwatch;
++    DirWatch *dwatch;
++    
++    Log::debug("revoke() name: %s, dev: %x, ino: %x\n", name, dev, ino);
++
++    if (!is_active())
++	return BAD;
++
++    // Lookup FileWatch by dev:ino, and its DirWatch.
++    fwatch = lookup_filewatch (dev, ino);
++    if (fwatch == NULL)
++	return BAD;
++    
++    dwatch = fwatch->dir_watch;
++    
++    // delete FileWatch, if last FileWatch: close fd, delete DirWatch
++    Log::debug ("Destroying FileWatch for (%x %x)\n",
++		(int)fwatch->file_dev, (int)fwatch->file_ino);
++    FileWatch **p;
++    for (p=&dwatch->watches; *p; p=&(*p)->next)
++    {
++      if (*p == fwatch)
++	{
++	  *p = (*p)->next;
++	  break;
++	}
++    }
++    unhash_filewatch(fwatch);
++    delete fwatch;
++    if (dwatch->watches == NULL)
++      {
++	Log::debug ("Destroying DirWatch for (%x %x)\n",
++		    (int)dwatch->dir_dev, (int)dwatch->dir_ino);
++	close(dwatch->fd);
++	unhash_dirwatch(dwatch);
++	delete dwatch;
++      }
++  
++    return OK;
++}
++
++
++void
++DNotify::all_watches_changed(void)
++{
++  int i;
++  FileWatch *fw;
++
++  for (i=0; i<FILE_HASHSIZE; i++)
++  {
++      fw = file_hash[i];
++      while (fw)
++      {
++	  (*ehandler)(fw->file_dev, fw->file_ino, CHANGE);
++
++	  fw = fw->hash_link;
++      }
++  }
++}
++
++
++void
++DNotify::read_handler(int fd, void *)
++{
++    static char readbuf[5000];
++    DirWatch *dw;
++    FileWatch *fw;
++    int snap_queue_tail;
++    int last_fd;
++
++    int rc = read(fd, readbuf, sizeof readbuf);
++    queue_changed = 0;
++    if (rc < 0)
++        Log::perror("pipe read");
++    else if (queue_overflowed)
++    {
++	  // There is a *slight* race condition here. Between reading
++	  // the queue_overflow flag and resetting it. But it doesn't
++	  // matter, since I'm gonna handle the overflow after reseting
++	  // anyway.
++	  queue_overflowed = false;
++
++	  // We're soon gonna check all watches anyway, so
++	  // get rid of the current queue
++	  queue_head = queue_tail;
++	  
++	  all_watches_changed ();
++    }
++    else
++    {
++	// Don't read events that happen later than
++	// the initial read. (Otherwise skipping fd's
++	// might miss some changes).
++	snap_queue_tail = queue_tail;
++	last_fd = -1;
++	while (queue_head != snap_queue_tail)
++	{
++	    fd = change_queue[queue_head];
++	    queue_head = (queue_head + 1) % QUEUESIZE;
++
++	    // Skip multiple changes to the same fd
++	    if (fd != last_fd)
++	    {
++		dw = lookup_dirwatch (fd);
++		if (dw)
++		{
++		    int n_watches, i;
++		    ChangeEventData *data;
++		    
++		    Log::debug("dnotify said dev %d/%d, ino %ld changed",
++			       major(dw->dir_dev), minor(dw->dir_dev), dw->dir_ino);
++		    
++		    n_watches = 0;
++		    for (fw=dw->watches; fw; fw=fw->next)
++			n_watches++;
++		    
++		    data = new ChangeEventData[n_watches];
++
++		    i = 0;
++		    for (fw=dw->watches; fw; fw=fw->next)
++		    {
++			data[i].file_dev = fw->file_dev;
++			data[i].file_ino = fw->file_ino;
++			i++;
++		    }
++
++		    for (i = 0; i < n_watches; i++)
++		    {
++			(*ehandler)(data[i].file_dev, data[i].file_ino, CHANGE);
++		    }
++		    
++		    delete[] data;
++		}
++	    }
++	    last_fd = fd;
++	}
++    }
++}
++
+--- fam-2.7.0/src/DNotify.h	2004-01-30 00:00:00.000000000 +0100
++++ fam-2.7.0.dnotify/src/DNotify.h	2004-01-30 00:00:00.000000000 +0100
+@@ -0,0 +1,98 @@
++//  Copyright (C) 2001 Red Hat, Inc.  All Rights Reserved.
++//  Copyright (C) 1999 Silicon Graphics, Inc.  All Rights Reserved.
++//
++//  This program is free software; you can redistribute it and/or modify it
++//  under the terms of version 2 of the GNU General Public License as
++//  published by the Free Software Foundation.
++//
++//  This program is distributed in the hope that it would be useful, but
++//  WITHOUT ANY WARRANTY; without even the implied warranty of
++//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  Further, any
++//  license provided herein, whether implied or otherwise, is limited to
++//  this program in accordance with the express provisions of the GNU
++//  General Public License.  Patent licenses, if any, provided herein do not
++//  apply to combinations of this program with other product or programs, or
++//  any other product whatsoever.  This program is distributed without any
++//  warranty that the program is delivered free of the rightful claim of any
++//  third person by way of infringement or the like.  See the GNU General
++//  Public License for more details.
++//
++//  You should have received a copy of the GNU General Public License along
++//  with this program; if not, write the Free Software Foundation, Inc., 59
++//  Temple Place - Suite 330, Boston MA 02111-1307, USA.
++
++#ifndef DNotify_included
++#define DNotify_included
++
++#include "config.h"
++#include "Monitor.h"
++#include <signal.h>
++
++//  DNotify is an object encapsulating the dnotify linux fcntl.
++//  It "emulates" the IMon interface.
++//  There can only be one instantiation of the DNotify object.
++//
++//  The user of this object uses express() and revoke() to
++//  express/revoke interest in a file.  There is also
++//  a callback, the EventHandler.  When an dnotify event comes in,
++//  the EventHandler is called.
++//
++//  The user of the DNotify object is the Interest class.
++
++class DNotify : public Monitor {
++public:
++    DNotify(EventHandler h);
++    ~DNotify();
++
++    static bool is_active();
++
++    virtual Status express(const char *name, struct stat *stat_return);
++    virtual Status revoke(const char *name, dev_t dev, ino_t ino);
++
++private:
++    struct FileWatch;
++    struct DirWatch;
++    struct ChangeEventData;
++  
++    //  Class Variables
++    enum { QUEUESIZE = 1024 };
++    static int pipe_write_fd;
++    static int pipe_read_fd;
++    static int change_queue[QUEUESIZE];
++    static volatile sig_atomic_t queue_overflowed;
++    static volatile sig_atomic_t queue_changed;
++    static volatile int queue_head; // Only modified by read handler
++    static volatile int queue_tail; // Only modified by signal handler
++    static EventHandler ehandler;
++    static void overflow_signal_handler(int sig, siginfo_t *si, void *data);
++    static void signal_handler(int sig, siginfo_t *si, void *data);
++    static void read_handler(int fd, void *closure);
++ 
++    enum { DIR_HASHSIZE = 367 };
++    static DirWatch *dir_hash[DIR_HASHSIZE];
++    enum { FILE_HASHSIZE = 823 };
++    static FileWatch *file_hash[FILE_HASHSIZE];
++
++    static DirWatch **dir_hashchain(int fd)
++			  { return &dir_hash[(unsigned) (fd) % DIR_HASHSIZE]; }
++    static FileWatch **file_hashchain(dev_t d, ino_t i)
++			  { return &file_hash[(unsigned) (d+i) % FILE_HASHSIZE]; }
++
++    static DirWatch *lookup_dirwatch (int fd);
++    static DirWatch *lookup_dirwatch (dev_t dir_dev, ino_t dir_ino);
++    static FileWatch *lookup_filewatch (dev_t file_dev, ino_t file_ino);
++    static void hash_dirwatch(DirWatch *w);
++    static void hash_filewatch(FileWatch *w);
++    static void unhash_dirwatch(DirWatch *w);
++    static void unhash_filewatch(FileWatch *w);
++    static Status watch_dir(const char *notify_dir, dev_t file_dev, ino_t file_ino);
++
++    static void all_watches_changed(void);
++    
++    DNotify(const DNotify&);			// Do not copy
++    DNotify & operator = (const DNotify&);	//  or assign.
++};
++
++#endif /* !IMon_included */
++
++
+--- fam-2.7.0/src/Interest.c++	2004-01-30 00:00:00.000000000 +0100
++++ fam-2.7.0.dnotify/src/Interest.c++	2004-01-30 00:00:00.000000000 +0100
+@@ -42,12 +42,21 @@
+ #include "Event.h"
+ #include "FileSystem.h"
+ #include "IMon.h"
++#include "DNotify.h"
+ #include "Log.h"
+ #include "Pollster.h"
+ #include "timeval.h"
+ 
+ Interest *Interest::hashtable[];
+-IMon      Interest::imon(imon_handler);
++
++#ifdef USE_DNOTIFY 
++static DNotify dnotify(Interest::monitor_handler);
++Monitor * Interest::monitor = &dnotify;
++#else
++static IMon imon(Interest::monitor_handler);
++Monitor * Interest::monitor = &imon;
++#endif
++
+ bool      Interest::xtab_verification = true;
+ 
+ Interest::Interest(const char *name, FileSystem *fs, in_addr host, ExportVerification ev)
+@@ -60,10 +69,10 @@
+       mypath_exported_to_host(ev == NO_VERIFY_EXPORTED)
+ {
+     memset(&old_stat, 0, sizeof(old_stat)); 
+-    IMon::Status s = IMon::BAD;
+ 
+-    s = imon.express(name, &old_stat);
+-    if (s != IMon::OK)
++    Monitor::Status s = Monitor::BAD;
++    s = monitor->express(name, &old_stat);
++    if (s != Monitor::OK)
+     {   int rc = lstat(name, &old_stat);
+ 	if (rc < 0)
+ 	{   Log::info("can't lstat %s", name);
+@@ -100,7 +109,7 @@
+     }
+ #endif
+ 
+-    if (exported_to_host()) fs->ll_monitor(this, s == IMon::OK);
++    if (exported_to_host()) fs->ll_monitor(this, s == Monitor::OK);
+ }
+ 
+ Interest::~Interest()
+@@ -128,7 +137,7 @@
+ 		pp = &p->hashlink;	// move to next element
+ 	    }
+ 	if (!found_same)
+-	    (void) imon.revoke(name(), dev, ino);
++	  (void) monitor->revoke(name(), dev, ino);
+     }
+ }
+ 
+@@ -147,7 +156,7 @@
+ 
+         // Express interest.
+         IMon::Status s = IMon::BAD;
+-	s = imon.express(name(), NULL);
++	s = monitor->express(name(), NULL);
+         if (s != IMon::OK) {
+             return true;
+         }
+@@ -248,23 +257,23 @@
+ }
+ 
+ void
+-Interest::imon_handler(dev_t device, ino_t inumber, int event)
++Interest::monitor_handler(dev_t device, ino_t inumber, int event)
+ {
+     assert(device || inumber);
+ 
+     for (Interest *p = *hashchain(device, inumber), *next = p; p; p = next)
+     {	next = p->hashlink;
+ 	if (p->ino == inumber && p->dev == device)
+-	{   if (event == IMon::EXEC)
++	  {   if (event == Monitor::EXEC)
+ 	    {   p->cur_exec_state = EXECUTING;
+ 		(void) p->report_exec_state();
+ 	    }
+-	    else if (event == IMon::EXIT)
++	    else if (event == Monitor::EXIT)
+ 	    {   p->cur_exec_state = NOT_EXECUTING;
+ 		(void) p->report_exec_state();
+ 	    }
+ 	    else
+-	    {   assert(event == IMon::CHANGE);
++	    {   assert(event == Monitor::CHANGE);
+ 		p->scan();
+ 	    }
+ 	}
+--- fam-2.7.0/config.h.in	2003-01-20 01:40:15.000000000 +0100
++++ fam-2.7.0.dnotify/config.h.in	2004-01-30 13:50:33.000000000 +0100
+@@ -180,3 +180,6 @@
+ 
+ /* Define to `int' if <sys/types.h> doesn't define. */
+ #undef uid_t
++
++/* Define to 1 if you have F_NOTIFY fcntl */
++#undef USE_DNOTIFY
+--- fam-2.7.0/configure.ac	2003-11-26 20:47:59.000000000 +0100
++++ fam-2.7.0.dnotify/configure.ac	2004-01-30 13:50:33.000000000 +0100
+@@ -34,7 +34,26 @@
+ AC_HEADER_DIRENT
+ AC_CHECK_HEADERS([fcntl.h limits.h linux/imon.h netinet/in.h rpc/rpc.h rpcsvc/mount.h stddef.h stdlib.h string.h syslog.h sys/imon.h sys/param.h sys/select.h sys/statvfs.h sys/syssgi.h sys/time.h sys/types.h sys/un.h unistd.h])
+ 
+-if test "$have_sys_imon_h"; then
++# Test for the linux dnotify fcntl
++AC_MSG_CHECKING([for dnotify fcntl support])
++AC_TRY_COMPILE([
++#define _GNU_SOURCE  
++#include <fcntl.h>
++#include <unistd.h>
++],
++[ int fd = 1;
++  fcntl (fd, F_NOTIFY, (DN_MODIFY|DN_CREATE|DN_DELETE|DN_RENAME|DN_ATTRIB)
++                       |DN_MULTISHOT);
++], have_dnotify=yes, have_dnotify=no)
++
++use_dnotify=false
++AC_MSG_RESULT($have_dnotify)
++
++if test "$have_dnotify"; then
++        MONITOR_FUNCS=IMonNone
++        AC_DEFINE([USE_DNOTIFY], [], [Use dnotify])
++	use_dnotify=true
++elif test "$have_sys_imon_h"; then
+ 	MONITOR_FUNCS=IMonIRIX
+ elif test "$have_linux_imon_h"; then
+ 	MONITOR_FUNCS=IMonLinux
+@@ -42,6 +62,7 @@
+ 	MONITOR_FUNCS=IMonNone
+ fi
+ AC_SUBST(MONITOR_FUNCS)
++AM_CONDITIONAL(USE_DNOTIFY, $use_dnotify)
+ 
+ # Checks for typedefs, structures, and compiler characteristics.
+ AC_HEADER_STDBOOL
+--- fam-2.7.0/src/IMon.h	2004-01-30 00:00:00.000000000 +0200
++++ fam-2.7.0.dnotify/src/IMon.h	2004-01-30 00:00:00.000000000 +0200
+@@ -24,10 +24,7 @@
+ #define IMon_included
+ 
+ #include "config.h"
+-#include <sys/stat.h>
+-#include <sys/types.h>
+-
+-#include "Boolean.h"
++#include "Monitor.h"
+ 
+ struct stat;
+ 
+@@ -41,25 +38,18 @@
+ //
+ //  The user of the IMon object is the Interest class.
+ 
+-class IMon {
++class IMon : public Monitor {
+ 
+ public:
+-
+-    enum Status { OK = 0, BAD = -1 };
+-    enum Event { EXEC, EXIT, CHANGE };
+-
+-    typedef void (*EventHandler)(dev_t, ino_t, int event);
+-
+     IMon(EventHandler h);
+     ~IMon();
+ 
+     static bool is_active();
+ 
+-    Status express(const char *name, struct stat *stat_return);
+-    Status revoke(const char *name, dev_t dev, ino_t ino);
++    virtual Status express(const char *name, struct stat *stat_return);
++    virtual Status revoke(const char *name, dev_t dev, ino_t ino);
+ 
+ private:
+-
+     //  Class Variables
+ 
+     static int imonfd;
+--- fam-2.7.0/src/Interest.h	2004-01-30 00:00:00.000000000 +0200
++++ fam-2.7.0.dnotify/src/Interest.h	2004-01-30 00:00:00.000000000 +0200
+@@ -32,7 +32,7 @@
+ 
+ class Event;
+ class FileSystem;
+-class IMon;
++class Monitor;
+ struct stat;
+ 
+ //  Interest -- abstract base class for filesystem entities of interest.
+@@ -74,7 +74,7 @@
+ 
+     //  Public Class Method
+ 
+-    static void imon_handler(dev_t, ino_t, int event);
++    static void monitor_handler(dev_t, ino_t, int event);
+ 
+     static void enable_xtab_verification(bool enable);
+ 
+@@ -121,7 +121,7 @@
+ 
+     //  Class Variables
+ 
+-    static IMon imon;
++    static Monitor *monitor;
+     static Interest *hashtable[HASHSIZE];
+     static bool xtab_verification;
+ 
+--- fam-2.7.0/src/Makefile.am	2003-01-19 13:00:17.000000000 +0100
++++ fam-2.7.0.dnotify/src/Makefile.am	2004-01-30 13:50:38.000000000 +0100
+@@ -71,7 +71,11 @@
+   main.c++ \
+   timeval.c++ \
+   timeval.h \
+-  @MONITOR_FUNCS@.c++
++  Monitor.h \
++  DNotify.h \
++  DNotify.c++ \
++  @MONITOR_FUNCS@.c++ 
+ 
+-EXTRA_famd_SOURCES = IMonIrix.c++ IMonLinux.c++ IMonNone.c++
++EXTRA_famd_SOURCES = IMonIrix.c++ IMonLinux.c++ IMonNone.c++ DNotify.c++ \
++  DNotify.h Monitor.h
+ 
+--- fam-2.7.0/src/Monitor.h	2004-01-30 00:00:00.000000000 +0200
++++ fam-2.7.0.dnotify/src/Monitor.h	2004-01-30 00:00:00.000000000 +0200
+@@ -0,0 +1,57 @@
++//  Copyright (C) 2001 Red Hat, Inc.  All Rights Reserved.
++//  Copyright (C) 1999 Silicon Graphics, Inc.  All Rights Reserved.
++//  
++//  This program is free software; you can redistribute it and/or modify it
++//  under the terms of version 2 of the GNU General Public License as
++//  published by the Free Software Foundation.
++//
++//  This program is distributed in the hope that it would be useful, but
++//  WITHOUT ANY WARRANTY; without even the implied warranty of
++//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  Further, any
++//  license provided herein, whether implied or otherwise, is limited to
++//  this program in accordance with the express provisions of the GNU
++//  General Public License.  Patent licenses, if any, provided herein do not
++//  apply to combinations of this program with other product or programs, or
++//  any other product whatsoever.  This program is distributed without any
++//  warranty that the program is delivered free of the rightful claim of any
++//  third person by way of infringement or the like.  See the GNU General
++//  Public License for more details.
++//
++//  You should have received a copy of the GNU General Public License along
++//  with this program; if not, write the Free Software Foundation, Inc., 59
++//  Temple Place - Suite 330, Boston MA 02111-1307, USA.
++
++#ifndef Monitor_included
++#define Monitor_included
++
++#include "config.h"
++#include <sys/stat.h>
++#include <sys/types.h>
++
++struct stat;
++
++//  Monitor is an abstract baseclass for differend file monitoring
++//  systems. The original system used was IMon, and the Montor API
++//  is heavily influenced by that.
++//  There can only be one instantiation of the Monitor object.
++//
++//  The user of this object uses express() and revoke() to
++//  express/revoke interest in a file to imon.  There is also
++//  a callback, the EventHandler.  When an event comes in,
++//  the EventHandler is called.
++//
++//  The main implementers of the Monitor class is IMon and DNotify
++
++class Monitor {
++public:
++
++    enum Status { OK = 0, BAD = -1 };
++    enum Event { EXEC, EXIT, CHANGE };
++
++    typedef void (*EventHandler)(dev_t, ino_t, int event);
++
++    virtual Status express(const char *name, struct stat *stat_return) = 0;
++    virtual Status revoke(const char *name, dev_t dev, ino_t ino) = 0;
++};
++
++#endif /* !Monitor_included */

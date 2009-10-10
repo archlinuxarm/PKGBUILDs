@@ -1,0 +1,60 @@
+# $Id: PKGBUILD 21055 2008-12-09 06:09:38Z eric $
+# Maintainer: Eric Belanger <eric@archlinux.org>
+# Contributor: John Proctor <jproctor@prium.net>
+
+pkgname=lesstif
+pkgver=0.95.0
+pkgrel=3
+pkgdesc="LGPL'd re-implementation of Motif"
+arch=('i686' 'x86_64')
+url="http://www.lesstif.org/"
+license=('LGPL' 'MIT')
+depends=('freetype2' 'libxt' 'libxp')
+options=('!libtool')
+source=(http://downloads.sourceforge.net/sourceforge/${pkgname}/${pkgname}-${pkgver}.tar.bz2
+	CAN-2005-0605.patch 64bitcleanups.patch	c++fix.patch scroll.patch LICENSE)
+md5sums=('ab895165c149d7f95843c7584b1c7ad4' '8089c6d6e427f2357fc4e85145e04579'\
+         '1234d1a45e1410c29f54612548e75127' 'b8caafffe583951e8525b145a4f78174'\
+         '38c43641a01ceeebbd5816a088e1ad48' 'b1f320192a9154f72d83e9d3d5a25a2f')
+sha1sums=('2a6f20d3bd525e6066ba2be22d8a47bf4bcd0425'
+          '0531ac69cc4daee9cec724b57efaac74f4379ed1'
+          '0f2af2fc4f8e48f63c30bf91d4ce5332248b449b'
+          '30947900c9ccb3802acc97dc42a58285f92fecb8'
+          'ca2fc0dda0103fdbc2b88d8ce49923cf71cf39a4'
+          '5d7f38555417cb617d7d5b7e41a93af8430dc638')
+
+build() {
+  cd ${srcdir}/${pkgname}-${pkgver}
+  patch -p1 < ../CAN-2005-0605.patch || return 1
+  patch -p1 < ../c++fix.patch || return 1
+  patch -p1 < ../scroll.patch || return 1
+  patch -p1 < ../64bitcleanups.patch || return 1
+
+  ./configure --prefix=/usr --mandir=/usr/share/man --enable-production \
+    --enable-nonstandard-conversions --enable-editres \
+    --with-xdnd --enable-build-21 --disable-debug --enable-static || return 1
+
+# fix linkage against already installed version
+  perl -pi -e 's/^(hardcode_into_libs)=.*/$1=no/' libtool || return 1
+
+  make || return 1
+
+# fix linkage against already installed version
+  for f in `find . -name \*.la -type f` ; do
+    perl -pi -e 's/^(relink_command=.*)/# $1/' $f || return 1
+  done
+
+  install -d ${pkgdir}/usr/lib
+  make -C lib/Mrm-2.1 || return 1
+  make -C lib/Mrm-2.1 DESTDIR=${pkgdir} install || return 1
+  make appdir=/usr/share/X11/app-defaults DESTDIR=${pkgdir} install || return 1
+  install -D -m644 ../LICENSE ${pkgdir}/usr/share/licenses/${pkgname}/LICENSE || return 1
+
+  # clean-up
+  rm -rf ${pkgdir}/usr/LessTif
+  rm -f ${pkgdir}/usr/lib/X11/mwm/README 
+  # conflicts with Shell from perl
+  rm -f ${pkgdir}/usr/share/man/man3/Shell.3
+  # conflicts with tcl
+  rm -f ${pkgdir}/usr/share/man/man3/Object.3
+}

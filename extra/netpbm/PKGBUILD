@@ -1,0 +1,57 @@
+# $Id: PKGBUILD 45263 2009-07-08 22:25:10Z eric $
+# Maintainer: Kevin Piche <kevin@archlinux.org>
+# Contributor: Jochem Kossen <j.kossen@home.nl>
+
+pkgname=netpbm
+pkgver=10.35.841
+pkgrel=1
+pkgdesc="A toolkit for manipulation of graphic images"
+arch=(i686 x86_64)
+license=('custom' 'BSD' 'GPL' 'LGPL')
+url="http://netpbm.sourceforge.net/"
+depends=('perl' 'libjpeg>=7' 'libpng' 'libtiff' 'libxml2')
+makedepends=('python')
+options=('!makeflags')
+# Releases after 10.34 are available via SVN only.
+# remake snapshot with: svn export http://netpbm.svn.sourceforge.net/svnroot/netpbm/stable@${pkgrel} netpbm
+# get doc with: wget --recursive --relative -nH http://netpbm.sourceforge.net/doc/
+source=(ftp://ftp.archlinux.org/other/netpbm/$pkgname-$pkgver.tar.bz2 \
+        ftp://ftp.archlinux.org/other/netpbm/netpbm-doc-20090222.tar.bz2 \
+        Makefile.config arch.patch netpbm-10.35-glibc.patch netpbm-10.35-jpeg7.patch)
+md5sums=('04d94bf5eefd56e6443b4008196d5969' '20f5392fd1deacfa267bf64ab9d420c5'\
+         'cfdb69f77f8ef06f8863fe02ce27db71' '88992e053dbfa9fdde2cccea32e6632b'\
+         '8e278fba37c8f70f6a8658b98686dfad' '6a3da4565f6623f4875bd62871a8dda5')
+
+build() {
+  cd ${srcdir}/${pkgname}
+  patch -p1 < ../arch.patch || return 1
+  patch -p0 < ../netpbm-10.35-glibc.patch || return 1
+  patch -p0 < ../netpbm-10.35-jpeg7.patch || return 1
+  cp ../Makefile.config .
+
+  if [ "${CARCH}" == "x86_64" ]; then
+    sed -i "s/^\(CFLAGS =\) .*/\1 $CFLAGS/" Makefile.config || return 1
+    sed -i "s/^\(CFLAGS_SHLIB =\) .*/\1 -fPIC/" Makefile.config  || return 1 # real 64bit fix 
+    sed -i 's/\(.*\$(SYMLINK) \)\(pnmtopnm\)\(\$(EXE) \)\(pamtopnm\)/\1\4\3\2/' converter/other/Makefile || return 1
+  fi
+
+  make || return 1
+  make package pkgdir=${pkgdir}/usr PKGMANDIR=share/man || return 1
+
+  # Generating useful man pages with html doc 
+  cd  ${srcdir}/doc
+  make MAKEMAN=${srcdir}/netpbm/buildtools/makeman \
+    -f ${srcdir}/netpbm/buildtools/Makefile.manpage manpages || return 1
+  make MAKEMAN=${srcdir}/netpbm/buildtools/makeman MANDIR=${pkgdir}/usr/share/man \
+    -f ${srcdir}/netpbm/buildtools/Makefile.manpage installman || return 1
+
+  # clean up and fixing symlinks
+  mv ${pkgdir}/usr/link/libnetpbm.a ${pkgdir}/usr/lib || return 1
+  rm -rf ${pkgdir}/usr/{config_template,README,pkginfo,misc,VERSION,link} || return 1
+  rm -rf ${pkgdir}/usr/man 
+  rm ${pkgdir}/usr/bin/doc.url
+  ln -s libnetpbm.so.10 ${pkgdir}/usr/lib/libnetpbm.so || return 1
+
+  # Licensing.  Note that each program in the package has a separate license.
+  install -D -m644 ${srcdir}/${pkgname}/doc/copyright_summary ${pkgdir}/usr/share/licenses/${pkgname}/copyright_summary.txt || return 1
+}

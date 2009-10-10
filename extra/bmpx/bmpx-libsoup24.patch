@@ -1,0 +1,544 @@
+diff -up bmpx-0.40.13/configure.ac.libsoup24 bmpx-0.40.13/configure.ac
+--- bmpx-0.40.13/configure.ac.libsoup24	2007-10-18 19:17:17.000000000 +0200
++++ bmpx-0.40.13/configure.ac	2008-02-15 20:26:58.000000000 +0100
+@@ -240,8 +240,7 @@ AC_ARG_WITH([pkgconfig-dir],
+ AC_SUBST([pkgconfigdir])
+ 
+ # libsoup
+-PKG_CHECK_MODULES([SOUP], [libsoup-2.2 >= 2.2.100])
+-BMP_CHECK_SOUP_EXTERN_C
++PKG_CHECK_MODULES([SOUP], [libsoup-2.4 >= 2.3.0.1])
+ 
+ # sqlite
+ PKG_CHECK_MODULES([SQLITE], [sqlite3 >= 3.3])
+diff -up bmpx-0.40.13/sentinel/beep-media-player-2-sentinel.cc.libsoup24 bmpx-0.40.13/sentinel/beep-media-player-2-sentinel.cc
+--- bmpx-0.40.13/sentinel/beep-media-player-2-sentinel.cc.libsoup24	2007-10-18 19:17:06.000000000 +0200
++++ bmpx-0.40.13/sentinel/beep-media-player-2-sentinel.cc	2008-02-15 20:26:58.000000000 +0100
+@@ -68,13 +68,7 @@
+ #include <bmp/dbus.hh>
+ #include <src/paths.hh>
+ 
+-#ifndef LIBSOUP_HAS_EXTERN_C
+-G_BEGIN_DECLS
+-#endif
+ #include <libsoup/soup.h>
+-#ifndef LIBSOUP_HAS_EXTERN_C
+-G_END_DECLS
+-#endif
+ 
+ #define SERVER_NAME "beep-media-player.org"
+ 
+diff -up bmpx-0.40.13/src/minisoup.hh.libsoup24 bmpx-0.40.13/src/minisoup.hh
+--- bmpx-0.40.13/src/minisoup.hh.libsoup24	2007-10-18 19:17:08.000000000 +0200
++++ bmpx-0.40.13/src/minisoup.hh	2008-02-15 20:26:58.000000000 +0100
+@@ -33,13 +33,7 @@
+ #include <iostream>
+ #include <fstream>
+ 
+-#ifndef LIBSOUP_HAS_EXTERN_C
+-G_BEGIN_DECLS
+-# include <libsoup/soup.h>
+-G_END_DECLS
+-#else
+-# include <libsoup/soup.h>
+-#endif // !LIBSOUP_HAS_EXTERN_C
++#include <libsoup/soup.h>
+ 
+ namespace Bmp
+ {
+@@ -111,7 +105,7 @@ namespace Bmp
+         restarted (SoupMessage* /*message*/, gpointer /*data*/);
+ 
+         static void
+-        got_chunk (SoupMessage* /*message*/, gpointer /*data*/);
++        got_chunk (SoupMessage* /*message*/, SoupBuffer* /*chunk*/, gpointer /*data*/);
+ 
+         static void
+         got_content_length (SoupMessage* /*message*/, gpointer /*data*/);
+@@ -161,7 +155,7 @@ namespace Bmp
+         restarted (SoupMessage* /*message*/, gpointer /*data*/);
+ 
+         static void
+-        got_answer (SoupMessage* /*message*/, gpointer /*data*/);
++        got_answer (SoupSession* /*session*/, SoupMessage* /*message*/, gpointer /*data*/);
+     };
+ 
+ 
+@@ -224,10 +218,10 @@ namespace Bmp
+         restarted (SoupMessage* /*message*/, gpointer /*data*/);
+ 
+         static void
+-        got_answer (SoupMessage* /*message*/, gpointer /*data*/);
++        got_answer (SoupSession* /*session*/, SoupMessage* /*message*/, gpointer /*data*/);
+                    
+         static void
+-        got_chunk (SoupMessage* /*message*/, gpointer /*data*/);
++        got_chunk (SoupMessage* /*message*/, SoupBuffer* /*chunk*/, gpointer /*data*/);
+ 
+         static void
+         got_content_length (SoupMessage* /*message*/, gpointer /*data*/);
+diff -up bmpx-0.40.13/src/minisoup.cc.libsoup24 bmpx-0.40.13/src/minisoup.cc
+--- bmpx-0.40.13/src/minisoup.cc.libsoup24	2007-10-18 19:17:08.000000000 +0200
++++ bmpx-0.40.13/src/minisoup.cc	2008-02-15 20:26:58.000000000 +0100
+@@ -60,8 +60,8 @@ namespace Bmp
+     {
+       g_signal_connect (G_OBJECT (m_message), "got-chunk", G_CALLBACK (got_chunk), this);
+       g_signal_connect (G_OBJECT (m_message), "restarted", G_CALLBACK (restarted), this);
+-      soup_message_add_header_handler (m_message, "content-length", SOUP_HANDLER_PRE_BODY,
+-                                       SoupMessageCallbackFn (got_content_length), this);
++      soup_message_add_header_handler (m_message, "got-headers", "content-length",
++                                       G_CALLBACK (got_content_length), this);
+       return soup_session_send_message (m_session, m_message);
+     }
+   
+@@ -75,26 +75,26 @@ namespace Bmp
+     RequestSync::get_data ()
+     {
+       std::string buffer;
+-      buffer.append (m_message->response.body, m_message->response.length);
++      buffer.append (m_message->response_body->data, m_message->response_body->length);
+       return buffer;
+     }
+ 
+     void
+     RequestSync::get_data (std::string & buffer)
+     {
+-      buffer.append (m_message->response.body, m_message->response.length);
++      buffer.append (m_message->response_body->data, m_message->response_body->length);
+     }
+ 
+     char const*
+     RequestSync::get_data_raw ()
+     {
+-      return m_message->response.body;
++      return m_message->response_body->data;
+     }
+ 
+     guint
+     RequestSync::get_data_size ()
+     {
+-      return m_message->response.length;
++      return m_message->response_body->length;
+     }
+ 
+ 
+@@ -102,15 +102,15 @@ namespace Bmp
+     RequestSync::add_header (std::string const& name,
+                              std::string const& value) 
+     {
+-      soup_message_add_header (m_message->request_headers, name.c_str(), value.c_str());   
++      soup_message_headers_append (m_message->request_headers, name.c_str(), value.c_str());   
+     }
+ 
+     void
+     RequestSync::add_request (std::string const& type,
+                               std::string const& request)
+     {
+-      soup_message_set_request (m_message, type.c_str(), SOUP_BUFFER_SYSTEM_OWNED /* we can't rely on the std::string not being destroyed */,
+-        g_strdup (const_cast<char*>(request.c_str())), strlen (request.c_str()));
++      soup_message_set_request (m_message, type.c_str(), SOUP_MEMORY_COPY,
++        request.c_str(), strlen (request.c_str()));
+       m_post = true;
+     }
+ 
+@@ -125,11 +125,11 @@ namespace Bmp
+     }
+ 
+     void
+-    RequestSync::got_chunk (SoupMessage* message, gpointer data)
++    RequestSync::got_chunk (SoupMessage* message, SoupBuffer* chunk, gpointer data)
+     {
+       RequestSync & request = (*(reinterpret_cast<RequestSync*>(data)));
+ 
+-      request.m_read += message->response.length;
++      request.m_read += chunk->length;
+       double percent = (double (request.m_read) / double (request.m_size));
+       if(percent >= 0. && percent <= 1.)
+       {
+@@ -141,7 +141,7 @@ namespace Bmp
+     RequestSync::got_content_length (SoupMessage* message, gpointer data)
+     {
+       RequestSync & request = (*(reinterpret_cast<RequestSync*>(data)));
+-      request.m_size = g_ascii_strtoull (soup_message_get_header (message->response_headers, "content-length"), NULL, 10);
++      request.m_size = soup_message_headers_get_content_length (message->response_headers);
+     }
+ 
+ 
+@@ -180,17 +180,17 @@ namespace Bmp
+       return m_message->status_code;
+     }
+ 
+-    guint
+-    Request::message_status ()
+-    {
+-      return m_message->status;
+-    }
++    //guint
++    //Request::message_status ()
++    //{
++    //  return m_message->status;
++    //}
+ 
+     void
+     Request::run ()
+     {
+       g_signal_connect (G_OBJECT (m_message), "restarted", G_CALLBACK (restarted), this);
+-      soup_session_queue_message (m_session, m_message, SoupMessageCallbackFn (got_answer), this);
++      soup_session_queue_message (m_session, m_message, SoupSessionCallback (got_answer), this);
+     }
+ 
+     void
+@@ -199,9 +199,6 @@ namespace Bmp
+       if (G_IS_OBJECT(m_session))
+       {
+             soup_session_abort (m_session);
+-            //soup_message_set_status (m_message, SOUP_STATUS_CANCELLED);
+-            //soup_session_cancel_message (m_session, m_message);
+-            //m_message = 0;
+       }
+     }
+ 
+@@ -210,15 +207,15 @@ namespace Bmp
+     Request::add_header (std::string const& name,
+                          std::string const& value) 
+     {
+-      soup_message_add_header (m_message->request_headers, name.c_str(), value.c_str());   
++      soup_message_headers_append (m_message->request_headers, name.c_str(), value.c_str());   
+     }
+ 
+     void
+     Request::add_request (std::string const& type,
+                           std::string const& request)
+     {
+-      soup_message_set_request (m_message, type.c_str(), SOUP_BUFFER_SYSTEM_OWNED /* we can't rely on the std::string not being destroyed */,
+-        g_strdup (const_cast<char*>(request.c_str())), strlen (request.c_str()));
++      soup_message_set_request (m_message, type.c_str(), SOUP_MEMORY_COPY,
++        request.c_str(), strlen (request.c_str()));
+       m_post = true;
+     }
+ 
+@@ -230,7 +227,7 @@ namespace Bmp
+     }
+ 
+     void
+-    Request::got_answer (SoupMessage* message, gpointer data)
++    Request::got_answer (SoupSession* session, SoupMessage* message, gpointer data)
+     {
+       Request & request = (*(reinterpret_cast<Request*>(data)));
+ 
+@@ -241,15 +238,12 @@ namespace Bmp
+       if( block )
+         return;
+ 
+-      if( request.m_message->status != SOUP_MESSAGE_STATUS_FINISHED )
+-        return;
+-
+       //if( request.m_message->status_code == SOUP_STATUS_CANCELLED )
+         //return;
+ 
+       request.Signals.Callback.emit(
+-                                      request.m_message->response.body, 
+-                                      request.m_message->response.length,
++                                      request.m_message->response_body->data, 
++                                      request.m_message->response_body->length,
+                                       request.m_message->status_code
+                                     );
+     }
+@@ -269,6 +263,7 @@ namespace Bmp
+ 
+       m_session = soup_session_async_new ();
+       m_message = soup_message_new ("GET", m_url.c_str());
++      soup_message_set_flags (m_message, SOUP_MESSAGE_OVERWRITE_CHUNKS);
+     }
+ 
+     Glib::RefPtr<RequestFile>
+@@ -279,9 +274,9 @@ namespace Bmp
+ 
+     RequestFile::~RequestFile ()
+     {
+-      if (G_IS_OBJECT(m_message) && m_message->status == SOUP_MESSAGE_STATUS_RUNNING)
++      if (m_file.is_open())
+       {
+-            cancel ();
++	    cancel ();
+             Signals.Aborted.emit ((boost::format (_("Download of file '%s' was cancelled prematurely!")) % filename_to_utf8 (m_filename).c_str()).str());
+       }
+       g_object_unref (m_session);
+@@ -316,9 +311,9 @@ namespace Bmp
+     {
+       g_signal_connect (G_OBJECT (m_message), "got-chunk", G_CALLBACK (got_chunk), this);
+       g_signal_connect (G_OBJECT (m_message), "restarted", G_CALLBACK (restarted), this);
+-      soup_message_add_header_handler (m_message, "content-length", SOUP_HANDLER_PRE_BODY,
+-                                       SoupMessageCallbackFn (got_content_length), this);
+-      soup_session_queue_message (m_session, m_message, SoupMessageCallbackFn (got_answer), this);
++      soup_message_add_header_handler (m_message, "got-headers", "content-length",
++                                       G_CALLBACK (got_content_length), this);
++      soup_session_queue_message (m_session, m_message, SoupSessionCallback (got_answer), this);
+       fileOpen ();
+     }
+ 
+@@ -327,8 +322,7 @@ namespace Bmp
+     {
+       if (G_IS_OBJECT(m_message))
+       {
+-            soup_message_set_status (m_message, SOUP_STATUS_CANCELLED);
+-            soup_session_cancel_message (m_session, m_message);
++            soup_session_cancel_message (m_session, m_message, SOUP_STATUS_CANCELLED);
+             m_message = 0;
+       }
+       
+@@ -340,7 +334,7 @@ namespace Bmp
+     RequestFile::add_header (std::string const& name,
+                              std::string const& value) 
+     {
+-      soup_message_add_header (m_message->request_headers, name.c_str(), value.c_str());   
++      soup_message_headers_append (m_message->request_headers, name.c_str(), value.c_str());   
+     }
+ 
+ 
+@@ -356,7 +350,7 @@ namespace Bmp
+     }
+ 
+     void
+-    RequestFile::got_answer (SoupMessage* message, gpointer data)
++    RequestFile::got_answer (SoupSession* session, SoupMessage* message, gpointer data)
+     {
+       RequestFile & request = (*(reinterpret_cast<RequestFile*>(data)));
+       
+@@ -368,25 +362,22 @@ namespace Bmp
+         return;
+       }
+ 
+-      if( request.m_message->status != SOUP_MESSAGE_STATUS_FINISHED )
+-        return;
+-
+       if( request.m_message->status_code == SOUP_STATUS_CANCELLED)
+         return;
+ 
+-      debug("soup","%s: status: %d, status_code: %d", G_STRLOC, request.m_message->status, request.m_message->status_code);
++      debug("soup","%s: status_code: %d", G_STRLOC, request.m_message->status_code);
+       
+       request.fileClose ();
+       request.Signals.Done.emit (request.m_filename);
+     }
+ 
+     void
+-    RequestFile::got_chunk (SoupMessage* message, gpointer data)
++    RequestFile::got_chunk (SoupMessage* message, SoupBuffer* chunk, gpointer data)
+     {
+       RequestFile & request = (*(reinterpret_cast<RequestFile*>(data)));
+ 
+-      request.m_file.write (message->response.body, message->response.length);
+-      request.m_read += message->response.length;
++      request.m_file.write (chunk->data, chunk->length);
++      request.m_read += chunk->length;
+ 
+       double percent = (double (request.m_read) / double (request.m_size));
+       if(percent >= 0. && percent <= 1.)
+@@ -399,7 +390,7 @@ namespace Bmp
+     RequestFile::got_content_length (SoupMessage* message, gpointer data)
+     {
+       RequestFile & request = (*(reinterpret_cast<RequestFile*>(data)));
+-      request.m_size = g_ascii_strtoull (soup_message_get_header (message->response_headers, "content-length"), NULL, 10);
++      request.m_size = soup_message_headers_get_content_length (message->response_headers);
+     }
+   }
+ }
+diff -up bmpx-0.40.13/README.libsoup24 bmpx-0.40.13/README
+--- bmpx-0.40.13/README.libsoup24	2007-10-18 19:17:17.000000000 +0200
++++ bmpx-0.40.13/README	2008-02-15 20:26:58.000000000 +0100
+@@ -16,7 +16,7 @@ Requirements:
+   * libglademm-2.4          >= 2.6.2
+   * libsexymm               >= 0.1.9
+   * librsvg                 >= 2.14.0
+-  * libsoup                 >= 2.2.100
++  * libsoup                 >= 2.3.0.1
+   * libofa                  >= 0.9.3
+   * sqlite                  >= 3.3.11
+   * libxml                  >= 2.6.1
+diff -up bmpx-0.40.13/configure.libsoup24 bmpx-0.40.13/configure
+--- bmpx-0.40.13/configure.libsoup24	2008-02-15 20:27:13.000000000 +0100
++++ bmpx-0.40.13/configure	2008-02-15 20:27:26.000000000 +0100
+@@ -31519,12 +31519,12 @@ echo $ECHO_N "checking for SOUP... $ECHO
+ 
+ if test -n "$PKG_CONFIG"; then
+         if test -n "$PKG_CONFIG" && \
+-    { (echo "$as_me:$LINENO: \$PKG_CONFIG --exists --print-errors \"libsoup-2.2 >= 2.2.100\"") >&5
+-  ($PKG_CONFIG --exists --print-errors "libsoup-2.2 >= 2.2.100") 2>&5
++    { (echo "$as_me:$LINENO: \$PKG_CONFIG --exists --print-errors \"libsoup-2.4 >= 2.3.0.1\"") >&5
++  ($PKG_CONFIG --exists --print-errors "libsoup-2.4 >= 2.3.0.1") 2>&5
+   ac_status=$?
+   echo "$as_me:$LINENO: \$? = $ac_status" >&5
+   (exit $ac_status); }; then
+-  pkg_cv_SOUP_CFLAGS=`$PKG_CONFIG --cflags "libsoup-2.2 >= 2.2.100" 2>/dev/null`
++  pkg_cv_SOUP_CFLAGS=`$PKG_CONFIG --cflags "libsoup-2.4 >= 2.3.0.1" 2>/dev/null`
+ else
+   pkg_failed=yes
+ fi
+@@ -31533,12 +31533,12 @@ else
+ fi
+ if test -n "$PKG_CONFIG"; then
+         if test -n "$PKG_CONFIG" && \
+-    { (echo "$as_me:$LINENO: \$PKG_CONFIG --exists --print-errors \"libsoup-2.2 >= 2.2.100\"") >&5
+-  ($PKG_CONFIG --exists --print-errors "libsoup-2.2 >= 2.2.100") 2>&5
++    { (echo "$as_me:$LINENO: \$PKG_CONFIG --exists --print-errors \"libsoup-2.4 >= 2.3.0.1\"") >&5
++  ($PKG_CONFIG --exists --print-errors "libsoup-2.4 >= 2.3.0.1") 2>&5
+   ac_status=$?
+   echo "$as_me:$LINENO: \$? = $ac_status" >&5
+   (exit $ac_status); }; then
+-  pkg_cv_SOUP_LIBS=`$PKG_CONFIG --libs "libsoup-2.2 >= 2.2.100" 2>/dev/null`
++  pkg_cv_SOUP_LIBS=`$PKG_CONFIG --libs "libsoup-2.4 >= 2.3.0.1" 2>/dev/null`
+ else
+   pkg_failed=yes
+ fi
+@@ -31547,18 +31547,18 @@ else
+ fi
+ 
+ if test $pkg_failed = yes; then
+-	SOUP_PKG_ERRORS=`$PKG_CONFIG --errors-to-stdout --print-errors "libsoup-2.2 >= 2.2.100"`
++	SOUP_PKG_ERRORS=`$PKG_CONFIG --errors-to-stdout --print-errors "libsoup-2.4 >= 2.3.0.1"`
+ 	# Put the nasty error message in config.log where it belongs
+ 	echo "$SOUP_PKG_ERRORS" 1>&5
+ 
+-	{ { echo "$as_me:$LINENO: error: Package requirements (libsoup-2.2 >= 2.2.100) were not met.
++	{ { echo "$as_me:$LINENO: error: Package requirements (libsoup-2.4 >= 2.3.0.1) were not met.
+ Consider adjusting the PKG_CONFIG_PATH environment variable if you
+ installed software in a non-standard prefix.
+ 
+ Alternatively you may set the SOUP_CFLAGS and SOUP_LIBS environment variables
+ to avoid the need to call pkg-config.  See the pkg-config man page for
+ more details." >&5
+-echo "$as_me: error: Package requirements (libsoup-2.2 >= 2.2.100) were not met.
++echo "$as_me: error: Package requirements (libsoup-2.4 >= 2.3.0.1) were not met.
+ Consider adjusting the PKG_CONFIG_PATH environment variable if you
+ installed software in a non-standard prefix.
+ 
+@@ -31596,90 +31596,6 @@ echo "${ECHO_T}yes" >&6; }
+ 	:
+ fi
+ 
+-	CPPFLAGS_SAVED="$CPPFLAGS"
+-	CPPFLAGS="$CPPFLAGS $SOUP_CFLAGS"
+-	export CPPFLAGS
+-
+-	LDFLAGS_SAVED="$LDFLAGS"
+-	LDFLAGS="$LDFLAGS $SOUP_LDFLAGS"
+-	export LDFLAGS
+-
+-	{ echo "$as_me:$LINENO: checking for extern in libsoup headers" >&5
+-echo $ECHO_N "checking for extern in libsoup headers... $ECHO_C" >&6; }
+-
+-	ac_ext=cpp
+-ac_cpp='$CXXCPP $CPPFLAGS'
+-ac_compile='$CXX -c $CXXFLAGS $CPPFLAGS conftest.$ac_ext >&5'
+-ac_link='$CXX -o conftest$ac_exeext $CXXFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
+-ac_compiler_gnu=$ac_cv_cxx_compiler_gnu
+-
+-	cat >conftest.$ac_ext <<_ACEOF
+-/* confdefs.h.  */
+-_ACEOF
+-cat confdefs.h >>conftest.$ac_ext
+-cat >>conftest.$ac_ext <<_ACEOF
+-/* end confdefs.h.  */
+-
+-	#include <libsoup/soup.h>
+-
+-int
+-main ()
+-{
+-
+-	SoupSession * session = soup_session_sync_new ();
+-
+-  ;
+-  return 0;
+-}
+-_ACEOF
+-rm -f conftest.$ac_objext
+-if { (ac_try="$ac_compile"
+-case "(($ac_try" in
+-  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+-  *) ac_try_echo=$ac_try;;
+-esac
+-eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+-  (eval "$ac_compile") 2>conftest.er1
+-  ac_status=$?
+-  grep -v '^ *+' conftest.er1 >conftest.err
+-  rm -f conftest.er1
+-  cat conftest.err >&5
+-  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+-  (exit $ac_status); } && {
+-	 test -z "$ac_cxx_werror_flag" ||
+-	 test ! -s conftest.err
+-       } && test -s conftest.$ac_objext; then
+-
+-	{ echo "$as_me:$LINENO: result: no" >&5
+-echo "${ECHO_T}no" >&6; }
+-
+-else
+-  echo "$as_me: failed program was:" >&5
+-sed 's/^/| /' conftest.$ac_ext >&5
+-
+-
+-	{ echo "$as_me:$LINENO: result: yes" >&5
+-echo "${ECHO_T}yes" >&6; }
+-
+-cat >>confdefs.h <<\_ACEOF
+-#define LIBSOUP_HAS_EXTERN_C
+-_ACEOF
+-
+-
+-fi
+-
+-rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+-	ac_ext=cpp
+-ac_cpp='$CXXCPP $CPPFLAGS'
+-ac_compile='$CXX -c $CXXFLAGS $CPPFLAGS conftest.$ac_ext >&5'
+-ac_link='$CXX -o conftest$ac_exeext $CXXFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
+-ac_compiler_gnu=$ac_cv_cxx_compiler_gnu
+-
+-
+-	CPPFLAGS="$CPPFLAGS_SAVED"
+-	LDFLAGS="$LDFLAGS_SAVED"
+-
+-
+ # sqlite
+ 
+ pkg_failed=no
+diff -up bmpx-0.40.13/m4/soup.m4.libsoup24 bmpx-0.40.13/m4/soup.m4
+--- bmpx-0.40.13/m4/soup.m4.libsoup24	2007-10-18 19:17:06.000000000 +0200
++++ bmpx-0.40.13/m4/soup.m4	2008-02-15 20:26:58.000000000 +0100
+@@ -1,4 +1,34 @@
+ dnl -*- Mode: Autoconf; -*-
++dnl -*- Mode: Autoconf; -*-
++
++AC_DEFUN([BMP_CHECK_SOUP_EXTERN_C],
++[
++	CPPFLAGS_SAVED="$CPPFLAGS"
++	CPPFLAGS="$CPPFLAGS $SOUP_CFLAGS"
++	export CPPFLAGS
++
++	LDFLAGS_SAVED="$LDFLAGS"
++	LDFLAGS="$LDFLAGS $SOUP_LDFLAGS"
++	export LDFLAGS
++
++	AC_MSG_CHECKING(for extern in libsoup headers)
++
++	AC_LANG_PUSH(C++)
++	AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
++	@%:@include <libsoup/soup.h>
++	]], [[
++	SoupSession * session = soup_session_sync_new ();
++	]])],[
++	AC_MSG_RESULT(no)
++	],[
++	AC_MSG_RESULT(yes)
++	AC_DEFINE(LIBSOUP_HAS_EXTERN_C,,[define if libsoup has extern c])
++	])
++	AC_LANG_POP([C++])
++
++	CPPFLAGS="$CPPFLAGS_SAVED"
++	LDFLAGS="$LDFLAGS_SAVED"
++])
+ 
+ AC_DEFUN([BMP_CHECK_SOUP_EXTERN_C],
+ [

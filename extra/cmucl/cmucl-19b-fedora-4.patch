@@ -1,0 +1,91 @@
+--- cmucl-19/src/motif/server/Config.x86.motif	2004-04-26 07:07:36.000000000 -0500
++++ cmucl-19/src/motif/server/Config.x86	2004-08-04 12:59:32.209585248 -0500
+@@ -1,6 +1,6 @@
+-CFLAGS = -O2 -I/usr/X11R6/include -I. -I$(VPATH)
++CFLAGS = -O2 $(RPM_OPT_FLAGS) -I/usr/X11R6/include -I. -I$(VPATH)
+ LDFLAGS = -L/usr/X11R6/lib
+-LIBS = -static -lXm -dynamic -lXt -lXext -lX11 -lSM -lICE -lXp -ldl -lpthread
++LIBS = -lXm -lXt -lXext -lX11 -lSM -lICE -lXp -ldl -lpthread
+ # This def assumes you are building in the same or parallel
+ # tree to the CVS souce layout. Sites may need to customize
+ # this path.
+--- cmucl-19b/src/lisp/Linux-os.h.gcc4	2005-01-13 13:55:00.000000000 -0600
++++ cmucl-19b/src/lisp/Linux-os.h	2005-09-21 23:00:28.000000000 -0500
+@@ -80,7 +80,13 @@
+ #define GET_CONTEXT int code=0; struct sigcontext_struct *context=&contextstruct;
+ #endif
+ 
+-#define setfpucw(cw)	asm("fldcw %0" : : "m" (cw))
++#ifdef _HAVE_FPU_CONTROL_H
++#include <fpu_control.h>
++#define setfpucw(cw) {fpu_control_t cw_tmp=cw;_FPU_SETCW(cw_tmp);} 
++#else
++/* _FPU_SETCW code borrowed from fpu_control.h above */
++#define setfpucw(cw) {unsigned int cw_tmp=cw;__asm__ __volatile__ ("fldcw %0" : : "m" (*&cw_tmp)); }
++#endif
+ 
+ #define sigvec          sigaction
+ #define sv_mask         sa_mask
+--- cmucl-19b/src/lisp/Config.linux_gencgc.mak	2005-09-22 08:04:35.157010000 -0500
++++ cmucl-19b/src/lisp/Config.linux_gencgc	2005-09-22 08:10:12.947121112 -0500
+@@ -19,7 +19,18 @@
+ GC_SRC = gencgc.c
+ endif
+ 
+-RUNTIME = $(GENCGC) $(LINKAGE)
++PERSONALITY=$(wildcard /usr/include/sys/personality.h)
++ifneq ($(PERSONALITY),)
++NO_RANDOMIZE=-DADDR_NO_RANDOMIZE
++endif
++
++HAVE_FPU_CONTROL_H=$(wildcard /usr/include/fpu_control.h)
++ifneq ($(HAVE_FPU_CONTROL_H),)
++HAVE_FPU_CONTROL_H=-D_HAVE_FPU_CONTROL_H
++endif
++
++RUNTIME = $(GENCGC) $(LINKAGE) $(NO_RANDOMIZE) $(HAVE_FPU_CONTROL_H)
++
+ # __NO_CTYPE so builds on glibc 2.3 will run on (some) older glibc's.
+ CPPFLAGS = -D__NO_CTYPE -I. -I$(PATH2) -I$(PATH1) -I- -I/usr/X11R6/include $(RUNTIME)
+ CFLAGS = -rdynamic -Wstrict-prototypes -Wall -g $(RUNTIME) $(RPM_OPT_FLAGS)
+--- cmucl-19b/src/lisp/Config.linux_gencgc.optflags	2004-06-29 22:27:47.000000000 -0500
++++ cmucl-19b/src/lisp/Config.linux_gencgc	2005-09-19 09:44:18.649617939 -0500
+@@ -22,7 +22,7 @@
+ RUNTIME = $(GENCGC) $(LINKAGE)
+ # __NO_CTYPE so builds on glibc 2.3 will run on (some) older glibc's.
+ CPPFLAGS = -D__NO_CTYPE -I. -I$(PATH2) -I$(PATH1) -I- -I/usr/X11R6/include $(RUNTIME)
+-CFLAGS = -rdynamic -Wstrict-prototypes -Wall -g $(RUNTIME)
++CFLAGS = -rdynamic -Wstrict-prototypes -Wall -g $(RUNTIME) $(RPM_OPT_FLAGS)
+ ASFLAGS = -g -DGENCGC -DLINKAGE_TABLE
+ NM = $(PATH1)/linux-nm
+ UNDEFSYMPATTERN = -Xlinker -u -Xlinker &
+--- cmucl-19b/src/lisp/lisp.c.pers	2005-04-14 20:40:08.000000000 -0500
++++ cmucl-19b/src/lisp/lisp.c	2005-09-19 09:03:57.929151702 -0500
+@@ -12,6 +12,9 @@
+ #include <sys/file.h>
+ #include <sys/param.h>
+ #include <sys/stat.h>
++#if defined(__linux__) && defined(ADDR_NO_RANDOMIZE)
++#include <sys/personality.h>
++#endif
+ 
+ #include "signal.h"
+ 
+@@ -455,6 +458,17 @@
+     boolean monitor;
+     lispobj initial_function = 0;
+ 
++#if defined(__linux__) && defined(ADDR_NO_RANDOMIZE)
++    long pers = personality(-1);
++    /* 0x40000 aka. ADDR_NO_RANDOMIZE */
++    if (!(pers & 0x40000)) {
++      if (personality(pers | 0x40000) != -1) {
++        execvp(argv[0], argv);
++      }
++      fprintf(stderr, "WARNING: Couldn't re-exec with the proper personality flags.  Trying to continue anyway.\n");
++    }
++#endif
++
+     if (builtin_image_flag != 0)
+       initial_function = (lispobj) &initial_function_addr;
+ 

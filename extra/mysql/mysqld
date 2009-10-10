@@ -1,0 +1,90 @@
+#!/bin/bash
+
+MYSQLD_ROOT="/var/lib/mysql"
+# source application-specific settings
+[ -f /etc/conf.d/mysqld ] && . /etc/conf.d/mysqld
+
+# general config
+. /etc/rc.conf
+. /etc/rc.d/functions
+
+getPID() {
+   echo $(pgrep -u mysql mysqld);
+}
+
+if [ ! `egrep '^mysql:' /etc/group` ]; then
+  stat_busy "Adding mysql group"
+  groupadd -g 89 mysql
+  stat_done
+fi
+if [ ! `egrep '^mysql:' /etc/passwd` ]; then
+  stat_busy "Adding mysql user"
+  useradd -u 89 -g mysql -d $MYSQLD_ROOT -s /bin/false mysql
+  [ -d $MYSQLD_ROOT ] && chown -R mysql:mysql $MYSQLD_ROOT
+  stat_done
+fi
+
+if [ ! -d $MYSQLD_ROOT ]; then
+  mkdir $MYSQLD_ROOT
+  /usr/bin/mysql_install_db --datadir=$MYSQLD_ROOT --user=mysql
+  chown -R mysql:mysql $MYSQLD_ROOT
+fi
+
+case "$1" in
+  start)
+    stat_busy "Starting MySQL"
+    if [ -z "$(getPID)" ]; then
+       /usr/bin/mysqld_safe --datadir=$MYSQLD_ROOT &>/dev/null &
+      if [ $? -gt 0 ]; then
+        stat_fail
+        exit 1
+      else
+        timeo=30
+        while [ $timeo -gt 0 ]; do
+          response=`/usr/bin/mysqladmin -uUNKNOWN_USER ping 2>&1` && break
+          echo "$response" | grep -q "mysqld is alive" && break
+          sleep 1
+          let timeo=${timeo}-1
+        done
+        if [ $timeo -eq 0 ]; then
+          stat_fail
+          exit 1
+        else
+          echo $(getPID) >/var/run/mysqld.pid
+          add_daemon mysqld
+          stat_done
+        fi
+      fi
+    else
+      stat_fail
+      exit 1
+    fi
+    ;;
+
+  stop)
+    stat_busy "Stopping MySQL"
+    if [ ! -z "$(getPID)" ]; then
+      kill $(getPID) &> /dev/null
+      if [ $? -gt 0 ]; then
+        stat_fail
+        exit 1
+      else
+        rm -f /var/run/mysqld.pid &>/dev/null
+        rm_daemon mysqld
+        stat_done
+      fi
+    else
+      stat_fail
+      exit 1
+    fi
+    ;;
+
+  restart)
+    $0 stop
+    sleep 3
+    $0 start
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart}"
+esac
+exit 0

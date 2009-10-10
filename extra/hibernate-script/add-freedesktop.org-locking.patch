@@ -1,0 +1,67 @@
+diff -Nur hibernate-script-1.99.orig/common.conf hibernate-script-1.99/common.conf
+--- hibernate-script-1.99.orig/common.conf	2008-05-01 13:59:58.000000000 +0200
++++ hibernate-script-1.99/common.conf	2008-08-29 11:31:55.000000000 +0200
+@@ -75,9 +75,11 @@
+ ## For kde you need dcop, kscreensaver available.
+ ## For XAuto you need xautolock available.
+ ## For Xtr you need xtrlock available.
++## For Freedesktop (for example KDE4) you need dbus-send available
+ # LockConsoleAs root
+ # LockXScreenSaver yes
+ # LockGnomeScreenSaver yes
++# LockFreedesktop
+ # LockKDE yes
+ # LockXLock yes
+ # LockXAutoLock yes
+diff -Nur hibernate-script-1.99.orig/scriptlets.d/lock hibernate-script-1.99/scriptlets.d/lock
+--- hibernate-script-1.99.orig/scriptlets.d/lock	2008-05-01 14:00:21.000000000 +0200
++++ hibernate-script-1.99/scriptlets.d/lock	2008-08-29 11:32:43.000000000 +0200
+@@ -3,6 +3,7 @@
+ 
+ AddConfigHandler LockOptions
+ AddConfigHelp "LockKDE <boolean>" "Lock all local KDE sessions before suspending."
++AddConfigHelp "LockFreedesktop <boolean>" "Lock all local sessions compatible with freedesktop.org screensaver interface before suspending."
+ AddConfigHelp "LockXScreenSaver <boolean>" "Lock all local X11 sessions with xscreensaver running before suspending."
+ AddConfigHelp "LockGnomeScreenSaver <boolean>" "Lock all local X11 sessions with gnome-screensaver running before suspending."
+ AddConfigHelp "LockXLock <boolean>" "Lock active X11 session using xlock."
+@@ -14,6 +15,22 @@
+ AddLongOption 'lock-console-as:'
+ AddOptionHelp '--lock-console-as <username>' 'Uses vlock to lock the entire system after resuming, requirng you to enter the password for the given user to unlock it. This overrides any username given in the configuration file. (Requires vlock)'
+ 
++LockFreedesktop() {
++    [ x"$LOCK_FREEDESKTOP" != "x1" ] && return 0
++
++    for userdir in /home/*; do
++        user="$(basename $userdir)"
++        for session in /home/$user/.dbus/session-bus/*; do
++            if [ -e "$session" ]; then
++                . $session
++                su -c "dbus-send --session --dest=org.freedesktop.ScreenSaver --type=method_call /ScreenSaver org.freedesktop.ScreenSaver.Lock" "$user"
++            fi
++        done
++    done
++
++    return 0
++}
++
+ LockKDE() {
+     [ x"$LOCK_KDE" != "x1" ] && return 0
+ 
+@@ -350,6 +367,17 @@
+ 		LOCK_KDE=0
+ 	    fi
+ 	    ;;
++	lockfreedesktop)
++	    if BoolIsOn "$1" "$2" ; then
++		LOCK_FREEDESKTOP=1
++		if [ -z "$FREEDESKTOPLOCK_HOOKED" ] ; then
++		    AddSuspendHook 91 LockFreedesktop
++		    FREEDESKTOPLOCK_HOOKED=1
++		fi
++	    else
++		LOCK_FREEDESKTOP=0
++	    fi
++	    ;;
+ 	lockxscreensaver)
+ 	    if BoolIsOn "$1" "$2" ; then 
+ 		LOCK_XSCREENSAVER=1

@@ -1,0 +1,76 @@
+From d10841493c4707f23f928d7580bc5bddb51d22a6 Mon Sep 17 00:00:00 2001
+From: Bob Long <blong@vmware.com>
+Date: Fri, 22 May 2009 22:48:55 +0000
+Subject: Fix black screen after resume from hibernate.
+
+The root cause for the black screen and system lock up is
+caused by not recovering the SVGA ID register after hibernation.
+Incorrect ID register value will invalidate the FIFO memory start
+register, and driver will not retrieve correct FIFO memory start
+address and the busy read of svga FIFO sync register will lock up
+the whole system.
+
+Currently SVGA Xorg driver does not have a kernel module to handle
+the power management event, but Xorg will call driver provided
+LeaveVT before shutting down system and call EnterVT after resuming
+system from hibernation, so these two callback functions are good
+entry points to save and restore the ID register value. This patch
+saves the ID register value in LeaveVT and restores the value to
+SVGA ID register in EnterVT.
+---
+diff --git a/src/vmware.c b/src/vmware.c
+index ef2dedb..069cf2c 100644
+--- a/src/vmware.c
++++ b/src/vmware.c
+@@ -652,6 +652,7 @@ VMWAREPreInit(ScrnInfoPtr pScrn, int flags)
+                    "No supported VMware SVGA found (read ID 0x%08x).\n", id);
+         return FALSE;
+     }
++    pVMWARE->suspensionSavedRegId = id;
+ 
+ #if !XSERVER_LIBPCIACCESS
+     pVMWARE->PciTag = pciTag(pVMWARE->PciInfo->bus, pVMWARE->PciInfo->device,
+@@ -1820,7 +1821,13 @@ VMWAREEnterVT(int scrnIndex, int flags)
+     ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+     VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
+ 
+-    if (!pVMWARE->SavedReg.svga_fifo_enabled) {
++    /*
++     * After system resumes from hiberation, EnterVT will be called and this
++     * is a good place to restore the SVGA ID register.
++     */
++    vmwareWriteReg(pVMWARE, SVGA_REG_ID, pVMWARE->suspensionSavedRegId);
++
++    if (!pVMWARE->SavedReg.svga_fifo_enabled) {       
+         VMWAREInitFIFO(pScrn);
+     }
+ 
+@@ -1831,6 +1838,14 @@ static void
+ VMWARELeaveVT(int scrnIndex, int flags)
+ {
+     ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
++    VMWAREPtr pVMWARE = VMWAREPTR(pScrn);
++
++    /*
++     * Before shutting down system for hibneration, LeaveVT will be called,
++     * we save the ID register value here and later restore it in EnterVT.
++     */
++    pVMWARE->suspensionSavedRegId = vmwareReadReg(pVMWARE, SVGA_REG_ID);
++
+     VMWARERestore(pScrn);
+ }
+ 
+diff --git a/src/vmware.h b/src/vmware.h
+index 57872b2..b906ff2 100644
+--- a/src/vmware.h
++++ b/src/vmware.h
+@@ -102,6 +102,7 @@ typedef struct {
+ 
+     VMWARERegRec SavedReg;
+     VMWARERegRec ModeReg;
++    CARD32 suspensionSavedRegId;
+ 
+     DisplayModePtr dynModes[NUM_DYN_MODES];
+ 
+--
+cgit v0.8.2

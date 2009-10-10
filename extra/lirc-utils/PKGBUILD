@@ -1,0 +1,68 @@
+# $Id: PKGBUILD 41455 2009-06-04 04:21:49Z eric $
+# Maintainer: Paul Mattal <paul@archlinux.org>
+
+pkgname=lirc-utils
+pkgver=0.8.5
+pkgrel=1
+pkgdesc="Linux Infrared Remote Control utils"
+arch=('i686' 'x86_64')
+url="http://www.lirc.org/"
+license=('GPL')
+_kernver=2.6.29-ARCH
+depends=('alsa-lib' 'libusb' 'libx11' 'libsm' 'python' 'libftdi')
+makedepends=('help2man')
+replaces=('lirc+pctv')
+backup=('etc/lircd.conf' 'etc/lircmd.conf'\
+        'etc/conf.d/lircd')
+options=('!libtool' '!makeflags')
+source=(http://prdownloads.sourceforge.net/lirc/lirc-${pkgver}.tar.bz2
+        #http://downloads.sourceforge.net/sourceforge/lirc/lirc-$pkgver.tar.bz2
+	lircd lircmd lirc.logrotate lircd.conf.d)
+
+build() {
+	# configure
+	cd $startdir/src/lirc-$pkgver || return 1
+
+      # Disabling lirc_gpio driver as it does no longer work Kernel 2.6.22+
+	sed -i -e "s:lirc_gpio\.o::" drivers/lirc_gpio/Makefile.am || return 1
+
+	autoreconf || return 1
+	libtoolize || return 1
+
+	./configure --enable-sandboxed --prefix=/usr \
+	--with-driver=all --with-kerneldir=/usr/src/linux-${_kernver} \
+	--with-moduledir=/lib/modules/${_kernver}/kernel/drivers/misc \
+	--with-transmitter \
+		|| return 1
+	# disable parallel and bt829
+        # because of incompatibility with smp systems
+        sed -i -e "s:lirc_parallel::" -e "s:lirc_bt829::" \
+		Makefile drivers/Makefile drivers/*/Makefile tools/Makefile \
+                || return 1
+
+  	# build
+	make || return 1
+	make DESTDIR=$startdir/pkg install || return 1
+	mkdir -p $startdir/pkg/usr/share/lirc $startdir/pkg/etc/rc.d \
+		|| return 1
+	cp $startdir/src/{lircd,lircmd} $startdir/pkg/etc/rc.d/ \
+		|| return 1
+	cp -rp remotes $startdir/pkg/usr/share/lirc || return 1
+	chmod -R go-w $startdir/pkg/usr/share/lirc/ || return 1
+
+	# install the logrotate config
+	install -D -m644 $startdir/src/lirc.logrotate \
+		$startdir/pkg/etc/logrotate.d/lirc || return 1
+	
+	# install conf.d file
+	install -D -m644 $startdir/src/lircd.conf.d \
+		$startdir/pkg/etc/conf.d/lircd || return 1
+
+	# remove built modules
+	rm -r $startdir/pkg/lib/
+}
+md5sums=('5a274e4eaff8156b17903c22ea01f506'
+         '909ad968afa10e4511e1da277bb23c3b'
+         '85f7fdac55e5256967241864049bf5e9'
+         '3deb02604b37811d41816e9b4385fcc3'
+         '5b1f8c9cd788a39a6283f93302ce5c6e')

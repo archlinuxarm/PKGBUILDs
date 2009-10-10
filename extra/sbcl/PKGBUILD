@@ -1,0 +1,68 @@
+# $Id: PKGBUILD 51723 2009-09-10 15:32:13Z juergen $
+# Contributor: John Proctor <jproctor@prium.net>
+# Contributor: Daniel White <daniel@whitehouse.id.au>
+# Maintainer: Juergen Hoetzel <juergen@archlinux.org>
+
+pkgname=sbcl
+pkgver=1.0.31
+pkgrel=2
+pkgdesc="Steel Bank Common Lisp"
+arch=(i686 x86_64)
+license=('custom')
+depends=('glibc')
+provides=('common-lisp' 'cl-asdf')
+makedepends=('sbcl' 'texinfo')
+source=("http://downloads.sourceforge.net/project/sbcl/sbcl/$pkgver/$pkgname-$pkgver-source.tar.bz2" "fix-source-path.lisp")
+md5sums=('a61fd099a72c2d3fa10a57298f3c9bf6' 'e0fb2483602d260ba602a0fbf37ae09f')
+
+url="http://www.sbcl.org/"
+install=sbcl.install
+
+build() {
+  export CFLAGS="${CFLAGS} -DSBCL_HOME=\\\"/usr/lib/sbcl\\\""
+  export GNUMAKE="make -e"
+  cd ${startdir}/src/${pkgname}-${pkgver}
+  # Make a multi-threaded SBCL, disable LARGEFILE  
+  cat >customize-target-features.lisp <<EOF
+(lambda (features)
+  (flet ((enable (x) (pushnew x features))
+         (disable (x) (setf features (remove x features))))
+  (enable :sb-thread)
+  (disable :largefile)))
+EOF
+
+  sh make.sh sbcl
+  mkdir -p ${startdir}/pkg/usr
+  pushd doc/manual
+  make info || return 1
+  popd 
+  INSTALL_ROOT=${startdir}/pkg/usr sh install.sh
+
+  src/runtime/sbcl --core output/sbcl.core --script ${startdir}/src/fix-source-path.lisp
+  mv sbcl-new.core ${startdir}/pkg/usr/lib/sbcl/sbcl.core
+
+# sources
+  mkdir -p ${startdir}/pkg/usr/share/sbcl-source
+  cp -R -t ${startdir}/pkg/usr/share/sbcl-source \
+    ${startdir}/src/${pkgname}-${pkgver}/{src,contrib}
+
+# drop unwanted files
+  find ${startdir}/pkg/usr/share/sbcl-source -type f \
+    -name \*.fasl -or \
+    -name \*.o -or \
+    -name \*.log -or \
+    -name \*.so -or \
+    -name a.out -delete
+
+  rm ${startdir}/pkg/usr/share/sbcl-source/src/runtime/sbcl
+  rm ${startdir}/pkg/usr/share/sbcl-source/src/runtime/sbcl.nm
+
+  find ${startdir}/pkg \( -name Makefile -o -name .cvsignore \) -delete
+
+  rm $startdir/pkg/usr/share/info/dir
+  gzip -9nf $startdir/pkg/usr/share/info/*
+
+  # license
+  install -D -m644 ${startdir}/src/${pkgname}-${pkgver}/COPYING \
+                   ${startdir}/pkg/usr/share/licenses/${pkgname}/license.txt
+}

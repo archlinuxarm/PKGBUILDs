@@ -1,0 +1,53 @@
+# $Id: PKGBUILD 47962 2009-07-30 00:13:26Z thomas $
+# Maintainer: judd <jvinet@zeroflux.org>
+# Contributor: Mario Vazquez <mario_vazq@hotmail.com>
+pkgname=bind
+# Use a period and not a hyphen before the patch level for proper versioning.
+pkgver=9.6.1.P1
+_pkgver=9.6.1-P1
+pkgrel=1
+pkgdesc="Berkeley Internet Name Domain - named server"
+arch=(i686 x86_64)
+url="http://www.isc.org/index.pl?/sw/bind/"
+license=('custom:ISC')
+backup=(etc/named.conf etc/logrotate.d/named etc/conf.d/named etc/rndc.key)
+depends=('openssl')
+provides=('dns-server')
+options=('!libtool')
+install=bind.install
+source=(ftp://ftp.isc.org/isc/bind9/${_pkgver}/${pkgname}-${_pkgver}.tar.gz
+	bind.so_bsdcompat.diff notools.patch named.conf localhost.zone 127.0.0.zone
+	named root.hint named.logrotate named.conf.d)
+md5sums=('e6ce3b355c4e6bf5d66ef100f555da3f' '447d58721cfee0e1e377b46f7d50b327'
+         '2ab9db5112cabae23770cdd2f00c6923' 'f58fa49a92df16534d31fcb6b0d1be1e'
+         'ab5beef0b41eb6376c7f1f4ee233172b' 'bdbdfe4990b0903984306dd14f98b951'
+         '750f283c7774ffe75cd215bce46b03cd' '8c212c0260d708f15f75d3adc71f0149'
+         '91b3463a181561deb845acc122713a2a' '475fde63600d7d95980de991f02d6b6d')
+
+build() {
+  export MAKEFLAGS="-j1"
+  cd ${startdir}/src/${pkgname}-${_pkgver}
+  patch -Np0 -i ${startdir}/src/bind.so_bsdcompat.diff || return 1
+  patch -Np1 -i ${startdir}/src/notools.patch || return 1
+  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
+              --with-libtool --enable-shared --disable-threads \
+              --with-openssl=yes --disable-linux-caps --without-libxml2
+  make || return 1
+  make DESTDIR=${startdir}/pkg install
+  install -D -m755 ../named ${startdir}/pkg/etc/rc.d/named
+  install -D -m640 ../named.conf ${startdir}/pkg/etc/named.conf
+  install -D -m600 ../127.0.0.zone ${startdir}/pkg/var/named/127.0.0.zone
+  install -D -m600 ../localhost.zone ${startdir}/pkg/var/named/localhost.zone
+  #grabbed from ftp://ftp.rs.internic.net/domain/named.root
+  install -D -m600 ../root.hint ${startdir}/pkg/var/named/root.hint
+  install -D -m600 ../named.logrotate ${startdir}/pkg/etc/logrotate.d/named
+  install -D -m644 ../named.conf.d ${startdir}/pkg/etc/conf.d/named
+  install -d -m755 ${startdir}/pkg/var/run/named
+  install -D -m644 COPYRIGHT $startdir/pkg/usr/share/licenses/$pkgname/LICENSE
+
+  # adjust ownerships (our named user will be uid/gid 40/40)
+  chmod 700 ${startdir}/pkg/var/named
+  chown root:40 ${startdir}/pkg/etc/named.conf
+  chown -R 40:40 ${startdir}/pkg/var/named
+  chown 40:40 ${startdir}/pkg/var/run/named
+}

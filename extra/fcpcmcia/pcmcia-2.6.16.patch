@@ -1,0 +1,246 @@
+--- fcpcmcia_cs.c~	2005-07-07 00:00:00.000000000 +0200
++++ fcpcmcia_cs.c	2006-03-29 17:11:59.000000000 +0200
+@@ -112,7 +112,7 @@
+ 
+ static void cs_config(dev_link_t *);
+ static void cs_release(dev_link_t *);
+-static int cs_event(event_t event, int priority, event_callback_args_t *);
++
+ 
+ /*
+    The attach() and detach() entry points are used to create and destroy
+@@ -120,16 +120,8 @@
+    needed to manage one actual PCMCIA card.
+ */
+ 
+-static dev_link_t * cs_attach(void);
+-static void cs_detach(dev_link_t *);
+-
+-/*
+-   The dev_info variable is the "key" that is used to match up this
+-   device driver with appropriate cards, through the card configuration
+-   database.
+-*/
++static void cs_detach(struct pcmcia_device *p_dev);
+ 
+-static dev_info_t dev_info = "fcpcmcia_cs";
+ 
+ /*
+    A linked list of "instances" of the skeleton device.  Each actual
+@@ -141,15 +133,8 @@
+    device numbers are used to derive the corresponding array index.
+ */
+ 
+-static dev_link_t *dev_list = NULL;
+ 
+ /*
+-   A dev_link_t structure has fields for most things that are needed
+-   to keep track of a socket, but there will usually be some device
+-   specific information that also needs to be kept track of.  The
+-   'priv' pointer in a dev_link_t structure can be used to point to
+-   a device-specific private data structure, like this.
+-
+    A driver needs to provide a dev_node_t structure for each device
+    on a card.  In some cases, there is only one device per card (for
+    example, ethernet cards, modems).  In other cases, there may be
+@@ -176,12 +161,10 @@
+     
+ ======================================================================*/
+ 
+-static dev_link_t *cs_attach(void)
++static int cs_attach(struct pcmcia_device *p_dev)
+ {
+-    client_reg_t client_reg;
+     dev_link_t *link;
+     local_info_t *local;
+-    int ret;
+ #if defined (PCMCIA_IRQ_INFO2)
+     int i;
+ #endif
+@@ -229,30 +212,19 @@
+     memset(local, 0, sizeof(local_info_t));
+     link->priv = local;
+     
+-    /* Register with Card Services */
+-    link->next = dev_list;
+-    dev_list = link;
+-    client_reg.dev_info = &dev_info;
+-    client_reg.Attributes = INFO_IO_CLIENT | INFO_CARD_SHARE;
+-    client_reg.EventMask =
+-	CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL |
+-	CS_EVENT_RESET_PHYSICAL | CS_EVENT_CARD_RESET |
+-	CS_EVENT_PM_SUSPEND | CS_EVENT_PM_RESUME;
+-    client_reg.event_handler = &cs_event;
+-    client_reg.Version = 0x0210;
+-    client_reg.event_callback_args.client_data = link;
+-    ret = pcmcia_register_client(&link->handle, &client_reg);
+-    if (ret != 0) {
+-	cs_error(link->handle, RegisterClient, ret);
+-	cs_detach(link);
+-	goto err;
+-    }
+-    return link;
++    link->handle = p_dev;
++    p_dev->instance = link;
++    
++    link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
++    cs_config(link);
++
++    return 0;
+ 
+  err_kfree:
+     kfree(link);
++    return -ENOMEM;
+  err:
+-    return NULL;
++    return -ENOMEM;
+ } /* cs_attach */
+ 
+ /*======================================================================
+@@ -264,35 +236,15 @@
+ 
+ ======================================================================*/
+ 
+-static void cs_detach(dev_link_t *link)
++static void cs_detach(struct pcmcia_device *p_dev)
+ {
+-    dev_link_t **linkp;
++    dev_link_t *link = dev_to_instance(p_dev);
+ 
+     NOTE("Detaching device...\n");
+ 
+-    /* Locate device structure */
+-    for (linkp = &dev_list; *linkp; linkp = &(*linkp)->next)
+-	if (*linkp == link) break;
+-    if (*linkp == NULL)
+-	return;
+-
+-    /*
+-       If the device is currently configured and active, we won't
+-       actually delete it yet.  Instead, it is marked so that when
+-       the release() function is called, that will trigger a proper
+-       detach().
+-    */
+-    if (link->state & DEV_CONFIG) {
+-	link->state |= DEV_STALE_LINK;
+-	return;
+-    }
++    if (link->state & DEV_CONFIG)
++	    cs_release(link);
+ 
+-    /* Break the link with Card Services */
+-    if (link->handle)
+-	pcmcia_deregister_client(link->handle);
+-    
+-    /* Unlink device structure, free pieces */
+-    *linkp = link->next;
+     if (link->priv) {
+ 	kfree(link->priv);
+     }
+@@ -493,65 +445,48 @@
+     pcmcia_release_irq(link->handle, &link->irq);
+     link->state &= ~DEV_CONFIG;
+     
+-    if (link->state & DEV_STALE_LINK)
+-	cs_detach(link);
+     
+ } /* cs_release */
+ 
+-/*======================================================================
+-
+-    The card status event handler.  Mostly, this schedules other
+-    stuff to run after an event is received.  A CARD_REMOVAL event
+-    also sets some flags to discourage the net drivers from trying
+-    to talk to the card any more.
+-
+-    When a CARD_REMOVAL event is received, we immediately set a flag
+-    to block future accesses to this device.  All the functions that
+-    actually access the device should check this flag to make sure
+-    the card is still present.
+-    
+-======================================================================*/
+-
+-static int cs_event(event_t event, int priority, event_callback_args_t *args)
++static int cs_suspend(struct pcmcia_device *dev)
+ {
+-    dev_link_t *link = args->client_data;
++	dev_link_t *link = dev_to_instance(dev);
+ 
+-    LOG("Card service event: %x\n", event);
+-    switch (event) {
+-    case CS_EVENT_CARD_REMOVAL:
+-	link->state &= ~DEV_PRESENT;
+-	if (link->state & DEV_CONFIG)
+-		cs_release(link);
+-	break;
+-    case CS_EVENT_CARD_INSERTION:
+-	link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
+-	cs_config(link);
+-	break;
+-    case CS_EVENT_PM_SUSPEND:
+ 	link->state |= DEV_SUSPEND;
+-	/* Fall through... */
+-    case CS_EVENT_RESET_PHYSICAL:
+ 	if (link->state & DEV_CONFIG)
+-	    pcmcia_release_configuration(link->handle);
+-	break;
+-    case CS_EVENT_PM_RESUME:
+-	link->state &= ~DEV_SUSPEND;
+-	/* Fall through... */
+-    case CS_EVENT_CARD_RESET:
++		pcmcia_release_configuration(link->handle);
++	return 0;
++}
++
++static int cs_resume(struct pcmcia_device *dev)
++
++{
++    dev_link_t *link = dev_to_instance(dev);
++
++        link->state &= ~DEV_SUSPEND;
+ 	if (link->state & DEV_CONFIG)
+ 	    pcmcia_request_configuration(link->handle, &link->conf);
+-	break;
+-    }
+-    return 0;
+-} /* cs_event */
++
++	return 0;
++}
+
++static struct pcmcia_device_id fcpcmcia_ids[] = {
++	PCMCIA_DEVICE_PROD_ID12("AVM", "ISDN A", 0x95d42008, 0xadc9d4bb),
++	PCMCIA_DEVICE_PROD_ID12("ISDN", "CARD", 0x8d9761c8, 0x01c5aa7b),
++	PCMCIA_DEVICE_NULL
++};
++MODULE_DEVICE_TABLE(pcmcia, fcpcmcia_ids);
++
+ static struct pcmcia_driver cs_driver = {
+ 	.owner	= THIS_MODULE,
+ 	.drv	= {
+ 		.name	= "fcpcmcia_cs",
+ 	},
+-	.attach	= cs_attach,
+-	.detach	= cs_detach,
++	.probe	= cs_attach,
++	.remove	= cs_detach,
++	.id_table = fcpcmcia_ids,
++       .suspend = cs_suspend,
++	.resume	= cs_resume,
+ };
+ 
+ static int __init cs_init(void)
+@@ -563,12 +490,6 @@
+ {
+ 	pcmcia_unregister_driver(&cs_driver);
+ 
+-	/* XXX: this really needs to move into generic code.. */
+-	while (dev_list != NULL) {
+-		if (dev_list->state & DEV_CONFIG)
+-			cs_release(dev_list);
+-		cs_detach(dev_list);
+-	}
+ }
+ 
+ module_init(cs_init);
+

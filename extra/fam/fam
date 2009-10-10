@@ -1,0 +1,44 @@
+#!/bin/bash
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+
+PID=`pidof -o %PPID /usr/sbin/famd`
+case "$1" in
+  start)
+    #Check for running portmap, start when not running
+    ck_daemon rpcbind && /etc/rc.d/rpcbind start
+    stat_busy "Starting File Alteration Monitor"
+    if [ ! -f /var/run/daemons/rpcbind ]; then
+      stat_fail
+      echo "ERROR: rpcbind is not running"
+      exit 1
+    fi
+    if [ -z "$PID" ]; then
+       /usr/sbin/famd -T 0 -c /etc/fam/fam.conf
+    fi
+    if [ ! -z "$PID" -o $? -gt 0 ]; then
+      stat_fail
+    else
+      add_daemon fam
+      stat_done
+    fi
+    ;;
+  stop)
+    stat_busy "Stopping File Alteration Monitor"
+    [ ! -z "$PID" ]  && kill $PID &> /dev/null
+    if [ $? -gt 0 ]; then
+      stat_fail
+    else
+      rm_daemon fam
+      stat_done
+    fi
+    ;;
+  restart)
+    $0 stop
+    sleep 1
+    $0 start
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart}"  
+esac

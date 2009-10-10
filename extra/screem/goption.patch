@@ -1,0 +1,91 @@
+--- src/screem-main.c	2006-04-17 00:25:57.000000000 +0100
++++ src/screem-main.c	2006-04-17 01:12:35.000000000 +0100
+@@ -54,12 +54,23 @@
+ static gchar *session_filename = SESSION_LAST;
+ 
+ /* passed parameters stuff */
++#ifndef GNOME_PARAM_GOPTION_CONTEXT
+ static const struct poptOption options[] = {
+ 	{ "load-session", 'l', POPT_ARG_STRING, &session_filename, 0,
+ 	  N_("Load the given session file"),
+ 	  N_("FILE") },
+ 	{ NULL, '\0', 0, NULL, 0, NULL, NULL }
+ };
++#else /* USE GOption interface */
++static const gchar **remaining_args = NULL;
++static GOptionEntry option_entries[] = {
++  { "load-session", 'l', 0, G_OPTION_ARG_STRING, &(session_filename),
++    N_("Load the given session file"), N_("FILE") },
++  { G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &remaining_args,
++    "Special option that collects any remaining arguments for us" },
++  { NULL }
++};
++#endif
+ 
+ typedef enum {
+ 	MISSING_GLADE,
+@@ -75,8 +86,10 @@
+ int main( int argc, char *argv[] )
+ {
+ 	GnomeProgram *program;
++	const gchar** start_files;	
++#ifndef GNOME_PARAM_GOPTION_CONTEXT
+ 	poptContext ctx;
+-	const gchar** start_files;
++#endif
+ 	const gchar *icon;
+ 	
+ 	gchar *dotdir;
+@@ -88,11 +101,21 @@
+ 	bind_textdomain_codeset( GETTEXT_PACKAGE, "UTF-8" );
+         textdomain( GETTEXT_PACKAGE );
+ #endif	
++
++#ifdef GNOME_PARAM_GOPTION_CONTEXT
++	GOptionContext *option_context = g_option_context_new("screem");
++	g_option_context_add_main_entries(option_context, option_entries, NULL);
++#endif
++
+ 	program = gnome_program_init( PACKAGE, VERSION, 
+ 			LIBGNOMEUI_MODULE,
+ 			argc, argv,
+ 			GNOME_PROGRAM_STANDARD_PROPERTIES,
++#ifndef GNOME_PARAM_GOPTION_CONTEXT
+ 			GNOME_PARAM_POPT_TABLE, options,
++#else
++			GNOME_PARAM_GOPTION_CONTEXT, option_context,
++#endif
+ 			GNOME_PARAM_APP_DATADIR, DATADIR,
+ 			LIBGNOMEUI_PARAM_DEFAULT_ICON,
+ 			DATADIR"/pixmaps/screem.png",
+@@ -105,10 +128,14 @@
+ 	icon = DATADIR"/pixmaps/screem.png";
+         gtk_window_set_default_icon_from_file( icon, NULL );
+ 
++#ifndef GNOME_PARAM_GOPTION_CONTEXT
+ 	/* parse arguments */
+ 	g_object_get( G_OBJECT( program ), 
+ 			GNOME_PARAM_POPT_CONTEXT, &ctx, NULL );
+ 	start_files = parse_args( ctx, argc, argv );
++#else 
++	start_files = remaining_args;
++#endif
+ 
+         gnome_vfs_init();
+ 	gnome_authentication_manager_init();
+@@ -160,6 +187,7 @@
+ 	return FALSE;
+ }
+ 
++#ifndef GNOME_PARAM_GOPTION_CONTEXT
+ static const gchar **parse_args( poptContext ctx, int argc, char *argv[] )
+ {
+ 	const gchar** start_files;
+@@ -169,6 +197,7 @@
+ 
+ 	return start_files;
+ }
++#endif
+ 
+ static void screem_main_missing( MissingType type )
+ {

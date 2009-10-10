@@ -1,0 +1,377 @@
+diff -urN dhcp-3.0.3/client/dhclient.8 dhcp-3.0.3-work/client/dhclient.8
+--- dhcp-3.0.3/client/dhclient.8	2004-09-30 01:01:46.000000000 +0200
++++ dhcp-3.0.3-work/client/dhclient.8	2005-10-19 18:43:28.000000000 +0200
+@@ -78,6 +78,9 @@
+ .B -w
+ ]
+ [
++.B -x
++]
++[
+ .I if0
+ [
+ .I ...ifN
+diff -urN dhcp-3.0.3/client/dhclient.c dhcp-3.0.3-work/client/dhclient.c
+--- dhcp-3.0.3/client/dhclient.c	2005-03-03 17:55:22.000000000 +0100
++++ dhcp-3.0.3-work/client/dhclient.c	2005-10-19 18:48:42.000000000 +0200
+@@ -74,7 +74,9 @@
+ int onetry=0;
+ int quiet=0;
+ int nowait=0;
+-
++#ifdef EXTENDED_NEW_OPTION_INFO
++int extended_option_environment = 0;
++#endif
+ static void usage PROTO ((void));
+ 
+ void do_release(struct client_state *);
+@@ -204,6 +206,11 @@
+ 		} else if (!strcmp (argv [i], "--version")) {
+ 			log_info ("isc-dhclient-%s", DHCP_VERSION);
+ 			exit (0);
++#ifdef EXTENDED_NEW_OPTION_INFO
++		} else if (!strcmp (argv [i], "-x")) {
++		    extended_option_environment = 1;
++		    new_option_info_tree = GENERATE_NEW_OPTION_INFO;
++#endif
+  		} else if (argv [i][0] == '-') {
+  		    usage ();
+ 		} else {
+@@ -241,7 +248,7 @@
+ 	}
+ 
+ 	/* first kill of any currently running client */
+-	if (release_mode) {
++	if (1) {
+ 		FILE *pidfd;
+ 		pid_t oldpid;
+ 		long temp;
+@@ -251,11 +258,17 @@
+ 		if ((pidfd = fopen(path_dhclient_pid, "r")) != NULL) {
+ 			e = fscanf(pidfd, "%ld\n", &temp);
+ 			oldpid = (pid_t)temp;
++                        log_info ("There is already a pid file %s with pid %i", path_dhclient_pid, oldpid);
+ 
+ 			if (e != 0 && e != EOF) {
+ 				if (oldpid) {
+-					if (kill(oldpid, SIGTERM) == 0)
+-						unlink(path_dhclient_pid);
++					if (kill(oldpid, SIGTERM) == 0) {
++                                                log_info ("killed old client process, removed PID file");
++                                                unlink(path_dhclient_pid);
++                                        } else if (errno == ESRCH) {
++                                                log_info ("removed stale PID file");
++                                                unlink(path_dhclient_pid);
++                                        }
+ 				}
+ 			}
+ 			fclose(pidfd);
+@@ -476,7 +489,11 @@
+ 	log_info (arr);
+ 	log_info (url);
+ 
++#ifdef EXTENDED_NEW_OPTION_INFO
++	log_error ("Usage: dhclient [-1dqr] [-nwx] [-p <port>] %s",
++#else
+ 	log_error ("Usage: dhclient [-1dqr] [-nw] [-p <port>] %s",
++#endif
+ 		   "[-s server]");
+ 	log_error ("                [-cf config-file] [-lf lease-file]%s",
+ 		   "[-pf pid-file] [-e VAR=val]");
+@@ -869,7 +886,7 @@
+ 	/* If the BOUND/RENEW code detects another machine using the
+ 	   offered address, it exits nonzero.  We need to send a
+ 	   DHCPDECLINE and toss the lease. */
+-	if (script_go (client)) {
++	if (script_go (client) == 2) {
+ 		make_decline (client, client -> new);
+ 		send_decline (client);
+ 		destroy_client_lease (client -> new);
+@@ -2433,8 +2450,28 @@
+ struct envadd_state {
+ 	struct client_state *client;
+ 	const char *prefix;
++        struct universe *universe;
+ };
+ 
++#ifdef EXTENDED_NEW_OPTION_INFO			
++static 
++void build_universe_info_envvar
++(      struct option_cache *oc,
++       struct packet *p, struct lease *l,
++       struct client_state *client,
++       struct option_state *in_o,
++       struct option_state *cf_o,
++       struct binding_scope **scope,
++       struct universe *u, void *es	          
++)
++{
++    char info_name[512], info_data[512];
++    snprintf(info_name, 512, "%s._universe_.", oc->option->universe->name);
++    snprintf(info_data, 512, "%u:%s", oc->option->code,oc->option->format);
++    client_envadd( client, info_name, oc->option->name, info_data );
++}
++#endif
++
+ void client_option_envadd (struct option_cache *oc,
+ 			   struct packet *packet, struct lease *lease,
+ 			   struct client_state *client_state,
+@@ -2451,6 +2488,31 @@
+ 				   in_options, cfg_options, scope, oc, MDL)) {
+ 		if (data.len) {
+ 			char name [256];
++#ifdef EXTENDED_NEW_OPTION_INFO			
++			if (  extended_option_environment )
++			{
++				if(  ( oc->option->universe != &dhcp_universe )
++				   &&( oc->option->universe->index > fqdn_universe.index )
++				   &&( es->universe !=  oc->option->universe )
++			          )
++				{
++					es->universe = oc->option->universe;
++					(*(es->universe->foreach))
++					     (  (struct packet *)0, (struct lease *)0, 
++						client_state, 
++						in_options, cfg_options, 
++						scope, es->universe, es, 
++						build_universe_info_envvar
++					     );
++				}else
++				if ( lookup_new_option_info(oc->option) != 0L )			   
++					build_universe_info_envvar
++					      ( oc, packet, lease, client_state, 
++						in_options, cfg_options, scope,
++						oc->option->universe, es 
++					      );
++			}
++#endif
+ 			if (dhcp_option_ev_name (name, sizeof name,
+ 						 oc -> option)) {
+ 				client_envadd (es -> client, es -> prefix,
+@@ -2479,6 +2541,7 @@
+ 
+ 	es.client = client;
+ 	es.prefix = prefix;
++	es.universe = 0L;
+ 
+ 	client_envadd (client,
+ 		       prefix, "ip_address", "%s", piaddr (lease -> address));
+@@ -2690,7 +2760,14 @@
+ 			s = option -> name;
+ 			if (j + 1 == buflen)
+ 				return 0;
++#ifdef EXTENDED_NEW_OPTION_INFO
++			if ( ! extended_option_environment )
++			    buf [j++] = '_';
++			else
++			    buf [j++] = '.';
++#else
+ 			buf [j++] = '_';
++#endif
+ 		}
+ 		++i;
+ 	} while (i != 2);
+diff -urN dhcp-3.0.3/client/scripts/linux dhcp-3.0.3-work/client/scripts/linux
+--- dhcp-3.0.3/client/scripts/linux	2002-11-15 02:09:09.000000000 +0100
++++ dhcp-3.0.3-work/client/scripts/linux	2005-10-19 18:46:52.000000000 +0200
+@@ -22,6 +22,19 @@
+ # 4. TIMEOUT not tested. ping has a flag I don't know, and I'm suspicious
+ # of the $1 in its args.
+ 
++if [ -n "${dhc_dbus}" ]; then
++   /usr/bin/dbus-send \
++       --system \
++       --dest=com.redhat.dhcp \
++       --type=method_call \
++       /com/redhat/dhcp/$interface \
++       com.redhat.dhcp.set \
++       'string:'"`env | /bin/egrep -v '^(PATH|SHLVL|_|PWD|dhc_dbus)\='`";
++       if (( ( dhc_dbus & 31 ) == 31 )); then
++           exit 0;
++       fi;
++fi;
++
+ make_resolv_conf() {
+   if [ "x$new_domain_name" != x ] && [ x"$new_domain_name_servers" != x ]; then
+     echo search $new_domain_name >/etc/resolv.conf
+@@ -80,6 +93,7 @@
+ fi
+ 
+ if [ x$reason = xPREINIT ]; then
++ if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 2 ) != 2 )); then
+   if [ x$alias_ip_address != x ]; then
+     # Bring down alias interface. Its routes will disappear too.
+     ifconfig $interface:0- inet 0
+@@ -98,6 +112,7 @@
+   sleep 1
+ 
+   exit_with_hooks 0
++ fi
+ fi
+ 
+ if [ x$reason = xARPCHECK ] || [ x$reason = xARPSEND ]; then
+@@ -115,6 +130,7 @@
+     fi
+   fi
+     
++ if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 2 ) != 2 )); then
+   if [ x$old_ip_address != x ] && [ x$alias_ip_address != x ] && \
+ 		[ x$alias_ip_address != x$old_ip_address ]; then
+     # Possible new alias. Remove old alias.
+@@ -124,13 +140,18 @@
+     # IP address changed. Bringing down the interface will delete all routes,
+     # and clear the ARP cache.
+     ifconfig $interface inet 0 down
+-
+   fi
++ fi
++
+   if [ x$old_ip_address = x ] || [ x$old_ip_address != x$new_ip_address ] || \
+      [ x$reason = xBOUND ] || [ x$reason = xREBOOT ]; then
+ 
++ if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 2 ) != 2 )); then
+     ifconfig $interface inet $new_ip_address $new_subnet_arg \
+ 							$new_broadcast_arg
++ fi
++ 
++ if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 4 ) != 4 )); then
+     # Add a network route to the computed network address.
+     if [ $relmajor -lt 2 ] || \
+ 		( [ $relmajor -eq 2 ] && [ $relminor -eq 0 ] ); then
+@@ -140,13 +161,18 @@
+       route add default gw $router
+     done
+   fi
++  fi
++ if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 2 ) != 2 )); then
+   if [ x$new_ip_address != x$alias_ip_address ] && [ x$alias_ip_address != x ];
+    then
+     ifconfig $interface:0- inet 0
+     ifconfig $interface:0 inet $alias_ip_address $alias_subnet_arg
+     route add -host $alias_ip_address $interface:0
+   fi
++ fi
++ if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 1 ) != 1 )); then
+   make_resolv_conf
++ fi
+   exit_with_hooks 0
+ fi
+ 
+@@ -168,19 +194,24 @@
+ fi
+ 
+ if [ x$reason = xTIMEOUT ]; then
++ if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 2 ) != 2 )); then
+   if [ x$alias_ip_address != x ]; then
+     ifconfig $interface:0- inet 0
+   fi
+   ifconfig $interface inet $new_ip_address $new_subnet_arg \
+ 					$new_broadcast_arg
++ fi
+   set $new_routers
+   ############## what is -w in ping?
+   if ping -q -c 1 $1; then
++   if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 2 ) != 2 )); then
+     if [ x$new_ip_address != x$alias_ip_address ] && \
+ 			[ x$alias_ip_address != x ]; then
+       ifconfig $interface:0 inet $alias_ip_address $alias_subnet_arg
+       route add -host $alias_ip_address dev $interface:0
+     fi
++   fi 
++   if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 4 ) != 4 )); then
+     if [ $relmajor -lt 2 ] || \
+ 		( [ $relmajor -eq 2 ] && [ $relminor -eq 0 ] ); then
+       route add -net $new_network_number
+@@ -188,10 +219,16 @@
+     for router in $new_routers; do
+       route add default gw $router
+     done
++   fi
++
++   if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 1 ) != 1 )); then
+     make_resolv_conf
++   fi
+     exit_with_hooks 0
+   fi
++ if [ -z "${dhc_dbus}" ] || (( ( dhc_dbus & 2 ) != 2 )); then
+   ifconfig $interface inet 0 down
++ fi
+   exit_with_hooks 1
+ fi
+ 
+diff -urN dhcp-3.0.3/common/parse.c dhcp-3.0.3-work/common/parse.c
+--- dhcp-3.0.3/common/parse.c	2005-03-03 17:55:23.000000000 +0100
++++ dhcp-3.0.3-work/common/parse.c	2005-10-19 18:43:28.000000000 +0200
+@@ -1270,6 +1270,10 @@
+ 	option_hash_add (option -> universe -> hash,
+ 			 (const char *)option -> name,
+ 			 0, option, MDL);
++#ifdef EXTENDED_NEW_OPTION_INFO
++	if ( new_option_info_tree != 0L )
++		add_new_option_info( option );
++#endif
+ 	return 1;
+ }
+ 
+diff -urN dhcp-3.0.3/common/tables.c dhcp-3.0.3-work/common/tables.c
+--- dhcp-3.0.3/common/tables.c	2004-09-01 19:06:35.000000000 +0200
++++ dhcp-3.0.3-work/common/tables.c	2005-10-19 18:43:28.000000000 +0200
+@@ -1238,3 +1238,40 @@
+ 			   fqdn_universe.name, 0,
+ 			   &fqdn_universe, MDL);
+ }
++
++#ifdef EXTENDED_NEW_OPTION_INFO
++#include <search.h>
++
++void *new_option_info_tree = 0L;
++
++static int  new_option_info_comparator( const void* p1, const void *p2 )
++{
++	uint32_t ocode1 =  (((const struct option*)p1)->universe->index << 8)
++		          |(((const struct option*)p1)->code),
++		 ocode2 =  (((const struct option*)p2)->universe->index << 8)
++	                  |(((const struct option*)p2)->code);
++	return( (ocode1 == ocode2) 
++		? 0 
++		:( ( ocode1 > ocode2 )
++		   ?  1
++		   : -1
++	         )
++	      );
++}
++
++void *add_new_option_info( struct option *option )
++{
++	if ( option->universe->index >= fqdn_universe.index )
++		return 0L;
++	if ( new_option_info_tree == GENERATE_NEW_OPTION_INFO )
++		new_option_info_tree = (void*)0L;
++	return tsearch( option, &(new_option_info_tree), new_option_info_comparator );
++}
++
++void *lookup_new_option_info( struct option *option )
++{
++	if ( new_option_info_tree == GENERATE_NEW_OPTION_INFO )
++		return 0L;
++	return tfind( option, &(new_option_info_tree), new_option_info_comparator );
++}
++#endif
+diff -urN dhcp-3.0.3/includes/dhcpd.h dhcp-3.0.3-work/includes/dhcpd.h
+--- dhcp-3.0.3/includes/dhcpd.h	2005-04-30 01:10:57.000000000 +0200
++++ dhcp-3.0.3-work/includes/dhcpd.h	2005-10-19 18:43:28.000000000 +0200
+@@ -1799,6 +1799,14 @@
+ void initialize_common_option_spaces PROTO ((void));
+ struct universe *config_universe;
+ 
++#define EXTENDED_NEW_OPTION_INFO
++#ifdef EXTENDED_NEW_OPTION_INFO
++#define GENERATE_NEW_OPTION_INFO ((void*)1)
++extern void   *new_option_info_tree;
++extern void   *add_new_option_info( struct option*);
++extern void   *lookup_new_option_info( struct option *);
++#endif
++
+ /* stables.c */
+ #if defined (FAILOVER_PROTOCOL)
+ extern failover_option_t null_failover_option;

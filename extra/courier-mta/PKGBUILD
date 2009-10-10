@@ -1,0 +1,103 @@
+# $Id: PKGBUILD 53172 2009-09-26 10:12:15Z allan $
+# Maintainer: tobias <tobias@archlinux.org>
+# Contributor: Tobias Kieslich <tobias@justdreams.de>
+
+# -----------  NOTE TO ALL USERS ------------
+# Go read http://www.courier-mta.org/install.html b4 running or building courier
+
+
+pkgname=courier-mta
+pkgver=0.62.1
+pkgrel=4
+pkgdesc="IMAP(s)/POP3(s) and SMTP Server with ML-manager, webmail and webconfig"
+arch=(i686 x86_64)
+license=('GPL2')
+backup=('etc/courier/imapd.cnf' 'etc/courier/pop3d.cnf' \
+        'etc/courier/imapd' 'etc/courier/imapd-ssl' \
+        'etc/courier/pop3d' 'etc/courier/pop3d-ssl' \
+        'etc/courier/courierd' 'etc/courier/sqwebmaild' \
+        'etc/courier/esmtpd' 'etc/courier/esmtpd-ssl' \
+        'etc/courier/esmtpd.cnf' 'etc/courier/esmtpd-msa' \
+        'etc/courier/webadmin/password' 'etc/courier/esmtpauthclient' \
+        'etc/conf.d/courier-mta')
+url="http://courier-mta.org"
+depends=('courier-authlib>=0.62.2' 'fam' 'gcc-libs' 'db>=4.8' 'pcre' 'mime-types' 'ca-certificates')
+optdepends=('libldap')
+makedepends=('apache>=2.2.9-3' 'pam>=1.0.1-2' 'expect' 'gnupg' 'libldap' 'fam')
+provides=('smtp-server' 'imap-server' 'pop3-server' 'courier-imap' 'courier-maildrop')
+conflicts=('courier-imap' 'smtp-server' 'imap-server' 'courier-maildrop' 'ucspi-tcp')
+options=('!libtool')
+install=courier-mta.install
+source=(http://downloads.sourceforge.net/project/courier/courier/${pkgver}/courier-${pkgver}.tar.bz2
+        courier-mta.rc.d courier-mta.conf.d )
+md5sums=('4437906c139a6a334ee9ae625730ae5e'
+         'a915ebe9f3539c99e1f7cda437f0811a'
+         'c299a91338e882aa7eed5a159f9d7eac')
+
+build() {
+  cd ${srcdir}/courier-${pkgver}
+
+ # fix a tiny bug
+  sed -i -e \
+    's|--with-authchangepwdir=/var/tmp/dev/null|--with-authchangepwdir=$libexecdir/authlib|' \
+    configure && chmod 755 configure
+ # courier is more about configuring than compiling :-), lets start the mess
+  ./configure --prefix=/usr \
+    --sysconfdir=/etc/courier \
+    --libdir=/usr/lib \
+    --libexecdir=/usr/lib \
+    --localstatedir=/var/spool/courier \
+    --disable-root-check \
+    --enable-unicode \
+    --enable-workarounds-for-imap-client-bugs \
+    --enable-mimetypes=/etc/mime.types \
+    --with-piddir=/var/run/courier \
+    --with-locking-method=lockf \
+    --with-trashquota \
+    --with-db=db \
+    --with-trashquota \
+    --with-random=/dev/urandom --without-ispell \
+    --with-mailuser=courier --with-mailgroup=courier \
+    --with-certdb=/etc/ssl/certs/
+  make || return 1
+  #chown mail.mail ${pkgdir}/var/spool/courier
+  make DESTDIR=${pkgdir} install
+ # docs say we can get rid of those after make
+  find ${pkgdir} -name '*\.a' -exec -rm -f {} \;
+ # install the perftest-script for testings
+  install -Dm755 courier/perftest1 ${pkgdir}/usr/lib/courier/perftest1
+ ###############################################################################
+ # this is what usually "make install-configure" does
+ # *.dist files get rid of "dist"
+  for distfile in ${pkgdir}/etc/courier/*.dist; do
+    mv ${distfile} ${pkgdir}/etc/courier/$(basename ${distfile} .dist)
+  done
+ # install pam files according to the layout used in Archlinux
+  for pamfile in ${pkgdir}/etc/courier/*.authpam; do
+    sed -i 's|/lib/security/pam_pwdb\.so|pam_unix.so|' ${pamfile}
+    #echo "password  required  pam_unix.so" >> $pamfile
+    install -Dm 644 ${pamfile} \
+      ${pkgdir}/etc/pam.d/$(basename ${pamfile} .authpam | sed "s/d$//")
+    rm -f ${pamfile}
+  done
+ ###############################################################################
+ # Arch Linux specific tweaks to make things easier for the user
+ # create passwordfile for webadmin -> standard archwebadmin
+  sed -i 's|/etc/courier/webadmin/password|$(DESTDIR)/etc/courier/webadmin/password|g' Makefile
+  yes "archwebadmin" | make DESTDIR=${pkgdir} install-webadmin-password
+ # arch specific scripts
+  install -Dm 644 ${srcdir}/${pkgname}.conf.d ${pkgdir}/etc/conf.d/courier-mta
+  install -Dm 755 ${srcdir}/${pkgname}.rc.d ${pkgdir}/etc/rc.d/courier-mta
+  #install -Dm 655 ${srcdir}/courier-webmail-cleancache.cron.hourly \
+  # ${pkgdir}/etc/cron.hourly/courier-webmail-cleancache
+ # bug http://bugs.archlinux.org/task/5154
+  find ${pkgdir}/usr/lib -name '*\.a' -exec rm -f {} \;
+ # fixing some permissions
+  chown -R courier:courier ${pkgdir}/usr/lib/courier/modules
+  chown -R courier:courier ${pkgdir}/var/run/courier
+  chown root.root ${pkgdir}/usr/{.,bin,lib,sbin,share}
+ # make a link to /usr/sbin/sendmail
+  install -dm 755 ${pkgdir}/usr/sbin
+  cd ${pkgdir}/usr/sbin
+  ln -s ../bin/sendmail ./sendmail
+}
