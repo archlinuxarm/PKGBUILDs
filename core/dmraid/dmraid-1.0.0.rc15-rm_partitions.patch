@@ -1,0 +1,222 @@
+diff -up 1.0.0.rc15/include/dmraid/lib_context.h.rmparts 1.0.0.rc15/include/dmraid/lib_context.h
+--- 1.0.0.rc15/include/dmraid/lib_context.h.rmparts	2008-06-20 16:17:35.000000000 +0200
++++ 1.0.0.rc15/include/dmraid/lib_context.h	2009-02-13 12:03:57.000000000 +0100
+@@ -169,6 +169,7 @@ enum action {
+ 	PARTCHAR = 0x20000000,
+ 
+ #endif
++	RMPARTITIONS = 0x40000000,
+ };
+ 
+ /* Arguments allowed ? */
+diff -up 1.0.0.rc15/lib/Makefile.in.rmparts 1.0.0.rc15/lib/Makefile.in
+--- 1.0.0.rc15/lib/Makefile.in.rmparts	2008-06-11 15:07:04.000000000 +0200
++++ 1.0.0.rc15/lib/Makefile.in	2009-02-13 12:03:57.000000000 +0100
+@@ -12,6 +12,7 @@ SOURCES=\
+ 	activate/activate.c \
+ 	activate/devmapper.c \
+ 	device/ata.c \
++	device/partition.c \
+ 	device/scan.c \
+ 	device/scsi.c \
+ 	display/display.c \
+diff -up 1.0.0.rc15/lib/device/dev-io.h.rmparts 1.0.0.rc15/lib/device/dev-io.h
+--- 1.0.0.rc15/lib/device/dev-io.h.rmparts	2008-06-12 12:54:32.000000000 +0200
++++ 1.0.0.rc15/lib/device/dev-io.h	2009-02-13 12:03:57.000000000 +0100
+@@ -19,5 +19,6 @@
+ 
+ int discover_devices(struct lib_context *lc, char **devnodes);
+ int removable_device(struct lib_context *lc, char *dev_path);
++int remove_device_partitions(struct lib_context *lc, void *rs, int dummy);
+ 
+ #endif
+diff -up /dev/null 1.0.0.rc15/lib/device/partition.c
+--- /dev/null	2009-02-13 08:38:43.364262886 +0100
++++ 1.0.0.rc15/lib/device/partition.c	2009-02-13 12:03:57.000000000 +0100
+@@ -0,0 +1,59 @@
++/*
++ * Copyright (C) 2009  Hans de Goede <hdegoede@redhat.com>, Red Hat Inc.
++ *                     All rights reserved.
++ *
++ * See file LICENSE at the top of this source tree for license information.
++ */
++#include <linux/blkpg.h>
++#include <sys/ioctl.h>
++#include <errno.h>
++#include <fcntl.h>
++#include "internal.h"
++
++static int
++_remove_subset_partitions(struct lib_context *lc, struct raid_set *rs)
++{
++	struct raid_dev *rd;
++	struct blkpg_partition part = { 0, };
++	struct blkpg_ioctl_arg io = {
++		.op = BLKPG_DEL_PARTITION,
++		.datalen = sizeof(part),
++		.data = &part,
++	};
++
++	list_for_each_entry(rd, &rs->devs, devs) {
++		int fd = open(rd->di->path, O_RDWR);
++		if (fd < 0)
++			LOG_ERR(lc, 0, "opening %s: %s\n", rd->di->path,
++				strerror(errno));
++
++		/* There is no way to enumerate partitions */
++		for (part.pno = 1; part.pno <= 256; part.pno++) {
++			if (ioctl(fd, BLKPG, &io) < 0 && errno != ENXIO &&
++					(part.pno < 16 || errno != EINVAL))
++				LOG_ERR(lc, 0,
++					"removing part %d from %s: %s\n",
++					part.pno, rd->di->path,
++					strerror(errno));
++		}
++	}
++	return 1;
++}
++
++/* Remove the partition block devices (ie sda1) from block devices (ie sda)
++   used in the set, so that things like hal / blkid won't try to access the
++   disks directly */
++int
++remove_device_partitions(struct lib_context *lc, void *v, int dummy)
++{
++	struct raid_set *subset, *rs = v;
++
++	/* Recursively walk down the chain of stacked RAID sets */
++	list_for_each_entry(subset, &rs->sets, list) {
++		/* Remove partitions from devices of set below this one */
++		if (!T_GROUP(rs) && !remove_device_partitions(lc, subset, 0))
++			return 0;
++	}
++
++	return _remove_subset_partitions(lc, rs);
++}
+diff -up 1.0.0.rc15/lib/metadata/metadata.c.rmparts 1.0.0.rc15/lib/metadata/metadata.c
+--- 1.0.0.rc15/lib/metadata/metadata.c.rmparts	2008-09-17 14:58:31.000000000 +0200
++++ 1.0.0.rc15/lib/metadata/metadata.c	2009-02-13 12:03:57.000000000 +0100
+@@ -2147,6 +2147,9 @@ lib_perform(struct lib_context *lc, enum
+ 	if (get_metadata(lc, action, p, argv))
+ 		ret = p->post(lc, p->pre ? p->pre(p->arg) : p->arg);
+ 
++	if (ret && (RMPARTITIONS & action))
++		process_sets(lc, remove_device_partitions, 0, SETS);
++
+ 	if (LOCK == p->lock)
+ 		unlock_resource(lc, NULL);
+ 
+diff -up 1.0.0.rc15/man/dmraid.8.rmparts 1.0.0.rc15/man/dmraid.8
+--- 1.0.0.rc15/man/dmraid.8.rmparts	2008-06-11 15:07:20.000000000 +0200
++++ 1.0.0.rc15/man/dmraid.8	2009-02-13 12:10:11.000000000 +0100
+@@ -8,6 +8,7 @@ dmraid \- discover, configure and activa
+  [-f|--format FORMAT[,FORMAT...]]
+  [{-P|--partchar} CHAR]
+  [-p|--no_partitions]
++ [-Z|--rm_partitions]
+  [--separator SEPARATOR]
+  [-t|--test]
+  [RAID-set...]
+@@ -110,7 +111,11 @@ In case metadata format handlers are cho
+ Useful if devices have multiple metadata signatures.
+ When activating RAID sets,
+ .B -p
+-disables the activation of partitions on them.
++disables the activation of partitions on them, and
++.B -Z
++will make dmraid tell the kernel to remove the partitions from the disks
++underlying the set, ie if sda is part of the set, remove sda1, sda2, etc.
++This prevents applications from directly accessiong the disks bypassing dmraid.
+ RAID set names given on command line don't need to be fully specified
+ (eg, "dmraid -ay sil" would activate all discovered Silicon Image Medley
+ RAID sets).
+diff -up 1.0.0.rc15/tools/commands.c.rmparts 1.0.0.rc15/tools/commands.c
+--- 1.0.0.rc15/tools/commands.c.rmparts	2008-06-20 22:25:33.000000000 +0200
++++ 1.0.0.rc15/tools/commands.c	2009-02-13 12:03:57.000000000 +0100
+@@ -38,7 +38,7 @@ static char const *short_opts = "a:hipP:
+ #endif
+ 	"rR:s::tv"
+ #endif
+-	"VC:S::";
++	"VC:S::Z";
+ 
+ #ifdef HAVE_GETOPTLONG
+ static struct option long_opts[] = {
+@@ -73,6 +73,7 @@ static struct option long_opts[] = {
+ 	{"version", no_argument, NULL, 'V'},
+ 	{"create", required_argument, NULL, 'C'},
+ 	{"spare", optional_argument, NULL, 'S'},
++	{"rm_partitions", no_argument, NULL, 'Z'},
+ 	{NULL, no_argument, NULL, 0}
+ };
+ #endif /* #ifdef HAVE_GETOPTLONG */
+@@ -209,6 +210,7 @@ help(struct lib_context *lc, int arg)
+ 		  "\t[-f|--format FORMAT[,FORMAT...]]\n"
+ 		  "\t[-P|--partchar CHAR]\n"
+ 		  "\t[-p|--no_partitions]\n"
++		  "\t[-Z|--rm_partitions]\n"
+ 		  "\t[--separator SEPARATOR]\n" "\t[RAID-set...]\n", c);
+ 	log_print(lc, "%s\t{-h|--help}\n", c);
+ 	log_print(lc, "%s\t{-V/--version}\n", c);
+@@ -221,7 +223,7 @@ help(struct lib_context *lc, int arg)
+ 		  "\t[-f|--format FORMAT[,FORMAT...]]\n"
+ 		  "\t[-P|--partchar CHAR]\n" "\t[-p|--no_partitions]\n"
+ 		  "\t[--separator SEPARATOR]\n" "\t[-t|--test]\n"
+-		  "\t[RAID-set...]\n", c);
++		  "\t[-Z|--rm_partitions] [RAID-set...]\n", c);
+ 	log_print(lc,
+ 		  "%s\t{-b|--block_devices} *\n"
+ 		  "\t[-c|--display_columns][FIELD[,FIELD...]]...\n"
+@@ -274,7 +276,7 @@ static struct actions actions[] = {
+ 	 UNDEF,			/* Set in check_activate() by mandatory option argument. */
+ 	 UNDEF,
+ 	 ACTIVATE | DEACTIVATE | FORMAT | HELP | IGNORELOCKING | NOPARTITIONS |
+-	 SEPARATOR
++	 SEPARATOR | RMPARTITIONS
+ #ifndef DMRAID_MINI
+ 	 | DBG | TEST | VERBOSE
+ #endif
+@@ -293,7 +295,8 @@ static struct actions actions[] = {
+ #  endif
+ 	 | RAID_DEVICES | RAID_SETS,
+ 	 ACTIVE | INACTIVE | COLUMN | DBG | DUMP | DMERASE | GROUP | HELP |
+-	 IGNORELOCKING | NOPARTITIONS | SEPARATOR | TEST | VERBOSE
++	 IGNORELOCKING | NOPARTITIONS | SEPARATOR | TEST | VERBOSE |
++	 RMPARTITIONS
+ #else
+ 	 , UNDEF
+ #endif
+@@ -310,7 +313,7 @@ static struct actions actions[] = {
+ 	{'P',
+ 	 PARTCHAR,
+ 	 ACTIVATE | DEACTIVATE,
+-	 FORMAT | HELP | IGNORELOCKING | SEPARATOR
++	 FORMAT | HELP | IGNORELOCKING | SEPARATOR | RMPARTITIONS
+ #ifndef DMRAID_MINI
+ 	 | DBG | TEST | VERBOSE
+ #endif
+@@ -323,7 +326,7 @@ static struct actions actions[] = {
+ 	{'p',
+ 	 NOPARTITIONS,
+ 	 ACTIVATE | DEACTIVATE,
+-	 FORMAT | HELP | IGNORELOCKING | SEPARATOR
++	 FORMAT | HELP | IGNORELOCKING | SEPARATOR | RMPARTITIONS
+ #ifndef DMRAID_MINI
+ 	 | DBG | TEST | VERBOSE
+ #endif
+@@ -573,6 +576,15 @@ static struct actions actions[] = {
+ 	 check_spare_argument,
+ 	 LC_HOT_SPARE_SET,
+ 	 },
++	{'Z',
++	 RMPARTITIONS,
++	 ACTIVATE, /* We cannot undo this on DEACTIVATE ! */
++	 DBG | FORMAT | HELP | IGNORELOCKING | NOPARTITIONS | VERBOSE |
++	 SEPARATOR,
++	 ARGS,
++	 NULL,
++	 0,
++	 },
+ };
+ 
+ /*
