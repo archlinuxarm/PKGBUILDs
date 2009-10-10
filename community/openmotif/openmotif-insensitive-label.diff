@@ -1,0 +1,417 @@
+---
+ ChangeLog           |   20 ++++++++++++++++++++
+ lib/Xm/I18List.c    |   10 ++++++++++
+ lib/Xm/IconButton.c |   10 ++++++++++
+ lib/Xm/IconG.c      |   12 ++++++++++++
+ lib/Xm/Label.c      |   12 ++++++++++++
+ lib/Xm/LabelG.c     |   11 ++++++++++-
+ lib/Xm/List.c       |    9 ++++++++-
+ lib/Xm/MultiList.c  |    4 +++-
+ lib/Xm/ResEncod.c   |    4 ++++
+ lib/Xm/Text.c       |    9 ++++++---
+ lib/Xm/TextF.c      |    5 +++++
+ lib/Xm/TextOut.c    |    6 ++++++
+ lib/Xm/TextP.h      |    2 ++
+ lib/Xm/Xm.c         |   50 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ lib/Xm/XmI.h        |    8 ++++++++
+ 15 files changed, 166 insertions(+), 6 deletions(-)
+
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,23 @@
++2007-09-13  Yuriy Syrota  <yura@ics.com>
++	* lib/Xm/ResEncod.c:
++	Fixed bug #1389 (A middle click on a tab lets nedit segfault)
++
++2007-09-13  Yuriy Syrota  <yura@ics.com>
++	* lib/Xm/TextP.h, lib/Xm/Text.c:
++	Fixed bug #1377 (XmText memory leak in InitializeHook)
++
++2007-08-15  Yuriy Syrota  <yura@ics.com>
++	* lib/Xm/MultiList.c:
++	Fixed bug #1385 (core.self of XmMultiList is NULL, but must be pointer itself.)
++
++2007-08-13  Yuriy Syrota  <yura@ics.com>
++	* lib/Xm/ResEncod.c:
++	Fixed bug #1380 (Can not set title bar in 2.3)
++
++2007-07-12  Yuriy Syrota  <yura@ics.com>
++	* lib/Xm/Scale.c:
++	Fixed bug #1373 (Problem with XmScale)
++
+ 2006-12-27  Yuriy Syrota  <yura@ics.com>
+ 	* lib/Xm/List.c:
+ 	Fixed bugs #1369 and #1370 (XmList max item height problem)
+--- a/lib/Xm/I18List.c
++++ b/lib/Xm/I18List.c
+@@ -2086,7 +2086,12 @@ CreateGCs(Widget w)
+     values.graphics_exposures = False;
+ 
+     mask = GCForeground | GCBackground | GCFont | GCGraphicsExposures;
++
++#ifdef FIX_1381
++	smask = mask | GCFillStyle;
++#else
+     smask = mask | GCStipple | GCFillStyle;
++#endif
+     
+     XmI18List_gc(ilist) = XtGetGC(w, mask, &values);
+ 
+@@ -2117,6 +2122,11 @@ CreateGCs(Widget w)
+     	XmI18List_entry_background_gc(ilist) = XtGetGC(w, mask, &values);
+     }
+ 
++#ifdef FIX_1381
++	/*added for gray insensitive foreground (instead stipple)*/
++    values.foreground=_XmAssignInsensitiveColor(w);
++#endif
++
+     XmI18List_stippled_gc(ilist) = XtGetGC(w, smask, &values);
+ 
+     if (XmI18List_entry_background_use(ilist))
+--- a/lib/Xm/IconButton.c
++++ b/lib/Xm/IconButton.c
+@@ -1836,7 +1836,11 @@ CreateGCs(Widget w)
+     values.fill_style = FillStippled;
+ 
+     mask = GCForeground | GCBackground | GCGraphicsExposures;
++#ifdef FIX_1381
++	smask = mask | GCFillStyle;
++#else
+     smask = mask | GCStipple | GCFillStyle;
++#endif
+ 
+     if (fs) {
+         values.font = fs->fid;
+@@ -1844,6 +1848,12 @@ CreateGCs(Widget w)
+     }
+ 
+     XmIconButton_gc(iw) = XtGetGC(w, mask, &values);
++
++#ifdef FIX_1381
++	/*added for gray insensitive foreground (instead stipple)*/
++    values.foreground = _XmAssignInsensitiveColor(w);
++#endif
++
+     XmIconButton_stippled_text_gc(iw) = XtGetGC(w, smask, &values);
+ 
+     /*
+--- a/lib/Xm/IconG.c
++++ b/lib/Xm/IconG.c
+@@ -3134,9 +3134,21 @@ UpdateGCs(
+ 
+ 
+     /** insensitive gc **/
++
++#ifdef FIX_1381
++	/*added for gray insensitive foreground (instead stipple)*/
++	values.foreground = _XmAssignInsensitiveColor( XtParent(wid));
++#else
+     values.foreground = IG_Foreground(wid) ;
++#endif
++
+     values.background = IG_Background(wid) ; 
++#ifdef FIX_1381
++    valueMask |= GCFillStyle;
++#else
+     valueMask |= GCFillStyle | GCStipple;
++#endif
++
+     values.fill_style = FillOpaqueStippled;
+     values.stipple = _XmGetInsensitiveStippleBitmap(wid);
+ 
+--- a/lib/Xm/Label.c
++++ b/lib/Xm/Label.c
+@@ -688,8 +688,15 @@ SetNormalGC(XmLabelWidget lw)
+   lw->label.normal_GC = XtAllocateGC((Widget) lw, 0, valueMask, &values,
+ 				     dynamicMask, 0);
+   
++#ifdef FIX_1381
++/*added for gray insensitive foreground (instead stipple)*/
++  valueMask |= GCFillStyle;
++  values.foreground =  _XmAssignInsensitiveColor((Widget)lw);
++#else
+   valueMask |= GCFillStyle | GCStipple;
+   values.foreground = lw->core.background_pixel;
++#endif
++
+   values.background = lw->primitive.foreground;
+   values.fill_style = FillOpaqueStippled;
+   values.stipple = _XmGetInsensitiveStippleBitmap((Widget) lw);
+@@ -1557,6 +1564,9 @@ Redisplay(
+ 		       lp->StringRect.width,
+ 		       lp->alignment,
+ 		       XmPrim_layout_direction(lw), NULL);
++
++#ifdef FIX_1381
++#else
+ #ifdef USE_XFT
+       if (!XtIsSensitive(wid))
+         {
+@@ -1569,6 +1579,8 @@ Redisplay(
+           XSetFillStyle(XtDisplay(lw), lp->insensitive_GC, FillOpaqueStippled);
+         }
+ #endif
++#endif
++
+     }
+   
+   if (lp->_acc_text != NULL) 
+--- a/lib/Xm/LabelG.c
++++ b/lib/Xm/LabelG.c
+@@ -1246,9 +1246,15 @@ SetNormalGC(XmLabelGadget lw)
+ 
+     LabG_NormalGC(lw) = XtAllocateGC((Widget) mw, 0, valueMask, &values,
+         dynamicMask, 0);
+-
++#ifdef FIX_1381
++/*added for gray insensitive foreground (instead stipple)*/
++  	valueMask |= GCFillStyle;
++	values.foreground = _XmAssignInsensitiveColor((Widget)mw);
++#else
+     valueMask |= GCFillStyle | GCStipple;
+     values.foreground = LabG_Background(lw); 
++#endif
++
+     values.background = LabG_Foreground(lw);
+     values.fill_style = FillOpaqueStippled;
+ 
+@@ -2435,6 +2441,8 @@ LRectangle *background_box)
+             lw->rectangle.y + LabG_TextRect(lw).y + LabG_StringRect(lw).y,
+             LabG_StringRect(lw).width,
+             LabG_Alignment(lw), LayoutG(lw), NULL);
++#ifdef FIX_1381
++#else
+ #ifdef USE_XFT
+         if (!XtIsSensitive(wid)) {
+           XSetFillStyle(XtDisplay(lw), LabG_InsensitiveGC(lw), FillStippled);
+@@ -2448,6 +2456,7 @@ LRectangle *background_box)
+           XSetFillStyle(XtDisplay(lw), LabG_InsensitiveGC(lw), FillOpaqueStippled);
+         }
+ #endif
++#endif
+     }
+ 
+     if (LabG__acceleratorText(lw) != NULL)
+--- a/lib/Xm/List.c
++++ b/lib/Xm/List.c
+@@ -2758,9 +2758,16 @@ MakeGC(XmListWidget lw)
+   lw->list.InverseGC = XtAllocateGC((Widget) lw, lw->core.depth,
+ 				    valueMask, &values, modifyMask, 0);
+ 
+-  values.foreground = lw->primitive.foreground;
+   values.background = lw->core.background_pixel;
++#ifdef FIX_1381
++/*added for gray insensitive foreground (instead stipple)*/
++  values.foreground = _XmAssignInsensitiveColor(lw);
++  valueMask |=  GCFillStyle;
++#else
++  values.foreground = lw->primitive.foreground;
+   valueMask |= GCStipple | GCFillStyle;
++#endif
++
+   values.fill_style = FillOpaqueStippled;
+   values.stipple = _XmGetInsensitiveStippleBitmap((Widget) lw);
+ 
+--- a/lib/Xm/MultiList.c
++++ b/lib/Xm/MultiList.c
+@@ -21,6 +21,7 @@
+ /************************************************************
+ *	TYPEDEFS AND DEFINES
+ *************************************************************/
++#define BUG_FIX_1385 1
+ 
+ #define H_MARGIN 5
+ #define V_MARGIN 5
+@@ -137,7 +138,7 @@ static XtResource resources[] =
+     sizeof(int), XtOffsetOf(XmMultiListRec, ext_list.visible_rows),
+     XmRImmediate, (XtPointer) XmMultiList_DEFAULT_VISIBLE_COUNT
+   },
+-
++#ifndef BUG_FIX_1385
+   {
+     XmNnumColumns, XmCNumColumns, XmRShort,
+     sizeof(short), 0,
+@@ -227,6 +228,7 @@ static XtResource resources[] =
+     sizeof(unsigned char), 0, 
+     NULL, (XtPointer) NULL
+   }
++#endif /* BUG_FIX_1385 */
+ };
+ 
+ static XmSyntheticResource syn_resources[] =
+--- a/lib/Xm/ResEncod.c
++++ b/lib/Xm/ResEncod.c
+@@ -2524,6 +2524,7 @@ processCharsetAndTextUtf8(XmStringCharSe
+   /* Now copy in the text */
+   if (ctlen > 0) {
+     char *text = Convert(ctext, ctlen, "UTF-8", tag);
++    if (text == NULL) return(False);
+     *outc = ctextConcat(*outc, *outlen, text, strlen(text));
+     *outlen += ctlen;
+     XtFree(text);
+@@ -2555,6 +2556,9 @@ processCharsetAndText(XmStringCharSet ta
+ {
+   unsigned int		ctlen = 0, len;
+ 
++  if (strcmp(tag, CS_UTF_8) == 0)
++    tag = XmFONTLIST_DEFAULT_TAG;
++
+   if (strcmp(tag, XmFONTLIST_DEFAULT_TAG) == 0)
+     {
+       XTextProperty	prop_rtn;
+--- a/lib/Xm/Text.c
++++ b/lib/Xm/Text.c
+@@ -2171,6 +2171,7 @@ Initialize(Widget rw,
+    newtw->text.onthespot->under_preedit = False;
+    newtw->text.onthespot->under_verify_preedit = False;
+    newtw->text.onthespot->verify_commit = False;
++   newtw->text.tm_table = (XtTranslations)NULL;
+ }
+ 
+ /*
+@@ -2278,14 +2279,13 @@ InitializeHook(Widget wid,
+   if (XmDirectionMatch(XmPrim_layout_direction(tw),
+ 		       XmTOP_TO_BOTTOM_RIGHT_TO_LEFT)) {
+     char *vevent_bindings;
+-    XtTranslations tm_table;
+     
+     vevent_bindings =
+ 		(String)XtMalloc(strlen(_XmTextIn_XmTextVEventBindings) + 1);
+     strcpy(vevent_bindings, _XmTextIn_XmTextVEventBindings);
+-    tm_table = (XtTranslations)XtParseTranslationTable(vevent_bindings);
++    tw->text.tm_table = (XtTranslations)XtParseTranslationTable(vevent_bindings);
+     XtFree(vevent_bindings);
+-    XtOverrideTranslations(wid, tm_table);
++    XtOverrideTranslations(wid, tw->text.tm_table);
+   }
+   
+   /* Initialize table */
+@@ -2437,6 +2437,9 @@ Destroy(Widget w)
+   
+   if (tw->text.onthespot != NULL)
+     XtFree((char *)tw->text.onthespot);
++
++  if (tw->text.tm_table != NULL)
++    XtFree((char *)tw->text.tm_table);
+ }
+ 
+ static void 
+--- a/lib/Xm/TextF.c
++++ b/lib/Xm/TextF.c
+@@ -1959,9 +1959,14 @@ SetNormGC(XmTextFieldWidget tf,
+   if (change_stipple) {
+     valueMask |= GCFillStyle;
+     if (stipple) {
++#ifdef FIX_1381
++		  /*added for gray insensitive foreground (instead stipple)*/
++		  values.foreground = _XmAssignInsensitiveColor((Widget)tf);
++#else
+       values.fill_style = FillStippled;
+       valueMask |= GCStipple;
+       values.stipple = tf->text.stipple_tile;
++#endif
+     } else 
+       values.fill_style = FillSolid;
+   }
+--- a/lib/Xm/TextOut.c
++++ b/lib/Xm/TextOut.c
+@@ -624,9 +624,15 @@ SetNormGC(XmTextWidget tw,
+   if (change_stipple) {
+     valueMask |= GCFillStyle;
+     if (stipple) {
++#ifdef FIX_1381
++		/*added for gray insensitive foreground (instead stipple)*/
++		values.foreground = _XmAssignInsensitiveColor((Widget)tw);
++#else
+       values.fill_style = FillStippled;
+       valueMask |= GCStipple;
+       values.stipple = data->stipple_tile;
++#endif
++
+     } else 
+       values.fill_style = FillSolid;
+   }
+--- a/lib/Xm/TextP.h
++++ b/lib/Xm/TextP.h
+@@ -227,6 +227,8 @@ typedef struct _XmTextPart {
+     int          hsbar_scrolling;/* scroring using the horizontal scrollbar */
+ 
+     OnTheSpotDataTW onthespot;  /* On the spot preedit style support. */
++
++    XtTranslations tm_table;
+ } XmTextPart;
+ 
+ typedef struct _XmTextRec {
+--- a/lib/Xm/Xm.c
++++ b/lib/Xm/Xm.c
+@@ -426,3 +426,53 @@ XmObjectAtPoint(
+     _XmAppUnlock(app);
+     return return_wid;
+ }
++
++#ifdef FIX_1381
++/************************************************************************
++ *
++ *  _XmAssignInsensitiveColor
++ *  Allocate the Gray color for display widget like insensitive.
++ *
++ *
++ ************************************************************************/
++
++Pixel
++_XmAssignInsensitiveColor(Widget w)
++{
++	static XColor screen_in_out;
++	int status;
++	Pixel p;
++
++	p = w->core.background_pixel;
++	XQueryColor(XtDisplay(w), w->core.colormap, &screen_in_out);
++	if (		 (abs(screen_in_out.red-RGB_GREY_VALUE)<RGB_GREY_PRESISE)
++			&& (abs(screen_in_out.green-RGB_GREY_VALUE)<RGB_GREY_PRESISE)
++			&& (abs(screen_in_out.blue-RGB_GREY_VALUE)<RGB_GREY_PRESISE) )
++	{
++		/*text color have to be more light for wosn't be invisible*/
++		screen_in_out.red=(RGB_GREY_VALUE+RGB_GREY_VALUE/2)<<8;
++		screen_in_out.green=(RGB_GREY_VALUE+RGB_GREY_VALUE/2)<<8;
++		screen_in_out.blue=(RGB_GREY_VALUE+RGB_GREY_VALUE/2)<<8;
++
++		status = XAllocColor(XtDisplay(w), w->core.colormap, &screen_in_out);
++		if (status)
++		{
++			p = screen_in_out.pixel;
++		}
++	}
++	else
++	{    /*gray color*/
++		screen_in_out.red=RGB_GREY_VALUE<<8;
++		screen_in_out.green=RGB_GREY_VALUE<<8;
++		screen_in_out.blue=RGB_GREY_VALUE<<8;
++
++		status = XAllocColor(XtDisplay(w), w->core.colormap, &screen_in_out);
++		if (status)
++		{
++			p = screen_in_out.pixel;
++		}
++	}
++
++	return p;
++}
++#endif
+--- a/lib/Xm/XmI.h
++++ b/lib/Xm/XmI.h
+@@ -276,5 +276,13 @@ extern void (*_XtProcessLock)();
+ }  /* Close scope of 'extern "C"' declaration which encloses file. */
+ #endif
+ 
++#define FIX_1381
++
++#ifdef FIX_1381
++#define RGB_GREY_VALUE 128
++#define RGB_GREY_PRESISE 50
++extern Pixel _XmAssignInsensitiveColor(Widget w);
++#endif
++
+ #endif /* _XmI_h */
+ /* DON'T ADD ANYTHING AFTER THIS #endif */

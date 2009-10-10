@@ -1,0 +1,76 @@
+#!/bin/sh
+
+. /etc/rc.d/functions
+. /etc/conf.d/dkfilter
+. /etc/rc.conf
+
+DKFILTER_IN_ARGS="--user=$DKFILTER_USER --group=$DKFILTER_GROUP --hostname=$DKFILTER_HOSTNAME 127.0.0.1:10025 127.0.0.1:10026"
+DKFILTER_OUT_ARGS="--user=$DKFILTER_USER --group=$DKFILTER_GROUP --keyfile=$DKFILTER_PRIVATE_KEY --selector=$DKFILTER_SELECTOR --domain=$DKFILTER_DOMAIN --method=nofws --headers 127.0.0.1:10027 127.0.0.1:10028"
+
+DKFILTER_IN_BIN="/usr/bin/dkfilter.in"
+DKFILTER_OUT_BIN="/usr/bin/dkfilter.out"
+PIDDKFILTER_IN="/var/run/dkfilter.in"
+PIDDKFILTER_OUT="/var/run/dkfilter.out"
+
+get_pid_in() {
+	ps fax | grep dkfilter.in | grep perl | awk -- "{print \$1}"
+}
+
+get_pid_out() {
+	ps fax | grep dkfilter.out | grep perl | awk -- "{print \$1}"
+}
+
+case "$1" in
+	start)
+		stat_busy "Starting inbound DomainKeys-filter (dkfilter.in)..."
+		$DKFILTER_IN_BIN $DKFILTER_IN_ARGS 1>>/var/log/dkfilter.in 2>>/var/log/dkfilter.in &
+		get_pid_in dkfilter.in >$PIDDKFILTER_IN
+		RETVAL=$?
+		if [ $RETVAL -eq 0 ]; then
+			stat_done
+		else
+			stat_fail
+			exit $RETVAL
+		fi
+
+		stat_busy "Starting outbound DomainKeys-filter (dkfilter.out)..."
+		$DKFILTER_OUT_BIN $DKFILTER_OUT_ARGS 1>>/var/log/dkfilter.out 2>>/var/log/dkfilter.out &
+		get_pid_out dkfilter.out >$PIDDKFILTER_OUT
+		RETVAL=$?
+		if [ $RETVAL -eq 0 ]; then
+			stat_done
+		else
+			stat_fail
+			exit $RETVAL
+		fi
+		;;
+
+	stop)
+		stat_busy "Shutting down inbound DomainKeys-filter (dkfilter.in)..."
+		kill `get_pid_in`
+		RETVAL=$?
+		if [ $RETVAL -eq 0 ]; then
+			stat_done
+		else
+			stat_fail
+			exit $RETVAL
+		fi
+		stat_busy "Shutting down outbound DomainKeys-filter (dkfilter.out)..."
+		kill `get_pid_out`
+		RETVAL=$?
+		if [ $RETVAL -eq 0 ]; then
+			stat_done
+		else
+			stat_fail
+			exit $RETVAL
+		fi
+		;;
+	restart)
+		$0 stop
+		$0 start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac

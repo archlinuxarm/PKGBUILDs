@@ -1,0 +1,92 @@
+#!/bin/bash
+
+. /etc/conf.d/dictd
+. /etc/rc.conf
+
+. /etc/rc.d/functions
+
+preconfiguration() {
+	stat_busy "Check dictd configuration"
+	if [ ! -e ${DICTD_CONF} ];  then
+		echo "No configuration"
+		stat_fail 
+		exit 1
+	fi
+	stat_done
+
+	# The new way of doing this is to scan /usr/lib/dict and tweek the conf
+	stat_busy "Scanning for dictionaries..."
+	if [ ! -d "${DICTD_DICTDIR}" ]; then
+ 		echo "No dictionaries found"
+		stat_fail
+		exit 1
+	fi
+	stat_done
+	pushd ${DICTD_DICTDIR} >/dev/null
+	INDEXFILES=`ls *.index`
+	if [ -z "$INDEXFILES" ]; then
+ 		echo "No dictionaries found"
+		stat_fail 
+		exit 1
+	fi
+
+	cat $DICTD_CONF | sed -e '/^#LASTLINE/,$d' > $DICTD_TMPCONF
+	echo "#LASTLINE" >> $DICTD_TMPCONF
+
+	CNT=0
+	for i in $INDEXFILES
+	do
+		DNAME=`echo $i | awk -F . '{print $1;}'`
+		#two possible names for a matching dictionary, check which is there.
+		if [ -f ${DNAME}.dict.dz ]; then
+			DICT=${DNAME}.dict.dz
+		elif [ -f ${DNAME}.dict ];then
+			DICT=${DNAME}.dict
+		else
+			echo "Index $i has no matching dictionaray..."
+		fi
+
+		#ok, go an index, and a dixtionary, append.
+		echo "database $DNAME { data \"${DICTD_DICTDIR}/${DICT}\"" >> $DICTD_TMPCONF
+		echo "         index \"${DICTD_DICTDIR}/$i\" }" >> $DICTD_TMPCONF
+
+		CNT=`expr $CNT + 1`
+	done
+	popd >/dev/null
+	mv ${DICTD_TMPCONF} ${DICTD_CONF}
+	echo "$CNT dictionary indexes found."
+}
+
+PID=`pidof -o %PPID /usr/sbin/dictd`
+
+case "$1" in 
+  start)
+  	preconfiguration || exit 1
+	stat_busy "Start dictd daemon"
+	/usr/sbin/dictd $DICTD_ARGS -- $DICTD_EARGS
+	if [  $? -gt 0 ]; then
+	      stat_fail
+	else
+	      add_daemon dictd
+  	      stat_done
+    	fi
+    ;;
+
+   stop)
+	stat_busy "Stop dictd daemon"
+	kill $PID 2>/dev/null 1>/dev/null
+	if [ $? -gt 0 ]; then
+	    stat_fail
+	else
+	    rm_daemon dictd
+	    stat_done
+	fi
+	;;
+  restart)
+	 $0 stop
+	sleep 1
+	$0 start
+	;;
+  *)
+	echo "usage: $0 {start|stop|restart}"
+esac

@@ -1,0 +1,79 @@
+# Contributor: [vEX] <niechift.dot.vex.at.gmail.dot.com>
+# Contributor: Zeqadious <zeqadious.at.gmail.dot.com>
+
+pkgname=xbmc
+pkgver=9.04.1
+pkgrel=6
+pkgdesc="XBMC Media Center"
+arch=('i686' 'x86_64')
+url="http://xbmc.org"
+license=('GPL' 'custom')
+depends=('alsa-lib' 'curl' 'enca' 'faac' 'freetype2' 'fribidi' 'gawk' 'glew' \
+         'hal' 'jasper' 'libgl' 'libjpeg>=6b-5' 'libmad' 'libmysqlclient' \
+         'libxinerama' 'libxrandr' 'lzo2' 'sdl_image' 'sdl_mixer' 'sqlite3' \
+         'tre' 'unzip' 'x-server' 'libcdio')
+makedepends=('autoconf' 'automake' 'boost' 'cmake' 'gcc' 'gperf' 
+             'libtool>=2.2.6a-1' 'make' 'nasm' 'patch' 'pkgconfig' 'zip'
+	     'libvdpau')
+optdepends=('libcdio: optical disc support'
+            'lirc: remote controller support'
+            'pmount: mount removable devices as normal user'
+            'smbclient: access windows shares'
+            'unrar: access compressed files without unpacking them')
+install=("${pkgname}.install")
+source=(http://arch.pp.ru/~sergej/dl/XBMC-${pkgver}.src.tar.bz2
+	libfaad2-enable-AC_PROG_CXX.patch
+	xbmc-build-fix.patch
+	xbmc-safe-fullscreen.patch)
+md5sums=('6d10b1887345e7aabcbfbdbcf486d590'
+         '6864778d6adc3ccc79130c294f2fffd9'
+         '79f9dae6da96e331b055ba3718b9cf2c'
+         'c4d53522773846d8670884cc38f94aa0')
+
+build() {
+    cd "${srcdir}/XBMC"
+    _xbmcprefix=/opt/xbmc
+
+    if [ $NOEXTRACT -ne 1 ]; then
+#    if true; then
+      sed -e 's|/usr/lib64/libcurl.so|/usr/lib/libcurl.so|' -i Makefile.include.in
+      patch -p1 <$srcdir/xbmc-build-fix.patch
+      patch -p0 <$srcdir/xbmc-safe-fullscreen.patch
+      patch -p0 <$srcdir/libfaad2-enable-AC_PROG_CXX.patch
+
+      autoreconf -vif xbmc/cores/dvdplayer/Codecs/libfaad2
+      autoreconf -vif xbmc/lib/libass
+      autoreconf -vif xbmc/cores/dvdplayer/Codecs/libdvd/libdvdcss
+      autoreconf -vif
+
+      ./configure --prefix=${_xbmcprefix} --disable-debug --enable-vdpau --disable-pulse --disable-avahi || return 1
+    fi
+
+    make || return 1
+    make prefix=${pkgdir}${_xbmcprefix} install || return 1
+
+    # Fix the shell script
+    sed -i '4iexport SDL_AUDIODRIVER=alsa' ${pkgdir}${_xbmcprefix}/bin/xbmc
+
+    # Menu item
+    install -Dm644 ${srcdir}/XBMC/tools/Linux/xbmc.desktop \
+                   ${pkgdir}/usr/share/applications/xbmc.desktop || return 1
+    install -Dm644 ${srcdir}/XBMC/tools/Linux/xbmc.png \
+                   ${pkgdir}/usr/share/pixmaps/xbmc.png || return 1
+
+    # XBMCTex
+    install -Dm755 ${srcdir}/XBMC/tools/XBMCTex/XBMCTex \
+                   ${pkgdir}${_xbmcprefix}/share/xbmc/tools/xbmctex || return 1
+
+    # License(s)
+    install -dm755 ${pkgdir}/usr/share/licenses/${pkgname}
+    for licensef in LICENSE.GPL README.linux copying.txt; do
+        mv ${pkgdir}${_xbmcprefix}/share/xbmc/${licensef} \
+           ${pkgdir}/usr/share/licenses/${pkgname} || return 1
+    done
+
+    # profile.d
+    mkdir -p $pkgdir/etc/profile.d/ && \
+    echo "export PATH=\$PATH:${_xbmcprefix}/bin" >$pkgdir/etc/profile.d/xbmc.sh && \
+    chmod 0755 $pkgdir/etc/profile.d/xbmc.sh
+}

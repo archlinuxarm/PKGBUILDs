@@ -1,0 +1,46 @@
+# $Id: PKGBUILD 82 2009-07-17 19:56:55Z aaron $
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
+
+pkgname=nemesis
+pkgver=1.4
+pkgrel=2
+pkgdesc="command-line network packet crafting and injection utility"
+arch=(i686 x86_64)
+url="http://nemesis.sourceforge.net/"
+license=('GPL')
+depends=(glibc)
+options=('!libtool')
+source=(http://downloads.sourceforge.net/sourceforge/nemesis/nemesis-$pkgver.tar.gz \
+	http://arch.pp.ru/~sergej/dl/libnet-1.0.2a.tar.gz \
+	nemesis-proto_tcp.c.diff)
+md5sums=('acd7de57798a7f90f445f80d4d4a6e61'
+         'ddf53f0f484184390e8c2a1bd0853667'
+         'd802f7a12610e68124200310ad80e0ac')
+
+build() {
+  # build libnet
+  cd ${startdir}/src/Libnet-1.0.2a
+
+  # very dirty hack
+  sed -i 's#malloc(p_size)#malloc(p_size*2)#' src/libnet_packet_mem.c
+
+  [ $NOEXTRACT -eq 1 ] || ./configure --prefix=$startdir/src/libnet
+  make || return 1
+  make MAN_PREFIX=$startdir/src/libnet/usr/man/man3 install || return 1
+
+  # build nemesis
+  cd ${startdir}/src/nemesis-$pkgver
+
+  export PATH="$startdir/src/libnet/bin:$PATH"
+  export CFLAGS="-D__GLIBC__=0 -I$startdir/src/libnet/include -DLIBNET_LIL_ENDIAN"
+  export LDFLAGS="-L$startdir/src/libnet/lib"
+
+  patch -Np1 <$srcdir/nemesis-proto_tcp.c.diff
+
+  [ $NOEXTRACT -eq 1 ] || ./configure --prefix=/usr \
+	    --with-libnet-includes=$startdir/src/libnet/include \
+	    --with-libnet-libraries=$startdir/src/libnet/lib
+  make || return 1
+  make DESTDIR=$startdir/pkg install
+}

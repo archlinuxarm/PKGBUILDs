@@ -1,0 +1,53 @@
+#!/bin/bash
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+
+get_pid() {
+	[ -f /var/run/jmc.pid ] && echo `cat /var/run/jmc.pid`
+}
+
+case "$1" in
+  start)
+    stat_busy "Starting jabber mail component daemon"
+
+    [ -f /var/run/jmc.pid ] && rm -f /var/run/jmc.pid
+    PID=`get_pid`
+    if [ -z "$PID" ]; then
+      cd /usr/lib/jmc && python jmc.py -c /etc/ejabberd/jmc.xml 1>>/var/log/ejabberd/jmc1.log 2>>/var/log/ejabberd/jmc2.log &
+      if [ $? -gt 0 ]; then
+        stat_fail
+        exit 1
+      else
+        add_daemon jmc
+        stat_done
+      fi
+    else
+      stat_fail
+      exit 1
+    fi
+    ;;
+
+  stop)
+    stat_busy "Stopping jabber mail component daemon"
+    PID=`get_pid`
+    [ ! -z "$PID" ] && kill $PID &> /dev/null
+    if [ $? -gt 0 ]; then
+      stat_fail
+      exit 1
+    else
+      rm -f /var/run/jmc.pid &> /dev/null
+      rm_daemon jmc
+      stat_done
+    fi
+    ;;
+
+  restart)
+    $0 stop
+    sleep 3
+    $0 start
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart}"  
+esac
+exit 0

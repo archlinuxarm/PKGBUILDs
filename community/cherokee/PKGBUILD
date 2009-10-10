@@ -1,0 +1,60 @@
+# $Id: PKGBUILD 2534 2009-09-19 14:32:54Z foutrelis $
+# Maintainer: Evangelos Foutras <foutrelis@gmail.com>
+# Contributor: Link Dupont <link@subpop.net>
+
+pkgname=cherokee
+pkgver=0.99.24
+pkgrel=2
+pkgdesc="A very fast, flexible and easy to configure Web Server"
+arch=('i686' 'x86_64')
+url="http://www.cherokee-project.com/"
+license=('GPL2')
+depends=('openssl' 'pcre')
+makedepends=('gettext' 'libldap' 'pam' 'libmysqlclient' 'ffmpeg' 'geoip')
+optdepends=('python: cherokee-admin (administrative web interface)'
+            'libldap: ldap validator'
+            'pam: pam validator'
+            'libmysqlclient: mysql validator'
+            'ffmpeg: Audio/Video streaming handler'
+            'geoip: GeoIP rule module'
+            'rrdtool: RRDtool based information collector')
+backup=('etc/cherokee/cherokee.conf'
+        'etc/logrotate.d/cherokee')
+install=cherokee.install
+source=(http://www.cherokee-project.com/download/0.99/$pkgver/cherokee-$pkgver.tar.gz
+        cherokee.rc
+        cherokee.logrotate
+        use-log-subdirectory.patch)
+options=('!libtool')
+md5sums=('5afed8bdd6020dc5bf0ba9ec83b947f1'
+         '87f16f9e807275248bf252af17099974'
+         '213069423f1c4a6abbb6e13a5b261bcf'
+         '7d5cdf855a1fdad525c1d9dddc9eae79')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  patch -p1 -i "$srcdir/use-log-subdirectory.patch" || return 1
+
+  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
+              --with-wwwroot=/srv/http --disable-static \
+              --with-wwwuser=http --with-wwwgroup=http \
+              --enable-os-string="Arch Linux"
+  make || return 1
+  make DESTDIR="$pkgdir" install
+
+  # PAM configuration file for cherokee
+  install -D -m644 pam.d_cherokee "$pkgdir/etc/pam.d/$pkgname"
+
+  # Copy configuration converters
+  for converter in contrib/*to*.py; do
+    install -D -m755 $converter "$pkgdir/usr/share/$pkgname/converters/$(basename $converter)"
+  done
+
+  # Fix ownership of /var/lib/cherokee/graphs
+  chown -R http:http "$pkgdir/var/lib/$pkgname/graphs"
+
+  install -d -m755 -o http -g http "$pkgdir/var/log/$pkgname"
+  install -D -m755 "$srcdir/$pkgname.rc" "$pkgdir/etc/rc.d/$pkgname"
+  install -D -m644 "$srcdir/$pkgname.logrotate" "$pkgdir/etc/logrotate.d/$pkgname"
+}

@@ -1,0 +1,53 @@
+#!/bin/bash
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+
+get_pid() {
+	echo `ps fax|egrep "python ./yahoo.py" | grep -v grep | awk -- "{print \\\$1}"`
+}
+
+case "$1" in
+  start)
+    stat_busy "Starting jabber Yahoo! transport daemon"
+
+    [ -f /var/run/yahoot.pid ] && rm -f /var/run/yahoot.pid
+    PID=`get_pid`
+    if [ -z "$PID" ]; then
+      cd /usr/lib/yahoo-t && python ./yahoo.py >>/var/log/ejabberd/yahoo1.log 2>>/var/log/ejabberd/yahoo2.log &
+      if [ $? -gt 0 ]; then
+        stat_fail
+        exit 1
+      else
+        add_daemon yahoo-t
+        stat_done
+      fi
+    else
+      stat_fail
+      exit 1
+    fi
+    ;;
+
+  stop)
+    stat_busy "Stopping jabber Yahoo! transport daemon"
+    PID=`get_pid`
+    [ ! -z "$PID" ] && kill $PID &> /dev/null
+    if [ $? -gt 0 ]; then
+      stat_fail
+      exit 1
+    else
+      rm -f /var/run/yahoot.pid &> /dev/null
+      rm_daemon yahoo-t
+      stat_done
+    fi
+    ;;
+
+  restart)
+    $0 stop
+    sleep 3
+    $0 start
+    ;;
+  *)
+    echo "usage: $0 {start|stop|restart}"  
+esac
+exit 0
