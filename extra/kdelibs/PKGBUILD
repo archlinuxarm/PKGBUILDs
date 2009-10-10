@@ -1,0 +1,63 @@
+# $Id: PKGBUILD 54238 2009-10-07 12:24:03Z andrea $
+# Maintainer: Pierre Schmitz <pierre@archlinux.de>
+
+pkgname=kdelibs
+pkgver=4.3.2
+pkgrel=2
+pkgdesc="KDE Core Libraries"
+arch=('i686' 'x86_64')
+url='http://www.kde.org'
+license=('GPL' 'LGPL' 'FDL')
+depends=('qt' 'shared-mime-info' 'hal' 'xz-utils' 'heimdal'
+	 'enchant' 'jasper' 'openexr' 'strigi>=0.7.0' 'libxtst'
+	 'giflib' 'soprano>=2.3.0' 'ca-certificates' 'xdg-utils')
+makedepends=('pkgconfig' 'cmake' 'automoc4' 'intltool' 'avahi' 'libgl' 'hspell' 'libxslt')
+replaces=('arts')
+install='kdelibs.install'
+source=(http://download.kde.org/stable/${pkgver}/src/${pkgname}-${pkgver}.tar.bz2
+        'kde-applications-menu.patch' 'archlinux-menu.patch' 'abs-syntax-highlight.patch'
+	'fix-deadlock-in-klocale.patch')
+md5sums=('0564ed8ba804a0f3f1cee9732a3d2d72'
+         '280f34ee159845f8902c31bd499254fc'
+         '0f214b222bfb0327e7a2b6fb13756895'
+         '18ea42696a7f41332a092d6ead7efc6a'
+	 'bc3053d898e24d6635f87166f419daf7')
+
+build() {
+	cd $srcdir/${pkgname}-${pkgver}
+
+	# avoid file conflict with gnome-menu
+	patch -p1 -i $srcdir/kde-applications-menu.patch
+	# add Archlinux menu entry
+	patch -p1 -i $srcdir/archlinux-menu.patch
+	# add syntax highlightning for PKGBUILD and .install files
+	patch -p1 -i $srcdir/abs-syntax-highlight.patch
+
+	# fixed in 4.3.3
+	patch -p0 -i ${srcdir}/fix-deadlock-in-klocale.patch || return 1
+
+	cd ..
+	mkdir build
+	cd build
+	cmake ../${pkgname}-${pkgver} \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_SKIP_RPATH=ON \
+		-DCMAKE_{SHARED,MODULE,EXE}_LINKER_FLAGS='-Wl,--no-undefined -Wl,--as-needed' \
+		-DKDE_DISTRIBUTION_TEXT='Arch Linux' \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DSYSCONF_INSTALL_DIR=/etc \
+		-DHTML_INSTALL_DIR=/usr/share/doc/kde/html \
+		-DKDE_DEFAULT_HOME='.kde4' \
+		-DWITH_FAM=OFF
+	make
+}
+
+package() {
+	cd $srcdir/build
+	make DESTDIR=$pkgdir install
+
+	# cert bundle seems to be hardcoded
+	# link it to the one from ca-certificates
+	rm -f $pkgdir/usr/share/apps/kssl/ca-bundle.crt
+	ln -sf /etc/ssl/certs/ca-certificates.crt $pkgdir/usr/share/apps/kssl/ca-bundle.crt
+}

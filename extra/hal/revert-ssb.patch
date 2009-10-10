@@ -1,0 +1,86 @@
+From 36d076bf26350e022731cb7c2c9f4e840dd25e37 Mon Sep 17 00:00:00 2001
+From: Matthew Garrett <mjg59@srcf.ucam.org>
+Date: Wed, 15 Jul 2009 06:54:36 +0000
+Subject: add support for devices on the SSB bus
+
+This provides detection of e. g. Broadcom wifi (b43) or ethernet (b44) devices.
+
+This doesn't update the spec for the new bus, but has been used successfully
+for years, and other buses were recently committed without spec updates as
+well. With hal being phased out and in maintenance mode, that should be
+appropriate now.
+
+See thread at http://lists.freedesktop.org/archives/hal/2007-April/008080.html
+---
+diff --git a/hald/linux/device.c b/hald/linux/device.c
+index 2823650..5ebde5a 100644
+--- a/hald/linux/device.c
++++ b/hald/linux/device.c
+@@ -850,6 +850,43 @@ ide_compute_udi (HalDevice *d)
+ /*--------------------------------------------------------------------------------------------------------------*/
+ 
+ static HalDevice *
++ssb_add (const gchar *sysfs_path, const gchar *device_file, HalDevice *parent_dev, const gchar *parent_path)
++{
++	HalDevice *d;
++
++	d = hal_device_new ();
++	hal_device_property_set_string (d, "linux.sysfs_path", sysfs_path);
++	hal_device_property_set_string (d, "linux.sysfs_path_device", sysfs_path);
++	hal_device_property_set_string (d, "info.bus", "ssb");
++	if (parent_dev != NULL) {
++		hal_device_property_set_string (d, "info.parent", hal_device_get_udi (parent_dev));
++	} else {
++		hal_device_property_set_string (d, "info.parent", "/org/freedesktop/Hal/devices/computer");
++	}
++
++	hal_util_set_driver (d, "info.linux.driver", sysfs_path);
++
++	hal_device_property_set_string (d, "ssb.bus_id",
++					hal_util_get_last_element (sysfs_path));
++	return d;
++}
++
++static gboolean
++ssb_compute_udi (HalDevice *d)
++{
++	gchar udi[256];
++
++	hal_util_compute_udi (hald_get_gdl (), udi, sizeof (udi),
++			      "/org/freedesktop/Hal/devices/ssb_%s",
++			      hal_device_property_get_string (d, "xen.bus_id"));
++	hal_device_set_udi (d, udi);
++	hal_device_property_set_string (d, "info.udi", udi);
++	return TRUE;
++}
++
++/*--------------------------------------------------------------------------------------------------------------*/
++
++static HalDevice *
+ ieee1394_add (const gchar *sysfs_path, const gchar *device_file, HalDevice *parent_dev, const gchar *parent_path)
+ {
+ 	HalDevice *d;
+@@ -4283,6 +4320,13 @@ static DevHandler dev_handler_bluetooth =
+ 	.remove       = dev_remove
+ };
+ 
++static DevHandler dev_handler_ssb = {
++	.subsystem   = "ssb",
++	.add         = ssb_add,
++	.compute_udi = ssb_compute_udi,
++	.remove      = dev_remove
++};
++
+ /* s390 specific busses */
+ static DevHandler dev_handler_ccw = {
+ 	.subsystem   = "ccw",
+@@ -4683,6 +4727,7 @@ static DevHandler *dev_handlers[] = {
+ 	&dev_handler_serial,
+ 	&dev_handler_serio,
+ 	&dev_handler_sound,
++	&dev_handler_ssb,
+ 	&dev_handler_tape,
+ 	&dev_handler_tape390,
+ 	/* Don't change order of usbclass and usb */
+--
+cgit v0.8.2

@@ -1,0 +1,88 @@
+#! /bin/sh
+# Created by Tobias Powalowski <tpowa@archlinux.org>
+# Settings
+APPNAME=$(basename "${0}")
+CONFIG="/etc/mkpxelinux.conf"
+
+usage ()
+{
+    echo "${APPNAME}: usage"
+    echo""
+    echo "  -d=INSTALLDIR    Your INSTALLDIR overwrites config default"
+    echo "  -c=CONFIG        Use CONFIG file. default: /etc/mkpxelinux.conf"
+    echo "  -h               This message."
+    exit 1
+}
+
+[ "$1" == "" ] && usage && exit 1
+
+while [ $# -gt 0 ]; do
+	case $1 in
+		-c=*|--c=*) CONFIG="$(echo $1 | awk -F= '{print $2;}')" ;;
+		-d=*|--d=*) INSTALLDIR="$(echo $1 | awk -F= '{print $2;}')" ;;
+		-h|--h|?) usage ;; 
+		*) usage ;;
+		esac
+	shift
+done
+
+if [ ! -f "${CONFIG}" ]; then
+	echo "config file '${CONFIG}' cannot be found, aborting..."
+    exit 1
+fi
+
+. "${CONFIG}"
+# export for mkinitcpio
+[ -n "${APPENDBOOTMESSAGE}" ] && export APPENDBOOTMESSAGE
+[ -n "${APPENDOPTIONSBOOTMESSAGE}" ] && export APPENDOPTIONSBOOTMESSAGE
+
+if [ "${INSTALLDIR}" = "" ]; then 
+	echo "ERROR: No INSTALLDIR name specified, please use the -d option"
+	 exit 1
+fi
+
+if ! [ $UID -eq 0 ]; then 
+	echo "ERROR: only works when run as root!"
+	exit 1
+fi
+
+! [ -e ${INSTALLDIR} ] && echo "No ${INSTALLDIR} found!" && exit 1 
+export TEMPDIR=${NFSROOTDIR}
+export INSTALLDIR=${INSTALLDIR}
+export RUNPROGRAM="${APPNAME}"
+[ "${BOOTMESSAGE}" = "" ] && export BOOTMESSAGE=$(mktemp /tmp/bootmessage.XXXX)
+[ "${OPTIONSBOOTMESSAGE}" = "" ] && export OPTIONSBOOTMESSAGE=$(mktemp /tmp/optionsbootmessage.XXXX)
+export USEKERNEL=${VERSION}
+# begin script
+# create default
+echo ":: Creating pxelinux default config file ..."
+mkdir -p ${INSTALLDIR}/pxelinux.cfg
+if [ "${PXELINUX_DEFAULT}" = "" ]; then
+	[ -e ${INSTALLDIR}/pxelinux.cfg/default ] && rm ${INSTALLDIR}/pxelinux.cfg/default
+	echo "prompt ${PROMPT}" >> ${INSTALLDIR}/pxelinux.cfg/default
+	echo "timeout ${TIMEOUT}" >> ${INSTALLDIR}/pxelinux.cfg/default
+	echo "display boot.msg" >> ${INSTALLDIR}/pxelinux.cfg/default
+	echo "F1 boot.msg" >> ${INSTALLDIR}/pxelinux.cfg/default
+	echo "F2 options.msg" >> ${INSTALLDIR}/pxelinux.cfg/default
+	echo "default arch"  >> ${INSTALLDIR}/pxelinux.cfg/default
+	echo "label arch" >> ${INSTALLDIR}/pxelinux.cfg/default
+	echo "kernel vmlinuz" >> ${INSTALLDIR}/pxelinux.cfg/default
+	echo "append initrd=initrd.img ${KERNEL_BOOT_OPTIONS}" >> ${INSTALLDIR}/pxelinux.cfg/default
+else
+	sed "s|@@PROMPT@@|${PROMPT}|g;s|@@TIMEOUT@@|${TIMEOUT}|g;s|@@KERNEL_BOOT_OPTIONS@@|${KERNEL_BOOT_OPTIONS}|g" \
+		${PXELINUX_DEFAULT} >  ${INSTALLDIR}/pxelinux.cfg/default
+fi
+[ ! -s ${INSTALLDIR}/pxelinux.cfg/default ] && echo "No pxelinux default config found" && exit 1
+echo ":: Calling mkinitcpio CONFIG=${MKINITCPIO_CONFIG} KERNEL=${VERSION} ..." 
+# generate initramdisk
+echo ":: Creating initramdisk ..."
+	mkinitcpio -c ${MKINITCPIO_CONFIG} -k ${VERSION} -g ${INSTALLDIR}/initrd.img
+echo ":: Using ${KERNEL} as image kernel ..."
+	install -m644 ${KERNEL} ${INSTALLDIR}/vmlinuz
+echo ":: Installing message files to ${INSTALLDIR} ..."
+	install -m644 ${BOOTMESSAGE} ${INSTALLDIR}/boot.msg
+	install -m644 ${OPTIONSBOOTMESSAGE} ${INSTALLDIR}/options.msg
+	[ ! -s ${INSTALLDIR}/boot.msg ] && echo 'ERROR:no boot.msg found, aborting!' && exit 1
+	[ ! -s ${INSTALLDIR}/options.msg ] && echo 'ERROR:no options.msg found, aborting!' && exit 1
+echo ":: Installing PXELINUX to ${INSTALLDIR} ..."
+	install -m644 /usr/lib/syslinux/pxelinux.0 ${INSTALLDIR}/pxelinux.0 && echo "Installation completed."

@@ -1,0 +1,264 @@
+From 9932dc2cafe66b752e965175a3cbe9889819feb5 Mon Sep 17 00:00:00 2001
+From: Jody Goldberg <jody@gnome.org>
+Date: Sat, 14 Mar 2009 22:21:18 +0000
+Subject: clear the 'im_block_edit_start' flag. (gnm_pane_unrealize) : set the flag.
+
+2009-03-13  Jody Goldberg <jody@gnome.org>
+
+	* src/gnm-pane.c (gnm_pane_realize) : clear the 'im_block_edit_start' flag.
+	(gnm_pane_unrealize) : set the flag.
+
+	* src/application.c (gnm_app_add_extra_ui) : take a group name.
+	(gnm_app_remove_extra_ui) : patch minor leak.
+	* src/gnm-plugin.c (plugin_service_ui_activate) : use the supplied
+	  group name rather than a static name that is shared between all
+	  custom ui.
+
+
+
+svn path=/branches/gnumeric-1-8/; revision=17206
+---
+diff --git a/ChangeLog b/ChangeLog
+index 6ac6e49..17b282a 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,3 +1,14 @@
++2009-03-13  Jody Goldberg <jody@gnome.org>
++
++	* src/gnm-pane.c (gnm_pane_realize) : clear the 'im_block_edit_start' flag.
++	(gnm_pane_unrealize) : set the flag.
++
++	* src/application.c (gnm_app_add_extra_ui) : take a group name.
++	(gnm_app_remove_extra_ui) : patch minor leak.
++	* src/gnm-plugin.c (plugin_service_ui_activate) : use the supplied
++	  group name rather than a static name that is shared between all
++	  custom ui.
++
+ 2009-01-18  Jody Goldberg <jody@gnome.org>
+ 
+ 	* configure.in : post release bump
+diff --git a/NEWS b/NEWS
+index 3603561..4391951 100644
+--- a/NEWS
++++ b/NEWS
+@@ -1,5 +1,8 @@
+ Gnumeric 1.8.5
+ 
++Jody:
++	* Work around semantic changes in gtk-2.16.
++
+ Jon Kåre:
+         * Work around vulnerability in Python. CVE-2009-0318 [#569648]
+ 
+diff --git a/src/application.c b/src/application.c
+index fccd626..04a47e7 100644
+--- a/src/application.c
++++ b/src/application.c
+@@ -815,12 +815,14 @@ gnm_action_free (GnmAction *action)
+ }
+ 
+ GnmAppExtraUI *
+-gnm_app_add_extra_ui (GSList *actions, char *layout,
++gnm_app_add_extra_ui (char const *group_name,
++		      GSList *actions, char *layout,
+ 		      char const *domain,
+ 		      gpointer user_data)
+ {
+ 	GnmAppExtraUI *extra_ui = g_new0 (GnmAppExtraUI, 1);
+ 	extra_uis = g_slist_prepend (extra_uis, extra_ui);
++	extra_ui->group_name = g_strdup (group_name);
+ 	extra_ui->actions = actions;
+ 	extra_ui->layout = layout;
+ 	extra_ui->user_data = user_data;
+@@ -832,6 +834,8 @@ void
+ gnm_app_remove_extra_ui (GnmAppExtraUI *extra_ui)
+ {
+ 	g_signal_emit (G_OBJECT (app), signals [CUSTOM_UI_REMOVED], 0, extra_ui);
++	g_free (extra_ui->group_name);
++	g_free (extra_ui);
+ }
+ 
+ void
+diff --git a/src/application.h b/src/application.h
+index 18d8837..ccf7c01 100644
+--- a/src/application.h
++++ b/src/application.h
+@@ -79,6 +79,7 @@ struct _GnmAction {
+ 	GnmActionHandler	handler;
+ };
+ typedef struct {
++	char const *group_name;
+ 	GSList	   *actions;
+ 	char	   *layout;
+ 	char const *domain;
+@@ -90,7 +91,8 @@ GnmAction *gnm_action_new  (char const *name, char const *label,
+ 			    GnmActionHandler handler);
+ void	   gnm_action_free (GnmAction *action);
+ 
+-GnmAppExtraUI *gnm_app_add_extra_ui (GSList *actions, char *layout,
++GnmAppExtraUI *gnm_app_add_extra_ui (char const *group_name,
++				     GSList *actions, char *layout,
+ 				     char const *domain,
+ 				     gpointer user_data);
+ void	   gnm_app_remove_extra_ui  (GnmAppExtraUI *extra_ui);
+diff --git a/src/gnm-pane-impl.h b/src/gnm-pane-impl.h
+index 90578b8..a38e2dc 100644
+--- a/src/gnm-pane-impl.h
++++ b/src/gnm-pane-impl.h
+@@ -30,14 +30,13 @@ struct _GnmPane {
+ 	gboolean   sliding_adjacent_h, sliding_adjacent_v;
+ 
+ 	/*  IM */
+-	guint      reseting_im :1;	/* quick hack to keep gtk_im_context_reset from starting an edit */
++	guint im_block_edit_start :1; /* see gnm_pane_key_press for details */
++	guint im_first_focus	  :1; /* see gnm_pane_init for details */
+ 	guint      preedit_length;
+ 	GtkIMContext  *im_context;
+ 	PangoAttrList *preedit_attrs;
+-	gboolean insert_decimal;
+-
+-
+ 
++	gboolean insert_decimal;
+ 
+ 	int		 index;
+ 	struct {
+diff --git a/src/gnm-pane.c b/src/gnm-pane.c
+index 68be0d4..58f1579 100644
+--- a/src/gnm-pane.c
++++ b/src/gnm-pane.c
+@@ -587,11 +587,15 @@ gnm_pane_key_press (GtkWidget *widget, GdkEventKey *event)
+ 		event->keyval == GDK_KP_Decimal ||
+ 		event->keyval == GDK_KP_Separator;
+ 
+-	if (gtk_im_context_filter_keypress (pane->im_context,event))
++	if (gtk_im_context_filter_keypress (pane->im_context, event))
+ 		return TRUE;
+-	pane->reseting_im = TRUE;
++
++	/* in gtk-2.8 something changed.  gtk_im_context_reset started
++	 * triggering a pre-edit-changed.  We'd end up start and finishing an
++	 * empty edit every time the cursor moved */
++	pane->im_block_edit_start = TRUE;
+ 	gtk_im_context_reset (pane->im_context);
+-	pane->reseting_im = FALSE;
++	pane->im_block_edit_start = FALSE;
+ 
+ 	if (gnm_pane_key_mode_sheet (pane, event, allow_rangesel))
+ 		return TRUE;
+@@ -628,7 +632,17 @@ static gint
+ gnm_pane_focus_in (GtkWidget *widget, GdkEventFocus *event)
+ {
+ #ifndef GNM_USE_HILDON
++	/* The first call to focus-in was sometimes the first thing to init the
++	 * imcontext.  In which case the im_context_focus_in would fire a
++	 * preedit-changed, and we would start editing. */
++	GnmPane *pane = GNM_PANE (widget);
++	if (pane->im_first_focus)
++		pane->im_block_edit_start = TRUE;
+ 	gtk_im_context_focus_in (GNM_PANE (widget)->im_context);
++	if (pane->im_first_focus) {
++		pane->im_first_focus = FALSE;
++		pane->im_block_edit_start = FALSE;
++	}
+ #endif
+ 	return (*GTK_WIDGET_CLASS (parent_klass)->focus_in_event) (widget, event);
+ }
+@@ -645,6 +659,8 @@ gnm_pane_realize (GtkWidget *w)
+ {
+ 	GtkStyle  *style;
+ 
++	GNM_PANE (w)->im_block_edit_start = FALSE;
++
+ 	if (GTK_WIDGET_CLASS (parent_klass)->realize)
+ 		(*GTK_WIDGET_CLASS (parent_klass)->realize) (w);
+ 
+@@ -667,8 +683,10 @@ gnm_pane_unrealize (GtkWidget *widget)
+ 	pane = GNM_PANE (widget);
+ 	g_return_if_fail (pane != NULL);
+ 
+-	if (pane->im_context)
++	if (pane->im_context) {
++		pane->im_block_edit_start = TRUE;
+ 		gtk_im_context_set_client_window (pane->im_context, NULL);
++	}
+ 
+ 	(*GTK_WIDGET_CLASS (parent_klass)->unrealize)(widget);
+ }
+@@ -733,10 +751,7 @@ cb_gnm_pane_preedit_changed (GtkIMContext *context, GnmPane *pane)
+ 		pango_attr_list_unref (pane->preedit_attrs);
+ 	gtk_im_context_get_preedit_string (pane->im_context, &preedit_string, &pane->preedit_attrs, &cursor_pos);
+ 
+-	/* in gtk-2.8 something changed.  gtk_im_context_reset started
+-	 * triggering a pre-edit-changed.  We'd end up start and finishing an
+-	 * empty edit every time the cursor moved */
+-	if (!pane->reseting_im &&
++	if (!pane->im_block_edit_start &&
+ 	    !wbcg_is_editing (wbcg) && !wbcg_edit_start (wbcg, TRUE, TRUE)) {
+ 		gtk_im_context_reset (pane->im_context);
+ 		pane->preedit_length = 0;
+@@ -911,8 +926,9 @@ gnm_pane_init (GnmPane *pane)
+ 
+ 	pane->im_context = gtk_im_multicontext_new ();
+ 	pane->preedit_length = 0;
+-	pane->preedit_attrs = NULL;
+-	pane->reseting_im = FALSE;
++	pane->preedit_attrs    = NULL;
++	pane->im_block_edit_start = FALSE;
++	pane->im_first_focus = TRUE;
+ 
+ 	GTK_WIDGET_SET_FLAGS (canvas, GTK_CAN_FOCUS);
+ 	GTK_WIDGET_SET_FLAGS (canvas, GTK_CAN_DEFAULT);
+@@ -2062,9 +2078,9 @@ gnm_pane_size_guide_start (GnmPane *pane, gboolean vert, int colrow, int width)
+ 			"width-pixels", 1,
+ 			NULL);
+ 	else {
+-		static char const dat [] = { 0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88 };
++		static unsigned char const dat [] = { 0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88 };
+ 		GdkBitmap *stipple = gdk_bitmap_create_from_data (
+-			GTK_WIDGET (pane)->window, dat, 8, 8);
++			GTK_WIDGET (pane)->window, (const gchar *)dat, 8, 8);
+ 		foo_canvas_item_set (pane->size_guide.guide, "fill-stipple", stipple, NULL);
+ 		g_object_unref (stipple);
+ 	}
+diff --git a/src/gnm-plugin.c b/src/gnm-plugin.c
+index d546a39..dd659bd 100644
+--- a/src/gnm-plugin.c
++++ b/src/gnm-plugin.c
+@@ -363,7 +363,7 @@ plugin_service_ui_activate (GOPluginService *service, ErrorInfo **ret_error)
+ 	PluginServiceUI *service_ui = GNM_PLUGIN_SERVICE_UI (service);
+ 	GError *err = NULL;
+ 	char *full_file_name;
+-	char *xml_ui;
++	char *xml_ui, *group_name;
+ 	char const *textdomain;
+ 
+ 	GO_INIT_RET_ERROR_INFO (ret_error);
+@@ -380,9 +380,11 @@ plugin_service_ui_activate (GOPluginService *service, ErrorInfo **ret_error)
+ 	g_free (full_file_name);
+ 
+ 	textdomain = go_plugin_get_textdomain (service->plugin);
+-	service_ui->layout_id = gnm_app_add_extra_ui (
++	group_name = g_strconcat (go_plugin_get_id (service->plugin), service->id, NULL);
++	service_ui->layout_id = gnm_app_add_extra_ui (group_name,
+ 		service_ui->actions,
+ 		xml_ui, textdomain, service);
++	g_free (group_name);
+ 	service->is_active = TRUE;
+ }
+ 
+diff --git a/src/wbc-gtk.c b/src/wbc-gtk.c
+index 6a7db0c..d687aa8 100644
+--- a/src/wbc-gtk.c
++++ b/src/wbc-gtk.c
+@@ -3010,7 +3010,7 @@ cb_add_custom_ui (G_GNUC_UNUSED GnmApp *app,
+ 	GtkAction       *res;
+ 
+ 	details = g_new0 (CustomUIHandle, 1);
+-	details->actions = gtk_action_group_new ("DummyName");
++	details->actions = gtk_action_group_new (extra_ui->group_name);
+ 
+ 	for (ptr = extra_ui->actions; ptr != NULL ; ptr = ptr->next) {
+ 		action = ptr->data;
+--
+cgit v0.8.2

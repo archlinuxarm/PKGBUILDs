@@ -1,0 +1,71 @@
+# $Id: PKGBUILD 53544 2009-10-02 09:39:44Z ronald $
+# Maintainer: Ronald van Haren <ronald.archlinux.org>
+# Contributor: dongiovanni <dongiovanni.archlinux.de>
+
+pkgname=grub2
+pkgver=1.97beta3
+pkgrel=1
+pkgdesc="The GNU GRand Unified Bootloader"
+url="http://www.gnu.org/software/grub/"
+arch=('i686' 'x86_64')
+license=('GPL3')
+depends=('sh' 'lzo2' 'freetype2')
+optdepends=('ruby:usr/share/grub/genmk.rb script' 'libusb: /sbin/grub-emu')
+makedepends=('bdf-unifont' 'ruby')
+conflicts=('grub')
+provides=('grub')
+backup=('boot/grub/grub.cfg')
+install=${pkgname}.install
+source=(ftp://alpha.gnu.org/gnu/grub/grub-1.97~beta3.tar.gz  
+	# use our own svn checkout so disable snapshot
+	#ftp://ftp.archlinux.org/sources/${pkgname}-${pkgver}.src.tar.bz2
+	'grub.cfg')  
+# don't install auto-install script. TODO: It needs a rewrite to work with grub2
+#	'install-grub')  
+md5sums=('542917012de4d2e47241bdffb67bedef'
+         '743215998a581a54ac77630f0db222ce')
+
+build() {
+  # Set destination architecture here
+  DESTARCH="i686"
+  #DESTARCH="x86_64"
+
+  cd $srcdir/grub-1.97~beta3
+  # run autogen.sh to create configure files
+  ./autogen.sh
+
+  # fix unifont.bdf location
+  sed -i 's|/usr/src/unifont.bdf|/usr/share/fonts/misc/unifont.bdf|' configure || return 1
+
+  # Arch64 grub2 needs to be statically build on i686
+  if [ "$CARCH" = "x86_64" ]; then
+    echo "this package has to be built on i686, won't compile on x86_64"
+    sleep 5
+  else
+
+    if [ "$DESTARCH" = "x86_64" ]; then
+	export LDFLAGS=-static
+        export CFLAGS=-static
+	./configure --prefix=/usr --enable-grub-mkfont --bindir=/bin \
+			--sbindir=/sbin --mandir=/usr/share/man \
+			--infodir=/usr/share/info --sysconfdir=/etc
+	unset CFLAGS CPPFLAGS LDFLAGS
+
+    else
+      CFLAGS= ./configure --prefix=/usr --enable-grub-mkfont --bindir=/bin \
+			--sbindir=/sbin --mandir=/usr/share/man \
+			--infodir=/usr/share/info --sysconfdir=/etc
+    fi
+  fi
+
+  CFLAGS= make || return 1
+  make DESTDIR=${pkgdir} install || return 1
+  
+  install -Dm644 ${srcdir}/grub.cfg $startdir/pkg/boot/grub/grub.cfg
+  #install -Dm755 ${srcdir}/install-grub $startdir/pkg/sbin/install-grub
+
+  # Fool makepkg into building a x86_64 package
+  if [ "$DESTARCH" = "x86_64" ]; then
+    export CARCH="x86_64"
+  fi
+}

@@ -1,0 +1,122 @@
+# $Id: PKGBUILD 30681 2009-03-21 09:59:19Z allan $
+# vim: ft=sh ts=2 sw=2
+#Maintainer: Simo Leone <neotuli@gmail.com>
+#Contributor: Simo Leone <neotuli@gmail.com>
+pkgname=festival
+pkgver=1.96beta
+_pkgverorig=1.96-beta
+pkgrel=2
+pkgdesc="Festival is a general multi-lingual speech synthesis system developed at CSTR (Centre for Speech Technology Research)."
+arch=('i686' 'x86_64')
+url="http://www.cstr.ed.ac.uk/projects/festival/"
+license=('BSD' 'GPL' 'custom')
+depends=('perl')
+options=('!makeflags')
+source=(http://festvox.org/packed/festival/1.96/$pkgname-$_pkgverorig.tar.gz
+	http://festvox.org/packed/festival/1.96/speech_tools-1.2.96-beta.tar.gz
+	http://festvox.org/packed/festival/1.96/festlex_POSLEX.tar.gz
+	http://festvox.org/packed/festival/1.96/festlex_CMU.tar.gz
+	http://festvox.org/packed/festival/1.96/festlex_OALD.tar.gz
+	config.diff
+	festconfig.diff
+	speech-tools-1.2.96_beta-gcc42.patch
+	speech-tools-1.2.96_beta-gcc43-include.patch
+	festival-1.96_beta-gcc43.patch)
+md5sums=('74915f4ffb13471c7e529ae92b392453'
+         '887e0c7586facb97cfc0114a105763b2'
+         '742c266e4c4978fae2b5c1bf6f549eb4'
+         '66d39c6f7b8e9d9beade051312365020'
+         '45a03689025849d02ec963a5b338ef37'
+         'd57d669a1751b98359bea7cd15991e89'
+         '04a7517509d28e36023fd865f998cf86'
+         'db6055cb7083aec48c402281a70692b3'
+         '83ea6c0cab8a5a1d4ca434a22c5e8d62'
+         '193c53b0c2a2f5b198a415537de04e78')
+
+build() {
+	##################################################################
+	#Speech Tools first
+	cd $srcdir/speech_tools
+	patch -Np1 -i $srcdir/config.diff
+	patch -Np1 -i $srcdir/speech-tools-1.2.96_beta-gcc42.patch
+	patch -Np1 -i $srcdir/speech-tools-1.2.96_beta-gcc43-include.patch
+
+	./configure --prefix=/usr --sysconfdir=/etc
+	make OPTIMISE_CXXFLAGS="${CXXFLAGS}" OPTIMISE_CCFLAGS="${CFLAGS}" || return 1
+	
+	install -dm755 $pkgdir/usr/{bin,lib,include/speech_tools{,instantiate,ling_class,rxp,sigpr,unix}}
+
+	#binaries
+	#move binaries over wrappers (FS#7864) 
+	for i in `grep -l 'EST shared script' bin/*`; do 
+		cp -f main/$(basename $i) bin; 
+	done
+	install -m755 -t $pkgdir/usr/bin bin/[a-z]*
+	rm -f $pkgdir/usr/bin/{est_gdb,est_examples,est_program}
+	
+	#libraries
+	install -m755 -t $pkgdir/usr/lib lib/lib*.so.*
+	ln -sf libestbase.so.1.2.96.1 $pkgdir/usr/lib/libestbase.so
+	ln -sf libeststring.so.1.2 $pkgdir/usr/lib/libeststring.so
+	install -m644 -t $pkgdir/usr/lib lib/lib*.a
+	
+	#headers
+	for dir in {.,instantiate,ling_class,rxp,sigpr,unix}; do
+	  install -m644 -t ../../tmp/usr/include/speech_tools/$dir include/$dir/*.h
+	done
+
+	#################################################################
+	# Now Festival itself
+	cd $srcdir/festival
+	patch -Np1 -i $srcdir/festconfig.diff
+	patch -Np1 -i $srcdir/festival-1.96_beta-gcc43.patch
+	
+	# Aviod make failure on making scripts and docs
+	sed -i "s#examples bin doc#examples#" Makefile
+	
+	./configure --prefix=/usr --sysconfdir=/etc
+	make OPTIMISE_CXXFLAGS="${CXXFLAGS}" OPTIMISE_CCFLAGS="${CFLAGS}"
+
+	#binaries
+	install -m755 src/main/festival $pkgdir/usr/bin/
+	install -m755 src/main/festival_client $pkgdir/usr/bin/
+	install -m755 examples/text2wave $pkgdir/usr/bin
+	install -m755 examples/saytime $pkgdir/usr/bin/
+
+	#libraries
+	install -m644 src/lib/libFestival.a $pkgdir/usr/lib/
+
+	#headers
+	install -Dm755 $pkgdir/usr/include/festival
+	install -m644 -t $pkgdir/usr/include/festival src/include/*.h
+
+	mkdir -p $pkgdir/usr/share/festival
+	#install -m644 -t $pkgdir/usr/share/festival lib/*.scm
+	#need to clean up but requires knowing which files are actually needed...
+	cp -aR lib/* $pkgdir/usr/share/festival
+	rm -f $(find $pkgdir/usr/share/festival -name Makefile)
+	
+	#create voices directory
+	install -Dm755 $pkgdir/usr/share/festival/voices
+	
+	#licenses
+	install -D -m644 $srcdir/festival/COPYING \
+	                 $pkgdir/usr/share/licenses/$pkgname/COPYING
+	install -D -m644 $srcdir/speech_tools/README \
+	                 $pkgdir/usr/share/licenses/$pkgname/COPYING.other
+
+	#################################################################
+	# Ok now some general cleanups
+	for i in `find $pkgdir/usr/include/ -type f`; do
+		sed -i -e 's,"EST.*\.h",\<speech_tools/&\>,g' -e 's,speech_tools/\",speech_tools/,g' \
+		-e 's,"siod.*\.h",\<speech_tools/&\>,g' -e 's,speech_tools/\",speech_tools/,g' \
+		-e 's,"instantiate/.*\.h",\<speech_tools/&\>,g' -e 's,speech_tools/instantiate/\",speech_tools/instantiate/,g' -e 's,"instantiate,instantiate,g' \
+		-e 's,"ling_class/.*\.h",\<speech_tools/&\>,g' -e 's,speech_tools/ling_class/\",speech_tools/ling_class/,g' -e 's,"ling_class,ling_class,g'\
+		-e 's,"rxp/.*\.h",\<speech_tools/&\>,g' -e 's,speech_tools/rxp/\",speech_tools/rxp/,g' -e 's,"rxp,rxp,g' \
+		-e 's,"sigpr/.*\.h",\<speech_tools/&\>,g' -e 's,speech_tools/sigpr/\",speech_tools/sigpr/,g' -e 's,"sigpr,sigpr,g' \
+		-e 's,"unix/.*\.h",\<speech_tools/&\>,g' -e 's,speech_tools/unix/\",speech_tools/unix/,g' -e 's,\.h\">,.h\>,g' -e 's,"unix,unix,g' \
+		-e 's,"festival\.h",\<festival/festival.h\>,g' \
+		-e 's,"ModuleDescription\.h",\<festival/ModuleDescription.h\>,g' \
+		-e 's,"Phone\.h",\<festival/Phone.h\>,g' $i
+	done
+}

@@ -1,0 +1,239 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## fix-ldapbackend-openldap.dpatch by Matthijs Mohlmann <matthijs@cacholong.nl>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: Upstream patch to fix build with openldap 2.4.
+
+@DPATCH@
+diff -urNad trunk~/configure.in trunk/configure.in
+--- trunk~/configure.in	2008-03-01 16:51:09.000000000 +0100
++++ trunk/configure.in	2008-03-02 21:43:03.677897471 +0100
+@@ -226,6 +226,36 @@
+ 		pdns )
+ 			needmysql=yes
+ 		;;
++		ldap)
++			AC_CHECK_HEADERS([ldap.h], , [AC_MSG_ERROR([ldap header (ldap.h) not found])])
++			AC_CHECK_HEADERS([lber.h], , [AC_MSG_ERROR([ldap header (lber.h) not found])])
++			AC_SUBST([LIBLDAP])
++			AC_CHECK_LIB(
++				[ldap_r], [ldap_set_option],
++				[AC_DEFINE([HAVE_LIBLDAP_R], 1, [Have -lldap_r]) LIBLDAP="ldap_r"],
++				[AC_CHECK_LIB(
++					[ldap], [ldap_set_option],
++					[AC_DEFINE([HAVE_LIBLDAP], 1, [Have -lldap]) LIBLDAP="ldap"],
++					[AC_MSG_ERROR([ldap library (libldap) not found])]
++				)]
++			)
++			AC_CHECK_LIB(
++				[$LIBLDAP], [ldap_initialize],
++				[AC_DEFINE([HAVE_LDAP_INITIALIZE], 1, [Define to 1 if you have ldap_initialize])]
++			)
++			AC_CHECK_LIB(
++				[$LIBLDAP], [ldap_sasl_bind],
++				[AC_DEFINE([HAVE_LDAP_SASL_BIND], 1, [Define to 1 if you have ldap_sasl_bind])]
++			)
++		;;
++		opendbx)
++			AC_CHECK_HEADERS([odbx.h], , [AC_MSG_ERROR([opendbx header (odbx.h) not found])])
++			AC_SUBST([LIBOPENDBX])
++			AC_CHECK_LIB(
++				[opendbx], [odbx_init],
++				[AC_DEFINE([HAVE_LIBOPENDBX], 1, [Have -lopendbx]) LIBOPENDBX="opendbx"]
++			)
++		;;
+ 	esac
+ done
+ 
+diff -urNad trunk~/modules/ldapbackend/Makefile.am trunk/modules/ldapbackend/Makefile.am
+--- trunk~/modules/ldapbackend/Makefile.am	2008-03-01 16:51:09.000000000 +0100
++++ trunk/modules/ldapbackend/Makefile.am	2008-03-02 21:43:03.677897471 +0100
+@@ -1,13 +1,13 @@
+ AM_CPPFLAGS=@THREADFLAGS@
+ lib_LTLIBRARIES = libldapbackend.la
+ 
+-EXTRA_DIST=OBJECTFILES OBJECTLIBS
++EXTRA_DIST = OBJECTFILES OBJECTLIBS
+ 
+ libldapbackend_la_SOURCES=ldapbackend.cc ldapbackend.hh \
+ 		powerldap.hh powerldap.cc utils.hh
+ 
+ 
+-libldapbackend_la_LIBADD=-lldap
++libldapbackend_la_LIBADD = -l@LIBLDAP@
+ 
+ 
+ 
+diff -urNad trunk~/modules/ldapbackend/powerldap.cc trunk/modules/ldapbackend/powerldap.cc
+--- trunk~/modules/ldapbackend/powerldap.cc	2008-03-01 16:51:09.000000000 +0100
++++ trunk/modules/ldapbackend/powerldap.cc	2008-03-02 21:43:03.678897819 +0100
+@@ -1,41 +1,57 @@
+ #include "powerldap.hh"
+-
++#include <pdns/misc.hh>
+ 
+ 
+ PowerLDAP::PowerLDAP( const string& hosts, uint16_t port, bool tls )
+ {
+-	int protocol = LDAP_VERSION3;
+-
+-
+-	if( ldap_initialize( &d_ld, hosts.c_str() ) != LDAP_SUCCESS )
++	int err;
++  
++#ifdef HAVE_LDAP_INITIALIZE
++	if( ( err = ldap_initialize( &d_ld, hosts.c_str() ) ) != LDAP_SUCCESS )
+ 	{
+-		if( ( d_ld = ldap_init( hosts.c_str(), port ) ) == NULL )
++		string ldapuris;
++		vector<string> uris;
++		stringtok( uris, hosts );
++
++		for( size_t i = 0; i < uris.size(); i++ )
+ 		{
+-			throw LDAPException( "Error initializing LDAP connection: " + string( strerror( errno ) ) );
++			ldapuris += " ldap://" + uris[i];
+ 		}
+ 
+-		if( tls && ldap_start_tls_s( d_ld, NULL, NULL ) != LDAP_SUCCESS )
++		if( ( err = ldap_initialize( &d_ld, ldapuris.c_str() ) ) != LDAP_SUCCESS )
+ 		{
+-			ldap_unbind( d_ld );
+-			throw( LDAPException( "Couldn't perform STARTTLS" ) );
++				throw LDAPException( "Error initializing LDAP connection to '" + ldapuris + ": " + getError( err ) );
+ 		}
+ 	}
+-
++#else
++	if( ( d_ld = ldap_init( hosts.c_str(), port ) ) == NULL )
++	{
++		throw LDAPException( "Error initializing LDAP connection to '" + hosts + "': " + string( strerror( errno ) ) );
++	}
++#endif
++  
++	int protocol = LDAP_VERSION3;
+ 	if( ldap_set_option( d_ld, LDAP_OPT_PROTOCOL_VERSION, &protocol ) != LDAP_OPT_SUCCESS )
+ 	{
+ 		protocol = LDAP_VERSION2;
+ 		if( ldap_set_option( d_ld, LDAP_OPT_PROTOCOL_VERSION, &protocol ) != LDAP_OPT_SUCCESS )
+ 		{
+-			ldap_unbind( d_ld );
++			ldap_unbind_ext( d_ld, NULL, NULL );
+ 			throw LDAPException( "Couldn't set protocol version to LDAPv3 or LDAPv2" );
+ 		}
+ 	}
++
++	if( tls && ( err = ldap_start_tls_s( d_ld, NULL, NULL ) ) != LDAP_SUCCESS )
++	{
++		ldap_unbind_ext( d_ld, NULL, NULL );
++		throw LDAPException( "Couldn't perform STARTTLS: " + getError( err ) );
++	}
+ }
+ 
+ 
+ PowerLDAP::~PowerLDAP()
+ {
+-	ldap_unbind( d_ld );
++ 	ldap_unbind_ext( d_ld, NULL, NULL );
+ }
+ 
+ 
+@@ -56,23 +72,48 @@
+ 	}
+ }
+ 
+-
+-void PowerLDAP::simpleBind( const string& ldapbinddn, const string& ldapsecret )
++void PowerLDAP::bind( const string& ldapbinddn, const string& ldapsecret, int method, int timeout )
+ {
+-	int err;
+-	if( ( err = ldap_simple_bind_s( d_ld, ldapbinddn.c_str(), ldapsecret.c_str() ) ) != LDAP_SUCCESS )
++	int msgid;
++
++#ifdef HAVE_LDAP_SASL_BIND
++	int rc;
++	struct berval passwd;
++
++	passwd.bv_val = (char *)ldapsecret.c_str();
++	passwd.bv_len = strlen( passwd.bv_val );
++
++	if( ( rc = ldap_sasl_bind( d_ld, ldapbinddn.c_str(), LDAP_SASL_SIMPLE, &passwd, NULL, NULL, &msgid ) ) != LDAP_SUCCESS )
+ 	{
+-		throw LDAPException( "Failed to bind to LDAP server: " + getError( err ) );
++		throw LDAPException( "Failed to bind to LDAP server: " + getError( rc ) );
++	}
++#else
++	if( ( msgid = ldap_bind( d_ld, ldapbinddn.c_str(), ldapsecret.c_str(), method ) ) == -1 )
++	{
++		throw LDAPException( "Failed to bind to LDAP server: " + getError( msgid ) );
+ 	}
++#endif
++
++	waitResult( msgid, timeout, NULL );
++}
++
++/**
++ * Depricated, use PowerLDAP::bind() instead
++ */
++
++void PowerLDAP::simpleBind( const string& ldapbinddn, const string& ldapsecret )
++{
++	this->bind( ldapbinddn, ldapsecret, LDAP_AUTH_SIMPLE, 30 );
+ }
+ 
+ 
+ int PowerLDAP::search( const string& base, int scope, const string& filter, const char** attr )
+ {
+-	int msgid;
+-	if( ( msgid = ldap_search( d_ld, base.c_str(), scope, filter.c_str(), const_cast<char**> (attr), 0 ) ) == -1 )
++	int msgid, rc;
++
++	if( ( rc = ldap_search_ext( d_ld, base.c_str(), scope, filter.c_str(), const_cast<char**> (attr), 0, NULL, NULL, NULL, LDAP_NO_LIMIT, &msgid ) ) != LDAP_SUCCESS )
+ 	{
+-		throw LDAPException( "Starting LDAP search: " + getError() );
++		throw LDAPException( "Starting LDAP search: " + getError( rc ) );
+ 	}
+ 
+ 	return msgid;
+@@ -195,14 +236,9 @@
+ 
+ const string PowerLDAP::getError( int rc )
+ {
+-	int ld_errno = rc;
+-
+-	if( ld_errno == -1 )
+-	{
+-		getOption( LDAP_OPT_ERROR_NUMBER, &ld_errno );
+-	}
++	if( rc == -1 ) { getOption( LDAP_OPT_ERROR_NUMBER, &rc ); }
+ 
+-	return ldap_err2string( ld_errno );
++	return string( ldap_err2string( rc ) );;
+ }
+ 
+ 
+diff -urNad trunk~/modules/ldapbackend/powerldap.hh trunk/modules/ldapbackend/powerldap.hh
+--- trunk~/modules/ldapbackend/powerldap.hh	2008-03-01 16:51:09.000000000 +0100
++++ trunk/modules/ldapbackend/powerldap.hh	2008-03-02 21:43:29.915010836 +0100
+@@ -84,6 +84,7 @@
+ 	void getOption( int option, int* value );
+ 	void setOption( int option, int value );
+ 
++	void bind( const string& ldapbinddn, const string& ldapsecret, int method, int timeout );
+ 	void simpleBind( const string& ldapbinddn = "", const string& ldapsecret = "" );
+ 	int search( const string& base, int scope, const string& filter, const char** attr = 0 );
+ 
+diff -urNad trunk~/modules/opendbxbackend/Makefile.am trunk/modules/opendbxbackend/Makefile.am
+--- trunk~/modules/opendbxbackend/Makefile.am	2008-03-01 16:51:09.000000000 +0100
++++ trunk/modules/opendbxbackend/Makefile.am	2008-03-02 21:43:03.679898166 +0100
+@@ -1,6 +1,7 @@
+ AM_CPPFLAGS=@THREADFLAGS@
+-lib_LTLIBRARIES = libopendbxbackend.la
+-libopendbxbackend_la_SOURCES = odbxbackend.hh odbxbackend.cc odbxprivate.cc
+-libopendbxbackend_la_LIBADD = -lopendbx
+ 
+ EXTRA_DIST = OBJECTFILES OBJECTLIBS
++
++lib_LTLIBRARIES = libopendbxbackend.la
++libopendbxbackend_la_SOURCES = odbxbackend.hh odbxbackend.cc odbxprivate.cc
++libopendbxbackend_la_LIBADD =-l@LIBOPENDBX@

@@ -1,0 +1,55 @@
+# $Id: PKGBUILD 48236 2009-08-01 07:28:38Z tpowa $
+# Maintainer: Paul Mattal <paul@archlinux.org>
+pkgname=hylafax
+pkgver=6.0.3
+pkgrel=1
+pkgdesc="Fax Server"
+arch=('i686' 'x86_64')
+install='hylafax.install'
+license=('custom')
+depends=('libtiff' 'pam' 'ghostscript')
+makedepends=('smtp-server')
+url="http://www.hylafax.org/"
+backup=(var/spool/hylafax/bin/{faxrcvd,notify} \
+	usr/lib/fax/{faxcover.ps,hfaxd.conf,pagesizes,typerules} \
+	var/spool/hylafax/etc/hosts.hfaxd) 
+source=(ftp://ftp.hylafax.org/source/${pkgname}-${pkgver}.tar.gz hylafax \
+        hylafax.cron.daily config.local)
+
+# build as root for successful build!
+build() {
+  uucp_created=0
+  if ! grep 'uucp' /etc/passwd > /dev/null; then
+    uucp_created=1
+    groupadd -g 14 uucp &>/dev/null
+    useradd -u 10 -g uucp -d '/' -s /bin/false uucp &>/dev/null
+    useradd -u 69 -g daemon -d '/' -s /bin/false fax &>/dev/null
+  fi
+  mkdir -p $pkgdir/usr/{bin,lib/fax,sbin,share/ghostscript/fonts} || return 1
+  mkdir -p $pkgdir/var/{spool/hylafax,lock} || return 1
+  cd $srcdir/${pkgname}-${pkgver} || return 1
+
+  cp ../config.local . || return 1
+  ./configure --nointeractive --with-OPTIMIZER="${CFLAGS}" || return 1
+  make || return 1
+  make ROOT=$pkgdir install || return 1
+  install -D -m 755 $srcdir/hylafax $pkgdir/etc/rc.d/hylafax || return 1
+  install -D -m 744 $srcdir/hylafax.cron.daily $pkgdir/etc/cron.daily/hylafax || return 1
+  # remove group if created
+  if [ $uucp_created -eq 1 ]; then
+    userdel uucp &>/dev/null
+    groupdel uucp &>/dev/null
+    userdel fax &>/dev/null
+  fi
+  # add missing awk file for notify-4.1 script
+  install -D -m 755 $srcdir/${pkgname}-${pkgver}/util/notify.awk \
+  	$spkgdir/var/spool/hylafax/bin/notify.awk || return 1
+  # fix permission on /var/lock
+  chmod 1777 $pkgdir/var/lock
+
+  install -D -m644 COPYRIGHT $startdir/pkg/usr/share/licenses/$pkgname/COPYRIGHT
+}
+md5sums=('7ea1452436f54248dd997982277eaa27'
+         '6602288a405324d8c8e3c5eac2bf19fd'
+         '52beffe7dc296b4f9ce9fd0387f7804e'
+         '0d2ce24d918226a852539aebf57d3f4a')

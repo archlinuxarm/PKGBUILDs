@@ -1,0 +1,67 @@
+# $Id: PKGBUILD 42160 2009-06-11 18:02:31Z tpowa $
+#Maintainer: Tobias Powalowski <tpowa@archlinux.org>
+
+pkgname=fcpci
+pkgver=31107
+pkgrel=48
+_kernver=2.6.30-ARCH
+pkgdesc="AVM ISDN driver for FRITZ PCI isdn cards. For stock arch 2.6 kernel."
+arch=(i686 x86_64)
+license=('custom:"AVM"' 'LGPL')
+url="http://www.avm.de"
+depends=('capi4k-utils' 'kernel26>=2.6.30' 'kernel26<2.6.31')
+if [ "$CARCH" = "i686" ]; then
+  source=(ftp://ftp.avm.de/cardware/fritzcrd.pci/linux/suse.93/fcpci-suse93-3.11-07.tar.gz \
+	kernel-2.6.19.patch atomic.patch kernel-2.6.20.patch kernel-2.6.22.patch kernel-2.6.24.patch)
+  md5sums=('3ee301b5d0e8df9e4b915af58b725556'
+         '5c63dc9df0810bb1ba85f3425abaa0ed'
+         '258b13bb2ac46960b9c91635f02cd080'
+         '890ec6e1219a3a4bae77f5815c3ed40d'
+         '4f4f03630ed994b16b4cd167f090a116'
+ 	 '21bfa466b1fb94663ed1f265948dba5e')
+fi
+if [ "$CARCH" = "x86_64" ]; then
+  source=(ftp://ftp.avm.de/cardware/fritzcrd.pci/linux_64bit/suse.10.0/fcpci-suse10.0-64bit-3.11-07.tar.gz \
+	kernel-2.6.19.patch atomic.patch kernel-2.6.20.patch kernel-2.6.22.patch kernel-2.6.24.patch)
+  md5sums=('c5595478515d19436ab20b42e1549de0'
+         '5c63dc9df0810bb1ba85f3425abaa0ed'
+         '258b13bb2ac46960b9c91635f02cd080'
+         '890ec6e1219a3a4bae77f5815c3ed40d'
+         '4f4f03630ed994b16b4cd167f090a116'
+ 	 '21bfa466b1fb94663ed1f265948dba5e')
+fi
+install=fcpci.install
+
+build() {
+  cd $startdir/src/fritz/src
+  [ "$CARCH" = "i686" ] && (patch -Np0 -i ../../atomic.patch || return 1)
+  patch -Np0 -i ../../kernel-2.6.19.patch || return 1
+  patch -Np0 -i ../../kernel-2.6.20.patch || return 1
+  patch -Np0 -i ../../kernel-2.6.22.patch || return 1
+  patch -Np0 -i ../../kernel-2.6.24.patch || return 1
+  cd ..
+  # fix from Karsten Keil <kkeil@suse.de>
+  # in refernece to bug: http://bugs.archlinux.org/task/8511
+  OBJ=$(find . -name '*lib.o')
+  for i in $OBJ; do
+    mv $i $i.old
+    objcopy -L memcmp \
+            -L memcpy \
+            -L memmove \
+            -L memset \
+            -L strcat \
+            -L strcmp \
+            -L strcpy \
+            -L strlen \
+            -L strncmp \
+            -L strncpy \
+    $i.old $i
+  done
+
+  make LIBDIR=$startdir/pkg/var/lib/fritz KDIR=/lib/modules/${_kernver}/build all || return 1
+  mkdir -p $startdir/pkg/lib/modules/${_kernver}/kernel/drivers/isdn/hardware/avm/
+  cp $startdir/src/fritz/src/fcpci.ko $startdir/pkg/lib/modules/${_kernver}/kernel/drivers/isdn/hardware/avm/
+  rm -r $startdir/pkg/var/lib/fritz  
+  # build module dependencies
+  sed -i -e "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" $startdir/fcpci.install
+}

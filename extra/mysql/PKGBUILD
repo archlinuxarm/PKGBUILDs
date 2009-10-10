@@ -1,0 +1,70 @@
+# $Id: PKGBUILD 52182 2009-09-16 12:30:01Z giovanni $
+# Maintainer: Douglas Soares de Andrade <douglas@archlinux.org>
+# Contributor: judd <jvinet@zeroflux.org>
+
+pkgname=mysql
+pkgver=5.1.38
+pkgrel=1
+pkgdesc="A fast SQL database server"
+arch=(i686 x86_64)
+backup=(etc/my.cnf etc/conf.d/mysqld)
+depends=("mysql-clients>=${pkgver}" 'tcp_wrappers' 'zlib' 'perl')
+makedepends=('libtool' 'patch')
+url=('http://www.mysql.com/')
+options=('!libtool')
+optdepends=('perl-dbi' 'perl-dbd-mysql')
+license=('GPL')
+source=(ftp://mirror.switch.ch/mirror/mysql/Downloads/MySQL-5.1/mysql-${pkgver}.tar.gz
+        mysql-no-clients.patch
+        mysql-fix-libs.patch
+        mysqld
+        my.cnf
+        mysqld.conf.d)
+
+build() {
+  cd ${startdir}/src/${pkgname}-${pkgver}
+
+  # fix build with gcc 4.4
+  # see http://bugs.archlinux.org/task/15242
+  # and http://gcc.gnu.org/bugzilla/show_bug.cgi?id=38562
+  CFLAGS="-fPIC ${CFLAGS} -fno-strict-aliasing"
+  CXXFLAGS="-fPIC ${CXXFLAGS} -fno-strict-aliasing"
+
+  patch -Np1 -i ${startdir}/src/mysql-no-clients.patch || return 1
+  patch -Np1 -i ${startdir}/src/mysql-fix-libs.patch || return 1
+
+  ./configure --prefix=/usr --libexecdir=/usr/sbin \
+  --localstatedir=/var --sysconfdir=/etc \
+  --without-debug --without-docs --without-readline \
+  --enable-local-infile --with-ssl \
+  --with-charset=latin1 --with-collation=latin1_general_ci \
+  --with-extra-charsets=complex --enable-thread-safe-client \
+  --with-libwrap \
+  --with-plugins=partition,ftexample,archive,blackhole,federated,heap,innobase,ndbcluster
+
+  pushd include || return
+  make || return 1
+  popd
+    
+  pushd libmysql
+  make link_sources get_password.lo || return
+  popd
+  
+  make || return 1
+  make DESTDIR=${startdir}/pkg install
+
+  rm -rf $pkgdir/usr/{mysql-test,sql-bench,lib,include}
+  install -D -m644 ../my.cnf ${startdir}/pkg/etc/my.cnf
+  install -D -m755 ../mysqld ${startdir}/pkg/etc/rc.d/mysqld
+  install -D -m644 ../mysqld.conf.d ${startdir}/pkg/etc/conf.d/mysqld
+  rm -f ${startdir}/pkg/usr/bin/mysql_config
+
+  # Cleanup files provided by the other packages
+  rm -rf $pkgdir/usr/{include,lib}
+}
+md5sums=('8ee9bb80079bbd09499a28bc57d902e7'
+         '8dce7e2b9f1f6ed6eca8bd62144bad0a'
+         'd1921e85821a66196c24ef6e5346b572'
+         'c093cc7eef5934f56f8bc775b559904b'
+         '0ee035590ffc61d32de994f461fd2bd2'
+         '4a9077fc95ec6db1d5420e0cdc74d31c')

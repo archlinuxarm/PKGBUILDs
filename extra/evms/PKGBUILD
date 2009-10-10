@@ -1,0 +1,86 @@
+# $Id: PKGBUILD 51819 2009-09-12 02:33:35Z allan $
+# Maintainer: Judd Vinet <jvinet@zeroflux.org>
+
+pkgname=evms
+pkgver=2.5.5
+pkgrel=9
+pkgdesc="Enterprise Volume Management System"
+arch=('i686' 'x86_64')
+license=('GPL')
+url="http://evms.sourceforge.net/"
+depends=('device-mapper>=1.02.19' 'e2fsprogs' 'perl' 'ncurses')
+optdepends=('gtk: for evmsgui'
+            'glib: for evmsn')
+makedepends=('gtk')
+backup=('etc/evms.conf')
+source=(http://downloads.sourceforge.net/project/evms/EVMS/$pkgver/evms-$pkgver.tar.gz
+	# patches from evms homepage
+	http://evms.sourceforge.net/patches/2.5.5/engine/BaseName.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/cli_query_segfault.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/cli_reload_options.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/copy_target_linear.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/disk_cache.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/fix-strings.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/get_geometry.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/md_super_fix.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/ntfs_unmkfs.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/ocfs2_version_check.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/raid5_algorithm.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/raid5_degrade_fix.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/raid5_remove_spare_fix.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/raid5_remove_spare_fix_2.patch
+	http://evms.sourceforge.net/patches/2.5.5/engine/s390_ioctl_fix.patch
+	evms-2.5.5-pagesize.patch  #from gentoo bug tracker 169623
+	evms-2.5.5-as-needed.patch
+	evms_hook evms_install)
+md5sums=('45b463f0cbade194dc0a08be432b572e'
+         'e0af09fee4898e9ae63e1902f116c18a'
+         '4d0610bd1f8b70bc477ccb2376f1a6f5'
+         '9daa792a87326c97077dccd007ac9af7'
+         '35b3b765f845b7ee5aeb52d91ec13bb7'
+         'a5e00a9f6f7ea6ec8a776d1cc7cb76bf'
+         'f65874b07c94b5ee54d3269ed40af451'
+         '2122d3cb2374153f2569f05d14fdee13'
+         'e48c5d6f6536b378e4f4d38e3187b8e7'
+         '5c3794821a2521dbfe2e540023bcc108'
+         '1edcbf74a9b4d4a01bc9beea2e0c41fb'
+         '1e0739ff2aaecafd3d6355c43a1eb637'
+         'ec9a4d05d6d67b3f1953fb63ebb2a41e'
+         'b38bf2b91d8787ddcf8742fc67a51772'
+         'dacdaf8103d5a683f031628ff816f81b'
+         'eb9d484e71ada2bbf9a94fa764c670cf'
+         '43b7b8e3a11ada886a92f0c8f9d18ce4'
+         '19e17ea80b35e5574777ed8e42b4210a'
+         'c97b7918f589ecfe244ed86de5513f0a'
+         'b0b5f684d04aab4c21789e37a3e26bb3')
+
+build() {
+  cd $srcdir/$pkgname-$pkgver
+  # adding patches from http://evms.sourceforge.net/patches/2.5.5/engine/
+  PATCHES="md_super_fix ntfs_unmkfs raid5_degrade_fix raid5_remove_spare_fix \
+           raid5_remove_spare_fix_2 raid5_algorithm cli_reload_options \
+           cli_query_segfault get_geometry BaseName s390_ioctl_fix disk_cache \
+           fix-strings ocfs2_version_check copy_target_linear"
+  for i in $PATCHES; do
+    patch -Np1 -i $srcdir/$i.patch || return 1
+  done
+  patch -Np1 -i $srcdir/evms-2.5.5-pagesize.patch || return 1
+  patch -Np1 -i $srcdir/evms-2.5.5-as-needed.patch || return 1
+  ./configure --sysconfdir=/etc --localstatedir=/var --mandir=/usr/share/man
+  make || return 1
+  make DESTDIR=$pkgdir install
+  
+  # move unneeded files from /sbin and /lib
+  install -dm755 $pkgdir/usr/sbin
+  for f in evms_gather_info evmsn evmsgui; do
+    mv $pkgdir/sbin/$f $pkgdir/usr/sbin/$f
+  done
+  
+  install -dm755 $pkgdir/usr/lib
+  mv $pkgdir/lib/libevms.a $pkgdir/usr/lib/libevms.a
+  ln -s ../../lib/libevms.so $pkgdir/usr/lib/libevms.so
+  
+  # add evms hook and install file for initcpio
+  install -Dm644 $srcdir/evms_install $pkgdir/lib/initcpio/install/evms
+  install -Dm644 $srcdir/evms_hook $pkgdir/lib/initcpio/hooks/evms
+}

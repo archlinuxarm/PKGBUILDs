@@ -1,0 +1,48 @@
+# $Id: PKGBUILD 39442 2009-05-16 20:41:27Z tpowa $
+#Maintainer: Tobias Powalowski <tpowa@archlinux.org>
+
+pkgname=capi4hylafax
+pkgver=010300
+pkgrel=3
+pkgdesc="capi plugin for hylafax to enable isdn faxing"
+arch=(i686 x86_64)
+url="ftp://ftp.avm.de/tools"
+license=('GPL')
+depends=('glibc' 'capi4k-utils' 'hylafax' 'gcc-libs' 'libtiff')
+source=(ftp://ftp.avm.de/tools/capi4hylafax.linux/capi4hylafax-01.03.00.tar.gz
+	config.faxCAPI capi4hylafax.rc)
+md5sums=('d37dc652ac80d1525ef8693be55ee67f' '653b60695d21c128f020a86274ca9192'\
+         '1fe40c58289fa3ba625ce6fe2fdb3d07')
+install=capi4hylafax.install
+backup=(var/spool/hylafax/etc/config.faxCAPI)
+build() {
+  cd $srcdir/$pkgname-01.03.00
+# fix config file
+  sed -i -e 's#/etc/config.faxCAPI#/var/spool/hylafax/etc/config.faxCAPI#g' src/defaults.h.in || return 1
+  ./configure || return 1
+  make || return 1
+  install -m755 -D src/faxsend/c2faxsend $pkgdir/usr/bin/c2faxsend
+  install -m755 -D src/faxrecv/c2faxrecv $pkgdir/usr/bin/c2faxrecv
+  install -m755 -D setupconffile $pkgdir/usr/bin/c2faxaddmodem
+  install -m644 -D $srcdir/config.faxCAPI $pkgdir/var/spool/hylafax/etc/config.faxCAPI
+  install -m755 -D $srcdir/capi4hylafax.rc $pkgdir/etc/rc.d/capi4hylafax
+# adding FIFO
+  mkfifo $pkgdir/var/spool/hylafax/FIFO.faxCAPI
+  chown 10 $pkgdir/var/spool/hylafax/FIFO.faxCAPI
+  chgrp 14 $pkgdir/var/spool/hylafax/FIFO.faxCAPI
+  chmod 0600 $pkgdir/var/spool/hylafax/FIFO.faxCAPI
+  mkdir -p $pkgdir/etc/udev/rules.d
+# fix /var/spool/hylafax permission
+  chown 10 $pkgdir/var/spool/hylafax
+  chgrp 14 $pkgdir/var/spool/hylafax
+# adding udev rule
+  mkdir -p $pkgdir/lib/udev/rules.d
+cat << EOF >> $pkgdir/lib/udev/rules.d/53-capi4hylafax.rules
+# CAPI devices
+KERNEL="capi",		NAME="capi20", SYMLINK+="isdn/capi20", GROUP="uucp"
+KERNEL="capi*",		NAME="capi/%n", GROUP="uucp"
+EOF
+# fix c2faxadd
+  sed -i -e 's#/etc/config.faxCAPI#/var/spool/hylafax/etc/config.faxCAPI#g' $pkgdir/usr/bin/c2faxaddmodem || return 1
+  echo "main_config_dialog" >>  $pkgdir/usr/bin/c2faxaddmodem
+}

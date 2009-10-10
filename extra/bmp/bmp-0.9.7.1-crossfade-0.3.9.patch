@@ -1,0 +1,108 @@
+Patch taken from xmms-crossfade 3.10 tarball.  Required for crossfade to
+work.  http://www.eisenlohr.org/xmms-crossfade/
+
+diff -ur bmp-0.9.7.1/beep/mainwin.c bmp-0.9.7.1.patched/beep/mainwin.c
+--- bmp-0.9.7.1/beep/mainwin.c	2005-05-09 10:45:39.000000000 +0200
++++ bmp-0.9.7.1.patched/beep/mainwin.c	2005-11-25 00:03:59.000000000 +0100
+@@ -655,9 +655,11 @@
+     mainwin_set_shade(!cfg.player_shaded);
+ }
+ 
++gboolean is_quitting = FALSE;
+ void
+ mainwin_quit_cb(void)
+ {
++    is_quitting = TRUE;
+     gtk_widget_hide(equalizerwin);
+     gtk_widget_hide(playlistwin);
+     gtk_widget_hide(mainwin);
+@@ -1318,7 +1320,7 @@
+ change_song(guint pos)
+ {
+     if (bmp_playback_get_playing())
+-        bmp_playback_stop();
++        bmp_playback_stop_for_restart();
+ 
+     playlist_set_position(pos);
+     bmp_playback_initiate();
+diff -ur bmp-0.9.7.1/beep/playback.c bmp-0.9.7.1.patched/beep/playback.c
+--- bmp-0.9.7.1/beep/playback.c	2005-01-26 06:56:15.000000000 +0100
++++ bmp-0.9.7.1.patched/beep/playback.c	2005-11-25 00:03:59.000000000 +0100
+@@ -89,7 +89,7 @@
+         return;
+ 
+     if (bmp_playback_get_playing())
+-        bmp_playback_stop();
++        bmp_playback_stop_for_restart();
+ 
+     vis_clear_data(mainwin_vis);
+     vis_clear_data(playlistwin_vis);
+@@ -135,6 +135,15 @@
+     get_current_input_plugin()->pause(ip_data.paused);
+ }
+ 
++gboolean input_stopped_for_restart = FALSE;
++void
++bmp_playback_stop_for_restart(void)
++{
++	input_stopped_for_restart = TRUE;
++	bmp_playback_stop();
++	input_stopped_for_restart = FALSE;
++}
++
+ void
+ bmp_playback_stop(void)
+ {
+diff -ur bmp-0.9.7.1/beep/playback.h bmp-0.9.7.1.patched/beep/playback.h
+--- bmp-0.9.7.1/beep/playback.h	2004-12-04 10:04:26.000000000 +0100
++++ bmp-0.9.7.1.patched/beep/playback.h	2005-11-25 00:03:59.000000000 +0100
+@@ -26,6 +26,7 @@
+ void bmp_playback_initiate(void);
+ void bmp_playback_pause(void);
+ void bmp_playback_stop(void);
++void bmp_playback_stop_for_restart(void);
+ gboolean bmp_playback_play_file(const gchar * filename);
+ gboolean bmp_playback_get_playing(void);
+ gboolean bmp_playback_get_paused(void);
+diff -ur bmp-0.9.7.1/beep/playlist.c bmp-0.9.7.1.patched/beep/playlist.c
+--- bmp-0.9.7.1/beep/playlist.c	2005-08-11 09:25:51.000000000 +0200
++++ bmp-0.9.7.1.patched/beep/playlist.c	2005-11-25 00:03:59.000000000 +0100
+@@ -817,7 +817,7 @@
+     if (bmp_playback_get_playing()) {
+         /* We need to stop before changing playlist_position */
+         PLAYLIST_UNLOCK();
+-        bmp_playback_stop();
++        bmp_playback_stop_for_restart();
+         PLAYLIST_LOCK();
+         restart_playing = TRUE;
+     }
+@@ -868,7 +868,7 @@
+     if (bmp_playback_get_playing()) {
+         /* We need to stop before changing playlist_position */
+         PLAYLIST_UNLOCK();
+-        bmp_playback_stop();
++        bmp_playback_stop_for_restart();
+         PLAYLIST_LOCK();
+         restart_playing = TRUE;
+     }
+@@ -1018,7 +1018,7 @@
+     if (bmp_playback_get_playing()) {
+         /* We need to stop before changing playlist_position */
+         PLAYLIST_UNLOCK();
+-        bmp_playback_stop();
++        bmp_playback_stop_for_restart();
+         PLAYLIST_LOCK();
+         restart_playing = TRUE;
+     }
+@@ -1047,7 +1047,10 @@
+ {
+     GList *plist_pos_list;
+ 
+-    bmp_playback_stop();
++    if (cfg.repeat)
++        bmp_playback_stop_for_restart();
++    else
++        bmp_playback_stop();
+ 
+     PLAYLIST_LOCK();
+     plist_pos_list = find_playlist_position_list();

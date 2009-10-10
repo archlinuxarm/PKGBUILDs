@@ -1,0 +1,55 @@
+# $Id: PKGBUILD 53141 2009-09-26 08:14:35Z pierre $
+# Contributor: Jeff Brodnax <tullyarcher@bellsouth.net>
+# Maintainer: Paul Mattal <paul@archlinux.org>
+pkgname=postfix
+pkgver=2.6.5
+pkgrel=3
+pkgdesc="Secure, fast, easy to administer drop in replacement for Sendmail (MTA)"
+arch=('i686' 'x86_64')
+license=('custom')
+depends=('pcre' 'libsasl' 'libmysqlclient' 'postgresql-libs>=8.4' 'libldap>=2.4' 'db>=4.8')
+backup=(etc/postfix/aliases etc/postfix/virtual etc/postfix/relocated \
+	etc/postfix/access etc/postfix/header_checks etc/postfix/transport \
+	etc/postfix/generic etc/postfix/canonical \
+	etc/postfix/main.cf etc/postfix/master.cf)
+install="$pkgname.install"
+provides=('smtp-server' 'smtp-forwarder')
+replaces=('postfix-mysql' 'postfix-pgsql')
+conflicts=('postfix-mysql' 'postfix-pgsql' 'smtp-server' 'smtp-forwarder')
+url="http://www.postfix.org/"
+source=(ftp://ftp.porcupine.org/mirrors/postfix-release/official/$pkgname-$pkgver.tar.gz \
+        $pkgname.patch.bz2 \
+	$pkgname)
+
+build() {
+	cd $startdir/src/$pkgname-$pkgver
+	
+	make makefiles \
+	        CCARGS="-DUSE_SASL_AUTH -I/usr/include/sasl \
+			-DUSE_CYRUS_SASL \
+			-DHAS_LDAP \
+			-DUSE_TLS \
+			-DHAS_MYSQL -I/usr/include/mysql \
+			-DHAS_PGSQL -I/usr/include/postgresql" \
+	        AUXLIBS="-lsasl2 -lssl -lcrypto -lldap -llber -lmysqlclient -lz -lm -lpq"
+	make OPT="${CFLAGS}" || return 1
+
+	sh postfix-install -non-interactive \
+		install_root="$startdir/pkg" \
+		daemon_directory="/usr/lib/$pkgname" \
+		sample_directory="/etc/$pkgname/sample" \
+		manpage_directory="/usr/share/man"
+
+	cd $startdir/pkg
+	cat $startdir/src/$pkgname.patch |patch -Np0 || return 1
+	rm -f etc/$pkgname/main.cf~
+
+	cd $startdir/pkg
+	mkdir etc/rc.d
+	install -m 0755 $startdir/src/$pkgname etc/rc.d/$pkgname
+
+	install -Dm644 $startdir/src/$pkgname-$pkgver/LICENSE ${startdir}/pkg/usr/share/licenses/${pkgname}/LICENSE
+}
+md5sums=('6b954cfb3eb6141dac1e773281211717'
+         'a3c45ff23ef036143711793fcf2478c3'
+         'c847b96f08925f08b0f610468a8e21f6')

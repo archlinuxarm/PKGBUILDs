@@ -1,0 +1,88 @@
+# $Id: PKGBUILD 52276 2009-09-17 06:09:28Z allan $
+# Maintainer: judd <jvinet@zeroflux.org>
+pkgname=samba
+pkgver=3.3.7
+# We use the 'A' to fake out pacman's version comparators.  Samba chooses
+# to append 'a','b',etc to their subsequent releases, which pamcan
+# misconstrues as alpha, beta, etc.  Bad samba!
+_realver=3.3.7
+pkgrel=2
+pkgdesc="Tools to access a server's filespace and printers via SMB"
+arch=(i686 x86_64)
+url="http://www.samba.org"
+license=('GPL3')
+backup=(etc/logrotate.d/samba etc/pam.d/samba etc/samba/smb.conf etc/xinetd.d/swat etc/conf.d/samba)
+depends=('db>=4.7' 'popt' 'libcups' 'acl' 'libldap' 'smbclient=3.3.7-2' 'libcap>=2.16' 'heimdal>=1.2-1' 'pam' 'fam' 'gnutls>=2.4.1' 'tdb=3.3.7')
+options=(!makeflags)
+source=(http://us1.samba.org/samba/ftp/stable/${pkgname}-${_realver}.tar.gz \
+        no-clients.patch samba samba.logrotate swat.xinetd samba.pam samba.conf.d)
+
+build() {
+  cd ${srcdir}/${pkgname}-${_realver}/source
+  patch -Np2 -i ${srcdir}/no-clients.patch || return 1
+
+  ./configure --prefix=/usr --with-configdir=/etc/samba \
+              --with-lockdir=/var/cache/samba \
+              --with-piddir=/var/run/samba \
+              --with-fhs --with-pam --with-ads --with-acl-support \
+              --without-cifsmount --without-libsmbclient \
+              --with-syslog --with-pam_smbpass \
+              --localstatedir=/var --disable-dnssd \
+	      --disable-avahi --libdir=/usr/lib/samba
+  make || return 1
+  mkdir -p ${pkgdir}/var/log/samba
+  mkdir -p ${pkgdir}/etc/samba/private
+  chmod 700 ${pkgdir}/etc/samba/private
+  make DESTDIR=$startdir/pkg install
+  chmod 644 ${pkgdir}/usr/include/*.h
+  rm -rf ${pkgdir}/usr/var
+  (cd script; cp installbin.sh i; cat i | sed 's/\/sbin\///' > installbin.sh)
+  install -D -m755 ../../samba ${pkgdir}/etc/rc.d/samba
+  install -D -m644 ../../samba.conf.d ${pkgdir}/etc/conf.d/samba
+  mkdir -p ${pkgdir}/etc/samba
+  cat ../examples/smb.conf.default | \
+    sed 's|log file = .*$|log file = /var/log/samba/log.%m|g' >${pkgdir}/etc/samba/smb.conf.default
+  install -D -m644 ../../samba.logrotate ${pkgdir}/etc/logrotate.d/samba
+  install -D -m644 ../../swat.xinetd ${pkgdir}/etc/xinetd.d/swat
+  install -D -m644 ../../samba.pam ${pkgdir}/etc/pam.d/samba
+  # symlink libs
+  for i in ${pkgdir}/usr/lib/samba/libsmbshare*; do
+	ln -sf samba/$(basename $i) ${pkgdir}/usr/lib/$(basename $i)
+  done
+  # spool directory
+  install -d -m1777 ${pkgdir}/var/spool/samba
+  sed -i 's|/usr/spool/samba|/var/spool/samba|g' ${pkgdir}/etc/samba/smb.conf.default
+  # fix logrotate
+  sed -i -e 's|log.%m|%m.log|g' ${pkgdir}/etc/samba/smb.conf.default
+  # nsswitch libraries
+  install -D -m755 nsswitch/libnss_wins.so ${pkgdir}/lib/libnss_wins.so
+  ln -s libnss_wins.so ${pkgdir}/lib/libnss_wins.so.2
+  install -D -m755 nsswitch/libnss_winbind.so ${pkgdir}/lib/libnss_winbind.so
+  install -D -m755 bin/pam_winbind.so ${pkgdir}/lib/security/pam_winbind.so
+  # remove conflict files of smbclient and tdb
+  for man in libsmbclient smbspool \
+      umount.cifs mount.cifs net; do
+    rm -f ${pkgdir}/usr/share/man/man8/${man}.8
+  done
+  for i in libnetapi* libtdb* libtalloc* libwbclient*; do
+	  rm -f ${pkgdir}/usr/lib/samba/$i
+  done
+  rm -f ${pkgdir}/usr/bin/tdbbackup
+  rm -f ${pkgdir}/usr/include/{tdb.h,talloc.h,netapi.h}
+  for man in rpcclient smbcacls smbclient smbcquotas \
+      smbtree smbtar nmblookup smbget; do
+    rm -f ${pkgdir}/usr/share/man/man1/${man}.1
+  done
+  rm -f ${pkgdir}/usr/share/man/man7/libsmbclient.7
+
+  rm -f ${pkgdir}/usr/include/libsmbclient.h
+  # copy ldap example
+  install -D -m644 ${srcdir}/${pkgname}-${_realver}/examples/LDAP/samba.schema ${pkgdir}/usr/share/doc/samba/examples/LDAP/samba.schema
+}
+md5sums=('bc7228cc686986353df67ff42b1b2b1e'
+         'ce3d88336ade7522e9a8f59bb306accd'
+         'e93533fa2296c07c1f645dfdd373657f'
+         '5697da77590ec092cc8a883bae06093c'
+         'a4bbfa39fee95bba2e7ad6b535fae7e6'
+         '96f82c38f3f540b53f3e5144900acf17'
+         'f2f2e348acd1ccb566e95fa8a561b828')

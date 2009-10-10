@@ -1,0 +1,124 @@
+From 178b5ff626d747026fc9d03c7908c3f203fbd263 Mon Sep 17 00:00:00 2001
+From: Thomas James Alexander Thurman <tthurman@src.gnome.org>
+Date: Thu, 12 Mar 2009 01:09:41 +0000
+Subject: fix problem where the previous code ignored callbacks for properties whose
+
+	* src/core/window-props.c: fix problem where the previous
+        code ignored callbacks for properties whose values weren't
+        looked up.  Closes #572573.
+
+
+svn path=/trunk/; revision=4191
+---
+diff --git a/src/core/window-props.c b/src/core/window-props.c
+index 02b8845..df90eaa 100644
+--- a/src/core/window-props.c
++++ b/src/core/window-props.c
+@@ -73,12 +73,6 @@ typedef struct MetaWindowPropHooks
+   ReloadValueFunc   reload_func;
+ } MetaWindowPropHooks;
+ 
+-static void init_prop_value            (MetaDisplay   *display,
+-                                        Atom           property,
+-                                        MetaPropValue *value);
+-static void reload_prop_value          (MetaWindow    *window,
+-                                        MetaPropValue *value,
+-                                        gboolean       initial);
+ static MetaWindowPropHooks* find_hooks (MetaDisplay *display,
+                                         Atom         property);
+ 
+@@ -128,23 +122,34 @@ meta_window_reload_properties_from_xwindow (MetaWindow *window,
+   g_return_if_fail (n_properties > 0);
+   
+   values = g_new0 (MetaPropValue, n_properties);
+-  
+-  i = 0;
+-  while (i < n_properties)
++
++  for (i=0; i<n_properties; i++)
+     {
+-      init_prop_value (window->display, properties[i], &values[i]);
+-      ++i;
++      MetaWindowPropHooks *hooks = find_hooks (window->display,
++                                               properties[i]);
++    
++      if (!hooks || hooks->type == META_PROP_VALUE_INVALID)
++        {
++          values[i].type = META_PROP_VALUE_INVALID;
++          values[i].atom = None;
++        }
++      else
++        {
++          values[i].type = hooks->type;
++          values[i].atom = properties[i];
++        }
+     }
+   
+   meta_prop_get_values (window->display, xwindow,
+                         values, n_properties);
+ 
+-  i = 0;
+-  while (i < n_properties)
++  for (i=0; i<n_properties; i++)
+     {
+-      reload_prop_value (window, &values[i], initial);
+-      
+-      ++i;
++      MetaWindowPropHooks *hooks = find_hooks (window->display,
++                                               properties[i]);
++
++      if (hooks && hooks->reload_func != NULL)
++        (* hooks->reload_func) (window, &values[i], initial);
+     }
+ 
+   meta_prop_free_values (values, n_properties);
+@@ -152,37 +157,6 @@ meta_window_reload_properties_from_xwindow (MetaWindow *window,
+   g_free (values);
+ }
+ 
+-/* Fill in the MetaPropValue used to get the value of "property" */
+-static void
+-init_prop_value (MetaDisplay   *display,
+-                 Atom           property,
+-                 MetaPropValue *value)
+-{
+-  MetaWindowPropHooks *hooks = find_hooks (display, property);
+-    
+-  if (!hooks || hooks->type == META_PROP_VALUE_INVALID)
+-    {
+-      value->type = META_PROP_VALUE_INVALID;
+-      value->atom = None;
+-    }
+-  else
+-    {
+-      value->type = hooks->type;
+-      value->atom = property;
+-    }
+-}
+-
+-static void
+-reload_prop_value (MetaWindow    *window,
+-                   MetaPropValue *value,
+-                   gboolean       initial)
+-{
+-  MetaWindowPropHooks *hooks = find_hooks (window->display, value->atom);
+-
+-  if (hooks && hooks->reload_func != NULL)
+-    (* hooks->reload_func) (window, value, initial);
+-}
+-
+ static void
+ reload_wm_client_machine (MetaWindow    *window,
+                           MetaPropValue *value,
+@@ -1566,6 +1540,9 @@ meta_display_free_window_prop_hooks (MetaDisplay *display)
+   display->prop_hooks_table = NULL;
+ }
+ 
++/**
++ * Finds the hooks for a particular property.
++ */
+ static MetaWindowPropHooks*
+ find_hooks (MetaDisplay *display,
+             Atom         property)
+--
+cgit v0.8.2

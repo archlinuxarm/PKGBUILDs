@@ -1,0 +1,78 @@
+Index: kexec-tools-1.101/kexec/arch/i386/x86-linux-setup.c
+===================================================================
+--- kexec-tools-1.101.orig/kexec/arch/i386/x86-linux-setup.c	2006-03-03 10:51:31.000000000 +0100
++++ kexec-tools-1.101/kexec/arch/i386/x86-linux-setup.c	2006-03-10 14:02:20.000000000 +0100
+@@ -24,6 +24,8 @@
+ #include <sys/stat.h>
+ #include <sys/mman.h>
+ #include <fcntl.h>
++#include <sys/ioctl.h>
++#include <linux/fb.h>
+ #include <unistd.h>
+ #include <x86/x86-linux.h>
+ #include "../../kexec.h"
+@@ -94,6 +96,56 @@ void setup_linux_bootloader_parameters(
+ 	cmdline_ptr[cmdline_len - 1] = '\0';
+ }
+ 
++int setup_linux_vesafb(struct x86_linux_param_header *real_mode)
++{
++	struct fb_fix_screeninfo fix;
++	struct fb_var_screeninfo var;
++	int fd;
++
++	fd = open("/dev/fb0", O_RDONLY);
++	if (-1 == fd)
++		return -1;
++
++	if (-1 == ioctl(fd, FBIOGET_FSCREENINFO, &fix))
++		goto out;
++	if (-1 == ioctl(fd, FBIOGET_VSCREENINFO, &var))
++		goto out;
++	if (0 != strcmp(fix.id, "VESA VGA"))
++		goto out;
++	close(fd);
++
++	real_mode->orig_video_isVGA = 0x23 /* VIDEO_TYPE_VLFB */;
++	real_mode->lfb_width      = var.xres;
++	real_mode->lfb_height     = var.yres;
++	real_mode->lfb_depth      = var.bits_per_pixel;
++	real_mode->lfb_base       = fix.smem_start;
++	real_mode->lfb_linelength = fix.line_length;
++	real_mode->vesapm_seg     = 0;
++
++	/* fixme: better get size from /proc/iomem */
++	real_mode->lfb_size       = (fix.smem_len + 65535) / 65536;
++	real_mode->pages          = (fix.smem_len + 4095) / 4096;
++
++	if (var.bits_per_pixel > 8) {
++		real_mode->red_pos    = var.red.offset;
++		real_mode->red_size   = var.red.length;
++		real_mode->green_pos  = var.green.offset;
++		real_mode->green_size = var.green.length;
++		real_mode->blue_pos   = var.blue.offset;
++		real_mode->blue_size  = var.blue.length;
++		real_mode->rsvd_pos   = var.transp.offset;
++		real_mode->rsvd_size  = var.transp.length;
++	}
++	fprintf(stderr, "%s: %dx%dx%d @ %lx +%lx\n", __FUNCTION__,
++		var.xres, var.yres, var.bits_per_pixel,
++		fix.smem_start, fix.smem_len);
++	return 0;
++
++ out:
++	close(fd);
++	return -1;
++}
++
+ void setup_linux_system_parameters(struct x86_linux_param_header *real_mode)
+ {
+ 	/* Fill in information the BIOS would usually provide */
+@@ -111,6 +163,7 @@ void setup_linux_system_parameters(struc
+ 	real_mode->orig_video_ega_bx = 0;
+ 	real_mode->orig_video_isVGA = 1;
+ 	real_mode->orig_video_points = 16;
++	setup_linux_vesafb(real_mode);
+ 
+ 	/* Fill in the memsize later */
+ 	real_mode->ext_mem_k = 0;

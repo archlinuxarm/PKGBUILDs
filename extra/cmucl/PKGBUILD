@@ -1,0 +1,61 @@
+# $Id: PKGBUILD 30037 2009-03-15 17:49:45Z juergen $
+# Contributor: John Proctor <jproctor@prium.net>
+# Maintainer: Juergen Hoetzel <juergen@archlinux.org>
+
+pkgname=cmucl
+pkgver=19f
+pkgrel=1
+pkgdesc="CMU Common Lisp"
+depends=('glibc' 'lesstif')
+provides=('common-lisp')
+makedepends=('sed' 'bc')
+license=('custom')
+#license PublicDomain
+source=(http://common-lisp.net/project/cmucl/downloads/release/${pkgver}/cmucl-src-${pkgver}.tar.bz2 \
+    http://common-lisp.net/project/cmucl/downloads/release/${pkgver}/cmucl-${pkgver}-x86-linux.tar.bz2)
+md5sums=('89529846608fe6fbf1227d52556109d9' 'b4d5e17959f808448f90ba074ef84843')
+url="http://www.cons.org/cmucl/"
+arch=(i686)
+
+build() {
+  cd $startdir/src
+  export CMUCLCORE=$startdir/src/lib/cmucl/lib/lisp-x87.core
+  # Create target buildroot
+  ./src/tools/create-target.sh $CHOST 
+  # Use binary-dist lisp to create initial kernel.core
+  ./src/tools/build-world.sh $CHOST $startdir/src/bin/lisp
+  # build native lisp binary
+  ./src/tools/rebuild-lisp.sh $CHOST 
+  # Generate lisp.core
+  ./src/tools/load-world.sh $CHOST  ${pkgver}
+  # rebuild kernel.core using native lisp 
+  ./src/tools/build-world.sh $CHOST $CHOST/lisp/lisp
+  # "(Re)generate lisp.core"
+  ./src/tools/load-world.sh $CHOST ${pkgver} 
+  # Build auxilary stuff
+  ./src/tools/build-utils.sh $CHOST 
+  # make new binary dist archives
+  ./src/tools/make-dist.sh $CHOST ${pkgver} x86 linux
+  
+  mkdir -p $startdir/pkg/usr/lib/cmucl/
+  mkdir -p $startdir/pkg/usr/share/man/man1
+  mkdir dist
+  tar xjf cmucl-${pkgver}-x86-linux.tar.bz2 -C dist 
+  tar xjf cmucl-${pkgver}-x86-linux.extra.tar.bz2 -C dist
+  cp -a dist/bin ${startdir}/pkg/usr/lib/cmucl
+  cp -a dist/lib/cmucl ${startdir}/pkg/usr/lib/ 
+  cp -a dist/man/man1/* ${startdir}/pkg/usr/share/man/man1/
+
+  ## Setup app-wrapper
+  install -m755 -p -D lib/cmucl/sample-wrapper $startdir/pkg/usr/bin/cmucl
+  # Fixup paths in wrapper
+  sed -i -e "s|^CMUCLLIB=.*|CMUCLLIB=/usr/lib/cmucl/lib|" $startdir/pkg/usr/bin/cmucl
+  sed -i -e "s|/<<your-cmucl-path>>|/usr/lib/cmucl|"      $startdir/pkg/usr/bin/cmucl
+  # many apps (ie, maxima) expect to find the wrapper named 'lisp' too
+  ln -sf cmucl $startdir/pkg/usr/bin/lisp
+  ## Unpackaged files
+  rm -f $startdir/pkg/usr/lib/cmucl/sample-wrapper
+  # license
+  install -D -m644 ${startdir}/src/src/general-info/COPYRIGHTS \
+                   ${startdir}/pkg/usr/share/licenses/${pkgname}/license.txt
+}

@@ -1,0 +1,313 @@
+--- svx/source/dialog/optinet2.cxx-old	2007-05-04 22:59:31.000000000 +0200
++++ svx/source/dialog/optinet2.cxx	2007-05-04 22:59:56.000000000 +0200
+@@ -1813,199 +1813,6 @@
+ 	maProtectRecordsPB.SetText( sNewText );
+ }
+ 
+-//added by jmeng begin
+-MozPluginTabPage::MozPluginTabPage(Window* pParent, const SfxItemSet& rSet)
+-	: SfxTabPage( pParent, SVX_RES( RID_SVXPAGE_INET_MOZPLUGIN ), rSet ),
+-	aMSWordGB		( this, SVX_RES( GB_MOZPLUGIN	    ) ),
+-	aWBasicCodeCB	( this, SVX_RES( CB_MOZPLUGIN_CODE ) )
+-{
+-	FreeResource();
+-}
+-
+-MozPluginTabPage::~MozPluginTabPage()
+-{
+-}
+-
+-SfxTabPage*	MozPluginTabPage::Create( Window* pParent,
+-										const SfxItemSet& rAttrSet )
+-{
+-	return new MozPluginTabPage( pParent, rAttrSet );
+-}
+-BOOL MozPluginTabPage::FillItemSet( SfxItemSet& )
+-{
+-	BOOL hasInstall = isInstalled();
+-	BOOL hasChecked = aWBasicCodeCB.IsChecked();
+-	if(hasInstall && (!hasChecked)){
+-		//try to uninstall
+-		uninstallPlugin();
+-	}
+-	else if((!hasInstall) && hasChecked){
+-		//try to install
+-		installPlugin();
+-	}
+-	else{
+-		// do nothing
+-	}
+-	return TRUE;
+-}
+-void MozPluginTabPage::Reset( const SfxItemSet& )
+-{
+-		aWBasicCodeCB.Check( isInstalled());
+-		aWBasicCodeCB.SaveValue();
+-}
+-
+-#ifdef WNT
+-extern "C" {
+-	int lc_isInstalled(const  char* realFilePath);
+-	int lc_installPlugin(const  char* realFilePath);
+-	int lc_uninstallPlugin(const  char* realFilePath);
+-}
+-#endif
+-
+-#define NPP_PATH_MAX 2048
+-inline bool getDllURL(rtl::OString * path)
+-{
+-    OSL_ASSERT(path != NULL);
+-    ::rtl::OUString dirPath/*dllPath, */;
+-    if (osl_getExecutableFile(&dirPath.pData) != osl_Process_E_None) {
+-        return false;
+-    }
+-    dirPath = dirPath.copy(0, dirPath.lastIndexOf('/'));
+-//    osl::FileBase::getAbsoluteFileURL(dirPath, libPath, dllPath);
+-    ::rtl::OUString sysDirPath;
+-	osl::FileBase::getSystemPathFromFileURL(dirPath, sysDirPath);
+-    *path = OUStringToOString(sysDirPath, RTL_TEXTENCODING_ASCII_US);
+-    return true;
+-}
+-
+-BOOL MozPluginTabPage::isInstalled()
+-{
+-#ifdef UNIX
+-    // get the real file referred by .so lnk file
+-    char lnkFilePath[NPP_PATH_MAX] = {0};
+-    char lnkReferFilePath[NPP_PATH_MAX] = {0};
+-    char* pHome = getpwuid(getuid())->pw_dir;
+-	strcat(lnkFilePath, pHome);
+-	strcat(lnkFilePath, "/.mozilla/plugins/libnpsoplugin" SAL_DLLEXTENSION);
+-
+-	struct stat sBuf;
+-	if (0 > lstat(lnkFilePath, &sBuf))
+-	    return false;
+-    if (!S_ISLNK(sBuf.st_mode))
+-		return false;
+-    if (0 >= readlink(lnkFilePath, lnkReferFilePath, NPP_PATH_MAX))
+-		return false;
+-    // If the link is relative, then we regard it as non-standard
+-    if (lnkReferFilePath[0] != '/')
+-        return false;
+-
+-    // get the real file path
+-    char realFilePath[NPP_PATH_MAX] = {0};
+-    ::rtl::OString tempString;
+-    if (!getDllURL(&tempString)) {
+-        return false;
+-    }
+-    strncpy(realFilePath, tempString.getStr(), NPP_PATH_MAX);
+-	strcat(realFilePath, "/libnpsoplugin" SAL_DLLEXTENSION);
+-
+-    if (0 != strcmp(lnkReferFilePath, realFilePath))
+-        return false;
+-    return true;
+-#endif
+-#ifdef WNT
+-	// get the value from registry
+-		BOOL ret = true;
+-	::rtl::OString tempString;
+-	char realFilePath[NPP_PATH_MAX] = {0};
+-    if (!getDllURL(&tempString)){
+-        return false;
+-    }
+-    strncpy(realFilePath, tempString.getStr(), NPP_PATH_MAX);
+-	if(! lc_isInstalled(realFilePath))
+-		ret =true;
+-	else
+-		ret = false;
+-	return ret;
+-#endif
+-}
+-
+-BOOL MozPluginTabPage::installPlugin()
+-{
+-#ifdef UNIX
+-    // get the real file referred by .so lnk file
+-    char lnkFilePath[NPP_PATH_MAX] = {0};
+-    char* pHome = getpwuid(getuid())->pw_dir;
+-	strcat(lnkFilePath, pHome);
+-    strcat(lnkFilePath, "/.mozilla/plugins/libnpsoplugin" SAL_DLLEXTENSION);
+-    remove(lnkFilePath);
+-
+-    // create the dirs if necessary
+-    struct stat buf;
+-    char tmpDir[NPP_PATH_MAX] = {0};
+-    sprintf(tmpDir, "%s/.mozilla", pHome);
+-    if (0 > stat(lnkFilePath, &buf))
+-    {
+-        mkdir(tmpDir, 0755);
+-        strcat(tmpDir, "/plugins");
+-        mkdir(tmpDir, 0755);
+-    }
+-
+-    // get the real file path
+-    char realFilePath[NPP_PATH_MAX] = {0};
+-    ::rtl::OString tempString;
+-    if (!getDllURL(&tempString)) {
+-        return false;
+-    }
+-    strncpy(realFilePath, tempString.getStr(), NPP_PATH_MAX);
+-	strcat(realFilePath, "/libnpsoplugin" SAL_DLLEXTENSION);
+-
+-    // create the link
+-    if (0 != symlink(realFilePath, lnkFilePath))
+-        return false;
+-    return true;
+-#endif
+-#ifdef WNT
+-	::rtl::OString tempString;
+-	char realFilePath[NPP_PATH_MAX] = {0};
+-    if (!getDllURL(&tempString)) {
+-        return false;
+-    }
+-    strncpy(realFilePath, tempString.getStr(), NPP_PATH_MAX);
+-	if( !lc_installPlugin(realFilePath))
+-		return true;
+-	else
+-		return false;
+-#endif
+-}
+-
+-BOOL MozPluginTabPage::uninstallPlugin()
+-{
+-#ifdef UNIX
+-    // get the real file referred by .so lnk file
+-    char lnkFilePath[NPP_PATH_MAX] = {0};
+-    char* pHome = getpwuid(getuid())->pw_dir;
+-	strcat(lnkFilePath, pHome);
+-	strcat(lnkFilePath, "/.mozilla/plugins/libnpsoplugin" SAL_DLLEXTENSION);
+-
+-	if(0 > remove(lnkFilePath))
+-	    return false;
+-	return true;
+-#endif
+-#ifdef WNT
+-	::rtl::OString tempString;
+-	char realFilePath[NPP_PATH_MAX] = {0};
+-    if (!getDllURL(&tempString)) {
+-        return false;
+-    }
+-    strncpy(realFilePath, tempString.getStr(), NPP_PATH_MAX);
+-	if(!lc_uninstallPlugin(realFilePath))
+-		return true;
+-	else
+-		return false;
+-#endif
+-}
+-//added by jmeng end
+-
+ /* -------------------------------------------------------------------------*/
+ 
+ class MailerProgramCfg_Impl : public utl::ConfigItem
+--- svx/source/dialog/optinet2.hxx	10 Apr 2008 23:34:00 -0000	1.16
++++ svx/source/dialog/optinet2.hxx	16 Jun 2008 16:09:22 -0000
+@@ -293,29 +293,6 @@
+ 	virtual	void 		Reset( const SfxItemSet& rSet );
+ };
+ 
+-//added by jmeng begin
+-class MozPluginTabPage : public SfxTabPage
+-{
+-    FixedLine       aMSWordGB;
+-	CheckBox		aWBasicCodeCB;
+-
+-	BOOL isInstalled(void);
+-	BOOL installPlugin(void);
+-	BOOL uninstallPlugin(void);
+-
+-	MozPluginTabPage( Window* pParent, const SfxItemSet& rSet );
+-	virtual ~MozPluginTabPage();
+-
+-public:
+-
+-	static SfxTabPage*	Create( Window* pParent,
+-								const SfxItemSet& rAttrSet );
+-
+-	virtual	BOOL 		FillItemSet( SfxItemSet& rSet );
+-	virtual	void 		Reset( const SfxItemSet& rSet );
+-
+-};
+-//added by jmeng end
+ #endif
+ 
+ /* -----------------------------20.06.01 16:32--------------------------------
+--- svx/source/options/optinet2.src	11 Apr 2008 02:13:50 -0000	1.97
++++ svx/source/options/optinet2.src	16 Jun 2008 16:11:20 -0000
+@@ -40,32 +40,6 @@
+ /*                                                                      */
+ /************************************************************************/
+ 
+-// added by jmeng begin
+-
+-TabPage RID_SVXPAGE_INET_MOZPLUGIN
+-{
+-	OutputSize = TRUE ;
+-	Size = MAP_APPFONT ( 260 , 185 ) ;
+-	SVLook = TRUE ;
+-	Hide = TRUE ;
+-
+-    FixedLine GB_MOZPLUGIN
+-	{
+-		Pos = MAP_APPFONT ( 6 , 3 ) ;
+-        Size = MAP_APPFONT (  248 , 8  ) ;
+-        Text[ en-US ] = "Browser Plug-in";
+-	};
+-	CheckBox CB_MOZPLUGIN_CODE
+-	{
+-		Pos = MAP_APPFONT ( 12 , 14 ) ;
+-		Size = MAP_APPFONT (  236 , 10  ) ;
+-		TabStop = TRUE ;
+-        Text [ en-US ] = "~Display documents in browser" ;
+-	};
+-};
+-
+-//added by jmeng end
+-
+ TabPage RID_SVXPAGE_INET_PROXY
+ {
+ 	HelpId = HID_OPTIONS_PROXY ;
+--- svx/source/dialog/treeopt.src	11 Apr 2008 00:17:12 -0000	1.21
++++ svx/source/dialog/treeopt.src	16 Jun 2008 16:12:27 -0000
+@@ -187,7 +187,6 @@
+ 			< "Proxy" ;  RID_SVXPAGE_INET_PROXY; > ;
+ 			< "Search" ;  RID_SVXPAGE_INET_SEARCH; > ;
+ 			< "E-mail" ;  RID_SVXPAGE_INET_MAIL; > ;
+-            < "Browser Plug-in" ;  RID_SVXPAGE_INET_MOZPLUGIN; > ;
+ 		};
+ 		//modified by jmeng end
+ 	};
+--- svx/inc/svx/dialogs.hrc	4 Jun 2008 11:21:07 -0000	1.14
++++ svx/inc/svx/dialogs.hrc	16 Jun 2008 16:14:30 -0000
+@@ -258,11 +258,6 @@
+ #define RID_SVXPAGE_INET_CACHE              (RID_SVX_START + 158)
+ #define RID_SVXPAGE_INET_TYPE               (RID_SVX_START + 159)
+ #define RID_SVXPAGE_INET_SEARCH				(RID_SVX_START + 160)
+-//added by jmeng begin
+-#define RID_SVXPAGE_INET_MOZPLUGIN			(RID_SVX_START + 2161)
+-#define GB_MOZPLUGIN	1
+-#define CB_MOZPLUGIN_CODE	2
+-//added by jmeng end
+ #define RID_SVXPAGE_INET_SECURITY	  		(RID_SVX_START + 200)
+ 
+ #define RID_SVXPAGE_BROWSER_OTHER           (RID_SVX_START + 202)
+--- svx/source/dialog/treeopt.cxx	11 Apr 2008 00:16:21 -0000	1.56
++++ svx/source/dialog/treeopt.cxx	16 Jun 2008 16:04:13 -0000
+@@ -368,9 +368,6 @@
+ 		case RID_SVXPAGE_ACCESSIBILITYCONFIG:		fnCreate = &SvxAccessibilityOptionsTabPage::Create; break;
+ 		case RID_SVXPAGE_SSO:						fnCreate = GetSSOCreator(); break;
+ 		case RID_SVXPAGE_OPTIONS_CTL:				fnCreate = &SvxCTLOptionsPage::Create ; break;
+-		//added by jmeng begin
+-		case RID_SVXPAGE_INET_MOZPLUGIN:			fnCreate = &MozPluginTabPage::Create; break;
+-		//added by jmeng end
+ 		case RID_SVXPAGE_OPTIONS_JAVA:				fnCreate = &SvxJavaOptionsPage::Create ; break;
+         case RID_SVXPAGE_ONLINEUPDATE:				fnCreate = &SvxOnlineUpdateTabPage::Create; break;
+         case RID_OPTPAGE_CHART_DEFCOLORS:			fnCreate = &SvxDefaultColorOptPage::Create; break;
+@@ -370,7 +367,6 @@
+     { "Internet",           "Proxy",                RID_SVXPAGE_INET_PROXY },
+     { "Internet",           "Search",               RID_SVXPAGE_INET_SEARCH },
+     { "Internet",           "Email",                RID_SVXPAGE_INET_MAIL },
+-    { "Internet",           "MozillaPlugin",        RID_SVXPAGE_INET_MOZPLUGIN },
+     { "LoadSave",           NULL,                   SID_FILTER_DLG },
+     { "LoadSave",           "General",              RID_SFXPAGE_SAVE },
+     { "LoadSave",           "VBAProperties",        SID_OPTFILTER_MSOFFICE },
