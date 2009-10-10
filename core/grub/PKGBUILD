@@ -1,0 +1,86 @@
+# $Id: PKGBUILD 47861 2009-07-28 10:32:47Z ronald $
+# Maintainer: Ronald van Haren <ronald.archlinux.org>
+
+pkgname=grub
+pkgver=0.97
+pkgrel=16
+pkgdesc="A GNU multiboot boot loader"
+arch=('i686' 'x86_64')
+license=('GPL')
+url="http://www.gnu.org/software/grub/"
+groups=('base')
+depends=('ncurses' 'diffutils' 'sed')
+source=(ftp://alpha.gnu.org/gnu/grub/grub-$pkgver.tar.gz
+        menu.lst
+        install-grub
+        040_all_grub-0.96-nxstack.patch
+        05-grub-0.97-initrdaddr.diff
+        i2o.patch
+        special-devices.patch
+        more-raid.patch
+        intelmac.patch
+        grub-inode-size.patch
+	ext4.patch)
+backup=('boot/grub/menu.lst')
+install=grub.install
+md5sums=('cd3f3eb54446be6003156158d51f4884'
+         'a2098dc41fc3cb13e53179de2979d088'
+         '3182c4ae4963a16930bc772bba89dacf'
+         'eb9d69c46af3a0667c1f651817d7f075'
+         'ccd2d757e79e3a03dc19ede7391ed328'
+         '826fdbf446067f9861baf9f6a69a4583'
+         '49f6d4bcced0bc8bbcff273f3254bbfa'
+         'f41f702014a064918d7afc6fc23baa6e'
+         '175dc6b9f4ab94e8056c3afb3e34460a'
+         '69c648d2b8d0965df70a74014424f31c'
+         '39e0f9a05b7e04aceb24fc7bc4893e3d')
+
+build() {
+  cd $srcdir/$pkgname-$pkgver
+
+  #set destination architecture here
+  DESTARCH="i686"
+  #DESTARCH="x86_64"
+  # optimizations break the build -- disable them
+  # adding special devices to grub, patches are from fedora
+  patch -Np1 -i ../special-devices.patch || return 1
+  patch -Np1 -i ../i2o.patch || return 1
+  patch -Np1 -i ../more-raid.patch || return 1
+  patch -Np1 -i ../intelmac.patch || return 1
+  # Add support for bigger inode size to e2fs_stage1_5
+  patch -Np1 -i ../grub-inode-size.patch || return 1
+  # Add ext4 support
+  # http://www.mail-archive.com/bug-grub@gnu.org/msg11458.html
+  patch -Np1 -i ../ext4.patch || return 1
+
+  #arch64 fixes for static build
+  if [ "$CARCH" = "x86_64" ]; then
+    echo "this package has to be built on i686, won't compile on x86_64"
+    sleep 5
+  else
+    if [ "$DESTARCH" = "x86_64" ]; then
+      # patch from gentoo for fixing a segfault
+      patch -Np1 -i ../040_all_grub-0.96-nxstack.patch || return 1
+      # patch from frugalware to make it boot when more than 2GB ram installed
+      patch -Np1 -i ../05-grub-0.97-initrdaddr.diff || return 1
+      CFLAGS="-static" ./configure --prefix=/usr --bindir=/bin --sbindir=/sbin \
+                           --mandir=/usr/share/man --infodir=/usr/share/info
+    else
+      CFLAGS= ./configure --prefix=/usr --bindir=/bin --sbindir=/sbin \
+                  --mandir=/usr/share/man --infodir=/usr/share/info
+    fi
+  fi
+
+  CFLAGS= make || return 1
+  make DESTDIR=$pkgdir install || return 1
+  install -D -m644 ../menu.lst $startdir/pkg/boot/grub/menu.lst
+  install -D -m755 ../install-grub $startdir/pkg/sbin/install-grub
+ 
+  rm -f $pkgdir/usr/share/info/dir || return 1
+  gzip /$pkgdir/usr/share/info/*
+
+  if [ "$DESTARCH" = "x86_64" ]; then
+    # fool makepkg into building a x86_64 package
+    export CARCH="x86_64"
+  fi
+}

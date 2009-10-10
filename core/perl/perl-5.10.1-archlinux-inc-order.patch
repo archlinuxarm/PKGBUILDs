@@ -1,0 +1,101 @@
+Tweak @INC so that the ordering is:
+	site (5.8.8)
+	vendor (all)
+	core (5.8.8)
+	obsolete (pre-5.8.8-9) vendor builds
+
+The rationale being that an admin (via site), or module packager (vendor) can
+chose to shadow core modules when there is a newer version than is included in
+core.
+
+Thanks to Charles Mauch (xterminus) for his work on the initial patch.
+
+--- perl.c.orig	2007-12-18 05:47:08.000000000 -0500
++++ perl.c	2007-12-24 23:15:23.000000000 -0500
+@@ -4748,44 +4748,12 @@
+ 
+ /* Use the ~-expanded versions of APPLLIB (undocumented),
+     ARCHLIB PRIVLIB SITEARCH SITELIB VENDORARCH and VENDORLIB
++    Arch Linux: SITEARCH SITELIB VENDORARCH VENDORLIB ARCHLIB PRIVLIB OTHER
+ */
+ #ifdef APPLLIB_EXP
+     incpush(APPLLIB_EXP, TRUE, TRUE, TRUE, TRUE);
+ #endif
+ 
+-#ifdef ARCHLIB_EXP
+-    incpush(ARCHLIB_EXP, FALSE, FALSE, TRUE, TRUE);
+-#endif
+-#ifdef MACOS_TRADITIONAL
+-    {
+-	Stat_t tmpstatbuf;
+-    	SV * privdir = newSV(0);
+-	char * macperl = PerlEnv_getenv("MACPERL");
+-	
+-	if (!macperl)
+-	    macperl = "";
+-	
+-	Perl_sv_setpvf(aTHX_ privdir, "%slib:", macperl);
+-	if (PerlLIO_stat(SvPVX(privdir), &tmpstatbuf) >= 0 && S_ISDIR(tmpstatbuf.st_mode))
+-	    incpush(SvPVX(privdir), TRUE, FALSE, TRUE, FALSE);
+-	Perl_sv_setpvf(aTHX_ privdir, "%ssite_perl:", macperl);
+-	if (PerlLIO_stat(SvPVX(privdir), &tmpstatbuf) >= 0 && S_ISDIR(tmpstatbuf.st_mode))
+-	    incpush(SvPVX(privdir), TRUE, FALSE, TRUE, FALSE);
+-	
+-   	SvREFCNT_dec(privdir);
+-    }
+-    if (!PL_tainting)
+-	incpush(":", FALSE, FALSE, TRUE, FALSE);
+-#else
+-#ifndef PRIVLIB_EXP
+-#  define PRIVLIB_EXP "/usr/local/lib/perl5:/usr/local/lib/perl"
+-#endif
+-#if defined(WIN32)
+-    incpush(PRIVLIB_EXP, TRUE, FALSE, TRUE, TRUE);
+-#else
+-    incpush(PRIVLIB_EXP, FALSE, FALSE, TRUE, TRUE);
+-#endif
+-
+ #ifdef SITEARCH_EXP
+     /* sitearch is always relative to sitelib on Windows for
+      * DLL-based path intuition to work correctly */
+@@ -4828,6 +4796,40 @@
+     incpush(PERL_VENDORLIB_STEM, FALSE, TRUE, TRUE, TRUE);
+ #endif
+ 
++/* Arch Linux: core libs after site and vendor libs. */
++#ifdef ARCHLIB_EXP
++    incpush(ARCHLIB_EXP, FALSE, FALSE, TRUE, TRUE);
++#endif
++#ifdef MACOS_TRADITIONAL
++    {
++	Stat_t tmpstatbuf;
++    	SV * privdir = newSV(0);
++	char * macperl = PerlEnv_getenv("MACPERL");
++	
++	if (!macperl)
++	    macperl = "";
++	
++	Perl_sv_setpvf(aTHX_ privdir, "%slib:", macperl);
++	if (PerlLIO_stat(SvPVX(privdir), &tmpstatbuf) >= 0 && S_ISDIR(tmpstatbuf.st_mode))
++	    incpush(SvPVX(privdir), TRUE, FALSE, TRUE, FALSE);
++	Perl_sv_setpvf(aTHX_ privdir, "%ssite_perl:", macperl);
++	if (PerlLIO_stat(SvPVX(privdir), &tmpstatbuf) >= 0 && S_ISDIR(tmpstatbuf.st_mode))
++	    incpush(SvPVX(privdir), TRUE, FALSE, TRUE, FALSE);
++	
++   	SvREFCNT_dec(privdir);
++    }
++    if (!PL_tainting)
++	incpush(":", FALSE, FALSE, TRUE, FALSE);
++#else
++#ifndef PRIVLIB_EXP
++#  define PRIVLIB_EXP "/usr/local/lib/perl5:/usr/local/lib/perl"
++#endif
++#if defined(WIN32)
++    incpush(PRIVLIB_EXP, TRUE, FALSE, TRUE, TRUE);
++#else
++    incpush(PRIVLIB_EXP, FALSE, FALSE, TRUE, TRUE);
++#endif
++
+ #ifdef PERL_OTHERLIBDIRS
+     incpush(PERL_OTHERLIBDIRS, TRUE, TRUE, TRUE, TRUE);
+ #endif

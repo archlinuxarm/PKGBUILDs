@@ -1,0 +1,88 @@
+diff -up 1.0.0.rc15/lib/format/ataraid/isw.c~ 1.0.0.rc15/lib/format/ataraid/isw.c
+--- 1.0.0.rc15/lib/format/ataraid/isw.c~	2009-04-10 14:12:14.000000000 +0200
++++ 1.0.0.rc15/lib/format/ataraid/isw.c	2009-04-10 14:38:56.000000000 +0200
+@@ -81,15 +81,43 @@ is_raid10(struct isw_dev *dev)
+ }
+ 
+ /* Find a disk table slot by serial number. */
++static const char *dev_info_serial_to_isw(const char *di_serial)
++{
++	static char isw_serial[1024];
++
++	int i, isw_serial_len = 0;
++
++	for (i = 0; di_serial[i] && isw_serial_len < 1023; i++) {
++		if (((unsigned char)di_serial[i]) > 0x20) {
++			/* ':' is reserved for use in placeholder serial
++			 * numbers for missing disks */
++			if (di_serial[i] == ':')
++				isw_serial[isw_serial_len] = ';';
++			else
++				isw_serial[isw_serial_len] = di_serial[i];
++			isw_serial_len++;
++		}
++	}
++	isw_serial[isw_serial_len] = 0;
++
++	if (isw_serial_len > MAX_RAID_SERIAL_LEN)
++		memmove(isw_serial,
++			isw_serial + (isw_serial_len - MAX_RAID_SERIAL_LEN),
++			MAX_RAID_SERIAL_LEN);
++
++	return isw_serial;
++}
++
+ static struct isw_disk *
+ _get_disk(struct isw *isw, struct dev_info *di)
+ {
+ 	if (di->serial) {
+ 		int i = isw->num_disks;
+ 		struct isw_disk *disk = isw->disk;
++		const char *isw_serial = dev_info_serial_to_isw(di->serial);
+ 
+ 		while (i--) {
+-			if (!strncmp(di->serial, (const char *) disk[i].serial,
++			if (!strncmp(isw_serial, (const char *) disk[i].serial,
+ 				     MAX_RAID_SERIAL_LEN))
+ 				return disk + i;
+ 		}
+@@ -866,7 +894,8 @@ rd_by_serial(struct raid_set *rs, const 
+ 
+ 	list_for_each_entry(rd, &rs->devs, devs) {
+ 		if (rd->di &&
+-		    !strncmp(rd->di->serial, serial, MAX_RAID_SERIAL_LEN))
++		    !strncmp(dev_info_serial_to_isw(rd->di->serial), serial,
++						    MAX_RAID_SERIAL_LEN))
+ 			return rd;
+ 	}
+ 
+@@ -1297,7 +1326,8 @@ isw_config_disks(struct lib_context *lc,
+ 	struct raid_dev *rd;
+ 
+ 	list_for_each_entry(rd, &rs->devs, devs) {
+-		strncpy((char *) disk[i].serial, rd->di->serial,
++		strncpy((char *) disk[i].serial, 
++			dev_info_serial_to_isw(rd->di->serial),
+ 			MAX_RAID_SERIAL_LEN);
+ 		disk[i].totalBlocks = rd->di->sectors;
+ 
+@@ -2421,7 +2451,8 @@ update_metadata(struct lib_context *lc, 
+ 	while (i--) {
+ 		/* Check if the disk is listed. */
+ 		list_for_each_entry(di, LC_DI(lc), list) {
+-			if (!strncmp(di->serial, (const char *) disk[i].serial,
++			if (!strncmp(dev_info_serial_to_isw(di->serial),
++				     (const char *) disk[i].serial,
+ 				     MAX_RAID_SERIAL_LEN))
+ 				goto goon;
+ 		}
+@@ -2517,7 +2548,8 @@ update_metadata(struct lib_context *lc, 
+ 	new_disk->status = CONFIG_ON_DISK |
+ 		DISK_SMART_EVENT_SUPPORTED |
+ 		CLAIMED_DISK | DETECTED_DISK | USABLE_DISK | CONFIGURED_DISK;
+-	strncpy((char *) new_disk->serial, di->serial, MAX_RAID_SERIAL_LEN);
++	strncpy((char *) new_disk->serial, dev_info_serial_to_isw(di->serial),
++		MAX_RAID_SERIAL_LEN);
+ 
+ 	/* build new isw_disk array */
+ 	for (i = 0; i < isw->num_disks; i++) {

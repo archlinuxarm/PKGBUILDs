@@ -1,0 +1,56 @@
+# $Id: PKGBUILD 53286 2009-09-28 00:42:37Z eric $
+# Maintainer: Eric Belanger <eric@archlinux.org>
+
+pkgname=('lvm2' 'device-mapper')
+pkgver=2.02.53
+_pkgverdm=1.02.38
+_pkgverlvm=${pkgver}
+pkgrel=1
+arch=('i686' 'x86_64')
+url="http://sourceware.org/lvm2/"
+license=('GPL')
+groups=('base')
+source=(ftp://sources.redhat.com/pub/lvm2/LVM2.${_pkgverlvm}.tgz lvm2_install lvm2_hook device-mapper.rules)
+md5sums=('f9ae3579bf15467b7f1d7aea8b9ed9b3' '40dccdb1044f00fc1e29ca549933d4bd'\
+         'd6f3ca901747c386aa0d842e9ea64413' '065f32a36947e6183722ed9aef13dc0c')
+sha1sums=('dc6561d51956232f42a38ffca058bf14a45c7591' '86358b3360373dcd1d7e1bf009fe6e6d0c70cdc3'\
+         '0c2a367f2217e6363e5e80257cbc7730d3841e42' '003f5cf654503dcc9c1ba7c11c7d6e77bf27bb8d')
+
+build() {
+  cd "${srcdir}/LVM2.${_pkgverlvm}"
+  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --enable-readline \
+    --enable-pkgconfig --enable-static_link --with-staticdir=/sbin  || return 1
+  make || return 1
+}
+
+package_device-mapper() {
+  pkgdesc="Device mapper userspace library and tools"
+  url="http://sourceware.org/dm/"
+  depends=('glibc' 'readline')
+
+  cd "${srcdir}/LVM2.${_pkgverlvm}"
+  make DESTDIR="${pkgdir}" sbindir="${pkgdir}/sbin" \
+    libdir="${pkgdir}/lib" install_device-mapper || return 1
+  # install the static library in /usr/lib
+  rm "${pkgdir}"/lib/libdevmapper.a*
+  install -D -m644 libdm/ioctl/libdevmapper.a "${pkgdir}/usr/lib/libdevmapper.a" || return 1
+  # install udev rule
+  install -D -m644 "${srcdir}/device-mapper.rules" "${pkgdir}/etc/udev/rules.d/device-mapper.rules" || return 1
+  # fix device-mapper link bug
+  ln -sf /lib/libdevmapper.so "${pkgdir}/usr/lib/libdevmapper.so" || return 1
+}
+
+package_lvm2() {
+  pkgdesc="Logical Volume Manager 2 utilities"
+  depends=('bash' "device-mapper>=${_pkgverdm}")
+  conflicts=('lvm')
+  backup=('etc/lvm/lvm.conf')
+  options=('!makeflags')
+
+  cd "${srcdir}/LVM2.${_pkgverlvm}"
+  make DESTDIR="${pkgdir}" sbindir="${pkgdir}/sbin" install_lvm2 || return 1
+  install -d "${pkgdir}"/etc/lvm/{archive,backup} || return 1
+  # add hook
+  install -D -m644 "${srcdir}/lvm2_hook" "${pkgdir}/lib/initcpio/hooks/lvm2" || return 1
+  install -D -m644 "${srcdir}/lvm2_install" "${pkgdir}/lib/initcpio/install/lvm2" || return 1
+}

@@ -1,0 +1,595 @@
+diff -Naur iputils.orig/Makefile iputils/Makefile
+--- iputils.orig/Makefile	2002-11-09 03:01:11.000000000 +0000
++++ iputils/Makefile	2005-06-09 16:15:32.000000000 +0000
+@@ -17,11 +17,6 @@
+   GLIBCFIX=-Iinclude-glibc -include include-glibc/glibc-bugs.h
+ endif
+ 
+-ifeq ($(KERNEL_INCLUDE)/linux/pfkeyv2.h,$(wildcard $(KERNEL_INCLUDE)/linux/pfkeyv2.h))
+-  SUBDIRS=libipsec setkey
+-  LDLIBS+=-Llibipsec -lipsec
+-  IPSECDEF=-DDO_IPSEC -Ilibipsec
+-endif
+ 
+ 
+ #options if you compile with libc5, and without a bind>=4.9.4 libresolv
+@@ -31,7 +26,7 @@
+ # What a pity, all new gccs are buggy and -Werror does not work. Sigh.
+ #CCOPT=-D_GNU_SOURCE -O2 -Wstrict-prototypes -Wall -g -Werror
+ CCOPT=-D_GNU_SOURCE -O2 -Wstrict-prototypes -Wall -g
+-CFLAGS=$(CCOPT) $(GLIBCFIX) -I$(KERNEL_INCLUDE) -I../include $(IPSECDEF) $(DEFINES) 
++CFLAGS=$(CCOPT) -I../include $(IPSECDEF) $(DEFINES) 
+ 
+ IPV4_TARGETS=tracepath ping clockdiff rdisc arping tftpd rarpd
+ IPV6_TARGETS=tracepath6 traceroute6 ping6
+@@ -42,7 +37,11 @@
+ 
+ tftpd: tftpd.o tftpsubs.o
+ ping: ping.o ping_common.o
++	$(LINK.o) $^ $(LDLIBS) -o $@ -Wl,-z,now -Wl,-z,relro
+ ping6: ping6.o ping_common.o
++	$(LINK.o) $^ $(LDLIBS) -o $@ -Wl,-z,now -Wl,-z,relro
++traceroute6: traceroute6.o
++	$(LINK.o) $^ $(LDLIBS) -o $@ -Wl,-z,now -Wl,-z,relro
+ ping.o ping6.o ping_common.o: ping_common.h
+ tftpd.o tftpsubs.o: tftp.h
+ 
+diff -Naur iputils.orig/arping.c iputils/arping.c
+--- iputils.orig/arping.c	2001-10-05 22:42:47.000000000 +0000
++++ iputils/arping.c	2005-06-09 16:15:24.000000000 +0000
+@@ -9,6 +9,7 @@
+  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
+  */
+ 
++#include <asm/byteorder.h>
+ #include <stdlib.h>
+ #include <sys/param.h>
+ #include <sys/socket.h>
+@@ -19,6 +20,8 @@
+ #include <sys/ioctl.h>
+ #include <linux/if.h>
+ #include <linux/if_arp.h>
++#include <linux/if_ether.h>
++#include <linux/if_packet.h>
+ #include <sys/uio.h>
+ 
+ #include <netdb.h>
+diff -Naur iputils.orig/clockdiff.c iputils/clockdiff.c
+--- iputils.orig/clockdiff.c	2002-02-23 00:10:59.000000000 +0000
++++ iputils/clockdiff.c	2005-06-09 16:15:24.000000000 +0000
+@@ -1,7 +1,9 @@
++#include <asm/byteorder.h>
+ #include <time.h>
+ #include <sys/types.h>
+ #include <sys/param.h>
+ #include <stdio.h>
++#include <linux/types.h>
+ #include <unistd.h>
+ #include <stdlib.h>
+ #include <math.h>
+diff -Naur iputils.orig/include-glibc/netinet/in.h iputils/include-glibc/netinet/in.h
+--- iputils.orig/include-glibc/netinet/in.h	2002-11-09 00:22:25.000000000 +0000
++++ iputils/include-glibc/netinet/in.h	2005-06-09 16:15:00.000000000 +0000
+@@ -65,4 +65,45 @@
+ 	 && (((__const uint32_t *) (a))[3] == ((__const uint32_t *) (b))[3]))
+ 
+ 
+-#endif	/* netinet/in.h */
++/* Functions to convert between host and network byte order.
++
++   Please note that these functions normally take `unsigned long int' or
++   `unsigned short int' values as arguments and also return them.  But
++   this was a short-sighted decision since on different systems the types
++   may have different representations but the values are always the same.  */
++
++extern u_int32_t ntohl (u_int32_t __netlong) __THROW __attribute__ ((__const__));
++extern u_int16_t ntohs (u_int16_t __netshort)
++     __THROW __attribute__ ((__const__));
++extern u_int32_t htonl (u_int32_t __hostlong)
++     __THROW __attribute__ ((__const__));
++extern u_int16_t htons (u_int16_t __hostshort)
++     __THROW __attribute__ ((__const__));
++
++#include <endian.h>
++
++/* Get machine dependent optimized versions of byte swapping functions.  */
++#include <bits/byteswap.h>
++
++#ifdef __OPTIMIZE__
++/* We can optimize calls to the conversion functions.  Either nothing has
++   to be done or we are using directly the byte-swapping functions which
++   often can be inlined.  */
++# if __BYTE_ORDER == __BIG_ENDIAN
++/* The host byte order is the same as network byte order,
++   so these functions are all just identity.  */
++# define ntohl(x)	(x)
++# define ntohs(x)	(x)
++# define htonl(x)	(x)
++# define htons(x)	(x)
++# else
++#  if __BYTE_ORDER == __LITTLE_ENDIAN
++#   define ntohl(x)	__bswap_32 (x)
++#   define ntohs(x)	__bswap_16 (x)
++#   define htonl(x)	__bswap_32 (x)
++#   define htons(x)	__bswap_16 (x)
++#  endif
++# endif
++#endif
++
++#endif /* netinet/in.h */
+diff -Naur iputils.orig/ipg iputils/ipg
+--- iputils.orig/ipg	2001-08-02 22:37:32.000000000 +0000
++++ iputils/ipg	2005-06-09 16:14:49.000000000 +0000
+@@ -1,21 +1,31 @@
+-#! /bin/bash
++#!/bin/bash
+ 
+-modprobe pg3
++modprobe pg3 >& /dev/null
++modprobe pktgen >& /dev/null
++
++PGDEV=/proc/net/pg
++if [[ ! -e ${PGDEV} ]] ; then
++	PGDEV=/proc/net/pktgen/pg0
++	if [[ ! -e ${PGDEV} ]] ; then
++		echo "Couldn't not locate pg in /proc/net :("
++		exit 1
++	fi
++fi
+ 
+ function pgset() {
+     local result
+ 
+-    echo $1 > /proc/net/pg
++    echo $1 > ${PGDEV}
+ 
+-    result=`cat /proc/net/pg | fgrep "Result: OK:"`
++    result=`cat ${PGDEV} | fgrep "Result: OK:"`
+     if [ "$result" = "" ]; then
+-         cat /proc/net/pg | fgrep Result:
++         cat ${PGDEV} | fgrep Result:
+     fi
+ }
+ 
+ function pg() {
+-    echo inject > /proc/net/pg
+-    cat /proc/net/pg
++    echo inject > ${PGDEV}
++    cat ${PGDEV}
+ }
+ 
+ pgset "odev eth0"
+diff -Naur iputils.orig/ping.c iputils/ping.c
+--- iputils.orig/ping.c	2002-11-07 22:53:21.000000000 +0000
++++ iputils/ping.c	2005-06-09 16:15:00.000000000 +0000
+@@ -60,8 +60,8 @@
+ 
+ #include "ping_common.h"
+ 
++#include <linux/icmp.h>
+ #include <netinet/ip.h>
+-#include <netinet/ip_icmp.h>
+ #ifdef DO_IPSEC
+ #include <libipsec.h>
+ #endif
+@@ -1213,7 +1213,7 @@
+ 	once = 1;
+ 
+ 	/* Patch bpflet for current identifier. */
+-	insns[2] = (struct sock_filter)BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __constant_htons(ident), 0, 1);
++	insns[2] = (struct sock_filter)BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, htons(ident), 0, 1);
+ 
+ 	if (setsockopt(icmp_sock, SOL_SOCKET, SO_ATTACH_FILTER, &filter, sizeof(filter)))
+ 		perror("WARNING: failed to install socket filter\n");
+diff -Naur iputils.orig/ping6.c iputils/ping6.c
+--- iputils.orig/ping6.c	2002-09-20 15:08:11.000000000 +0000
++++ iputils/ping6.c	2005-06-09 16:15:00.000000000 +0000
+@@ -68,8 +68,44 @@
+  */
+ #include "ping_common.h"
+ 
+-#include <linux/in6.h>
+-#include <linux/ipv6.h>
++struct ipv6_rt_hdr {
++        __u8            nexthdr;
++        __u8            hdrlen;
++        __u8            type;
++        __u8            segments_left;
++
++        /*
++         *      type specific data
++         *      variable length field
++         */
++};
++
++struct rt0_hdr {
++        struct ipv6_rt_hdr      rt_hdr;
++        __u32                   bitmap;         /* strict/loose bit map */
++        struct in6_addr         addr[0];
++
++#define rt0_type                rt_hdr.type;
++};
++#define IPV6_SRCRT_TYPE_0     0       /* IPv6 type 0 Routing Header   */
++struct ipv6hdr {
++#if defined(__LITTLE_ENDIAN)
++        __u8                    priority:4,
++                                version:4;
++#elif defined(__BIG_ENDIAN)
++        __u8                    version:4,
++                                priority:4;
++#endif
++        __u8                    flow_lbl[3];
++
++        __u16                   payload_len;
++        __u8                    nexthdr;
++        __u8                    hop_limit;
++
++        struct  in6_addr        saddr;
++        struct  in6_addr        daddr;
++};
++
+ #include <linux/icmpv6.h>
+ 
+ #define BIT_CLEAR(nr, addr) do { ((__u32 *)(addr))[(nr) >> 5] &= ~(1U << ((nr) & 31)); } while(0)
+@@ -879,7 +915,7 @@
+ 	once = 1;
+ 
+ 	/* Patch bpflet for current identifier. */
+-	insns[1] = (struct sock_filter)BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __constant_htons(ident), 0, 1);
++	insns[1] = (struct sock_filter)BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, htons(ident), 0, 1);
+ 
+ 	if (setsockopt(icmp_sock, SOL_SOCKET, SO_ATTACH_FILTER, &filter, sizeof(filter)))
+ 		perror("WARNING: failed to install socket filter\n");
+diff -Naur iputils.orig/ping_common.h iputils/ping_common.h
+--- iputils.orig/ping_common.h	2002-09-20 15:08:11.000000000 +0000
++++ iputils/ping_common.h	2005-06-09 16:15:24.000000000 +0000
+@@ -1,3 +1,4 @@
++#include <asm/byteorder.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+@@ -19,6 +20,7 @@
+ 
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
++#include <linux/types.h>
+ #include <linux/errqueue.h>
+ 
+ #include "SNAPSHOT.h"
+diff -Naur iputils.orig/rarpd.c iputils/rarpd.c
+--- iputils.orig/rarpd.c	2001-12-02 18:45:06.000000000 +0000
++++ iputils/rarpd.c	2005-06-09 16:15:24.000000000 +0000
+@@ -9,6 +9,7 @@
+  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
+  */
+ 
++#include <asm/byteorder.h>
+ #include <stdio.h>
+ #include <syslog.h>
+ #include <dirent.h>
+@@ -26,6 +27,7 @@
+ #include <sys/signal.h>
+ #include <linux/if.h>
+ #include <linux/if_arp.h>
++#include <linux/if_ether.h>
+ #include <netinet/in.h>
+ #include <linux/if_packet.h>
+ #include <linux/filter.h>
+@@ -42,7 +44,9 @@
+ char *ifname;
+ char *tftp_dir = "/etc/tftpboot";
+ 
++#ifndef __UCLIBC__
+ extern int ether_ntohost(char *name, unsigned char *ea);
++#endif
+ void usage(void) __attribute__((noreturn));
+ 
+ struct iflink
+@@ -52,12 +56,12 @@
+ 	int		hatype;
+ 	unsigned char	lladdr[16];
+ 	unsigned char	name[IFNAMSIZ];
+-	struct ifaddr 	*ifa_list;
++	struct l_ifaddr 	*ifa_list;
+ } *ifl_list;
+ 
+-struct ifaddr
++struct l_ifaddr
+ {
+-	struct ifaddr 	*next;
++	struct l_ifaddr 	*next;
+ 	__u32		prefix;
+ 	__u32		mask;
+ 	__u32		local;
+@@ -89,7 +93,7 @@
+ 	int fd;
+ 	struct ifreq *ifrp, *ifend;
+ 	struct iflink *ifl;
+-	struct ifaddr *ifa;
++	struct l_ifaddr *ifa;
+ 	struct ifconf ifc;
+ 	struct ifreq ibuf[256];
+ 
+@@ -180,7 +184,7 @@
+ 		if (ifa == NULL) {
+ 			if (mask == 0 || prefix == 0)
+ 				continue;
+-			ifa = (struct ifaddr*)malloc(sizeof(*ifa));
++			ifa = (struct l_ifaddr*)malloc(sizeof(*ifa));
+ 			memset(ifa, 0, sizeof(*ifa));
+ 			ifa->local = addr;
+ 			ifa->prefix = prefix;
+@@ -236,10 +240,10 @@
+ 	return dent != NULL;
+ }
+ 
+-struct ifaddr *select_ipaddr(int ifindex, __u32 *sel_addr, __u32 **alist)
++struct l_ifaddr *select_ipaddr(int ifindex, __u32 *sel_addr, __u32 **alist)
+ {
+ 	struct iflink *ifl;
+-	struct ifaddr *ifa;
++	struct l_ifaddr *ifa;
+ 	int retry = 0;
+ 	int i;
+ 
+@@ -295,7 +299,7 @@
+ 
+ 	if (r == NULL) {
+ 		if (hatype == ARPHRD_ETHER && halen == 6) {
+-			struct ifaddr *ifa;
++			struct l_ifaddr *ifa;
+ 			struct hostent *hp;
+ 			char ename[256];
+ 			static struct rarp_map emap = {
+@@ -305,7 +309,11 @@
+ 				6,
+ 			};
+ 
++#ifndef __UCLIBC__
+ 			if (ether_ntohost(ename, lladdr) != 0 ||
++#else
++			if (
++#endif
+ 			    (hp = gethostbyname(ename)) == NULL) {
+ 				if (verbose)
+ 					syslog(LOG_INFO, "not found in /etc/ethers");
+@@ -364,7 +372,7 @@
+ {
+ 	__u32 laddr = 0;
+ 	struct iflink *ifl;
+-	struct ifaddr *ifa;
++	struct l_ifaddr *ifa;
+ 
+ 	for (ifl=ifl_list; ifl; ifl = ifl->next)
+ 		if (ifl->index == ifindex)
+diff -Naur iputils.orig/rdisc.c iputils/rdisc.c
+--- iputils.orig/rdisc.c	2001-08-24 17:39:00.000000000 +0000
++++ iputils/rdisc.c	2005-06-09 16:15:24.000000000 +0000
+@@ -25,6 +25,7 @@
+  * 2550 Garcia Avenue
+  * Mountain View, California  94043
+  */
++#include <asm/byteorder.h>
+ #include <stdio.h>
+ #include <errno.h>
+ #include <signal.h>
+@@ -1504,5 +1505,5 @@
+ 	if (logging)
+ 		syslog(LOG_ERR, "%s: %m", str);
+ 	else
+-		(void) fprintf(stderr, "%s: %s\n", str, sys_errlist[errno]);
++		(void) fprintf(stderr, "%s: %s\n", str, strerror(errno));
+ }
+diff -Naur iputils.orig/tftpd.c iputils/tftpd.c
+--- iputils.orig/tftpd.c	2002-01-24 00:31:41.000000000 +0000
++++ iputils/tftpd.c	2005-06-09 16:15:24.000000000 +0000
+@@ -48,6 +48,7 @@
+  * This version includes many modifications by Jim Guyton <guyton@rand-unix>
+  */
+ 
++#include <asm/byteorder.h>
+ #include <sys/types.h>
+ #include <sys/ioctl.h>
+ #include <sys/stat.h>
+@@ -57,7 +58,6 @@
+ 
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+-#include <linux/in6.h>
+ #include <netdb.h>
+ 
+ #include <setjmp.h>
+diff -Naur iputils.orig/tracepath.c iputils/tracepath.c
+--- iputils.orig/tracepath.c	2002-11-09 04:54:46.000000000 +0000
++++ iputils/tracepath.c	2005-06-09 16:15:24.000000000 +0000
+@@ -9,10 +9,12 @@
+  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
+  */
+ 
++#include <asm/byteorder.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+ #include <sys/socket.h>
++#include <linux/types.h>
+ #include <linux/errqueue.h>
+ #include <errno.h>
+ #include <string.h>
+@@ -76,7 +78,7 @@
+ 	int progress = -1;
+ 	int broken_router;
+ 	
+-restart:
++       while (1) {
+ 	memset(&rcvbuf, -1, sizeof(rcvbuf));
+ 	iov.iov_base = &rcvbuf;
+ 	iov.iov_len = sizeof(rcvbuf);
+@@ -93,7 +95,7 @@
+ 	if (res < 0) {
+ 		if (errno == EAGAIN)
+ 			return progress;
+-		goto restart;
++		continue;
+ 	}
+ 
+ 	progress = mtu;
+@@ -216,7 +218,7 @@
+ 		perror("NET ERROR");
+ 		return 0;
+ 	}
+-	goto restart;
++       }
+ }
+ 
+ int probe_ttl(int fd, int ttl)
+@@ -227,7 +229,6 @@
+ 
+ 	memset(sndbuf,0,mtu);
+ 
+-restart:
+ 	for (i=0; i<10; i++) {
+ 		int res;
+ 
+@@ -243,7 +244,8 @@
+ 		if (res==0)
+ 			return 0;
+ 		if (res > 0)
+-			goto restart;
++			i = 0;
++			continue;
+ 	}
+ 	hisptr = (hisptr + 1)&63;
+ 
+diff -Naur iputils.orig/tracepath6.c iputils/tracepath6.c
+--- iputils.orig/tracepath6.c	2001-09-02 02:03:46.000000000 +0000
++++ iputils/tracepath6.c	2005-06-09 16:15:24.000000000 +0000
+@@ -9,13 +9,13 @@
+  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
+  */
+ 
++#include <asm/byteorder.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+-
+-#include <linux/in6.h>
++#include <linux/types.h>
+ #include <linux/errqueue.h>
+ #include <errno.h>
+ #include <string.h>
+@@ -66,7 +66,7 @@
+ 	int progress = -1;
+ 	int broken_router;
+ 
+-restart:
++       while (1) {
+ 	memset(&rcvbuf, -1, sizeof(rcvbuf));
+ 	iov.iov_base = &rcvbuf;
+ 	iov.iov_len = sizeof(rcvbuf);
+@@ -83,7 +83,7 @@
+ 	if (res < 0) {
+ 		if (errno == EAGAIN)
+ 			return progress;
+-		goto restart;
++		continue;
+ 	}
+ 
+ 	progress = 2;
+@@ -222,34 +222,29 @@
+ 		perror("NET ERROR");
+ 		return 0;
+ 	}
+-	goto restart;
++       }
+ }
+ 
+ int probe_ttl(int fd, int ttl)
+ {
+-	int i;
++	int i=0, res;
+ 	char sndbuf[mtu];
+ 	struct probehdr *hdr = (struct probehdr*)sndbuf;
+ 
+-restart:
+-
+-	for (i=0; i<10; i++) {
+-		int res;
+-
+-		hdr->ttl = ttl;
+-		gettimeofday(&hdr->tv, NULL);
+-		if (send(fd, sndbuf, mtu-overhead, 0) > 0)
+-			break;
+-		res = recverr(fd, ttl);
+-		if (res==0)
+-			return 0;
+-		if (res > 0)
+-			goto restart;
+-	}
+-
+-	if (i<10) {
+-		int res;
+-
++	while (i<10) {
++		for (i=0; i<10; i++) {
++			hdr->ttl = ttl;
++			gettimeofday(&hdr->tv, NULL);
++			if (send(fd, sndbuf, mtu-overhead, 0) > 0)
++				break;
++			res = recverr(fd, ttl);
++			if (res==0)
++				return 0;
++			if (res > 0) {
++				i = 0;
++				continue;
++			}
++		}
+ 		data_wait(fd);
+ 		if (recv(fd, sndbuf, sizeof(sndbuf), MSG_DONTWAIT) > 0) {
+ 			printf("%2d?: reply received 8)\n", ttl);
+@@ -257,7 +252,7 @@
+ 		}
+ 		res = recverr(fd, ttl);
+ 		if (res == 1)
+-			goto restart;
++			continue;
+ 		return res;
+ 	}
+ 
+diff -Naur iputils.orig/traceroute6.c iputils/traceroute6.c
+--- iputils.orig/traceroute6.c	2002-10-03 03:29:23.000000000 +0000
++++ iputils/traceroute6.c	2005-06-09 16:14:49.000000000 +0000
+@@ -244,11 +244,30 @@
+ #include <netinet/in.h>
+ #include <netinet/ip.h>
+ #include <netinet/ip_icmp.h>
++#if __linux__
++#include <linux/udp.h>
++#else
+ #include <netinet/udp.h>
++#endif
++
++#include <linux/types.h>
++struct ipv6hdr {
++#if defined(__LITTLE_ENDIAN)
++        __u8                    priority:4,
++                                version:4;
++#elif defined(__BIG_ENDIAN)
++        __u8                    version:4,
++                                priority:4;
++#endif
++        __u8                    flow_lbl[3];
+ 
+-#include <linux/ipv6.h>
+-#include <linux/in6.h>
++        __u16                   payload_len;
++        __u8                    nexthdr;
++        __u8                    hop_limit;
+ 
++        struct  in6_addr        saddr;
++        struct  in6_addr        daddr;
++};
+ #include <linux/icmpv6.h>
+ 
+ #include <arpa/inet.h>

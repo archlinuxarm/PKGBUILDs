@@ -1,0 +1,100 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 20_pidof.dpatch by Petter Reinholdtsen
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: Modify pidof to not print empty line if no pid was found. (bug: #225476)
+
+@DPATCH@
+diff -urNad trunk~/src/killall5.c trunk/src/killall5.c
+--- trunk~/src/killall5.c	2008-03-26 09:30:38.000000000 +0100
++++ trunk/src/killall5.c	2008-03-26 09:31:14.000000000 +0100
+@@ -378,8 +378,8 @@
+ 	int		foundone = 0;
+ 	int		ok = 0;
+ 
+-	/* Try to stat the executable. */
+-	if (prog[0] == '/' && stat(prog, &st) == 0) dostat++;
++	if (! prog)
++		return NULL;
+ 
+ 	/* Get basename of program. */
+ 	if ((s = strrchr(prog, '/')) == NULL)
+@@ -387,9 +387,16 @@
+ 	else
+ 		s++;
+ 
++	if (! *s)
++		return NULL;
++
+ 	q = (PIDQ_HEAD *)xmalloc(sizeof(PIDQ_HEAD));
+ 	q = init_pid_q(q);
+ 
++	/* Try to stat the executable. */
++	if (prog[0] == '/' && stat(prog, &st) == 0)
++		dostat++;
++
+ 	/* First try to find a match based on dev/ino pair. */
+ 	if (dostat) {
+ 		for (p = plist; p; p = p->next) {
+@@ -404,15 +411,35 @@
+ 	if (!foundone) for (p = plist; p; p = p->next) {
+ 		ok = 0;
+ 
+-		/* Compare name (both basename and full path) */
+-		ok += (p->argv0 && strcmp(p->argv0, prog) == 0);
+-		ok += (p->argv0 && strcmp(p->argv0base, s) == 0);
++		/*             matching        nonmatching
++		 * proc name   prog name       prog name
++		 * ---         -----------     ------------
++		 *   b         b, p/b, q/b
++		 * p/b         b, p/b          q/b
++		 *
++		 * Algorithm: Match if:
++		 *    cmd = arg
++		 * or cmd = base(arg)
++		 * or base(cmd) = arg
++		 *
++		 * Specifically, do not match just because base(cmd) = base(arg)
++		 * as was done in earlier versions of this program, since this
++		 * allows /aaa/foo to match /bbb/foo .
++		 */
++		ok |=
++			(p->argv0 && strcmp(p->argv0, prog) == 0)
++			|| (p->argv0 && s != prog && strcmp(p->argv0, s) == 0)
++			|| (p->argv0base && strcmp(p->argv0base, prog) == 0);
+ 
+ 		/* For scripts, compare argv[1] as well. */
+-		if (scripts_too && p->argv1 &&
+-		    !strncmp(p->statname, p->argv1base, STATNAMELEN)) {
+-			ok += (strcmp(p->argv1, prog) == 0);
+-			ok += (strcmp(p->argv1base, s) == 0);
++		if (
++			scripts_too && p->statname && p->argv1base
++			&& !strncmp(p->statname, p->argv1base, STATNAMELEN)
++		) {
++			ok |=
++				(p->argv1 && strcmp(p->argv1, prog) == 0)
++				|| (p->argv1 && s != prog && strcmp(p->argv1, s) == 0)
++				|| (p->argv1base && strcmp(p->argv1base, prog) == 0);
+ 		}
+ 
+ 		/*
+@@ -423,7 +450,7 @@
+ 		    (p->argv0 == NULL ||
+ 		     p->argv0[0] == 0 ||
+ 		     strchr(p->argv0, ' '))) {
+-			ok += (strcmp(p->statname, s) == 0);
++			ok |= (strcmp(p->statname, s) == 0);
+ 		}
+ 		if (ok) add_pid_to_q(q, p);
+ 	}
+@@ -548,7 +575,8 @@
+ 			}
+ 		}
+ 	}
+-	printf("\n");
++	if (!first)
++		printf("\n");
+ 	closelog();
+ 	return(first ? 1 : 0);
+ }

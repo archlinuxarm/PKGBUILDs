@@ -1,0 +1,142 @@
+# arg 1:  the new package version
+# arg 2:  the old package version
+
+KERNEL_NAME=
+KERNEL_VERSION=2.6.30-ARCH
+
+post_install () {
+  # updating module dependencies
+  echo ">>> Updating module dependencies. Please wait ..."
+  depmod $KERNEL_VERSION 
+  # generate init ramdisks
+  echo ">>> MKINITCPIO SETUP"
+  echo ">>> ----------------"
+  echo ">>> If you use LVM2, Encrypted root or software RAID,"
+  echo ">>> Ensure you enable support in /etc/mkinitcpio.conf ."
+  echo ">>> More information about mkinitcpio setup can be found here:"
+  echo ">>> http://wiki.archlinux.org/index.php/Mkinitcpio"
+  echo ""
+  echo ">>> Generating initial ramdisk, using mkinitcpio.  Please wait..."
+  /sbin/mkinitcpio -p kernel26${KERNEL_NAME}
+}
+
+post_upgrade() {
+  pacman -Q grub &>/dev/null
+  hasgrub=$?
+  pacman -Q grub2 &>/dev/null
+  hasgrub2=$?
+  pacman -Q lilo &>/dev/null
+  haslilo=$?
+  # reminder notices
+  if [ $haslilo -eq 0 ]; then
+    echo ">>>"
+    if [ $hasgrub -eq 0 -o $hasgrub2 -eq 0 ]; then
+      echo ">>> If you use the LILO bootloader, you should run 'lilo' before rebooting."
+    else
+      echo ">>> You appear to be using the LILO bootloader. You should run"
+      echo ">>> 'lilo' before rebooting."
+    fi
+    echo ">>>"
+  fi
+
+  if grep "/boot" /etc/fstab 2>&1 >/dev/null; then
+    if ! grep "/boot" /etc/mtab 2>&1 >/dev/null; then
+      echo "WARNING: /boot appears to be a seperate partition but is not mounted"
+      echo "         This is most likely not what you want.  Please mount your /boot"
+      echo "         partition and reinstall the kernel unless you are sure this is OK"
+    fi
+  fi
+
+  if [ "`vercmp $2 2.6.13`" -lt 0 ]; then
+    # important upgrade notice
+    echo ">>>"
+    echo ">>> IMPORTANT KERNEL UPGRADE NOTICE"
+    echo ">>> -------------------------------"
+    echo ">>> As of kernel 2.6.13, DevFS is NO LONGER AVAILABLE!"
+    echo ">>> If you still use DevFS, please make the transition to uDev before"
+    echo ">>> rebooting.  If you really need to stay with DevFS for some reason,"
+    echo ">>> then you can manually downgrade to an older version:"
+    echo ">>>"
+    echo ">>> # pacman -U http://archlinux.org/~judd/kernel/kernel26-scsi-2.6.12.2-1.pkg.tar.gz"
+    echo ">>>"
+    echo ">>> If you choose to downgrade, don't forget to add kernel26-scsi to your"
+    echo ">>> IgnorePkg list in /etc/pacman.conf"
+    echo ">>>"
+    echo ">>> (NOTE: The following portion applies to uDev users as well!)"
+    echo ">>>"
+    echo ">>> If you use any DevFS paths in your GRUB menu.lst, then you will not"
+    echo ">>> be able to boot!  Change your root= parameter to use the classic"
+    echo ">>> naming scheme."
+    echo ">>>"
+    echo ">>> EXAMPLES:"
+    echo ">>> - change root=/dev/discs/disc0/part3 to root=/dev/sda3"
+    echo ">>> - change root=/dev/md/0 to root=/dev/md0"
+    echo ">>>"
+  fi
+  # generate new init ramdisk
+  if [ "`vercmp $2 2.6.18`" -lt 0 ]; then
+    echo ">>> --------------------------------------------------------------"
+    echo ">>> |                          WARNING:                          |"
+    echo ">>> |mkinitrd is not supported anymore in kernel >=2.6.18 series!|"
+    echo ">>> |              Please change to Mkinitcpio setup.            |"
+    echo ">>> --------------------------------------------------------------"
+    echo ">>>"
+  fi
+  # updating module dependencies
+  echo ">>> Updating module dependencies. Please wait ..."
+  depmod $KERNEL_VERSION
+  echo ">>> MKINITCPIO SETUP"
+  echo ">>> ----------------"
+  if [ "`vercmp $2 2.6.18`" -lt 0 ]; then
+    echo ">>> Please change your bootloader config files:"
+    echo ">>> Grub: /boot/grub/menu.lst | Lilo: /etc/lilo.conf"
+    echo "------------------------------------------------"
+    echo "| - initrd26.img to kernel26${KERNEL_NAME}.img               |"
+    echo "| - initrd26-full.img to kernel26${KERNEL_NAME}-fallback.img |"
+    echo "------------------------------------------------"
+  fi
+  if [ "`vercmp $2 2.6.19`" -lt 0 ]; then
+    echo ""
+    echo ">>> New PATA/IDE subsystem - EXPERIMENTAL"
+    echo ">>> ----------"
+    echo ">>> To use the new pata drivers, change the 'ide' hook "
+    echo ">>> to 'pata' in /etc/mkinicpio.conf HOOKS="
+    echo ">>> The new system changes: /dev/hd? to /dev/sd?"
+    echo ">>> Don't forget to modify GRUB, LILO and fstab to the"
+    echo ">>> new naming system. "
+    echo ">>> eg: hda3 --> sda3, hdc8 --> sdc8"
+    echo ""
+    echo ">>> piix/ata_piix (Intel chipsets) - IMPORTANT"
+    echo "----------"
+    echo ">>> If you have enabled ide/pata/sata HOOKs in /etc/mkinitcpio.conf" 
+    echo ">>> the 'ata_piix' module will be used."
+    echo ">>> This may cause your devices to shift names, eg:"
+    echo ">>> - IDE: devices from hd? to sd?"
+    echo ">>> - SATA: sda might shift to sdc if you have 2 other disks on a PIIX IDE port."
+    echo ">>> To check if this will affect you, check 'mkinitcpio -M' for piix/ata_piix"
+    echo ""
+  fi
+
+  echo ">>> If you use LVM2, Encrypted root or software RAID,"
+  echo ">>> Ensure you enable support in /etc/mkinitcpio.conf ."
+  echo ">>> More information about mkinitcpio setup can be found here:"
+  echo ">>> http://wiki.archlinux.org/index.php/Mkinitcpio"
+  echo ""
+  echo ">>> Generating initial ramdisk, using mkinitcpio.  Please wait..."
+if [ "`vercmp $2 2.6.19`" -lt 0 ]; then
+  /sbin/mkinitcpio -p kernel26${KERNEL_NAME} -m "ATTENTION:\nIf you get a kernel panic below
+and are using an Intel chipset, append 'earlymodules=piix' to the
+kernel commandline"
+else
+  /sbin/mkinitcpio -p kernel26${KERNEL_NAME}
+fi
+if [ "`vercmp $2 2.6.21`" -lt 0 ]; then
+  echo ""
+  echo "Important ACPI Information:"
+  echo ">>> Since 2.6.20.7 all possible ACPI parts are modularized."
+  echo ">>> The modules are located at:"
+  echo ">>> /lib/modules/$(uname -r)/kernel/drivers/acpi"
+  echo ">>> For more information about ACPI modules check this wiki page:"
+  echo ">>> 'http://wiki.archlinux.org/index.php/ACPI_modules'"
+fi
+}

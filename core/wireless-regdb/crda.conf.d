@@ -1,0 +1,4 @@
+#
+# Wireless regulatory domain configuration
+#
+

@@ -1,0 +1,1170 @@
+--- iputils/ping_common.c.old	Thu Mar 14 16:58:47 2002
++++ iputils/ping_common.c	Thu Mar 14 17:10:54 2002
+@@ -775,10 +775,10 @@
+ 		tmdev = llsqrt(tsum2 - tsum * tsum);
+ 
+ 		printf("rtt min/avg/max/mdev = %ld.%03ld/%lu.%03ld/%ld.%03ld/%ld.%03ld ms",
+-		       tmin/1000, tmin%1000,
++		       (long)tmin/1000, (long)tmin%1000,
+ 		       (unsigned long)(tsum/1000), (long)(tsum%1000),
+-		       tmax/1000, tmax%1000,
+-		       tmdev/1000, tmdev%1000
++		       (long)tmax/1000, (long)tmax%1000,
++		       (long)tmdev/1000, (long)tmdev%1000
+ 		       );
+ 	}
+ 	if (pipesize > 1)
+@@ -809,10 +809,10 @@
+ 		tavg = tsum / (nreceived + nrepeats);
+ 
+ 		fprintf(stderr, ", min/avg/ewma/max = %ld.%03ld/%lu.%03ld/%d.%03d/%ld.%03ld ms",
+-		       tmin/1000, tmin%1000,
++		       (long)tmin/1000, (long)tmin%1000,
+ 		       tavg/1000, tavg%1000,
+ 		       rtt/8000, (rtt/8)%1000,
+-		       tmax/1000, tmax%1000
++		       (long)tmax/1000, (long)tmax%1000
+ 		       );
+ 	}
+ 	fprintf(stderr, "\n");
+--- iputils/rdisc.c-org	Wed May  1 00:27:34 2002
++++ iputils/rdisc.c	Wed May  1 00:32:40 2002
+@@ -63,6 +63,8 @@
+ 
+ #include "SNAPSHOT.h"
+ 
++#define RDISC_SERVER
++
+ struct interface
+ {
+ 	struct in_addr 	address;	/* Used to identify the interface */
+@@ -163,11 +165,8 @@
+ int debugfile;
+ 
+ char usage[] =
+-"Usage:	rdisc [-b] [-d] [-s] [-v] [-f] [-a] [-V] [send_address] [receive_address]\n"
+-#ifdef RDISC_SERVER
+-"       rdisc -r [-b] [-d] [-s] [-v] [-f] [-a] [-V] [-p <preference>] [-T <secs>] \n"
+-"		 [send_address] [receive_address]\n"
+-#endif
++"Usage:	rdisc -r [-b] [-d] [-s] [-v] [-f] [-a] [-V] [-p <preference>] [-T <secs>] \n"
++"                 [send_address] [receive_address]\n"
+ ;
+ 
+ 
+@@ -875,7 +874,9 @@
+ 				((max_adv_int - min_adv_int) 
+ 				 * (random() % 1000)/1000);
+ 		} else {
+-			if (!is_directly_connected(ip->saddr)) {
++			struct in_addr tmp;
++			tmp.s_addr = ip->saddr;
++			if (!is_directly_connected(tmp)) {
+ 				if (verbose)
+ 					logtrace("ICMP %s from %s: source not directly connected\n",
+ 						      pr_type((int)icp->type),
+@@ -945,7 +946,6 @@
+ {
+ #ifdef RDISC_SERVER
+ 	if (responder) {
+-		int i;
+ 
+ 		/* Send out a packet with a preference so that all
+ 		 * hosts will know that we are dead.
+--- iputils/ping_common.c.countermeasures	Tue May 21 10:06:05 2002
++++ iputils/ping_common.c	Tue May 21 10:12:42 2002
+@@ -628,7 +628,8 @@
+ 		tvsub(tv, &tmp_tv);
+ 		triptime = tv->tv_sec * 1000000 + tv->tv_usec;
+ 		if (triptime < 0) {
+-			fprintf(stderr, "Warning: time of day goes back (%ldus), taking countermeasures.\n", triptime);
++			if (options & F_VERBOSE)
++				fprintf(stderr, "Warning: time of day goes back (%ldus), taking countermeasures.\n", triptime);
+ 			triptime = 0;
+ 			if (!(options & F_LATENCY)) {
+ 				gettimeofday(tv, NULL);
+--- iputils/ping.c.addrcache	2002-09-20 17:08:11.000000000 +0200
++++ iputils/ping.c	2003-05-15 16:41:19.000000000 +0200
+@@ -1124,6 +1124,12 @@
+ {
+ 	struct hostent *hp;
+ 	static char buf[4096];
++	static __u32 addr_cache = 0;
++
++	if ( addr == addr_cache )
++		return buf;
++
++	addr_cache = addr;
+ 
+ 	if ((options & F_NUMERIC) ||
+ 	    !(hp = gethostbyaddr((char *)&addr, 4, AF_INET)))
+--- iputils/ping6.c.addrcache	2002-09-20 17:08:11.000000000 +0200
++++ iputils/ping6.c	2003-05-15 16:41:19.000000000 +0200
+@@ -893,7 +893,14 @@
+  */
+ char * pr_addr(struct in6_addr *addr)
+ {
+-	struct hostent *hp = NULL;
++	static struct hostent *hp = NULL;
++	static struct in6_addr addr_cache = {{{0,0,0,0}}};
++
++	if ( addr->s6_addr32[0] == addr_cache.s6_addr32[0] &&
++	     addr->s6_addr32[1] == addr_cache.s6_addr32[1] &&
++	     addr->s6_addr32[2] == addr_cache.s6_addr32[2] &&
++	     addr->s6_addr32[3] == addr_cache.s6_addr32[3] )
++		return hp ? hp->h_name : pr_addr_n(addr);
+ 
+ 	if (!(options&F_NUMERIC))
+ 		hp = gethostbyaddr((__u8*)addr, sizeof(struct in6_addr), AF_INET6);
+--- iputils-ss021109-vanilla/ping.c	Thu Nov  7 23:53:21 2002
++++ iputils/ping.c	Sun Jan 12 03:39:24 2003
+@@ -285,6 +285,9 @@
+ 						perror("ping: IP_MULTICAST_IF");
+ 						exit(2);
+ 					}
++				} else if (icmp_sock >= 0) {
++					/* We possible tried to SO_BINDTODEVICE() a subinterface like 'eth0:1' */
++					perror("Warning: cannot bind to specified iface, falling back");
+ 				}
+ 			}
+ 		}
+--- iputils/ping.c.icmp_seq	2003-09-03 16:45:07.000000000 +0200
++++ iputils/ping.c	2003-09-03 16:45:41.000000000 +0200
+@@ -610,7 +610,7 @@
+ 	icp->type = ICMP_ECHO;
+ 	icp->code = 0;
+ 	icp->checksum = 0;
+-	icp->un.echo.sequence = htons(ntransmitted+1);
++	icp->un.echo.sequence = htons(ntransmitted);
+ 	icp->un.echo.id = ident;			/* ID */
+ 
+ 	CLR((ntransmitted+1) % mx_dup_ck);
+--- iputils/ping6.c.icmp_seq	2003-09-03 16:45:20.000000000 +0200
++++ iputils/ping6.c	2003-09-03 16:45:34.000000000 +0200
+@@ -647,7 +647,7 @@
+ 	icmph->icmp6_type = ICMPV6_ECHO_REQUEST;
+ 	icmph->icmp6_code = 0;
+ 	icmph->icmp6_cksum = 0;
+-	icmph->icmp6_sequence = htons(ntransmitted+1);
++	icmph->icmp6_sequence = htons(ntransmitted);
+ 	icmph->icmp6_identifier = ident;
+ 
+ 	CLR((ntransmitted+1) % mx_dup_ck);
+diff -ru iputils/include-glibc/netinet/in.h iputils-clean/include-glibc/netinet/in.h
+--- iputils/include-glibc/netinet/in.h	2000-06-18 14:57:25.000000000 -0400
++++ iputils-clean/include-glibc/netinet/in.h	2003-09-03 11:21:55.000000000 -0400
+@@ -8,4 +8,45 @@
+ 
+ #define SOL_IP	0
+ 
+-#endif	/* netinet/in.h */
++/* Functions to convert between host and network byte order.
++
++   Please note that these functions normally take `unsigned long int' or
++   `unsigned short int' values as arguments and also return them.  But
++   this was a short-sighted decision since on different systems the types
++   may have different representations but the values are always the same.  */
++
++extern u_int32_t ntohl (u_int32_t __netlong) __THROW __attribute__ ((__const__));
++extern u_int16_t ntohs (u_int16_t __netshort)
++     __THROW __attribute__ ((__const__));
++extern u_int32_t htonl (u_int32_t __hostlong)
++     __THROW __attribute__ ((__const__));
++extern u_int16_t htons (u_int16_t __hostshort)
++     __THROW __attribute__ ((__const__));
++
++#include <endian.h>
++
++/* Get machine dependent optimized versions of byte swapping functions.  */
++#include <bits/byteswap.h>
++
++#ifdef __OPTIMIZE__
++/* We can optimize calls to the conversion functions.  Either nothing has
++   to be done or we are using directly the byte-swapping functions which
++   often can be inlined.  */
++# if __BYTE_ORDER == __BIG_ENDIAN
++/* The host byte order is the same as network byte order,
++   so these functions are all just identity.  */
++# define ntohl(x)	(x)
++# define ntohs(x)	(x)
++# define htonl(x)	(x)
++# define htons(x)	(x)
++# else
++#  if __BYTE_ORDER == __LITTLE_ENDIAN
++#   define ntohl(x)	__bswap_32 (x)
++#   define ntohs(x)	__bswap_16 (x)
++#   define htonl(x)	__bswap_32 (x)
++#   define htons(x)	__bswap_16 (x)
++#  endif
++# endif
++#endif
++
++#endif /* netinet/in.h */
+diff -ru iputils/ping6.c iputils-clean/ping6.c
+--- iputils/ping6.c	2003-09-03 11:22:46.000000000 -0400
++++ iputils-clean/ping6.c	2003-09-03 11:15:42.000000000 -0400
+@@ -879,7 +879,7 @@
+ 	once = 1;
+ 
+ 	/* Patch bpflet for current identifier. */
+-	insns[1] = (struct sock_filter)BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __constant_htons(ident), 0, 1);
++	insns[1] = (struct sock_filter)BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, htons(ident), 0, 1);
+ 
+ 	if (setsockopt(icmp_sock, SOL_SOCKET, SO_ATTACH_FILTER, &filter, sizeof(filter)))
+ 		perror("WARNING: failed to install socket filter\n");
+diff -ru iputils/ping.c iputils-clean/ping.c
+--- iputils/ping.c	2003-09-03 11:22:46.000000000 -0400
++++ iputils-clean/ping.c	2003-09-03 11:15:26.000000000 -0400
+@@ -1196,7 +1196,7 @@
+ 	once = 1;
+ 
+ 	/* Patch bpflet for current identifier. */
+-	insns[2] = (struct sock_filter)BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __constant_htons(ident), 0, 1);
++	insns[2] = (struct sock_filter)BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, htons(ident), 0, 1);
+ 
+ 	if (setsockopt(icmp_sock, SOL_SOCKET, SO_ATTACH_FILTER, &filter, sizeof(filter)))
+ 		perror("WARNING: failed to install socket filter\n");
+diff -urN iputils/clockdiff.c iputils.new/clockdiff.c
+--- iputils/clockdiff.c	2002-02-22 19:10:59.000000000 -0500
++++ iputils.new/clockdiff.c	2003-09-10 09:20:28.000000000 -0400
+@@ -2,6 +2,7 @@
+ #include <sys/types.h>
+ #include <sys/param.h>
+ #include <stdio.h>
++#include <linux/types.h>
+ #include <unistd.h>
+ #include <stdlib.h>
+ #include <math.h>
+diff -urN iputils/ping6.c iputils.new/ping6.c
+--- iputils/ping6.c	2003-09-10 17:27:48.000000000 -0400
++++ iputils.new/ping6.c	2003-09-10 17:22:43.000000000 -0400
+@@ -68,8 +68,44 @@
+  */
+ #include "ping_common.h"
+ 
+-#include <linux/in6.h>
+-#include <linux/ipv6.h>
++struct ipv6_rt_hdr {
++        __u8            nexthdr;
++        __u8            hdrlen;
++        __u8            type;
++        __u8            segments_left;
++
++        /*
++         *      type specific data
++         *      variable length field
++         */
++};
++
++struct rt0_hdr {
++        struct ipv6_rt_hdr      rt_hdr;
++        __u32                   bitmap;         /* strict/loose bit map */
++        struct in6_addr         addr[0];
++
++#define rt0_type                rt_hdr.type;
++};
++#define IPV6_SRCRT_TYPE_0     0       /* IPv6 type 0 Routing Header   */
++struct ipv6hdr {
++#if defined(__LITTLE_ENDIAN)
++        __u8                    priority:4,
++                                version:4;
++#elif defined(__BIG_ENDIAN)
++        __u8                    version:4,
++                                priority:4;
++#endif
++        __u8                    flow_lbl[3];
++
++        __u16                   payload_len;
++        __u8                    nexthdr;
++        __u8                    hop_limit;
++
++        struct  in6_addr        saddr;
++        struct  in6_addr        daddr;
++};
++
+ #include <linux/icmpv6.h>
+ 
+ #define BIT_CLEAR(nr, addr) do { ((__u32 *)(addr))[(nr) >> 5] &= ~(1U << ((nr) & 31)); } while(0)
+diff -urN iputils/ping_common.h iputils.new/ping_common.h
+--- iputils/ping_common.h	2002-09-20 11:08:11.000000000 -0400
++++ iputils.new/ping_common.h	2003-09-10 17:16:16.000000000 -0400
+@@ -19,6 +19,7 @@
+ 
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
++#include <linux/types.h>
+ #include <linux/errqueue.h>
+ 
+ #include "SNAPSHOT.h"
+diff -urN iputils/tftpd.c iputils.new/tftpd.c
+--- iputils/tftpd.c	2002-01-23 19:31:41.000000000 -0500
++++ iputils.new/tftpd.c	2003-09-10 09:39:45.000000000 -0400
+@@ -57,7 +57,6 @@
+ 
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+-#include <linux/in6.h>
+ #include <netdb.h>
+ 
+ #include <setjmp.h>
+diff -urN iputils/tracepath6.c iputils.new/tracepath6.c
+--- iputils/tracepath6.c	2001-09-01 22:03:46.000000000 -0400
++++ iputils.new/tracepath6.c	2003-09-10 09:40:18.000000000 -0400
+@@ -14,8 +14,7 @@
+ #include <unistd.h>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+-
+-#include <linux/in6.h>
++#include <linux/types.h>
+ #include <linux/errqueue.h>
+ #include <errno.h>
+ #include <string.h>
+diff -urN iputils/tracepath.c iputils.new/tracepath.c
+--- iputils/tracepath.c	2002-02-22 19:10:59.000000000 -0500
++++ iputils.new/tracepath.c	2003-09-10 06:14:35.000000000 -0400
+@@ -13,6 +13,7 @@
+ #include <stdlib.h>
+ #include <unistd.h>
+ #include <sys/socket.h>
++#include <linux/types.h>
+ #include <linux/errqueue.h>
+ #include <errno.h>
+ #include <string.h>
+diff -urN iputils/traceroute6.c iputils.new/traceroute6.c
+--- iputils/traceroute6.c	2002-09-20 11:44:22.000000000 -0400
++++ iputils.new/traceroute6.c	2003-09-10 10:12:47.000000000 -0400
+@@ -246,9 +246,24 @@
+ #include <netinet/ip_icmp.h>
+ #include <netinet/udp.h>
+ 
+-#include <linux/ipv6.h>
+-#include <linux/in6.h>
++#include <linux/types.h>
++struct ipv6hdr {
++#if defined(__LITTLE_ENDIAN)
++        __u8                    priority:4,
++                                version:4;
++#elif defined(__BIG_ENDIAN)
++        __u8                    version:4,
++                                priority:4;
++#endif
++        __u8                    flow_lbl[3];
++
++        __u16                   payload_len;
++        __u8                    nexthdr;
++        __u8                    hop_limit;
+ 
++        struct  in6_addr        saddr;
++        struct  in6_addr        daddr;
++};
+ #include <linux/icmpv6.h>
+ 
+ #include <arpa/inet.h>
+--- iputils/arping.c.unaligned	2001-10-06 00:42:47.000000000 +0200
++++ iputils/arping.c	2003-10-02 15:14:42.000000000 +0200
+@@ -332,7 +332,7 @@
+ 			timeout = atoi(optarg);
+ 			break;
+ 		case 'I':
+- 			device = optarg;
++ 			device = strdup(optarg);
+  			break;
+  		case 'f':
+  			quit_on_reply=1;
+--- iputils/traceroute6.c.inet_pton	2004-04-22 15:06:28.268797480 +0200
++++ iputils/traceroute6.c	2004-04-22 15:06:35.727877941 +0200
+@@ -538,7 +538,7 @@
+ 	} else {
+ 		(void) bzero((char *)&saddr, sizeof(saddr));
+ 		saddr.sin6_family = AF_INET6;
+-		if (inet_pton(AF_INET6, source, &saddr.sin6_addr) < 0)
++		if (inet_pton(AF_INET6, source, &saddr.sin6_addr) <= 0)
+ 		{
+ 			Printf("traceroute: unknown addr %s\n", source);
+ 			exit(1);
+--- iputils/traceroute6.c.old	2004-12-07 11:08:57.000000000 +0100
++++ iputils/traceroute6.c	2004-12-07 11:14:09.397575536 +0100
+@@ -352,8 +352,11 @@
+ 	icmp_sock = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6);
+ 	socket_errno = errno;
+ 
+-	setuid(getuid());
+-
++	if(setuid(getuid()) != 0)
++	{
++		perror("traceroute: setuid()");
++		exit(-1);
++	}
+ 	on = 1;
+ 	seq = tos = 0;
+ 	to = (struct sockaddr_in6 *)&whereto;
+--- iputils/ping6.c.old	2004-12-07 11:08:57.000000000 +0100
++++ iputils/ping6.c	2004-12-07 11:13:40.707937024 +0100
+@@ -223,7 +223,11 @@
+ 	socket_errno = errno;
+ 
+ 	uid = getuid();
+-	setuid(uid);
++	if(setuid(uid) != 0)
++	{
++		perror("ping: setuid()");
++		exit(-1);
++	}
+ 
+ 	source.sin6_family = AF_INET6;
+ 	memset(&firsthop, 0, sizeof(firsthop));
+--- iputils/ping.c.old	2004-12-07 11:08:57.000000000 +0100
++++ iputils/ping.c	2004-12-07 11:13:27.523941296 +0100
+@@ -119,7 +119,11 @@
+ 	socket_errno = errno;
+ 
+ 	uid = getuid();
+-	setuid(uid);
++	if(setuid(uid) != 0)
++	{
++		perror("ping: setuid()");
++		exit(-1);
++	}
+ 
+ 	source.sin_family = AF_INET;
+ 
+--- iputils/doc/ping.8.old	2002-09-27 19:12:47.000000000 +0200
++++ iputils/doc/ping.8	2004-12-07 11:09:42.434160144 +0100
+@@ -112,7 +112,7 @@
+ when finished.
+ .TP
+ \fB-R\fR
+-Record route.
++Record route. (IPv4 only)
+ Includes the RECORD_ROUTE option in the ECHO_REQUEST
+ packet and displays the route buffer on returned packets.
+ Note that the IP header is only large enough for nine such routes.
+--- iputils/doc/ping.sgml.old	2002-09-20 14:55:50.000000000 +0200
++++ iputils/doc/ping.sgml	2004-12-07 11:09:42.435159992 +0100
+@@ -190,7 +190,7 @@
+  <varlistentry>
+   <term><option/-R/</term>
+   <listitem><para>
+-Record route.
++Record route. (IPv4 only)
+ Includes the RECORD_ROUTE option in the ECHO_REQUEST
+ packet and displays the route buffer on returned packets.
+ Note that the IP header is only large enough for nine such routes.
+--- iputils/ping.c	2005-05-18 01:37:05.621810488 -0400
++++ iputils/ping.c.new	2005-05-18 01:41:27.113018222 -0400
+@@ -101,7 +101,7 @@ static struct {
+ int cmsg_len;
+ 
+ struct sockaddr_in source;
+-char *device;
++char *device=NULL;
+ int pmtudisc = -1;
+ 
+ 
+@@ -177,7 +177,7 @@ main(int argc, char **argv)
+ 				ptr[3] = i4;
+ 				options |= F_STRICTSOURCE;
+ 			} else {
+-				device = optarg;
++				device = strdup(optarg);
+ 			}
+ 			break;
+ 		}
+--- iputils/ping6.c	2005-05-18 01:37:05.620833925 -0400
++++ iputils/ping6.c.new	2005-05-18 01:41:23.599346390 -0400
+@@ -155,7 +155,7 @@ static int pr_icmph(__u8 type, __u8 code
+ static void usage(void) __attribute((noreturn));
+ 
+ struct sockaddr_in6 source;
+-char *device;
++char *device=NULL;
+ int pmtudisc=-1;
+ 
+ static int icmp_sock;
+@@ -248,7 +248,7 @@ int main(int argc, char *argv[])
+ 				}
+ 				options |= F_STRICTSOURCE;
+ 			} else {
+-				device = optarg;
++				device = strdup(optarg);
+ 			}
+ 			break;
+ 		case 'M':
+diff -ur iputils/arping.c iputils.tom/arping.c
+--- iputils/arping.c	2005-07-15 13:51:15.533632784 -0700
++++ iputils.tom/arping.c	2005-07-15 13:50:47.967823000 -0700
+@@ -59,6 +59,8 @@
+ #define MS_TDIFF(tv1,tv2) ( ((tv1).tv_sec-(tv2).tv_sec)*1000 + \
+ 			   ((tv1).tv_usec-(tv2).tv_usec)/1000 )
+ 
++#define min(x,y) ((x)<(y) ? (x) : (y))
++
+ void usage(void)
+ {
+ 	fprintf(stderr,
+@@ -476,7 +478,7 @@
+ 	}
+ 
+ 	he = me;
+-	memset(he.sll_addr, -1, he.sll_halen);
++	memset(he.sll_addr, -1, min(he.sll_halen, sizeof he.sll_addr));
+ 
+ 	if (!quiet) {
+ 		printf("ARPING %s ", inet_ntoa(dst));
+--- iputils/arping.c.orig	2001-10-05 18:42:47.000000000 -0400
++++ iputils/arping.c	2005-07-13 13:07:45.406217716 -0400
+@@ -166,10 +166,12 @@ void catcher(void)
+ 	if (start.tv_sec==0)
+ 		start = tv;
+ 
+-	if (count-- == 0 || (timeout && MS_TDIFF(tv,start) > timeout*1000 + 500))
++	if ((timeout && MS_TDIFF(tv,start) > timeout*1000 + 500) ||
++		((count == 0) && (!timeout)))
+ 		finish();
+ 
+ 	if (last.tv_sec==0 || MS_TDIFF(tv,last) > 500) {
++		count--;
+ 		send_pack(s, src, dst, &me, &he);
+ 		if (count == 0 && unsolicited)
+ 			finish();
+@@ -510,6 +512,8 @@ main(int argc, char **argv)
+ 		sigaddset(&sset, SIGINT);
+ 		sigprocmask(SIG_BLOCK, &sset, &osset);
+ 		recv_pack(packet, cc, &from);
++		if(received == count)
++			exit(0);
+ 		sigprocmask(SIG_SETMASK, &osset, NULL);
+ 	}
+ }
+--- iputils/tracepath6.c.getaddrinfo	2005-09-08 10:31:47.000000000 +0200
++++ iputils/tracepath6.c	2005-09-08 10:31:47.000000000 +0200
+@@ -280,7 +280,7 @@
+ 	struct sockaddr_in6 sin;
+ 	int ttl;
+ 	char *p;
+-	struct hostent *he;
++	struct addrinfo hints, *res;
+ 	int ch;
+ 
+ 	while ((ch = getopt(argc, argv, "nbh?")) != EOF) {
+@@ -308,20 +308,26 @@
+ 		perror("socket");
+ 		exit(1);
+ 	}
+-	sin.sin6_family = AF_INET6;
+ 
+ 	p = strchr(argv[0], '/');
+ 	if (p) {
+ 		*p = 0;
++	}
++
++	memset(&hints, '\0', sizeof(hints));
++	hints.ai_family = AF_INET6;
++	if (getaddrinfo(argv[0], NULL, &hints, &res)) {
++		herror("getaddrinfo");
++		exit(1);
++	}
++
++	memcpy(&sin, res->ai_addr, sizeof(struct sockaddr_in6));
++	freeaddrinfo(res);
++
++	if (p) {
+ 		sin.sin6_port = htons(atoi(p+1));
+ 	} else
+ 		sin.sin6_port = htons(0x8000 | getpid());
+-	he = gethostbyname2(argv[0], AF_INET6);
+-	if (he == NULL) {
+-		herror("gethostbyname2");
+-		exit(1);
+-	}
+-	memcpy(&sin.sin6_addr, he->h_addr, 16);
+ 
+ 	if (connect(fd, (struct sockaddr*)&sin, sizeof(sin)) < 0) {
+ 		perror("connect");
+--- iputils/tracepath.c.getaddrinfo	2005-09-08 10:31:47.000000000 +0200
++++ iputils/tracepath.c	2005-09-08 11:03:39.000000000 +0200
+@@ -272,12 +272,12 @@
+ int
+ main(int argc, char **argv)
+ {
+-	struct hostent *he;
+ 	int fd;
+ 	int on;
+ 	int ttl;
+ 	char *p;
+ 	int ch;
++	struct addrinfo hints, *res;
+ 
+ 	while ((ch = getopt(argc, argv, "nh?")) != EOF) {
+ 		switch(ch) {
+@@ -300,20 +300,26 @@
+ 		perror("socket");
+ 		exit(1);
+ 	}
+-	target.sin_family = AF_INET;
+ 
+ 	p = strchr(argv[0], '/');
+ 	if (p) {
+ 		*p = 0;
++	}
++	
++	memset(&hints, '\0', sizeof(hints));
++	hints.ai_family = AF_INET;
++	if (getaddrinfo(argv[0], NULL, &hints, &res)) {
++	    herror("getaddrinfo");
++	    exit(1);
++	}
++	
++	memcpy(&target, res->ai_addr, sizeof(struct sockaddr_in));
++	freeaddrinfo(res);
++	
++	if (p) 
+ 		base_port = atoi(p+1);
+-	} else
++	else
+ 		base_port = 44444;
+-	he = gethostbyname(argv[0]);
+-	if (he == NULL) {
+-		herror("gethostbyname");
+-		exit(1);
+-	}
+-	memcpy(&target.sin_addr, he->h_addr, 4);
+ 
+ 	on = IP_PMTUDISC_DO;
+ 	if (setsockopt(fd, SOL_IP, IP_MTU_DISCOVER, &on, sizeof(on))) {
+--- iputils/ping.c.flood	2005-09-26 09:26:49.000000000 +0200
++++ iputils/ping.c	2005-09-26 13:07:39.000000000 +0200
+@@ -614,7 +608,7 @@
+ 	icp->type = ICMP_ECHO;
+ 	icp->code = 0;
+ 	icp->checksum = 0;
+-	icp->un.echo.sequence = htons(ntransmitted);
++	icp->un.echo.sequence = htons(ntransmitted+1);
+ 	icp->un.echo.id = ident;			/* ID */
+ 
+ 	CLR((ntransmitted+1) % mx_dup_ck);
+diff -ru iputils/ping_common.c iputils-foo/ping_common.c
+--- iputils/ping_common.c	2005-09-22 15:22:57.000000000 -0400
++++ iputils-foo/ping_common.c	2005-09-22 15:24:42.000000000 -0400
+@@ -584,6 +584,7 @@
+ 					   * destined to other running pings. */
+ 
+ 			iov.iov_len = packlen;
++			memset(&msg,'\0',sizeof(msg));
+ 			msg.msg_name = addrbuf;
+ 			msg.msg_namelen = sizeof(addrbuf);
+ 			msg.msg_iov = &iov;
+--- iputils/tracepath6.c.hoplimit	2005-12-13 13:32:56.000000000 +0100
++++ iputils/tracepath6.c	2005-12-13 13:35:01.000000000 +0100
+@@ -359,8 +359,8 @@
+ 		perror("IP_RECVERR");
+ 		exit(1);
+ 	}
+-	if (setsockopt(fd, SOL_IPV6, IPV6_HOPLIMIT, &on, sizeof(on))) {
+-		perror("IPV6_HOPLIMIT");
++	if (setsockopt(fd, SOL_IPV6, IPV6_RECVHOPLIMIT, &on, sizeof(on))) {
++		perror("IPV6_RECVHOPLIMIT");
+ 		exit(1);
+ 	}
+ 	if (mapped && setsockopt(fd, SOL_IP, IP_RECVTTL, &on, sizeof(on))) {
+--- iputils/ping6.c.hoplimit	2005-12-13 13:32:56.000000000 +0100
++++ iputils/ping6.c	2005-12-13 13:34:04.000000000 +0100
+@@ -521,13 +521,10 @@
+ 		}
+ 	}
+ 
+-	if (1) {
+-		int on = 1;
+-		if (setsockopt(icmp_sock, IPPROTO_IPV6, IPV6_HOPLIMIT,
+-			       &on, sizeof(on)) == -1) {
+-			perror ("can't receive hop limit");
+-			exit(2);
+-		}
++	int on = 1;
++	if (setsockopt(icmp_sock, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &on, sizeof(on))) {
++		perror("setsockopt(IPV6_RECVHOPLIMIT)");
++		exit(2);
+ 	}
+ 
+ 	if (options&F_FLOWINFO) {
+--- iputils/ping6.c.gcc41	2006-01-25 16:21:47.000000000 +0100
++++ iputils/ping6.c	2006-01-25 16:21:47.000000000 +0100
+@@ -383,7 +383,7 @@
+ 			exit(2);
+ 		}
+ 		alen = sizeof(source);
+-		if (getsockname(probe_fd, (struct sockaddr*)&source, &alen) == -1) {
++		if (getsockname(probe_fd, (struct sockaddr*)&source, (socklen_t*)&alen) == -1) {
+ 			perror("getsockname");
+ 			exit(2);
+ 		}
+@@ -599,6 +599,7 @@
+ 	int net_errors = 0;
+ 	int local_errors = 0;
+ 	int saved_errno = errno;
++	ssize_t wr_ret;
+ 
+ 	iov.iov_base = &icmph;
+ 	iov.iov_len = sizeof(icmph);
+@@ -629,7 +630,7 @@
+ 		if (options & F_QUIET)
+ 			goto out;
+ 		if (options & F_FLOOD)
+-			write(STDOUT_FILENO, "E", 1);
++			wr_ret = write(STDOUT_FILENO, "E", 1);
+ 		else if (e->ee_errno != EMSGSIZE)
+ 			fprintf(stderr, "ping: local error: %s\n", strerror(e->ee_errno));
+ 		else
+@@ -652,7 +653,7 @@
+ 		if (options & F_QUIET)
+ 			goto out;
+ 		if (options & F_FLOOD) {
+-			write(STDOUT_FILENO, "\bE", 2);
++			wr_ret = write(STDOUT_FILENO, "\bE", 2);
+ 		} else {
+ 			printf("From %s icmp_seq=%u ", pr_addr(&sin6->sin6_addr), ntohs(icmph.icmp6_sequence));
+ 			pr_icmph(e->ee_type, e->ee_code, e->ee_info);
+@@ -795,7 +796,8 @@
+ 				return 0;
+ 			nerrors++;
+ 			if (options & F_FLOOD) {
+-				write(STDOUT_FILENO, "\bE", 2);
++				ssize_t wr_ret;
++				wr_ret = write(STDOUT_FILENO, "\bE", 2);
+ 				return 0;
+ 			}
+ 			printf("From %s: icmp_seq=%u ", pr_addr(&from->sin6_addr), ntohs(icmph1->icmp6_sequence));
+--- iputils/arping.c.gcc41	2006-01-25 16:21:47.000000000 +0100
++++ iputils/arping.c	2006-01-25 16:21:47.000000000 +0100
+@@ -449,7 +449,7 @@
+ 				perror("connect");
+ 				exit(2);
+ 			}
+-			if (getsockname(probe_fd, (struct sockaddr*)&saddr, &alen) == -1) {
++			if (getsockname(probe_fd, (struct sockaddr*)&saddr, (socklen_t*)&alen) == -1) {
+ 				perror("getsockname");
+ 				exit(2);
+ 			}
+@@ -468,7 +468,7 @@
+ 
+ 	if (1) {
+ 		int alen = sizeof(me);
+-		if (getsockname(s, (struct sockaddr*)&me, &alen) == -1) {
++		if (getsockname(s, (struct sockaddr*)&me, (socklen_t*)&alen) == -1) {
+ 			perror("getsockname");
+ 			exit(2);
+ 		}
+@@ -499,13 +499,13 @@
+ 
+ 	while(1) {
+ 		sigset_t sset, osset;
+-		char packet[4096];
++		unsigned char packet[4096];
+ 		struct sockaddr_ll from;
+ 		int alen = sizeof(from);
+ 		int cc;
+ 
+ 		if ((cc = recvfrom(s, packet, sizeof(packet), 0,
+-				   (struct sockaddr *)&from, &alen)) < 0) {
++				   (struct sockaddr *)&from, (socklen_t*)&alen)) < 0) {
+ 			perror("arping: recvfrom");
+ 			continue;
+ 		}
+--- iputils/traceroute6.c.gcc41	2006-01-25 16:21:47.000000000 +0100
++++ iputils/traceroute6.c	2006-01-25 16:21:47.000000000 +0100
+@@ -529,7 +529,7 @@
+ 			exit(1);
+ 		}
+ 		alen = sizeof(saddr);
+-		if (getsockname(probe_fd, (struct sockaddr*)&saddr, &alen) == -1) {
++		if (getsockname(probe_fd, (struct sockaddr*)&saddr, (socklen_t*)&alen) == -1) {
+ 			perror("getsockname");
+ 			exit(1);
+ 		}
+@@ -656,7 +656,7 @@
+ 
+ 	if (select(sock+1, &fds, (fd_set *)0, (fd_set *)0, &wait) > 0) {
+ 		cc=recvfrom(icmp_sock, (char *)packet, sizeof(packet), 0,
+-			    (struct sockaddr *)from, &fromlen);
++			    (struct sockaddr *)from, (socklen_t*)&fromlen);
+ 	}
+ 
+ 	return(cc);
+--- iputils/tftpd.c.gcc41	2006-01-25 16:21:47.000000000 +0100
++++ iputils/tftpd.c	2006-01-25 16:21:47.000000000 +0100
+@@ -126,7 +126,7 @@
+ 	}
+ 	fromlen = sizeof (from);
+ 	n = recvfrom(0, buf, sizeof (buf), 0,
+-	    (struct sockaddr *)&from, &fromlen);
++	    (struct sockaddr *)&from, (socklen_t*)&fromlen);
+ 	if (n < 0) {
+ 		if (errno != EAGAIN)
+ 			syslog(LOG_ERR, "recvfrom: %m\n");
+@@ -164,9 +164,9 @@
+ 				 * than one tftpd being started up to service
+ 				 * a single request from a single client.
+ 				 */
+-				j = sizeof from;
++				j = sizeof (from);
+ 				i = recvfrom(0, buf, sizeof (buf), 0,
+-				    (struct sockaddr *)&from, &j);
++				    (struct sockaddr *)&from, (socklen_t*)&j);
+ 				if (i > 0) {
+ 					n = i;
+ 					fromlen = j;
+--- iputils/clockdiff.c.gcc41	2006-01-25 16:21:47.000000000 +0100
++++ iputils/clockdiff.c	2006-01-25 16:21:47.000000000 +0100
+@@ -148,7 +148,7 @@
+ 	if (select(FD_SETSIZE, &ready, (fd_set *)0, (fd_set *)0, &tout)) {
+ 		length = sizeof(struct sockaddr_in);
+ 		cc = recvfrom(sock_raw, (char *)packet, PACKET_IN, 0, 
+-		    (struct sockaddr *)NULL, &length);
++		    (struct sockaddr *)NULL, (socklen_t*)&length);
+ 		if (cc < 0)
+ 			return -1;
+ 		goto empty;
+@@ -214,7 +214,7 @@
+ 
+ 			(void)gettimeofday(&tv1, (struct timezone *)0);
+ 			cc = recvfrom(sock_raw, (char *)packet, PACKET_IN, 0, 
+-			    (struct sockaddr *)NULL, &length);
++			    (struct sockaddr *)NULL, (socklen_t*)&length);
+ 
+ 			if (cc < 0)
+ 				return(-1);
+@@ -326,7 +326,7 @@
+ 	if (select(FD_SETSIZE, &ready, (fd_set *)0, (fd_set *)0, &tout)) {
+ 		length = sizeof(struct sockaddr_in);
+ 		cc = recvfrom(sock_raw, (char *)packet, PACKET_IN, 0, 
+-		    (struct sockaddr *)NULL, &length);
++		    (struct sockaddr *)NULL, (socklen_t*)&length);
+ 		if (cc < 0)
+ 			return -1;
+ 		goto empty;
+@@ -396,7 +396,7 @@
+ 
+ 			(void)gettimeofday(&tv1, (struct timezone *)0);
+ 			cc = recvfrom(sock_raw, (char *)packet, PACKET_IN, 0, 
+-				      (struct sockaddr *)NULL, &length);
++				      (struct sockaddr *)NULL, (socklen_t*)&length);
+ 
+ 			if (cc < 0)
+ 				return(-1);
+@@ -539,6 +539,7 @@
+ 	struct hostent * hp;
+ 	char hostname[MAXHOSTNAMELEN];
+ 	int s_errno = 0;
++	int nice_ret;
+ 
+ 	if (argc < 2) {
+ 		setuid(getuid());
+@@ -606,7 +607,7 @@
+ 		rspace[1] = ip_opt_len;
+ 		rspace[2] = 5;
+ 		rspace[3] = IPOPT_TS_PRESPEC;
+-		if (getsockname(sock_raw, (struct sockaddr*)&myaddr, &addrlen) == -1) {
++		if (getsockname(sock_raw, (struct sockaddr*)&myaddr, (socklen_t*)&addrlen) == -1) {
+ 			perror("getsockname");
+ 			exit(1);
+ 		}
+@@ -623,8 +624,13 @@
+ 			ip_opt_len = 0;
+ 		}
+ 	}
+-
+-	nice(-16);
++	nice_ret = nice(-16);
++	if (nice_ret < 0) {
++		if (errno)
++			perror("nice");
++		else
++			fprintf(stderr, "nice: unknown failure\n");
++	}
+ 
+ 	if ((measure_status = (ip_opt_len ? measure_opt : measure)(&server)) < 0) {
+ 		if (errno)
+--- iputils/rdisc.c.gcc41	2006-01-25 16:21:47.000000000 +0100
++++ iputils/rdisc.c	2006-01-25 16:21:47.000000000 +0100
+@@ -454,7 +454,7 @@
+ 		int cc;
+ 
+ 		cc=recvfrom(s, (char *)packet, len, 0, 
+-			    (struct sockaddr *)&from, &fromlen);
++			    (struct sockaddr *)&from, (socklen_t*)&fromlen);
+ 		if (cc<0) {
+ 			if (errno == EINTR)
+ 				continue;
+--- iputils/rarpd.c.gcc41	2001-12-02 19:45:06.000000000 +0100
++++ iputils/rarpd.c	2006-01-25 16:21:47.000000000 +0100
+@@ -154,8 +154,8 @@
+ 			ifl->index = index;
+ 			ifl->hatype = ifrp->ifr_hwaddr.sa_family;
+ 			memcpy(ifl->lladdr, ifrp->ifr_hwaddr.sa_data, 14);
+-			strncpy(ifl->name, ifrp->ifr_name, IFNAMSIZ);
+-			p = strchr(ifl->name, ':');
++			strncpy((char*)ifl->name, ifrp->ifr_name, IFNAMSIZ);
++			p = strchr((char*)ifl->name, ':');
+ 			if (p)
+ 				*p = 0;
+ 			if (verbose)
+@@ -423,7 +423,7 @@
+ 	unsigned char *ptr;
+ 	int n;
+ 
+-	n = recvfrom(fd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr*)&sll, &sll_len);
++	n = recvfrom(fd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr*)&sll, (socklen_t*)&sll_len);
+ 	if (n<0) {
+ 		if (errno != EINTR && errno != EAGAIN)
+ 			syslog(LOG_ERR, "recvfrom: %m");
+@@ -531,7 +531,7 @@
+ 	/* Update our ARP cache. Probably, this guy
+ 	   will not able to make ARP (if it is broken)
+ 	 */
+-	arp_advise(sll.sll_ifindex, rmap->lladdr, rmap->lladdr_len, rmap->ipaddr);
++	arp_advise(sll.sll_ifindex,(unsigned char *)rmap->lladdr, rmap->lladdr_len, rmap->ipaddr);
+ 
+ 	/* Sendto is blocking, but with 5sec timeout */
+ 	alarm(5);
+@@ -673,8 +673,15 @@
+ 			perror("rarpd: fork");
+ 			exit(1);
+ 		}
++		int chdir_ret = chdir("/");
++		if (chdir_ret != 0) {
++		    if (errno)
++			perror("chdir");
++		    else
++			fprintf(stderr, "chdir: Uknown error\n");
++		}
+ 
+-		chdir("/");
++		
+ 		fd = open("/dev/null", O_RDWR);
+ 		if (fd >= 0) {
+ 			dup2(fd, 0);
+--- iputils/ping_common.c.gcc41	2006-01-25 16:21:47.000000000 +0100
++++ iputils/ping_common.c	2006-01-25 16:21:47.000000000 +0100
+@@ -284,6 +284,7 @@
+ 	static int oom_count;
+ 	static int tokens;
+ 	int i;
++	ssize_t wr_ret;
+ 
+ 	/* Have we already sent enough? If we have, return an arbitrary positive value. */ 
+ 	if (exiting || (npackets && ntransmitted >= npackets && !deadline))
+@@ -327,7 +328,7 @@
+ 			 * high preload or pipe size is very confusing. */
+ 			if ((preload < screen_width && pipesize < screen_width) ||
+ 			    in_flight() < screen_width)
+-				write(STDOUT_FILENO, ".", 1);
++				wr_ret = write(STDOUT_FILENO, ".", 1);
+ 		}
+ 		return interval - tokens;
+ 	}
+@@ -380,7 +381,7 @@
+ 
+ 	if (i == 0 && !(options & F_QUIET)) {
+ 		if (options & F_FLOOD)
+-			write(STDOUT_FILENO, "E", 1);
++			wr_ret = write(STDOUT_FILENO, "E", 1);
+ 		else
+ 			perror("ping: sendmsg");
+ 	}
+@@ -402,8 +403,8 @@
+ 	rcvbuf = hold = alloc * preload;
+ 	if (hold < 65536)
+ 		hold = 65536;
+-	setsockopt(icmp_sock, SOL_SOCKET, SO_RCVBUF, (char *)&hold, sizeof(hold));
+-	if (getsockopt(icmp_sock, SOL_SOCKET, SO_RCVBUF, (char *)&hold, &tmplen) == 0) {
++	setsockopt(icmp_sock, SOL_SOCKET, SO_RCVBUF, (char *)&hold, (socklen_t)sizeof(hold));
++	if (getsockopt(icmp_sock, SOL_SOCKET, SO_RCVBUF, (char *)&hold, (socklen_t*)&tmplen) == 0) {
+ 		if (hold < rcvbuf)
+ 			fprintf(stderr, "WARNING: probably, rcvbuf is not enough to hold preload.\n");
+ 	}
+@@ -650,7 +651,8 @@
+ {
+ 	int dupflag = 0;
+ 	long triptime = 0;
+-
++	ssize_t wr_ret;
++	
+ 	++nreceived;
+ 	if (!csfailed)
+ 		acknowledge(seq);
+@@ -706,9 +708,9 @@
+ 
+ 	if (options & F_FLOOD) {
+ 		if (!csfailed)
+-			write(STDOUT_FILENO, "\b \b", 3);
++			wr_ret = write(STDOUT_FILENO, "\b \b", 3);
+ 		else
+-			write(STDOUT_FILENO, "\bC", 1);
++			wr_ret = write(STDOUT_FILENO, "\bC", 1);
+ 	} else {
+ 		int i;
+ 		__u8 *cp, *dp;
+--- iputils/ping.c.gcc41	2006-01-25 16:21:47.000000000 +0100
++++ iputils/ping.c	2006-01-25 16:21:47.000000000 +0100
+@@ -314,7 +314,7 @@
+ 			}
+ 		}
+ 		alen = sizeof(source);
+-		if (getsockname(probe_fd, (struct sockaddr*)&source, &alen) == -1) {
++		if (getsockname(probe_fd, (struct sockaddr*)&source, (socklen_t*)&alen) == -1) {
+ 			perror("getsockname");
+ 			exit(2);
+ 		}
+@@ -517,6 +517,7 @@
+ 	int net_errors = 0;
+ 	int local_errors = 0;
+ 	int saved_errno = errno;
++	ssize_t wr_ret;
+ 
+ 	iov.iov_base = &icmph;
+ 	iov.iov_len = sizeof(icmph);
+@@ -547,7 +548,7 @@
+ 		if (options & F_QUIET)
+ 			goto out;
+ 		if (options & F_FLOOD)
+-			write(STDOUT_FILENO, "E", 1);
++			wr_ret = write(STDOUT_FILENO, "E", 1);
+ 		else if (e->ee_errno != EMSGSIZE)
+ 			fprintf(stderr, "ping: local error: %s\n", strerror(e->ee_errno));
+ 		else
+@@ -583,7 +584,7 @@
+ 		if (options & F_QUIET)
+ 			goto out;
+ 		if (options & F_FLOOD) {
+-			write(STDOUT_FILENO, "\bE", 2);
++			wr_ret = write(STDOUT_FILENO, "\bE", 2);
+ 		} else {
+ 			printf("From %s icmp_seq=%u ", pr_addr(sin->sin_addr.s_addr), ntohs(icmph.un.echo.sequence));
+ 			pr_icmph(e->ee_type, e->ee_code, e->ee_info, NULL);
+@@ -677,6 +678,7 @@
+ 	struct iphdr *ip;
+ 	int hlen;
+ 	int csfailed;
++	ssize_t wr_ret;
+ 
+ 	/* Check the IP header */
+ 	ip = (struct iphdr *)buf;
+@@ -748,7 +750,7 @@
+ 					return !error_pkt;
+ 				if (options & F_FLOOD) {
+ 					if (error_pkt)
+-						write(STDOUT_FILENO, "\bE", 2);
++						wr_ret = write(STDOUT_FILENO, "\bE", 2);
+ 					return !error_pkt;
+ 				}
+ 				printf("From %s: icmp_seq=%u ",
+@@ -765,9 +767,9 @@
+ 		}
+ 		if ((options & F_FLOOD) && !(options & (F_VERBOSE|F_QUIET))) {
+ 			if (!csfailed)
+-				write(STDOUT_FILENO, "!E", 2);
++				wr_ret = write(STDOUT_FILENO, "!E", 2);
+ 			else
+-				write(STDOUT_FILENO, "!EC", 3);
++				wr_ret = write(STDOUT_FILENO, "!EC", 3);
+ 			return 0;
+ 		}
+ 		if (!(options & F_VERBOSE) || uid)
+--- iputils/ping6.c.OLD	2006-02-06 10:34:35.000000000 +0100
++++ iputils/ping6.c	2006-02-06 10:35:38.000000000 +0100
+@@ -353,7 +353,7 @@
+ 	hostname = target;
+ 
+ 	if (ipv6_addr_any(&source.sin6_addr)) {
+-		int alen;
++		socklen_t alen;
+ 		int probe_fd = socket(AF_INET6, SOCK_DGRAM, 0);
+ 
+ 		if (probe_fd < 0) {
+--- iputils/ping.c.OLD	2006-02-06 10:34:35.000000000 +0100
++++ iputils/ping.c	2006-02-06 10:34:35.000000000 +0100
+@@ -253,7 +253,7 @@
+ 	}
+ 
+ 	if (source.sin_addr.s_addr == 0) {
+-		int alen;
++		socklen_t alen;
+ 		struct sockaddr_in dst = whereto;
+ 		int probe_fd = socket(AF_INET, SOCK_DGRAM, 0);
+ 
+@@ -855,9 +855,36 @@
+ 		case ICMP_SR_FAILED:
+ 			printf("Source Route Failed\n");
+ 			break;
++		case ICMP_NET_UNKNOWN:
++			printf("Destination Net Unknown\n");
++			break;
++		case ICMP_HOST_UNKNOWN:
++			printf("Destination Host Unknown\n");
++			break;
++		case ICMP_HOST_ISOLATED:
++			printf("Source Host Isolated\n");
++			break;
++		case ICMP_NET_ANO:
++			printf("Destination Net Prohibited\n");
++			break;
++		case ICMP_HOST_ANO:
++			printf("Destination Host Prohibited\n");
++			break;
++		case ICMP_NET_UNR_TOS:
++			printf("Destination Net Unreachable for Type of Service\n");
++			break;
++		case ICMP_HOST_UNR_TOS:
++			printf("Destination Host Unreachable for Type of Service\n");
++			break;
+ 		case ICMP_PKT_FILTERED:
+ 			printf("Packet filtered\n");
+ 			break;
++		case ICMP_PREC_VIOLATION:
++			printf("Precedence Violation\n");
++			break;
++		case ICMP_PREC_CUTOFF:
++			printf("Precedence Cutoff\n");
++			break;
+ 		default:
+ 			printf("Dest Unreachable, Bad Code: %d\n", code);
+ 			break;
+--- iputils/ping_common.c.OLD	2006-02-06 10:34:35.000000000 +0100
++++ iputils/ping_common.c	2006-02-06 10:34:35.000000000 +0100
+@@ -67,7 +67,7 @@
+ 	int ii, jj, kk;
+ 	int pat[16];
+ 	char *cp;
+-	char *bp = outpack+8;
++	unsigned char *bp = outpack+8;
+ 
+ 	for (cp = patp; *cp; cp++) {
+ 		if (!isxdigit(*cp)) {
+@@ -393,7 +393,7 @@
+ void sock_setbufs(int icmp_sock, int alloc)
+ {
+ 	int rcvbuf, hold;
+-	int tmplen = sizeof(hold);
++	socklen_t tmplen = sizeof(hold);
+ 
+ 	if (!sndbuf)
+ 		sndbuf = alloc;
+@@ -464,7 +464,7 @@
+ 
+ 	if (!(options & F_PINGFILLED)) {
+ 		int i;
+-		char *p = outpack+8;
++		unsigned char *p = outpack+8;
+ 
+ 		/* Do not forget about case of small datalen,
+ 		 * fill timestamp area too!
+@@ -819,7 +819,7 @@
+ 	}
+ 	if (pipesize > 1)
+ 		printf(", pipe %d", pipesize);
+-	if (ntransmitted > 1 && (!interval || (options&(F_FLOOD|F_ADAPTIVE)))) {
++	if (ntransmitted > 1 && nreceived && (!interval || (options&(F_FLOOD|F_ADAPTIVE)))) {
+ 		int ipg = (1000000*(long long)tv.tv_sec+tv.tv_usec)/(ntransmitted-1);
+ 		printf(", ipg/ewma %d.%03d/%d.%03d ms",
+ 		       ipg/1000, ipg%1000, rtt/8000, (rtt/8)%1000);
