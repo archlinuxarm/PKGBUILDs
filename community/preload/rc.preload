@@ -1,0 +1,94 @@
+#!/bin/bash
+#
+#	/etc/rc.d/init.d/preload
+#
+# Starts the preload daemon
+#
+# Heavily modified for Arch Linux by Leslie P. Polzer <polzer@gnu.org>.
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+
+PID=`pidof -o %PPID /usr/sbin/preload`
+
+if [ -f /etc/conf.d/preload ]; then
+        . /etc/conf.d/preload
+fi
+
+MIN_MEMORY=${MIN_MEMORY:-256}
+# Check for > MIN_MEMORY MB
+free -m | awk '/Mem:/ {exit ($2 >= ('"$MIN_MEMORY"'))?0:1}' || exit 0
+
+RETVAL=0
+
+#
+# See how we were called.
+#
+
+start() {
+        if [ -z "$PID" ]; then
+                stat_busy "Starting preload daemon: "
+                /usr/sbin/preload $PRELOAD_OPTS
+                RETVAL=$?
+                if [ $RETVAL -eq 0 ]; then
+                        add_daemon preload
+                        stat_done
+                else
+                        stat_fail
+                fi
+        fi
+        return $RETVAL
+}
+
+stop() {
+        stat_busy "Stopping preload daemon: "
+        kill $PID &>/dev/null
+        RETVAL=$?
+        if [ $RETVAL -eq 0 ]; then
+                rm_daemon preload
+                stat_done
+		PID=""
+        else
+                stat_fail
+        fi
+        return $RETVAL
+}
+
+
+restart() {
+        $0 stop
+	sleep 1
+        $0 start
+}	
+
+reload() {
+        trap "" SIGHUP
+        kill -HUP $PID
+}	
+
+case "$1" in
+        start)
+        start
+        ;;
+        stop)
+        stop
+        ;;
+        reload)
+        reload
+        ;;
+        restart)
+        restart
+        ;;
+        condrestart)
+        if [ ! -z $PID ]; then
+                restart
+        else
+                stat_fail
+        fi
+        ;;
+        *)
+        echo "Usage: $0 {start|stop|restart|condrestart|reload}"
+        exit 1
+esac
+
+exit $RETVAL

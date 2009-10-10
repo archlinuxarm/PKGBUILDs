@@ -1,0 +1,114 @@
+# $Id: PKGBUILD 82 2009-07-17 19:56:55Z aaron $
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Maintainer: Edward Tjörnhammar <xhemi@cube2.se>
+# Contributor: Edward Tjörnhammar <xhemi@cube2.se>
+
+pkgname=inn
+pkgver=2.4.6
+pkgrel=3
+pkgdesc="Complete open source Usenet system. De facto standard for handling news routing, news spool and serving the spool to customers."
+url="http://www.isc.org/products/INN/"
+arch=('i686' 'x86_64')
+license=("INN")
+depends=('openssl' 'dovecot')
+optdepends=('perl' 'python')
+makedepends=('make' 'bison' 'gcc' 'smtp-forwarder')
+options=(emptydirs docs zipman)
+install=(inn.install)
+backup=(etc/inn/newsfeeds
+	etc/inn/incoming.conf
+	etc/inn/nnrpd.track
+	etc/inn/passwd.nntp
+	etc/inn/inn.conf
+	etc/inn/moderators
+	etc/inn/control.ctl
+	etc/inn/expire.ctl
+	etc/inn/nntpsend.ctl
+	etc/inn/innreport.conf
+	etc/inn/innwatch.ctl
+	etc/inn/distrib.pats
+	etc/inn/overview.fmt
+	etc/inn/actsync.cfg
+	etc/inn/actsync.ign
+	etc/inn/motd.news
+	etc/inn/storage.conf
+	etc/inn/cycbuff.conf
+	etc/inn/buffindexed.conf
+	etc/inn/innfeed.conf
+	etc/inn/news2mail.cf
+	etc/inn/readers.conf
+	etc/inn/radius.conf
+	etc/inn/ovdb.conf
+	etc/inn/sasl.conf
+	etc/inn/subscriptions
+	var/db/inn/active
+	var/db/inn/active.old
+	var/db/inn/active.times
+	var/db/inn/history
+	var/db/inn/history.dir
+	var/db/inn/history.hash
+	var/db/inn/history.index
+	var/db/inn/newsgroups)
+source=(http://ftp.isc.org/isc/inn/inn-$pkgver.tar.gz \
+	innd.rc \
+	nnrpd.rc \
+	innd.conf \
+	nnrpd.conf \
+	site.make.patch)
+md5sums=('50741ff1b9c230af9109aafc7e98b1a2'
+         'f9988770889d1a2843fa72de85d4c48b'
+         '58d3f9eaf7cf4e9c8f195fd435ae354b'
+         'fbf1d2c5b3c5a08ae3e515c71c2e2e4a'
+         'bb4bbe86ae52fbbf08b0f6f370dea052'
+         'e6d7b7a34f1d6ca5058206f4c5236061')
+
+build() {
+  cd $srcdir/inn-$pkgver
+
+  ./configure --prefix=/usr \
+	--includedir=/usr/include/inn \
+	--sbindir=/usr/sbin \
+	--with-libtool \
+	--with-gnu-id \
+	--with-db-dir=/var/db/inn \
+	--with-etc-dir=/etc/inn \
+	--with-spool-dir=/var/spool/news \
+	--with-log-dir=/var/log/inn \
+	--with-run-dir=/var/run/inn \
+	--with-tmp-dir=/var/spool/inn/tmp \
+	--enable-largefiles \
+	--with-openssl=/usr \
+	--with-perl \
+	--with-python \
+	--with-sasl=/usr || return 1
+
+  patch -p3 < $srcdir/site.make.patch
+  export LD_LIBRARY_PATH=.:$pkgdir/usr/lib:$LD_LIBRARY_PATH
+
+  make || return 1
+  make DESTDIR=$pkgdir install || return 1
+
+  mkdir -p $pkgdir/etc/{conf,rc}.d && \
+  install -m0755 $srcdir/innd.rc $pkgdir/etc/rc.d/innd && \
+  install -m0644 $srcdir/innd.conf $pkgdir/etc/conf.d/innd || return 1
+
+  install -m0755 $srcdir/nnrpd.rc $pkgdir/etc/rc.d/nnrpd && \
+  install -m0644 $srcdir/nnrpd.conf $pkgdir/etc/conf.d/nnrpd || return 1
+
+  cd $pkgdir/usr/lib
+  for i in lib*.a; do 
+	gcc -shared -o ${i%%.a}.so.2.0.0 $i || return 1
+	for j in 2.0 2; do
+	    ln -s ${i%%a}so.2.0.0 ${i%%a}so.$j || return 1
+	done
+  done
+
+  touch $pkgdir/var/db/inn/history{.dir,.hash,.index,} || return 1
+
+  mkdir -p $pkgdir/usr/share/doc/inn && \
+  mv $pkgdir/usr/man $pkgdir/usr/share/ && \
+  mv $pkgdir/usr/share/man/man3/list.3 $pkgdir/usr/share/man/man3/list-inn.3 && \
+  mv $pkgdir/usr/doc/* $pkgdir/usr/share/doc/inn/ && \
+  mv $pkgdir/usr/bin/archive $pkgdir/usr/bin/archive.inn && \
+  rm -rf $pkgdir/usr/doc
+}

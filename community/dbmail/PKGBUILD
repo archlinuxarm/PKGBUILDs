@@ -1,0 +1,69 @@
+# $Id: PKGBUILD 2555 2009-09-19 16:06:40Z ibiru $
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Sebastian Faltoni <sebastian.faltoni@gmail.com>
+
+pkgname=dbmail
+pkgver=2.2.11
+_pkgver=2.2.11
+pkgrel=5
+pkgdesc="Fast and scalable sql based mail services"
+arch=('i686' 'x86_64')
+# mhash libevent libzdb
+depends=('gmime')
+makedepends=('asciidoc' 'xmlto' 'docbook-xsl' 'docbook-xml' 'postgresql-libs>=8.4.1' \
+	     'sqlite3' 'libmysqlclient' 'libldap>=2.4.18' 'libsieve')
+optdepends=('postgresql-libs: for PostgreSQL storage backend' \
+	    'sqlite3: for SQLite storage backend' \
+	    'libmysqlclient: for MySQL storage backend' \
+	    'libldap: for LDAP authentication' \
+	    'libsieve: for dbmail-sieve')
+url="http://www.dbmail.org"
+license=('GPL')
+options=('!libtool' 'zipman')
+backup=(etc/conf.d/dbmail)
+source=(http://www.dbmail.org/download/2.2/$pkgname-${_pkgver}.tar.gz \
+	dbmail.conf.d \
+	dbmail.rc.d)
+md5sums=('d535587973d73b85469d92a35f52133b'
+         'e7f72bc360decdb2475266391ad12329'
+         '099225611da20ec194c092ac9befc33c')
+
+build() {
+  cd $startdir/src/$pkgname-${_pkgver}/
+
+# Uncoment this if you want pam authentication
+#  patch -p1 <$startdir/src/dbmail-2.2.10-pam-support.patch
+#  automake
+#  autoconf
+
+# Apply these patches if you want to use MySQL 5.1.*
+# See MySQL bug: http://bugs.mysql.com/bug.php?id=38745
+if false; then
+  patch -p0 dbmail-message.c <<EOF
+744c744
+< 		"FROM %smessageblks "
+---
+> 		"FROM %smessageblks use index(physmessage_id_index) "
+EOF
+  patch -p0 db.c <<EOF
+2139c2139
+< 		 "SELECT message_idnr FROM %smessages "
+---
+> 		 "SELECT message_idnr FROM %smessages use index(mailbox_idnr_index) "
+EOF
+fi
+
+  ./configure --prefix=/usr --with-mysql --with-pgsql --with-sqlite --with-ldap --with-sieve
+  make || return 1
+  make DESTDIR=$startdir/pkg install || return 1
+
+  (cd man && make && make install DESTDIR=$startdir/pkg) || return 1
+
+  mkdir $startdir/pkg/etc && \
+  install -Dm644 dbmail.conf ${startdir}/pkg/etc/dbmail.conf.sample && \
+  install -Dm644 ../${pkgname}.conf.d ${startdir}/pkg/etc/conf.d/${pkgname} && \
+  install -Dm755 ../${pkgname}.rc.d ${startdir}/pkg/etc/rc.d/${pkgname} && \
+  mkdir $pkgdir/usr/share/dbmail && \
+  cp -r sql/* $pkgdir/usr/share/dbmail/ && \
+  cp dbmail.schema $pkgdir/usr/share/dbmail/
+}

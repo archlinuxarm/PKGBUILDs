@@ -1,0 +1,64 @@
+# $Id: PKGBUILD 82 2009-07-17 19:56:55Z aaron $
+# Maintainer: Jaroslav Lichtblau <dragonlord@aur.archlinux.org>
+# Contributor: Jaroslav Lichtblau <dragonlord@aur.archlinux.org>
+# Contributor: Michal Krenek <mikos@sg1.cz>
+
+pkgname=boinc
+pkgver=6.4.5
+pkgrel=3
+pkgdesc="Berkeley Open Infrastructure for Network Computing."
+arch=('i686' 'x86_64')
+url="http://boinc.berkeley.edu/"
+license=('LGPL')
+depends=('curl' 'wxgtk')
+makedepends=('libxslt' 'pkgconfig' 'perl-xml-sax' 'subversion')
+install=$pkgname.install
+source=($pkgname.rc $pkgname.bash boincmgr.16x16.png boincmgr.32x32.png boincmgr.48x48.png)
+
+md5sums=('2fa7bcfaf4b03b118afe9e26b50f3a38'
+         '05ed267db973ef7cbaf1118bb20bf9ce'
+         '0ad75d8be65f28b4febbbc7404b8d8c5'
+         '1bd8a06000ce83c4e6d038de6cd5e31e'
+         '41ce8f82cb835d4f9533f3450fb19716')
+
+_svnroot="http://boinc.berkeley.edu/svn/tags"
+_svnmod="boinc_core_release_${pkgver//./_}"
+
+build() {
+  cd "${srcdir}"
+
+  msg "Connecting to boinc.berkeley.edu SVN server..."
+  svn co ${_svnroot}/${_svnmod} || (error "SVN checkout failed" && return 1)
+
+  msg "SVN checkout done or server timeout"
+  msg "Starting make..."
+
+#missing in 6.4.5 tag
+  cp "${srcdir}"/{boincmgr.16x16.png,boincmgr.32x32.png,boincmgr.48x48.png} \
+       "${srcdir}/$_svnmod/clientgui/res"
+
+  rm -r "${srcdir}/$_svnmod-build"
+  cp -r "${srcdir}/$_svnmod" "${srcdir}/$_svnmod-build"
+  cd "${srcdir}/$_svnmod-build"
+
+#configure
+  ./_autosetup
+  ./configure --prefix=/usr --disable-server --enable-static=no \
+              --disable-static-linkage --with-wxdir=/usr/lib \
+              --enable-unicode --with-x --with-wx-config=$(which wx-config) \
+              --enable-client --disable-static-client --with-ssl
+  sed -i 's|LDFLAGS = |LDFLAGS = -L../lib |g' */Makefile || return 1
+
+#build with one thread (j2 or higher does not work)
+  make -j1 || return 1
+  make DESTDIR="${pkgdir}" install || return 1
+
+#install rc-script
+  install -D -m755 "${srcdir}/$pkgname.rc" "${pkgdir}/etc/rc.d/$pkgname"
+
+#install bash-completion
+  install -D -m644 "${srcdir}/$pkgname.bash" "${pkgdir}/etc/bash_completion.d/$pkgname"
+
+#killing /etc/init.d directory
+  rm -rf "${pkgdir}/etc/init.d" || return 1
+}

@@ -1,0 +1,105 @@
+# Maintainer: Douglas Soares de Andrade <dsandrade@gmail.com>
+# Contributor: judd <jvinet@zeroflux.org>
+# Contributor: Mario A. Vazquez
+# Contributor: Jerzy Goca <juras256@epf.pl>
+
+pkgname=grub-gfx
+pkgver=0.97
+pkgrel=11
+pkgdesc="A GNU multiboot boot loader"
+arch=('i686' 'x86_64')
+license=('GPL')
+url="http://www.gnu.org/software/grub/"
+depends=('ncurses')
+makedepends=('automake>=1.10' 'autoconf>=2.61' 'patch')
+conflicts=('grub')
+provides=('grub')
+source=(ftp://alpha.gnu.org/gnu/grub/grub-$pkgver.tar.gz \
+        menu.lst install-grub grub-0.97-graphics.patch \
+        splash.xpm.gz grub-inode-size.patch \
+        040_all_grub-0.96-nxstack.patch \
+        05-grub-0.97-initrdaddr.diff ext4.patch \
+        i2o.patch special-devices.patch more-raid.patch intelmac.patch)
+backup=('boot/grub/menu.lst')
+install=grub-gfx.install
+
+build() {
+  cd $startdir/src/grub-$pkgver
+
+  #set destination architecture here
+  #DESTARCH="i686"
+  DESTARCH="x86_64"
+
+  # graphics patch
+  patch -p1 < ../grub-0.97-graphics.patch || return 1
+
+  # optimizations break the build -- disable them
+  # adding special devices to grub, patches are from fedora
+  patch -Np1 -i ../special-devices.patch || return 1
+  patch -Np1 -i ../i2o.patch || return 1
+  patch -Np1 -i ../more-raid.patch || return 1
+  patch -Np1 -i ../intelmac.patch || return 1
+  patch -Np1 -i ../grub-inode-size.patch || return 1
+  patch -Np1 -i ../ext4.patch || return 1
+
+  # correcting problems for new wersion of autotools
+  sed -i -e'/^AC_PROG_CC/ a\AM_PROG_CC_C_O\ ' configure.ac
+  sed -i -e'/^AC_PROG_CC/ a\AM_PROG_AS\ ' configure.ac
+  aclocal
+  autoconf
+  automake
+
+  #arch64 fixes for static build
+  if [ "$CARCH" = "x86_64" ]; then
+    echo "this package has to be build on i686, won't compile on x86_64"
+    sleep 5
+  else
+    if [ "$DESTARCH" = "x86_64" ]; then
+      # patch from gentoo for fixing a segfault
+      patch -Np1 -i ../040_all_grub-0.96-nxstack.patch || return 1
+      # patch from frugalware to make it boot when more than 2GB ram installed
+      patch -Np1 -i ../05-grub-0.97-initrdaddr.diff || return 1
+      CFLAGS="-static" ./configure --prefix=/usr --bindir=/bin --sbindir=/sbin
+    else
+      CFLAGS= ./configure --prefix=/usr --bindir=/bin --sbindir=/sbin
+    fi
+  fi
+
+  CFLAGS= make || return 1
+  make DESTDIR=$startdir/pkg install
+  install -D -m644 ../menu.lst $startdir/pkg/boot/grub/menu.lst
+  install -D -m755 ../install-grub $startdir/pkg/sbin/install-grub
+
+  # symlink for compatibility with the <=0.7 installer
+  mkdir -p $startdir/pkg/usr/share
+  ln -s ../lib/grub $startdir/pkg/usr/share/grub
+
+  # splashimage xpm install
+  install -D -m644 $startdir/splash.xpm.gz $startdir/pkg/boot/grub/splash.xpm.gz
+
+  # Create a symlink to people that was using it
+  pushd $startdir/pkg/boot/grub/
+  ln -s splash.xpm.gz arch.xpm.gz
+  popd
+
+  rm -f $pkgdir/usr/share/info/dir || return 1
+
+  if [ "$DESTARCH" = "x86_64" ]; then
+    # fool makepkg into building a x86_64 package
+    export CARCH="x86_64"
+  fi
+
+}
+md5sums=('cd3f3eb54446be6003156158d51f4884'
+         '58cfec4abda85307f779147ab9a6be48'
+         '3182c4ae4963a16930bc772bba89dacf'
+         '12f043616b51ce2ba82e46c9186a528d'
+         '342f59f24cf5de5f013eacda68e617eb'
+         'ada26cbc681907823cc4ff2a55b97866'
+         'eb9d69c46af3a0667c1f651817d7f075'
+         'ccd2d757e79e3a03dc19ede7391ed328'
+         '39e0f9a05b7e04aceb24fc7bc4893e3d'
+         '826fdbf446067f9861baf9f6a69a4583'
+         '49f6d4bcced0bc8bbcff273f3254bbfa'
+         'f41f702014a064918d7afc6fc23baa6e'
+         '175dc6b9f4ab94e8056c3afb3e34460a')

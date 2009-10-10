@@ -1,0 +1,372 @@
+/* ====================================================================
+ * Copyright (c) 1995 The Apache Group.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer. 
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. All advertising materials mentioning features or use of this
+ *    software must display the following acknowledgment:
+ *    "This product includes software developed by the Apache Group
+ *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ *
+ * 4. The names "Apache Server" and "Apache Group" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission.
+ *
+ * 5. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by the Apache Group
+ *    for use in the Apache HTTP server project (http://www.apache.org/)."
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE APACHE GROUP ``AS IS'' AND ANY
+ * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE APACHE GROUP OR
+ * IT'S CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
+ * OF THE POSSIBILITY OF SUCH DAMAGE.
+ * ====================================================================
+ *
+ * This software consists of voluntary contributions made by many
+ * individuals on behalf of the Apache Group and was originally based
+ * on public domain software written at the National Center for
+ * Supercomputing Applications, University of Illinois, Urbana-Champaign.
+ * For more information on the Apache Group and the Apache HTTP server
+ * project, please see <http://www.apache.org/>.
+ *
+ */
+
+/****************************************************************************
+ * Title       : Bandwidth management
+ * File        : mod_bandwidth.c
+ * Author      : Yann Stettler (stettler@cohprog.com)
+ * Date        : 12 January 2003
+ * Version     : 2.0.6 for Apache 1.3+
+ *
+ * Description :
+ *   Provide bandwidth usage limitation either on the whole server or
+ *   one a per connection basis based on the size of files, directory
+ *   location or remote domain/IP.
+ *
+ * Revision    : 08/04/97 - "-1" value for LargeFileLimit to disable any
+ *                          limits for that kind of files.
+ *               01/26/98 - Include in_domain() and in_ip() in this file and
+ *                          make them static so it will work with Apache 1.3x
+ *               03/29/98 - Change to set bandwidth in VirtualHost directive
+ *               07/17/99 - Minor changes to remove warnings at compil time
+ *                          
+ *                          Allow the use of the network/mask format when
+ *                          setting a bandwidth for a remote host/network.
+ *                          (Thanks to Sami Kuhmonen for the patch) 
+ *
+ *                          New directive BandWidthPulse
+ *
+ *               10/14/00 - Minor bug fixed
+ *               12/15/00 - Bug fix when using mmap
+ *               08/29/01 - Add a directive to change the data directory
+ *                          (Thanks to Awesome Walrus <walrus@amur.ru> )
+ *               01/12/03 - Add MaxConnection directive to limit the number
+ *                          of simultaneous connections.
+ *
+ ***************************************************************************
+ * Copyright (c)1997 Yann Stettler and CohProg SaRL. All rights reserved.
+ * Written for the Apache Group by :
+ *
+ * Yann Stettler
+ * stettler@cohprog.com
+ * http://www.cohprog.com/
+ * http://www.animanga.com/
+ *
+ * Based on the original default_handler module and on bw_module 0.2 from
+ * Etienne BERNARD (eb@via.ecp.fr) at VIA Centrale Reseaux, ECP, France
+ * 
+ * Many thanks to Colba Net Inc (Montreal) for their sponsoring of 
+ * improvements to this module.
+ *
+ ***************************************************************************/
+
+
+/*
+ * Instruction :
+ * -------------
+ *
+ * Note : this module was writen for Apache 1.3.x and tested on it
+ *
+ * Installation :
+ *
+ * 1) Insert the following line at the end of the "Configuration" file :
+ *    Module bandwidth_module      mod_bandwidth.o
+ *
+ * WARNING : This behaviour is not the same between the various main versions
+ *           of Apache. Please, read the instruction on our website for the
+ *           instructions concerning the latest release : 
+ *           http://www.cohprog.com/v3/bandwidth/doc-en.html
+ *
+ * 2) Run the "Configure" program and re-compile the server with "make".
+ *
+ * 3) Create the following directories with "rwx" permission to everybody :
+ *    (or rwx for the user under which Apache run : Usualy "nobody")
+ *    /tmp/apachebw
+ *    /tmp/apachebw/link
+ *    /tmp/apachebw/master
+ *
+ *  /==== by Awesome Walrus <walrus@amur.ru> =====================\
+ *    Or you may change this name by using BandWidthDataDir global
+ *    configuration directive. See below for details.
+ *  \==== by Awesome Walrus <walrus@amur.ru> =====================/
+ *
+ * Note that if any of those directories doesn't exist, or if they can't
+ * be accessed by the server, the module is totaly disabled except for
+ * logging an error message in the logfile.
+ *
+ * Be careful that on some systems the content of the /tmp directory
+ * is deleted at boot time or every so often by a cronjob. If that the
+ * case, either disable this feature or change the location of the
+ * directories used by the module in the sources bellow.
+ *
+ * Server configuration directive :
+ * --------------------------------
+ *
+ *  /==== by Awesome Walrus <walrus@amur.ru> =====================\
+ * -  BandWidthDataDir
+ *    Syntax  : BandWidthDataDir <directory>
+ *    Default : "/tmp/apachebw"
+ *    Context : server config
+ *
+ *    Sets the name of the directory used by mod_bandwidth to store
+ *    its internal temporary information.
+ *  \==== by Awesome Walrus <walrus@amur.ru> =====================/
+ *
+ * -  BandWidthModule 
+ *    Syntax  : BandWidthModule <On|Off>
+ *    Default : Off
+ *    Context : per server config
+ *
+ *    Enable or disable totaly the whole module. By default, the module is
+ *    disable so it is safe to compile it in the server anyway.
+ *
+ *    PLEASE, NOTE THAT IF YOU SET A BANDWIDTH LIMIT INSIDE A VIRTUALHOST
+ *    BLOCK, YOU ALSO __NEED__ TO PUT THE "BandWidthModule On" DIRECTIVE
+ *    INSIDE THAT VIRTUALHOST BLOCK !
+ *
+ *    IF YOU SET BANDWIDTH LIMITS INSIDE DIRECTORY BLOCKS (OUTSIDE OF
+ *    ANY VIRTUALHOST BLOCK), YOU ONLY NEED TO PUT THE "BandWidthModule On"
+ *    DIRECTIVE ONCE, OUTSIDE OF ANY VIRTUALHOST OR DIRECTORY BLOCK.
+ *
+ * -  BandWidthPulse
+ *    Syntax  : BandWidthPulse <microseconds>
+ *    Default :
+ *    Context : per server config
+ *
+ *    Change the algorithm used to calculate bandwidth and transmit data.
+ *    In normal mode (old mode), the module try to transmit data in packets
+ *    of 1KB. That mean that if the bandwidth available is of 512B, the
+ *    module will transmit 1KB, wait 2 seconds, transmit another 1KB and
+ *    so one.
+ *
+ *    Seting a value with "BandWidthPulse", will change the algorithm so
+ *    that the server will always wait the same amount of time between
+ *    sending packets but the size of the packets will change.
+ *    The value is in microseconds.
+ *    For example, if you set "BandWidthPulse 1000000" (1 sec) and the
+ *    bandwidth available is of 512B, the sever will transmit 512B,
+ *    wait 1 second, transmit 512B and so on.
+ *
+ *    The advantage is a smother flow of data. The disadvantage is
+ *    a bigger overhead of data transmited for packet header.
+ *    Setting too small a value (bellow 1/5 of a sec) is not realy
+ *    useful and will put more load on the system and generate more
+ *    traffic for packet header.
+ *
+ *    Note also that the operating system may do some buffering on
+ *    it's own and so defeat the purpose of setting small values.
+ *
+ *    This may be very useful on especialy crowded network connection :
+ *    In normal mode, several seconds may happen between the sending of
+ *    a full packet. This may lead to timeout or people may believe that
+ *    the connection is hanging. Seting a value of 1000000 (1 sec) would
+ *    guarantee that some data are sent every seconds...
+ *
+ * Directory / Server / Virtual Server configuration directive :
+ * -------------------------------------------------------------
+ *
+ * -  BandWidth
+ *    Syntax  : BandWidth <domain|ip|all> <rate>
+ *    Default : none
+ *    Context : per directory, .htaccess
+ *
+ *    Limit the bandwidth for files in this directory and
+ *    sub-directories based on the remote host <domain> or
+ *    <ip> address or for <all> remote hosts.
+ *
+ *    Ip addresses may now be specified in the network/mask format.
+ *    (Ie: 192.168.0.0/21 )
+ *
+ *    The <rate> is in Bytes/second.
+ *    A <rate> of "0" means no bandwidth limit.
+ *
+ *    Several BandWidth limits can be set for the same
+ *    directory to set different limits for different
+ *    hosts. In this case, the order of the "BandWidth"
+ *    keywords is important as the module will take the
+ *    first entry which matches the client address.
+ *
+ *    Example :
+ *       <Directory /home/www>
+ *       BandWidth ecp.fr 0
+ *       BandWidth 138.195 0
+ *       BandWidth all 1024
+ *       </Directory>
+ *
+ *      This will limit the bandwith for directory /home/www and 
+ *      all it's subdirectories to 1024Bytes/sec, except for 
+ *      *.ecp.fr or 138.195.*.* where no limit is set.
+ *
+ * -  LargeFileLimit
+ *    Syntax  : LargeFileLimit <filesize> <rate>
+ *    Default : none
+ *    Context : per directory, .htaccess
+ *
+ *    Set a maximal <rate> (in bytes/sec) to use when transfering
+ *    a file of <filesize> KBytes or more.
+ *
+ *    Several "LargeFileLimit" can be set for various files sizes
+ *    to create range. The rate used for a given file size will be
+ *    the one of the matching range.
+ *
+ *    A <rate> of "0" mean that there isn't any limit based on
+ *    the size.
+ *
+ *    A <rate> of "-1" mean that there isn't any limit for that type
+ *    of file. It's override even a BandWidth limit. I found this usefull
+ *    to give priority to very small files (html pages, very small pictures)
+ *    while seting limits for larger files... (users with their video files
+ *    can go to hell ! :)
+ *
+ *    Example :
+ *    If the following limits are set :
+ *       LargeFileLimit 200 3072
+ *       LargeFileLimit 1024 2048
+ *
+ *       That's mean that a file of less than 200KBytes won't be
+ *       limited based on his size. A file with a size between
+ *       200KBytes (included) and 1023Kbytes (included) will be
+ *       limited to 3072Bytes/sec and a file of 1024Kbytes or more
+ *       will be limited to 2048Bytes/sec.
+ *
+ * -  MinBandWidth
+ *    Syntax  : MinBandWidth <domain|ip|all> <rate>
+ *    Default : all 256
+ *    Context : per directory, .htaccess
+ *
+ *    Set a minimal bandwidth to use for transfering data. This
+ *    over-ride both BandWidth and LargeFileLimit rules as well
+ *    as the calculated rate based on the number of connections.
+ *
+ *    The first argument is used in the same way as the first
+ *    argument of BandWidth.
+ *
+ *    <rate> is in bytes per second.
+ *
+ *    A rate of "0" explicitly means to use the default minimal
+ *    value (256 Bytes/sec).
+ *
+ *    A rate of "-1" means that the minimal rate is equal to the
+ *    actual rate defined by BandWidth and LargeFileLimit.
+ *    In fact, that means that the final rate won't depend
+ *    of the number of connections but only on what was defined.
+ *
+ *    Example :
+ *    If BandWidth is set to "3072" (3KBytes/sec) and MinBandWidth
+ *    is set to "1024" (1KBytes/sec) that means :
+ *       - if there is one connection, the file will be transfered
+ *         at 3072 Bytes/sec.
+ *       - if there is two connections, each files will be transfered
+ *         at 1536 Bytes/sec. 
+ *       - if there is three or more connections, each files will be
+ *         transfered at 1024 Bytes/sec. (Minimal of 1024 Bytes/sec).
+ *
+ *    If MinBandWidth is set to "-1" that means :
+ *       - if there is one connection, the file will be transfered
+ *         at 3072 Bytes/sec.
+ *       - if there is two or more connections, each files will be
+ *         transfered at 3072 Bytes/sec. In effect, the rate doesn't
+ *         depend anymore on the number of connections but only on
+ *         the configuration values.
+ *
+ *    Note that the total transfer rate will never exceed your physical
+ *    bandwidth limitation.
+ *
+ * Note : If both a "BandWidth" and a "LargeFileLimit" limit apply,
+ *        the lowest one will be used. (But never lower than the
+ *        "MinBandWidth" rate)
+ *
+ *        If both a virtual server limit is defined and another
+ *        apply for a directory under this virtual server, the
+ *        directory limit will over-ride it.
+ *
+ *        If a limit is defined outside a Directory or VirtualHost
+ *        directive, it will act as default on a per virtual server
+ *        basis. (Ie: each virtual server will have that limit,
+ *        _independantly_ of the other servers)
+ *
+ * -  MaxConnection
+ *    Syntax  : MaxConnection <connections>
+ *    Default : 0 (illimited)
+ *    Context : per directory, .htaccess 
+ *
+ *    Restrict the number of maximum simultanous connections. If the
+ *    limit is reached, new connections will be rejected.
+ "
+ *    A value of 0 mean that there isn't any limits.
+ *
+ * Implementation notes :
+ * ----------------------
+ * 
+ * 1) This module isn't called when serving a cgi-script. In this
+ *    case, it's the functions in mod_cgi.c that handle the connection.
+ *
+ *    That's not a bug : I didn't want to change the cgi_module and
+ *    I was too lazy to do it anyway.
+ *
+ * 2) The rate of data transmission is only calculated. It isn't
+ *    measured. Which mean that this module calculates the final
+ *    rate that should apply for a file and simply divides this
+ *    number by the number of actual connections subject to the
+ *    same "per directory" directives.
+ * 
+ * 3) On the "+" side, the module regulate the speed taking
+ *    into account the actual time that was needed to send the
+ *    data. Which also mean that if data are read by the client
+ *    at a slowest rate than the limit, no time will be lost and
+ *    data will be sent as fast as the client can read them (but
+ *    no faster than the limited rate :) ...
+ *
+ * 4) Some kind of buffering is done as side effect. Data are
+ *    sent in packet of 1024 Bytes which seems a good value
+ *    for TCP/IP.
+ *    If another packet size is wanted, change the value of
+ *    "#define PACKET" in the codes bellow.
+ *
+ * 5) The default value for MinBandWidth is defined by :
+ *    "#define MIN_BW_DEFAULT" (in Bytes/sec)
+ *
+ * 6) Don't define "BWDEBUG" for a production server :
+ *    this would log a _lot_ of useless informations for
+ *    debuging purpose.
+ *
+ */

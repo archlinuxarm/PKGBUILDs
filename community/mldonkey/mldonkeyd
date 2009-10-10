@@ -1,0 +1,98 @@
+#!/bin/bash
+
+if [ "$(id -u)" != 0 ] ; then
+	echo "You must be root to start MLDonkey as daemon."
+	exit 2
+fi
+
+# general config
+USECOLOR="YES"
+. /etc/conf.d/mldonkey
+. /etc/rc.d/functions
+
+if [ -z ${MLDUSER} ] ; then
+	echo "Unable to run MLDonkey. You must set a user in /etc/conf.d/mldonkey ."
+	exit 2
+fi
+
+CONFDIR=$(getent passwd $MLDUSER | cut -d: -f6)/.mldonkey
+
+if [ -z ${PIDDIR} ] ; then
+    PIDDIR="/var/lock"
+fi
+
+PIDFILE=${PIDDIR}/mlnet.pid
+
+[ -f /tmp/mldonkey.log ] && rm -f /tmp/mldonkey.log
+
+case "$1" in
+    start)
+        stat_busy "Starting MLDonkey"
+	
+	[ ! -d ${CONFDIR} ] && su ${MLDUSER} -s /bin/sh -c "mkdir -p ${CONFDIR}"
+	if [ -d ${PIDDIR} ] ; then
+		mkdir -p ${PIDDIR}
+		chown ${MLDUSER} ${PIDDIR}
+	fi
+
+	if [ -f ${PIDFILE} ] ; then
+		stat_fail
+		echo "Unable to run MLDonkey, it seems to be already running. If you're sure MLDonkey \
+		is not running, you can remove ${PIDFILE}."
+		exit 2
+	else
+		rm -f ${CONFDIR}/*.tmp
+	fi
+	
+	su ${MLDUSER} -s /bin/sh -c "/usr/bin/mlnet -pid ${PIDDIR} ${PARAMS} -log_to_syslog true &> /tmp/mldonkey.log &"
+	
+	i=0
+	while [ "$i" -lt 20 ] ; do
+		if [ ! -z "$(grep "Core started" /tmp/mldonkey.log)" ] ; then
+			add_daemon mldonkey
+			stat_done
+			exit 0
+		elif [ ! -z "$(grep "This means another MLDonkey" /tmp/mldonkey.log)" ] ; then
+			stat_fail
+			exit 2
+		elif [ ! -z "$(grep "This is normally caused by another" /tmp/mldonkey.log)" ] ; then
+			stat_fail
+			exit 2
+		else
+			((i++))
+		fi
+	sleep 1
+	done
+	stat_fail
+        ;;
+
+    stop)
+        stat_busy "Stopping MLDonkey"
+	if [ -f ${PIDFILE} ] ; then
+		kill $( cat ${PIDFILE} ) &> /dev/null
+	else
+		stat_fail
+		echo "Unable to stop MLDonkey. It is not running."
+		exit 2
+	fi
+
+        if [ $? -gt 0 ]; then
+            stat_fail
+        else
+	    rm -f ${PIDFILE}
+            rm_daemon mldonkey
+            stat_done
+        fi
+        ;;
+
+    restart)
+        $0 stop
+	sleep 1
+        $0 start
+        ;;
+
+    *)
+        echo "usage: $0 {start|stop|restart}"
+	;;
+esac
+exit 0

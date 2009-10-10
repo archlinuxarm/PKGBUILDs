@@ -1,0 +1,342 @@
+diff -cr qpxtool-0.6.1/lib/qpxtransport/qpx_mmc.cpp qpxtool-0.6.1a/lib/qpxtransport/qpx_mmc.cpp
+*** qpxtool-0.6.1/lib/qpxtransport/qpx_mmc.cpp	2007-08-19 16:04:14.000000000 +0200
+--- qpxtool-0.6.1a/lib/qpxtransport/qpx_mmc.cpp	2009-08-02 04:28:55.000000000 +0200
+***************
+*** 32,41 ****
+  }
+  
+  drive_info::drive_info(const char* _device){
+! 	device=(char*)malloc(bufsz_dev);
+  	strcpy(device,_device);
+! 	rd_buf=(unsigned char*)malloc(bufsz_rd);
+! 	ATIP=(unsigned char*)malloc(bufsz_ATIP);
+  	if (!cmd.associate(device, NULL)) {
+  //		printf("** Can't open device: %16s\n",_device);
+  		err=1;
+--- 32,53 ----
+  }
+  
+  drive_info::drive_info(const char* _device){
+!         int i;
+!         memset(ven, 0, 9);
+! 	ven_ID=0;
+!         memset(dev, 0, 17);
+! 	dev_ID=0;
+!         memset(fw, 0, 5);
+!         memset(serial,0,17);
+!         memset(TLA,0, 5);
+! 
+!         //media initialisation
+!         memset(&media, 0, sizeof(media_info));
+! 
+! 	device=(char*) calloc(sizeof(char),bufsz_dev);
+  	strcpy(device,_device);
+! 	rd_buf=(unsigned char*)calloc (sizeof(unsigned char),bufsz_rd);
+! 	ATIP=(unsigned char*)calloc(sizeof(unsigned char), bufsz_ATIP);
+  	if (!cmd.associate(device, NULL)) {
+  //		printf("** Can't open device: %16s\n",_device);
+  		err=1;
+***************
+*** 59,66 ****
+  	plextor.varirec_str_dvd=0;
+  	plextor.powerec_state=0;
+  	plextor.plexeraser=0;
+- 	ven_ID=0;
+- 	dev_ID=0;
+  	iface_id=0;
+  	iface[0]=0;
+  	loader_id=0;
+--- 71,76 ----
+***************
+*** 74,86 ****
+  //	delete urd_buf;
+  	busy=1;
+  //	delete pthread_t;
+! 	delete rd_buf;
+! 	delete ATIP;
+! 	delete device;
+  }
+  
+  void drivecpy(drive_info* dst, drive_info* src){
+! 	dst->device=(char*)malloc(bufsz_dev);
+  //		printf("Can't copy device:(\n");
+  	memcpy(dst->device, src->device,bufsz_dev);
+  //		printf("Can't copy device:(\n");
+--- 84,96 ----
+  //	delete urd_buf;
+  	busy=1;
+  //	delete pthread_t;
+! 	free(rd_buf);
+! 	free(ATIP);
+! 	free(device);
+  }
+  
+  void drivecpy(drive_info* dst, drive_info* src){
+! 	dst->device=(char*)calloc(sizeof(char),bufsz_dev);
+  //		printf("Can't copy device:(\n");
+  	memcpy(dst->device, src->device,bufsz_dev);
+  //		printf("Can't copy device:(\n");
+***************
+*** 91,98 ****
+  //	}
+  	dst->mmc=src->mmc;
+  //	dst->memcpy(dst, src, 0xFF);
+! 	dst->rd_buf=(unsigned char*)malloc(bufsz_rd);
+! 	dst->ATIP=(unsigned char*)malloc(bufsz_ATIP);
+  	dst->ATIP_len = src->ATIP_len;
+  	dst->ven_ID=src->ven_ID;
+  	memcpy(dst->ven,src->ven,9);
+--- 101,108 ----
+  //	}
+  	dst->mmc=src->mmc;
+  //	dst->memcpy(dst, src, 0xFF);
+! 	dst->rd_buf=(unsigned char*)calloc(sizeof(unsigned char),bufsz_rd);
+! 	dst->ATIP=(unsigned char*)calloc(sizeof(unsigned char),bufsz_ATIP);
+  	dst->ATIP_len = src->ATIP_len;
+  	dst->ven_ID=src->ven_ID;
+  	memcpy(dst->ven,src->ven,9);
+***************
+*** 723,729 ****
+  }
+  
+  int inquiry(drive_info* drive) {
+! 	char	data[36];	
+  	if (drive->mmc == -1) return ERR_NO_DEV;
+  	drive->cmd_clear();
+  	drive->cmd[0] = SPC_INQUIRY;
+--- 733,744 ----
+  }
+  
+  int inquiry(drive_info* drive) {
+!         // cmd.transport with at least LITE-ON drives does not write to whole
+!         // `data' variable, thus, to avoid unitialised value usage we allocate
+!         // it with calloc
+! 	char *data;
+!         data = (char*)calloc(sizeof(char), 36);
+! 
+  	if (drive->mmc == -1) return ERR_NO_DEV;
+  	drive->cmd_clear();
+  	drive->cmd[0] = SPC_INQUIRY;
+***************
+*** 1473,1478 ****
+--- 1488,1495 ----
+  	char		header[40];
+  	union { unsigned char _e[4+40],_11[4+256]; } dvd;
+  	unsigned char	format; // 0x11 +, 0x0E -
++         memset(header, 0, 40);
++         memset(&dvd, 0, sizeof(dvd));
+  	if (drive->media.disc_type & DISC_DVDminus)
+  		format=0x0E;
+  	else
+diff -cr qpxtool-0.6.1/lib/qpxtransport/qpx_transport.cpp qpxtool-0.6.1a/lib/qpxtransport/qpx_transport.cpp
+*** qpxtool-0.6.1/lib/qpxtransport/qpx_transport.cpp	2007-08-19 16:04:14.000000000 +0200
+--- qpxtool-0.6.1a/lib/qpxtransport/qpx_transport.cpp	2009-08-02 00:44:25.000000000 +0200
+***************
+*** 14,19 ****
+--- 14,20 ----
+  int sense2str(int err, char* str);
+  
+  #if defined(__unix) || defined(__unix__)
++ #include <limits.h>
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <unistd.h>
+***************
+*** 210,215 ****
+--- 211,231 ----
+  #define KERNEL_BROKEN 0
+  	if (use_sg_io)
+  	{
++  		/* see linux-2.6.23/block/scsi_ioctl.c:36 */
++  		static const unsigned char scsi_command_size[8] =
++  		{
++  				6, 10, 10, 12,
++  				16, 12, 10, 10
++  		};
++  		char cmdsize, opcode;
++  
++  		opcode = cgc.cmd[0];
++  		/* see linux-2.6.23/include/scsi/scsi.h:25 */
++  		cmdsize = scsi_command_size[((opcode) >> 5) & 7];
++  		if ((sg_io.cmd_len > 0) && (sg_io.cmd_len < cmdsize)) {
++  			sg_io.cmd_len = cmdsize;
++  		}
++  
+  		sg_io.dxferp		= buf;
+  		sg_io.dxfer_len		= sz;
+  		sg_io.dxfer_direction	= use_sg_io[dir];
+diff -cr qpxtool-0.6.1/qpxtool-gui/QPxTool.cpp qpxtool-0.6.1a/qpxtool-gui/QPxTool.cpp
+*** qpxtool-0.6.1/qpxtool-gui/QPxTool.cpp	2007-08-19 16:04:14.000000000 +0200
+--- qpxtool-0.6.1a/qpxtool-gui/QPxTool.cpp	2009-08-02 03:55:33.000000000 +0200
+***************
+*** 4018,4054 ****
+  		delete Rez_20[i]; delete Rez_21[i];
+  		delete RezJ[i]; delete RezB[i];
+  	}
+! 	delete RezRD;
+! 	delete Rez_00; delete Rez_01;
+! 	delete Rez_10; delete Rez_11;
+! 	delete Rez_20; delete Rez_21;
+! 	delete RezJ; delete RezB;
+! 	for (i=0; i<hresft; i++) {
+  		delete RezFE[i]; delete RezTE[i];
+  	}
+! 	delete RezFE; delete RezTE;
+  	for (i=0; i<6; i++)
+  		for (j=0; j<hresta; j++) 
+  			{ delete RezTAP[i][j]; delete RezTAL[i][j]; }
+  // Destroying grid
+  	printf("**   Destroying grid...\n");
+  	for (i=0;i<(int)grids_RD;i++) delete GridRD[i];
+! 	delete GridRD;
+  	for (i=0;i<(int)grids_CX;i++) delete Grid0[i];
+! 	delete Grid0;
+  	for (i=0;i<(int)grids_JB;i++) delete GridJB[i];
+! 	delete GridJB;
+  	for (i=0;i<(int)grids_FT;i++) delete GridFT[i];
+! 	delete GridFT;
+  	for (i=0;i<(int)grids_TA;i++)
+  		{ delete GridTAP[i]; delete GridTAL[i]; }
+! 	delete GridTAP; delete GridTAL;
+  	for (i=0; i<3; i++) delete Limits[i];
+  //	delete drive->test_thread_id;
+  	delete drive;
+! 	delete Exx.BLER;
+! 	delete Exx.E11; delete Exx.E21; delete Exx.E31;
+! 	delete Exx.E12; delete Exx.E22; delete Exx.E32;
+  
+  #ifdef __DISP_TRK
+  	for (i=0; i<255; i++)
+--- 4018,4054 ----
+  		delete Rez_20[i]; delete Rez_21[i];
+  		delete RezJ[i]; delete RezB[i];
+  	}
+! 	free(RezRD);
+! 	free(Rez_00); free(Rez_01);
+! 	free(Rez_10); free(Rez_11);
+! 	free(Rez_20); free(Rez_21);
+! 	free(RezJ); free(RezB);
+!         for (i=0; i<hresft; i++) {
+  		delete RezFE[i]; delete RezTE[i];
+  	}
+! 	free(RezFE); free(RezTE);
+  	for (i=0; i<6; i++)
+  		for (j=0; j<hresta; j++) 
+  			{ delete RezTAP[i][j]; delete RezTAL[i][j]; }
+  // Destroying grid
+  	printf("**   Destroying grid...\n");
+  	for (i=0;i<(int)grids_RD;i++) delete GridRD[i];
+! 	free(GridRD);
+  	for (i=0;i<(int)grids_CX;i++) delete Grid0[i];
+! 	free(Grid0);
+  	for (i=0;i<(int)grids_JB;i++) delete GridJB[i];
+! 	free(GridJB);
+  	for (i=0;i<(int)grids_FT;i++) delete GridFT[i];
+! 	free(GridFT);
+  	for (i=0;i<(int)grids_TA;i++)
+  		{ delete GridTAP[i]; delete GridTAL[i]; }
+! 	free(GridTAP); free(GridTAL);
+  	for (i=0; i<3; i++) delete Limits[i];
+  //	delete drive->test_thread_id;
+  	delete drive;
+! 	free(Exx.BLER);
+! 	free(Exx.E11); free(Exx.E21); free(Exx.E31);
+! 	free(Exx.E12); free(Exx.E22); free(Exx.E32);
+  
+  #ifdef __DISP_TRK
+  	for (i=0; i<255; i++)
+diff -cr qpxtool-0.6.1/qpxtool-gui/include/test_threads.h qpxtool-0.6.1a/qpxtool-gui/include/test_threads.h
+*** qpxtool-0.6.1/qpxtool-gui/include/test_threads.h	2007-08-19 16:04:14.000000000 +0200
+--- qpxtool-0.6.1a/qpxtool-gui/include/test_threads.h	2009-08-02 04:23:16.000000000 +0200
+***************
+*** 35,40 ****
+--- 35,48 ----
+  // 			scan_tbl[i] = (scan_commands*)malloc(sizeof(scan_commands));
+  		init_check_table();
+  		printf(" OK\n");
++                 memset(arr_BLER, 0, 128);
++                 memset(arr_E11, 0, 128);
++                 memset(arr_E21, 0, 128);
++                 memset(arr_E31, 0, 128);
++                 memset(arr_E12, 0, 128);
++                 memset(arr_E22, 0, 128);
++                 memset(arr_E32, 0, 128);
++                 memset(&skip_flag, 0, sizeof(int));
+  	}
+  	~ScanThread(){
+  		if (drive) delete drive;
+diff -cr qpxtool-0.6.1/qpxtool-gui/qcheck/test_threads.cpp qpxtool-0.6.1a/qpxtool-gui/qcheck/test_threads.cpp
+*** qpxtool-0.6.1/qpxtool-gui/qcheck/test_threads.cpp	2007-08-19 16:04:14.000000000 +0200
+--- qpxtool-0.6.1a/qpxtool-gui/qcheck/test_threads.cpp	2009-08-02 03:57:45.000000000 +0200
+***************
+*** 494,506 ****
+  int ScanThread::scan_pie() {
+  	char* TEST="DVD PIE";
+  	post_signal(event_test_init,(void*)TEST);
+! struct timeval start, finish;
+  
+  	int scan_blk = 0;
+  	int blocks_failed = 0;
+  	int hscale = hscaleDVD*drive->media.layers;
+  
+  	block_data block;
+  	block.test=TEST_DVD_PIE;
+  	block.lba = 0;
+  	block.blocks = drive->media.capacity;
+--- 494,509 ----
+  int ScanThread::scan_pie() {
+  	char* TEST="DVD PIE";
+  	post_signal(event_test_init,(void*)TEST);
+!         struct timeval start, finish;
+!         memset(&start, 0, sizeof(struct timeval));
+!         memset(&finish, 0, sizeof(struct timeval));
+  
+  	int scan_blk = 0;
+  	int blocks_failed = 0;
+  	int hscale = hscaleDVD*drive->media.layers;
+  
+  	block_data block;
++         memset(&block, 0, sizeof(block_data));
+  	block.test=TEST_DVD_PIE;
+  	block.lba = 0;
+  	block.blocks = drive->media.capacity;
+***************
+*** 508,517 ****
+  	int	oldidx=0;
+  	int	intervals,i;
+  
+! 	int	block_min_pie = 0, block_max_pie = 0, block_pie, max_pie = 0, total_pie = 0, pie;
+! 	int	block_min_pif = 0, block_max_pif = 0, block_pif, max_pif = 0, total_pif = 0, pif;
+! 	int	block_min_poe = 0, block_max_poe = 0, block_poe, max_poe = 0, total_poe = 0, poe;
+! 	int	block_min_pof = 0, block_max_pof = 0, block_pof, max_pof = 0, total_pof = 0, pof;
+  	int	broken_pie = 0;
+  
+  	int	read_pif = 0;
+--- 511,520 ----
+  	int	oldidx=0;
+  	int	intervals,i;
+  
+! 	int	block_min_pie = 0, block_max_pie = 0, block_pie, max_pie = 0, total_pie = 0, pie = 0;
+! 	int	block_min_pif = 0, block_max_pif = 0, block_pif, max_pif = 0, total_pif = 0, pif = 0;
+! 	int	block_min_poe = 0, block_max_poe = 0, block_poe, max_poe = 0, total_poe = 0, poe = 0;
+! 	int	block_min_pof = 0, block_max_pof = 0, block_pof, max_pof = 0, total_pof = 0, pof = 0;
+  	int	broken_pie = 0;
+  
+  	int	read_pif = 0;
+***************
+*** 560,566 ****
+  	{
+  		block_pie = 0; block_pif = 0; block_poe = 0; block_pof = 0;
+  //		for (i=0;i<(hscale/(128));i++){
+! 		for (i=0; oldidx == block.idx;i++){
+  //			block.lba = block.idx*hscale+i*128;
+  			oldidx = block.idx;
+  			if (read_poe)
+--- 563,569 ----
+  	{
+  		block_pie = 0; block_pif = 0; block_poe = 0; block_pof = 0;
+  //		for (i=0;i<(hscale/(128));i++){
+! 		for (i=0; oldidx == block.idx && i<128;i++){ // this i>128 shouldn't be here, 'i' should never reach 128
+  //			block.lba = block.idx*hscale+i*128;
+  			oldidx = block.idx;
+  			if (read_poe)

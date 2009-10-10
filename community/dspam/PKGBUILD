@@ -1,0 +1,68 @@
+# $Id: PKGBUILD 3142 2009-09-28 09:38:13Z spupykin $
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: William Rea <sillywilly@gmail.com>
+
+pkgname=dspam
+pkgver=3.8.0
+pkgrel=5
+pkgdesc="A scalable, open-source statistical anti-spam filter"
+arch=('i686' 'x86_64')
+url="http://dspam.nuclearelephant.com/"
+options=('!libtool')
+backup=(etc/dspam/dspam.conf)
+license=("GPL")
+depends=(readline libcap ncurses zlib openssl)
+makedepends=('libmysqlclient' 'postgresql-libs' 'db' 'sqlite3')
+optdepends=('libmysqlclient: MySQL support'
+	    'postgresql-libs: PostgreSQL support'
+	    'db: BerkeleyDB support'
+	    'sqlite3: SQLite support')
+options=(zipman docs)
+#source=(http://dspam.nuclearelephant.com/sources/dspam-$pkgver.tar.gz \
+source=(http://ftp.eu.openbsd.org/pub/buildit/source-archive/dspam-$pkgver.tar.gz
+	dspam.logrotated
+	dspam)
+install=$pkgname.install
+md5sums=('056b8c8b3ad9415a52c01b22ff1e64cf'
+	 '2163ca41de383f09f4d754e2d35cb158'
+         'b7f4630c5e5d7c464072507cca5dbb27')
+
+build() {
+  OPTS="--enable-delivery-to-stdout --with-dspam-owner=dspam --with-dspam-group=dspam --enable-daemon --enable-virtual-users \
+	--with-mysql-includes=/usr/include/mysql --with-mysql-libraries=/usr/lib/mysql \
+	--with-storage-driver="mysql_drv,libdb4_drv,pgsql_drv,sqlite3_drv,hash_drv" --with-dspam-home=/var/lib/dspam \
+	--with-logdir=/var/log/dspam --enable-preferences-extension --enable-large-scale"
+
+  cd $srcdir/$pkgname-$pkgver
+  [ $NOEXTRACT -eq 1 ] || ./configure --prefix=/usr --sysconfdir=/etc/dspam --localstatedir=/var ${OPTS}
+  make || return 1
+  make DESTDIR=$pkgdir install || return 1
+
+  mkdir -p $pkgdir/srv/www/dspam && \
+  cp -a webui/* $pkgdir/srv/www/dspam/ && \
+  find $pkgdir/srv/www/dspam/ -type f -name 'Makefile*' -exec rm -f {} \; && \
+  find $pkgdir/srv/www/dspam/ -type f -name '*.in' -exec rm -f {} \; || return 1
+
+  install -d $pkgdir/var/run/dspam $pkgdir/etc/logrotate.d \
+	     $pkgdir/etc/rc.d $pkgdir/var/lib/dspam/{mysql,pgsql} && \
+  install -m644 ../dspam.logrotated $pkgdir/etc/logrotate.d && \
+  install -m755 ../dspam $pkgdir/etc/rc.d || return 1
+ 
+  sed -i 's|#ServerPID|ServerPID|' $pkgdir/etc/dspam/dspam.conf || return 1
+
+  sed -e 's:^#*\(ServerDomainSocketPath[\t ]\{1,\}\).*:\1\"/var/run/dspam/dspam.sock\":gI' \
+				-e 's:^#*\(ServerPID[\t ]\{1,\}\).*:\1/var/run/dspam/dspam.pid:gI' \
+				-i $pkgdir/etc/dspam/dspam.conf || return 1
+
+  sed -i 's|/var/lib/mysql/mysql.sock|/tmp/mysql.sock|' $pkgdir/etc/dspam/dspam.conf || return 1
+
+  cp -r src/tools.mysql_drv/*.sql $pkgdir/var/lib/dspam/mysql && \
+  cp -r src/tools.pgsql_drv/*.sql $pkgdir/var/lib/dspam/pgsql && \
+  mkdir -p $pkgdir/usr/share && \
+  mv $pkgdir/usr/man $pkgdir/usr/share/man || return 1
+
+  cd $pkgdir/usr/share/man/man3 && \
+  find -type l -exec ln -sf libdspam.3 {} \; || return 1
+
+  chmod 0755 $pkgdir/usr/bin/*
+}

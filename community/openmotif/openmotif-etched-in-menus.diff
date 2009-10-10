@@ -1,0 +1,222 @@
+---
+ lib/Xm/CascadeB.c  |   21 ++++++++++++++++++++-
+ lib/Xm/CascadeBG.c |   20 ++++++++++++++++++++
+ lib/Xm/ToggleB.c   |   44 ++++++++++++++++++++++++++++++++++----------
+ lib/Xm/ToggleBG.c  |   30 ++++++++++++++++++++++++++++++
+ lib/Xm/XmI.h       |    2 ++
+ 5 files changed, 106 insertions(+), 11 deletions(-)
+
+--- a/lib/Xm/CascadeB.c
++++ b/lib/Xm/CascadeB.c
+@@ -641,11 +641,30 @@ Redisplay(
+ 		((XmCascadeButtonWidget)cb)->label.normal_GC = 
+ 		    CB_BackgroundGC(cb);
+ 	    }
++#if FIX_1395
++	    /* 1395:
++	     By default (if not etched and not armed) window (widget) have
++	     background color that used to draw widget bg. When widget is
++	     etched, background selected correctly (as selected color),
++	     but label exposr method will use default background color
++	     to fill area bellow lable text. Result is ugly menus.
++	     We should replace colors before expose from label
++	     and change it back after repainting.
++	    */
++            Pixel tmpc = cb->core.background_pixel;
++            XSetWindowBackground(XtDisplay(cb), XtWindow(cb), select_pix);
++#endif
+ 
+ 	    _XmProcessLock();
+ 	    expose = xmLabelClassRec.core_class.expose;
+ 	    _XmProcessUnlock();
+-	    (*expose)(cb, event, region);
++	    (*expose)((Widget) cb, event, region);
++#if FIX_1395
++	    /*
++	     Set correct window background (label is repainted, role back)
++	    */
++	    XSetWindowBackground(XtDisplay(cb), XtWindow(cb), tmpc);
++#endif
+ 
+ 	    if (replaceGC)
+ 		((XmCascadeButtonWidget)cb)->label.normal_GC = tmpGC;
+--- a/lib/Xm/CascadeBG.c
++++ b/lib/Xm/CascadeBG.c
+@@ -1069,6 +1069,10 @@ Redisplay(
+ 	    Pixel	junk, select_pix;
+ 	    XmManagerWidget mw = (XmManagerWidget) XtParent(cb);
+ 	    Boolean replaceGC = False;
++#ifdef FIX_1395
++	    XGCValues values;
++	    GC tmp_bgc = NULL;
++#endif
+ 
+ 	    XmGetColors(XtScreen(mw), mw->core.colormap,
+ 		mw->core.background_pixel,
+@@ -1080,6 +1084,17 @@ Redisplay(
+ 		tmpGC = LabG_NormalGC(cb);
+ 		LabG_NormalGC(cb) = CBG_BackgroundGC(cb);
+ 	    }
++#ifdef FIX_1395
++	    /* Fetch the select_color GetGC() actually used. */
++	    XGetGCValues(XtDisplay(cb), LabG_BackgroundGC(cb), GCBackground, &values);
++	    if (values.background != select_pix)
++	    {
++			values.background = select_pix;
++			XChangeGC(XtDisplay((Widget)cb), LabG_BackgroundGC(cb), GCBackground, &values);
++		}
++	    tmp_bgc = LabG_BackgroundGC(cb);
++	    LabG_BackgroundGC(cb) = CBG_ArmGC(cb);
++#endif
+ 
+ 
+ 	    _XmProcessLock();
+@@ -1087,6 +1102,11 @@ Redisplay(
+ 	    _XmProcessUnlock();
+ 	    (* expose)((Widget)cb, event, region);
+ 
++#ifdef FIX_1395
++	    /* Restore default bg GC*/
++	    LabG_BackgroundGC(cb) = tmp_bgc;
++#endif
++
+ 	    if (replaceGC)
+ 		LabG_NormalGC(cb) = tmpGC;
+ 	}
+--- a/lib/Xm/ToggleB.c
++++ b/lib/Xm/ToggleB.c
+@@ -3579,11 +3579,24 @@ DrawToggleLabel(
+     }
+   
+   {
+-       XtExposeProc expose;
+-       _XmProcessLock();
+-       expose = xmLabelClassRec.core_class.expose;
+-       _XmProcessUnlock();
+-       (* expose) ((Widget) tb, NULL, NULL);
++
++	XtExposeProc expose;
++#if FIX_1395
++       Pixel tmpc = tb->core.background_pixel; /* Save bg color */
++
++       /* Changing label background color if button toggled */
++       if (tb->toggle.visual_set == XmSET && !Lab_IsMenupane(tb))
++        XSetWindowBackground(XtDisplay(tb), XtWindow(tb), tb->toggle.select_color);
++#endif
++        _XmProcessLock();
++        expose = xmLabelClassRec.core_class.expose;
++        _XmProcessUnlock();
++        (* expose) ((Widget) tb, NULL, NULL);
++#if FIX_1395
++	/* restore default bg color */
++	if (tb->toggle.visual_set == XmSET && !Lab_IsMenupane(tb) )
++	    XSetWindowBackground(XtDisplay(tb), XtWindow(tb), tmpc);
++#endif
+    }
+   
+   if (restore_gc)
+@@ -3615,6 +3628,7 @@ DrawEtchedInMenu(
+   GC tmp_gc = None;
+   XmDisplay dpy = (XmDisplay) XmGetXmDisplay(XtDisplay(tb));
+   Boolean etched_in = dpy->display.enable_etched_in_menu;
++  Pixel select_pix, tmpc;
+   
+   if (tb->primitive.top_shadow_color == tb->toggle.select_color ||
+       tb->primitive.bottom_shadow_color == tb->toggle.select_color)
+@@ -3635,7 +3649,7 @@ DrawEtchedInMenu(
+   
+   if (tb->toggle.Armed) 
+     {
+-	Pixel select_pix;
++	tmpc = tb->core.background_pixel;
+ 
+ 	XmGetColors(XtScreen(tb), tb->core.colormap,
+ 		    tb->core.background_pixel,
+@@ -3651,10 +3665,20 @@ DrawEtchedInMenu(
+ 
+   {
+        XtExposeProc expose;
+-       _XmProcessLock();
+-       expose = xmLabelClassRec.core_class.expose;
+-       _XmProcessUnlock();
+-       (* expose) ((Widget) tb, NULL, NULL);
++#if FIX_1395
++	if (tb->toggle.Armed)
++	{
++ 	    XSetWindowBackground(XtDisplay(tb), XtWindow(tb), select_pix);
++	}
++	else
++	{
++	    XSetWindowBackground(XtDisplay(tb), XtWindow(tb), tb->core.background_pixel);
++	}
++#endif
++	_XmProcessLock();
++	expose = xmLabelClassRec.core_class.expose;
++	_XmProcessUnlock();
++	(* expose) ((Widget) tb, NULL, NULL);
+    }
+   
+   if (restore_gc)
+--- a/lib/Xm/ToggleBG.c
++++ b/lib/Xm/ToggleBG.c
+@@ -4295,6 +4295,10 @@ DrawEtchedInMenu(
+   int fh = tb->rectangle.height - 2 * margin;
+   Boolean restore_gc = False;
+   GC tmp_gc = NULL;
++#ifdef FIX_1395
++  Boolean restore_bgc = False;
++  GC tmp_bgc = NULL;
++#endif
+   XmDisplay dpy = (XmDisplay) XmGetXmDisplay(XtDisplay((Widget) tb));
+   Boolean etched_in = dpy->display.enable_etched_in_menu;
+   
+@@ -4329,6 +4333,25 @@ DrawEtchedInMenu(
+ 	      LabG_NormalGC(tb) = TBG_BackgroundGC(tb);
+ 	      restore_gc = True;
+ 	  }
++
++#ifdef FIX_1395
++	  {
++	    XGCValues values;
++	    /* Fetch the select_color GetGC() actually used. */
++	    XGetGCValues(XtDisplay(tb), TBG_SelectGC(tb), GCBackground, &values);
++	    /* Before label expose call we should change bgc
++	     to correct color and then restore it.
++	    */
++	    if (values.background != select_pix)
++	    {
++		XChangeGC(XtDisplay((Widget)tb), TBG_SelectGC(tb),
++		  GCBackground, &values);
++		tmp_bgc = LabG_BackgroundGC(tb);
++		LabG_BackgroundGC(tb) = TBG_SelectGC(tb);
++		restore_bgc = True;
++	    }
++	 }
++#endif
+     }
+   
+   {
+@@ -4345,6 +4368,13 @@ DrawEtchedInMenu(
+       XSetClipMask(XtDisplay(tb), TBG_BackgroundGC(tb), None);
+       LabG_NormalGC(tb) = tmp_gc;
+     }
++
++#ifdef FIX_1395
++  if (restore_bgc)
++  {
++      LabG_BackgroundGC(tb) = tmp_bgc;
++  }
++#endif
+ }
+ 
+ /*
+--- a/lib/Xm/XmI.h
++++ b/lib/Xm/XmI.h
+@@ -284,5 +284,7 @@ extern void (*_XtProcessLock)();
+ extern Pixel _XmAssignInsensitiveColor(Widget w);
+ #endif
+ 
++#define FIX_1395 1
++
+ #endif /* _XmI_h */
+ /* DON'T ADD ANYTHING AFTER THIS #endif */

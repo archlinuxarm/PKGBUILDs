@@ -1,0 +1,93 @@
+# $Id: PKGBUILD 978 2009-08-10 15:23:56Z spupykin $
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Gergely Tamas <dice@mfa.kfki.hu>
+
+pkgname=xen
+pkgver=3.4.1
+
+_kxenver=3.4.0
+_kernver=2.6.18
+
+_newlibver=1.16.0
+_pciutilsver=2.2.9
+_lwipver=1.3.0
+_grubver=0.97
+_zlibver=1.2.3
+
+pkgrel=1
+pkgdesc="a Virtual Machine Monitor (VMM)"
+arch=(i686 x86_64)
+url="http://xen.org"
+license=("GPL")
+install=xen.install
+depends=('iproute' 'bridge-utils' 'python' 'sdl' 'zlib' 'e2fsprogs')
+makedepends=('dev86')
+source=(http://bits.xensource.com/oss-xen/release/$pkgver/xen-$pkgver.tar.gz \
+	http://bits.xensource.com/oss-xen/release/${_kxenver}/linux-${_kernver}-xen-${_kxenver}.tar.gz \
+	ftp://sources.redhat.com/pub/newlib/newlib-${_newlibver}.tar.gz \
+	http://www.kernel.org/pub/software/utils/pciutils/pciutils-${_pciutilsver}.tar.bz2 \
+	http://download.savannah.gnu.org/releases/lwip/lwip-${_lwipver}.tar.gz \
+	http://www.zlib.net/zlib-${_zlibver}.tar.gz \
+	http://alpha.gnu.org/gnu/grub/grub-${_grubver}.tar.gz \
+	xen0.kver xen0.preset xenU.kver xenU.preset xen-fallback.conf)
+noextract=(newlib-${_newlibver}.tar.gz
+	   pciutils-${_pciutilsver}.tar.bz2
+	   lwip-${_lwipver}.tar.gz
+	   zlib-${_zlibver}.tar.gz
+	   grub-${_grubver}.tar.gz)
+md5sums=('c3f8dbcf833140825b1e2f16b64655f3'
+         '7630b0c8607f976eea4d478920ee6662'
+         'bf8f1f9e3ca83d732c00a79a6ef29bc4'
+         'cec05e7785497c5e19da2f114b934ffd'
+         '36cc57650cffda9a0269493be2a169bb'
+         'debc62758716a169df9f62e6ab2bc634'
+         'cd3f3eb54446be6003156158d51f4884'
+         'f2318482f046bdaabdf3e8a79afac525'
+         'e90e33cbc1f0862f083c8b539988928f'
+         '54c464f588417675b0b8b17222658639'
+         'aaf5b9ec1b28654afaaea376bc0c5e12'
+         '36858bd6a0bca63d2aa901b2e42d4a05')
+
+build() {
+  cd $startdir/src/xen-$pkgver
+
+  cp -L $srcdir/newlib-${_newlibver}.tar.gz stubdom/ && \
+  cp -L $srcdir/pciutils-${_pciutilsver}.tar.bz2 stubdom/ && \
+  cp -L $srcdir/lwip-${_lwipver}.tar.gz stubdom/ && \
+  cp -L $srcdir/zlib-${_zlibver}.tar.gz stubdom/ && \
+  cp -L $srcdir/grub-${_grubver}.tar.gz stubdom/ || return 1
+
+  sed -i 's#WGET=wget -c#WGET=false#' stubdom/Makefile || return 1
+  sed -i 's#override##' tools/firmware/Rules.mk || return 1
+  sed -i 's#x86_32#x86_64#' tools/firmware/Rules.mk || return 1
+
+  touch $startdir/src/linux-${_kernver}-xen-${_kxenver}/.valid-src || return 1
+
+  msg "make dist"
+  [ $CARCH == "x86_64" ] && _arch="XEN_TARGET_ARCH=x86_64"
+  [ $CARCH == "i686" ]   && _arch="XEN_TARGET_ARCH=x86_32"
+  make CC=gcc LINUX_SRCDIR="$startdir/src/linux-${_kernver}-xen-${_kxenver}" KERNELS="linux-2.6-xen0 linux-2.6-xenU" ${_arch} || msg "FAILED"
+
+  msg "make install"
+  make CC=gcc LINUX_SRCDIR="$startdir/src/linux-${_kernver}-xen-${_kxenver}" KERNELS="linux-2.6-xen0 linux-2.6-xenU" ${_arch} DESTDIR=$startdir/pkg install || msg "FAILED"
+
+  msg "copy xen0"
+  install -m644 -D $startdir/src/xen0.preset $startdir/pkg/etc/mkinitcpio.d/xen0.preset || return 1
+  install -m644 -D $startdir/src/xen0.kver $startdir/pkg/etc/mkinitcpio.d/xen0.kver || return 1
+
+  msg "copy xenU"
+  install -m644 -D $startdir/src/xenU.preset $startdir/pkg/etc/mkinitcpio.d/xenU.preset || return 1
+  install -m644 -D $startdir/src/xenU.kver $startdir/pkg/etc/mkinitcpio.d/xenU.kver || return 1
+
+  msg "copy fallback config"
+  install -m644 -D $startdir/src/xen-fallback.conf $startdir/pkg/etc/mkinitcpio.d/xen-fallback.conf || return 1
+
+  msg "fix and cleanup"
+  ( cd $pkgdir/etc && mv init.d rc.d ) || return 1
+
+  rm -rf $pkgdir/usr/share/man/man1/qemu-img.1* \
+	$pkgdir/usr/share/man/man1/qemu.1* \
+	$pkgdir/home
+
+  [ -d $pkgdir/usr/lib64 ] && mv $pkgdir/usr/lib64 $pkgdir/usr/lib || true
+}
