@@ -1,64 +1,63 @@
-# Maintainer: Krzysztof "hiciu" Warzecha <kwarzecha7@gmail.com>
-
-#
-# Why checksums are missing? Or "bsdtar: Unrecognized archive format":
-# bsdtar can't handle this archive, I don't know why. You need to re-gzip it.
-# execute `gzip -d openssh-5.2p1.tar.gz; gzip openssh-5.2p1.tar` and everything should work.
-#
+# Maintainer: Aaron Griffin <aaron@archlinux.org>
+# Contributor: judd <jvinet@zeroflux.org>
 
 pkgname=openssh
-pkgver=5.2p1
-pkgrel=2
+pkgver=5.3p1
+pkgrel=1
+#_gsskexver=20080404
 pkgdesc='A Secure SHell server/client'
-arch=(arm)
+arch=('arm')
 license=('custom')
-groups=('base')
 url="http://www.openssh.org/portable.html"
 backup=('etc/ssh/ssh_config' 'etc/ssh/sshd_config' 'etc/pam.d/sshd')
-depends=('openssl>=0.9.8g' 'zlib' 'pam' 'tcp_wrappers' 'heimdal>=1.2-1')
+depends=('openssl>=0.9.8k' 'zlib' 'pam' 'tcp_wrappers' 'heimdal>=1.2.1')
 source=(ftp://ftp.openbsd.org/pub/OpenBSD/OpenSSH/portable/$pkgname-$pkgver.tar.gz
-        sshd sshd.confd sshd.pam)
+        sshd
+	sshd.confd
+	sshd.pam)
+md5sums=('fc4389fb090deb2a52a3b0da5cba4d80'
+	 'd9ee5e0a0d143689b3d6f11454a2a892'
+         'e2cea70ac13af7e63d40eb04415eacd5'
+	 '1c7c2ea8734ec7e3ca58d820634dc73a')
 
 build() {
-  cd $startdir/src/$pkgname-$pkgver
+  cd $srcdir/$pkgname-$pkgver
+  #patch -up0 < $srcdir/$pkgname-$pkgver-gsskex-$_gsskexver.patch
 
   #NOTE we disable-strip so that makepkg can decide whether to strip or not
   ./configure --prefix=/usr --libexecdir=/usr/lib/ssh \
     --sysconfdir=/etc/ssh --with-tcp-wrappers --with-privsep-user=nobody \
-    --with-md5-passwords --with-pam --with-mantype=man --mandir=/usr/man \
-    --with-xauth=/usr/bin/xauth --with-kerberos5=/usr --disable-strip
+    --with-md5-passwords --with-pam --with-mantype=man --mandir=/usr/share/man \
+    --with-xauth=/usr/bin/xauth --with-kerberos5=/usr --with-ssl-engine \
+    --disable-strip
   make || return 1
-  make DESTDIR=$startdir/pkg install
+  make DESTDIR=$pkgdir install
 
-  #What is this for? Is it needed?
-  mkdir -p $startdir/pkg/var/empty
+  install -Dm755 $srcdir/sshd $pkgdir/etc/rc.d/sshd
 
-  install -D -m755 $startdir/src/sshd $startdir/pkg/etc/rc.d/sshd
+  install -Dm644 LICENCE $pkgdir/usr/share/licenses/$pkgname/LICENCE
+  install -Dm644 $srcdir/sshd.pam $pkgdir/etc/pam.d/sshd
+  install -Dm644 $srcdir/sshd.confd $pkgdir/etc/conf.d/sshd
 
-  install -D -m644 LICENCE $startdir/pkg/usr/share/licenses/$pkgname/LICENCE
-  install -D -m644 $startdir/src/sshd.pam $startdir/pkg/etc/pam.d/sshd
-  install -D -m644 $startdir/src/sshd.confd $startdir/pkg/etc/conf.d/sshd
-
-  rm $startdir/pkg/usr/man/man1/slogin.1
-  ln -sf ssh.1.gz $startdir/pkg/usr/man/man1/slogin.1.gz
+  rm $pkgdir/usr/share/man/man1/slogin.1
+  ln -sf ssh.1.gz $pkgdir/usr/share/man/man1/slogin.1.gz
 
   #additional contrib scripts that we like
-  install -D -m755 contrib/findssl.sh $startdir/pkg/usr/bin/findssl.sh
-  install -D -m755 contrib/ssh-copy-id $startdir/pkg/usr/bin/ssh-copy-id
-  install -D -m644 contrib/ssh-copy-id.1  $startdir/pkg/usr/man/man1/ssh-copy-id.1
+  install -Dm755 contrib/findssl.sh $pkgdir/usr/bin/findssl.sh
+  install -Dm755 contrib/ssh-copy-id $pkgdir/usr/bin/ssh-copy-id
+  install -Dm644 contrib/ssh-copy-id.1  $pkgdir/usr/share/man/man1/ssh-copy-id.1
 
   # sshd_config
   sed -i \
     -e 's|^#ListenAddress 0.0.0.0|ListenAddress 0.0.0.0|g' \
     -e 's|^#UsePAM no|UsePAM yes|g' \
     -e 's|^#ChallengeResponseAuthentication yes|ChallengeResponseAuthentication no|g' \
-    $startdir/pkg/etc/ssh/sshd_config
-  echo "HashKnownHosts yes" >>  $startdir/pkg/etc/ssh/ssh_config
-  echo "StrictHostKeyChecking ask" >>  $startdir/pkg/etc/ssh/ssh_config
+    $pkgdir/etc/ssh/sshd_config
+  echo "HashKnownHosts yes" >>  $pkgdir/etc/ssh/ssh_config
+  echo "StrictHostKeyChecking ask" >>  $pkgdir/etc/ssh/ssh_config
 
   #ssh_config
   sed -i \
     -e 's|^# Host \*|Host *|g' \
-    $startdir/pkg/etc/ssh/ssh_config
-
+    $pkgdir/etc/ssh/ssh_config
 }
