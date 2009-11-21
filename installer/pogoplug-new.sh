@@ -1,8 +1,10 @@
 #!/bin/bash
-echo "Hello there!"
-# Make sure you ran
-# mount -o rw,remount /
-# before running this script
+
+# NOTE!!!! THIS DOESN'T WORK, DO NOT USE IT
+
+echo "Make sure you run"
+echo "mount -o rw,remount /"
+echo "before running this script"
 read enter
 cd /
 wget http://openpogo.com/pacman/installer/archplug.tar.gz
