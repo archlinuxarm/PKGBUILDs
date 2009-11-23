@@ -1,27 +1,28 @@
-# Maintainer: Douglas Soares de Andrade <douglas@archlinux.org>
+# Maintainer: Andrea Scarpino <andrea@archlinux.org>
+# Contributor: Douglas Soares de Andrade <douglas@archlinux.org>
 # Contributor: judd <jvinet@zeroflux.org>
 
-pkgname=mysql
-pkgver=5.1.38
-pkgrel=1
+pkgbase=mysql
+pkgname=('libmysqlclient' 'mysql-clients' 'mysql')
+pkgver=5.1.41
+pkgrel=3
 pkgdesc="A fast SQL database server"
 arch=('arm')
-backup=(etc/my.cnf etc/conf.d/mysqld)
-depends=("mysql-clients>=${pkgver}" 'tcp_wrappers' 'zlib' 'perl')
-makedepends=('libtool' 'patch')
-url=('http://www.mysql.com/')
-options=('!libtool')
-optdepends=('perl-dbi' 'perl-dbd-mysql')
 license=('GPL')
-source=(ftp://mirror.switch.ch/mirror/mysql/Downloads/MySQL-5.1/mysql-${pkgver}.tar.gz
-        mysql-no-clients.patch
-        mysql-fix-libs.patch
-        mysqld
-        my.cnf
-        mysqld.conf.d)
+url=('http://www.mysql.com/')
+makedepends=('tcp_wrappers' 'zlib' 'perl' 'openssl' 'libtool' 'patch')
+options=('!libtool')
+source=("http://ftp.gwdg.de/pub/misc/mysql/Downloads/MySQL-5.1/mysql-$pkgver.tar.gz"
+        'mysqld'
+        'my.cnf'
+        'mysqld.conf.d')
+md5sums=('b5d39e8789174753f3c782959729e68c'
+         '7e1c46ccbd91553cc11df7199fbfca32'
+         '26589ea08b78fc38dd174caeb93b810c'
+	 '4a9077fc95ec6db1d5420e0cdc74d31c')
 
 build() {
-  cd ${startdir}/src/${pkgname}-${pkgver}
+  cd ${srcdir}/${pkgbase}-${pkgver}
 
   # fix build with gcc 4.4
   # see http://bugs.archlinux.org/task/15242
@@ -29,41 +30,95 @@ build() {
   CFLAGS="-fPIC ${CFLAGS} -fno-strict-aliasing"
   CXXFLAGS="-fPIC ${CXXFLAGS} -fno-strict-aliasing"
 
-  patch -Np1 -i ${startdir}/src/mysql-no-clients.patch || return 1
-  patch -Np1 -i ${startdir}/src/mysql-fix-libs.patch || return 1
-
-  ./configure --prefix=/usr --libexecdir=/usr/sbin \
-  --localstatedir=/var --sysconfdir=/etc \
-  --without-debug --without-docs --without-readline \
-  --enable-local-infile --with-ssl \
-  --with-charset=latin1 --with-collation=latin1_general_ci \
-  --with-extra-charsets=complex --enable-thread-safe-client \
-  --with-libwrap \
-  --with-plugins=partition,ftexample,archive,blackhole,federated,heap,innobase,ndbcluster
-
-  pushd include || return
+  ./configure --prefix=/usr \
+    --libexecdir=/usr/sbin \
+    --localstatedir=/var \
+    --sysconfdir=/etc/mysql \
+    --without-docs \
+    --without-readline \
+    --with-ssl \
+    --with-libwrap \
+    --with-charset=utf8 \
+    --with-collation=utf8_general_ci \
+    --with-extra-charsets=complex \
+    --with-embedded-server \
+    --with-unix-socket-path=/var/run/mysqld/mysqld.sock \
+    --enable-local-infile \
+    --with-plugins=partition,ftexample,archive,blackhole,federated,heap,innobase,innodb_plugin,ndbcluster
   make || return 1
-  popd
-    
+}
+
+package_libmysqlclient(){
+  pkgdesc="MySQL client libraries"
+  depends=('openssl' 'zlib' 'gcc-libs' 'tcp_wrappers')
+  
+  cd ${srcdir}/${pkgbase}-${pkgver}
+  for dir in libmysql libmysql_r libmysqld; do
+    pushd ${dir} || return 1
+      make DESTDIR=${pkgdir} install
+    popd
+  done
+  
+  cd include
+  make DESTDIR=${pkgdir} install
+  # Copy missing includes
+  install -m644 *.h ${pkgdir}/usr/include/mysql
+
+  # mysql_config
+  cd ../scripts
+  make mysql_config
+  install -d ${pkgdir}/usr/bin
+  install -m755 mysql_config ${pkgdir}/usr/bin || return 1
+  
+  # create library symlinks in /usr/lib
+  ln -sf mysql/libmysqlclient.so.16 $pkgdir/usr/lib/libmysqlclient.so.16
+  ln -sf libmysqlclient.so.16 $pkgdir/usr/lib/libmysqlclient.so
+  ln -sf libmysqlclient.so.16 $pkgdir/usr/lib/libmysqlclient.so.1
+  ln -sf mysql/libmysqlclient_r.so.16  $pkgdir/usr/lib/libmysqlclient_r.so.16
+  ln -sf libmysqlclient_r.so.16 $pkgdir/usr/lib/libmysqlclient_r.so
+  ln -sf libmysqlclient_r.so.16 $pkgdir/usr/lib/libmysqlclient_r.so.1
+}
+
+package_mysql-clients(){
+  pkgdesc="MySQL client tools"
+  depends=("libmysqlclient>=${pkgver}")
+  
+  cd ${srcdir}/${pkgbase}-${pkgver}
   pushd libmysql
-  make link_sources get_password.lo || return
+    make link_sources get_password.lo || return
   popd
   
-  make || return 1
-  make DESTDIR=${startdir}/pkg install
+  cd client
+  make DESTDIR=${pkgdir} install
 
-  rm -rf $pkgdir/usr/{mysql-test,sql-bench,lib,include}
-  install -D -m644 ../my.cnf ${startdir}/pkg/etc/my.cnf
-  install -D -m755 ../mysqld ${startdir}/pkg/etc/rc.d/mysqld
-  install -D -m644 ../mysqld.conf.d ${startdir}/pkg/etc/conf.d/mysqld
-  rm -f ${startdir}/pkg/usr/bin/mysql_config
-
-  # Cleanup files provided by the other packages
-  rm -rf $pkgdir/usr/{include,lib}
+  # Removing libmysqlclient stuff
+  rm -rf $pkgdir/usr/lib/
+  # These will be provided by mysql
+  rm -f ${pkgdir}/usr/bin/{mysql_upgrade,mysqlbinlog,mysqltest}
 }
-md5sums=('8ee9bb80079bbd09499a28bc57d902e7'
-         '8dce7e2b9f1f6ed6eca8bd62144bad0a'
-         'd1921e85821a66196c24ef6e5346b572'
-         'c093cc7eef5934f56f8bc775b559904b'
-         '0ee035590ffc61d32de994f461fd2bd2'
-         '4a9077fc95ec6db1d5420e0cdc74d31c')
+
+package_mysql(){
+  backup=('etc/my.cnf' 'etc/mysql/my.cnf' 'etc/conf.d/mysqld')
+  install=mysql.install
+  depends=('mysql-clients')
+  optdepends=('perl-dbi' 'perl-dbd-mysql')
+
+  cd ${srcdir}/${pkgbase}-${pkgver}
+  pushd libmysql
+    make link_sources get_password.lo || return
+  popd
+  
+  make DESTDIR=${pkgdir} install
+
+  rm -rf ${pkgdir}/usr/{mysql-test,sql-bench,lib,include}
+  install -D -m644 ../my.cnf ${pkgdir}/etc/mysql/my.cnf
+  install -D -m755 ../mysqld ${pkgdir}/etc/rc.d/mysqld
+  install -D -m644 ../mysqld.conf.d ${pkgdir}/etc/conf.d/mysqld
+
+  # Cleanup files provided by the others packages
+  rm -f ${pkgdir}/usr/bin/{mysql,mysql_config,mysql_client_test_embedded,mysqladmin,mysqlcheck,mysqldump,mysqlimport,mysqlshow,mysqlslap,mysqltest_embedded}
+  rm -rf ${pkgdir}/usr/{include,lib}
+
+  # create directory for PID and sock files
+  install -d ${pkgdir}/var/run/mysqld
+}
