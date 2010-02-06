@@ -76,7 +76,7 @@ function notDownload () {
 ## Introduction
 
 function Intro () {
-	CAT <<INTRO
+	cat <<INTRO
 	
 << Welcome to the PlugApps for Pogoplug v1/v2/DockStar USB Installer. >>
 
