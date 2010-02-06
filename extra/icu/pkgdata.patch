@@ -1,0 +1,202 @@
+Index: source/tools/pkgdata/pkgdata.cpp
+===================================================================
+--- source.orig/tools/pkgdata/pkgdata.cpp	2009-06-26 14:57:38.000000000 -0400
++++ source/tools/pkgdata/pkgdata.cpp	2009-06-28 09:49:51.013264666 -0400
+@@ -77,6 +77,13 @@
+ #define CAN_WRITE_OBJ_CODE
+ #endif
+ 
++// Temporary fix until http://bugs.icu-project.org/trac/ticket/6969 is
++// resolved.
++#ifdef CAN_WRITE_OBJ_CODE
++# undef CAN_WRITE_OBJ_CODE
++# define BUILD_DATA_WITHOUT_ASSEMBLY
++#endif
++
+ /*
+  * When building the data library without assembly,
+  * some platforms use a single c code file for all of
+@@ -118,6 +125,7 @@
+ static void createFileNames(const char *version_major, const char *version, const char *libName, const UBool reverseExt);
+ 
+ static int32_t pkg_getOptionsFromICUConfig(UOption *option);
++static int runCommand(const char* command);
+ 
+ enum {
+     NAME,
+@@ -461,6 +469,17 @@
+     return result;
+ }
+ 
++static int runCommand(const char* command)
++{
++    printf("pkgdata: %s\n", command);
++    int result = system(command);
++    if (result != 0)
++    {
++	printf("-- return status = %d\n", result);
++    }
++    return result;
++}
++
+ #define LN_CMD "ln -s"
+ #define RM_CMD "rm -f"
+ 
+@@ -724,7 +743,7 @@
+             LN_CMD,
+             libFileNames[LIB_FILE_VERSION],
+             libFileNames[LIB_FILE_VERSION_MAJOR]);
+-    result = system(cmd);
++    result = runCommand(cmd);
+     if (result != 0) {
+         return result;
+     }
+@@ -737,7 +756,7 @@
+             libFileNames[LIB_FILE_VERSION],
+             libFileNames[LIB_FILE], pkgDataFlags[SO_EXT]);
+ 
+-     result = system(cmd);
++     result = runCommand(cmd);
+ 
+     return result;
+ }
+@@ -753,7 +772,7 @@
+             installDir, PKGDATA_FILE_SEP_STRING, libFileNames[LIB_FILE_VERSION]
+             );
+ 
+-    result = system(cmd);
++    result = runCommand(cmd);
+ 
+     if (result != 0) {
+         return result;
+@@ -795,7 +814,7 @@
+                         srcDir, PKGDATA_FILE_SEP_STRING, buffer,
+                         installDir, PKGDATA_FILE_SEP_STRING, buffer);
+ 
+-                result = system(cmd);
++                result = runCommand(cmd);
+                 if (result != 0) {
+                     fprintf(stderr, "Failed to install data file with command: %s\n", cmd);
+                     break;
+@@ -815,7 +834,7 @@
+     }
+ #else
+     sprintf(cmd, "%s %s %s %s", WIN_INSTALL_CMD, srcDir, installDir, WIN_INSTALL_CMD_FLAGS);
+-    result = system(cmd);
++    result = runCommand(cmd);
+     if (result != 0) {
+         fprintf(stderr, "Failed to install data file with command: %s\n", cmd);
+     }
+@@ -849,7 +868,17 @@
+                 targetDir,
+                 libFileNames[LIB_FILE_VERSION_TMP]);
+ 
+-        result = system(cmd);
++        result = runCommand(cmd);
++        if (result != 0) {
++            return result;
++        }
++
++        sprintf(cmd, "%s %s%s",
++                pkgDataFlags[RANLIB],
++                targetDir,
++                libFileNames[LIB_FILE_VERSION]);
++
++        result = runCommand(cmd);
+         if (result != 0) {
+             return result;
+         }
+@@ -860,7 +889,7 @@
+                 targetDir,
+                 libFileNames[LIB_FILE_VERSION_TMP]);
+ 
+-        result = system(cmd);
++        result = runCommand(cmd);
+         if (result != 0) {
+             return result;
+         }
+@@ -908,7 +937,21 @@
+                 pkgDataFlags[A_EXT],
+                 objectFile);
+ 
+-        result = system(cmd);
++        result = runCommand(cmd);
++        if (result == 0)
++        {
++#ifdef OS400
++            sprintf(cmd, "QSH CMD('%s %s%s.%s')",
++#else
++            sprintf(cmd, "%s %s%s.%s",
++#endif
++                pkgDataFlags[RANLIB],
++                targetDir,
++                libFileNames[LIB_FILE],
++                pkgDataFlags[A_EXT]);
++
++            result = runCommand(cmd);
++        }
+     } else /* if (mode == MODE_DLL) */ {
+ #ifdef U_CYGWIN
+         sprintf(cmd, "%s%s%s %s -o %s%s %s %s%s %s %s",
+@@ -935,7 +978,7 @@
+                 pkgDataFlags[BIR_FLAGS]);
+ 
+         /* Generate the library file. */
+-        result = system(cmd);
++        result = runCommand(cmd);
+     }
+ 
+     if (freeCmd) {
+@@ -961,7 +1004,7 @@
+             tempObjectFile,
+             gencFilePath);
+ 
+-    result = system(cmd);
++    result = runCommand(cmd);
+     if (result != 0) {
+         return result;
+     }
+@@ -1043,7 +1086,7 @@
+                         tempObjectFile,
+                         gencmnFile);
+             
+-            result = system(cmd);
++            result = runCommand(cmd);
+             if (result != 0) {
+                 break;
+             }
+@@ -1094,7 +1137,7 @@
+             sprintf(cmd, "cat %s >> %s", gencmnFile, icudtAll);
+ #endif
+             
+-            result = system(cmd);
++            result = runCommand(cmd);
+             if (result != 0) {
+                 break;
+             }
+@@ -1110,7 +1153,7 @@
+                     pkgDataFlags[LIBFLAGS],
+                     tempObjectFile,
+                     gencmnFile);
+-        result = system(cmd);
++        result = runCommand(cmd);
+         if (result != 0) {
+             break;
+         }
+@@ -1139,7 +1182,7 @@
+         tempObjectFile,
+         icudtAll);
+     
+-    result = system(cmd);
++    result = runCommand(cmd);
+     if (result == 0) {
+         sprintf(buffer, "%s %s",
+             buffer,
+@@ -1222,7 +1265,7 @@
+                 );
+     }
+ 
+-    return system(cmd);
++    return runCommand(cmd);
+ }
+ #endif
