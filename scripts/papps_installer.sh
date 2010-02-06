@@ -35,40 +35,40 @@ For Advanced Users Only...
 
 Press ENTER to continue...
 NAND
-read enter
+	read enter
 
 # Let's give one final warning
-WarningNand
+	WarningNand
 
 # Lets mount everything up & prepare
-cd /
-echo '---'; sleep 1 ; echo 'Mounting /dev/mtdblock3'
-mount -o rw,remount /
-mkdir -p /new_root
-umount /dev/mtdblock3
-mount /dev/mtdblock3 /new_root
+	cd /
+	echo '---'; sleep 1 ; echo 'Mounting /dev/mtdblock3'
+	mount -o rw,remount /
+	mkdir -p /new_root
+	umount /dev/mtdblock3
+	mount /dev/mtdblock3 /new_root
 
 # Clean everything out
-echo '---'; sleep 1; echo 'Cleaning /dev/mtdblock3'
-rm -rf /new_root/*
+	echo '---'; sleep 1; echo 'Cleaning /dev/mtdblock3'
+	rm -rf /new_root/*
 
 # Download the flash image & MD5 check
-echo '---'; sleep 1; echo 'Downloading/Checksumming Flash Image'
-Download
-echo '---'; sleep 1; echo 'Extracting Image'
-Extract
-echo '---'; sleep 1; echo 'Installing image'
-Install
-echo '---'; sleep 1; echo 'Modifying Boot Script (/etc/init.d/rcS)'
-ModifyrcS
-Reboot
+	echo '---'; sleep 1; echo 'Downloading/Checksumming Flash Image'
+	Download
+	echo '---'; sleep 1; echo 'Extracting Image'
+	Extract
+	echo '---'; sleep 1; echo 'Installing image'
+	Install
+	echo '---'; sleep 1; echo 'Modifying Boot Script (/etc/init.d/rcS)'
+	ModifyrcS
+	Reboot
 }
 
 ## USB Install
 function Usb () {
 	local FlashType=usb
 	
-		cat <<USB
+	cat <<USB
 
 Welcome to the USB installer (Preferred method of installation)...
 >>> Please start by removing all of your usb devices, and set aside one erasable disk
@@ -77,24 +77,24 @@ Press ENTER to continue...
 USB
 	
 # Lets give a final Warning
-WarningUsb
+	WarningUsb
 
 # Find the correct disk to format
-echo '---'; sleep 1 ; echo 'Listing Disks...'; echo ' ';
-ListDisk
+echo '---'; sleep 1 ; echo 'Listing Disks...'
+	ListDisk
 
 # Decide & format disk
-Format
+	Format
 
 # Lets mount everything up & prepare
-cd /
-echo '---'; sleep 1 ; echo "Mounting /dev/$d"
-mount -o rw,remount /
+	cd /
+	echo '---'; sleep 1 ; echo "Mounting /dev/$d"
+	mount -o rw,remount /
 
 # Shutdown hbmgr
-/etc/init.d/hbmgr.sh stop
-mkdir -p /new_root
-mount /dev/$d /new_root
+	killall hbwd
+	mkdir -p /new_root
+	mount /dev/$d /new_root
 
 # Clean everything out
 echo '---'; sleep 1; echo "Cleaning /dev/$d"
