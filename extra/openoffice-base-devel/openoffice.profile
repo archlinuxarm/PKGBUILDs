@@ -1,1 +1,0 @@
-export OOO_FORCE_DESKTOP=gnome
