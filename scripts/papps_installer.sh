@@ -16,10 +16,10 @@ function Intro () {
 	
 << Welcome to the PlugApps for Pogoplug v1/v2/DockStar USB Installer. >>
 
->> (Preferred) To install to usb (pogoplug v2) please use ./papps_installer --usb
->> (Advanced) To install to nand please use ./papps_installer --nand
+>> (Preferred) To install to a USB drive, use ./papps_installer --usb
+>> (Advanced) To install to NAND, use ./papps_installer --nand
 ---
-If you are lost, please ask for help, or risk bricking your plug.
+Also, read the guide thourougly before installing.
 INTRO
 }
 
@@ -53,7 +53,7 @@ NAND
 	rm -rf /new_root/*
 
 # Download the flash image & MD5 check
-	echo '---'; sleep 1; echo 'Downloading/Checksumming Flash Image'
+	echo '---'; sleep 1; echo 'Downloading/Verifying Flash Image'
 	Download
 	echo '---'; sleep 1; echo 'Extracting Image'
 	Extract
@@ -101,7 +101,7 @@ echo '---'; sleep 1; echo "Cleaning /dev/$d"
 rm -rf /new_root/*
 
 # Download the flash image & MD5 check
-echo '---'; sleep 1; echo 'Downloading/Checksumming Flash Image'
+echo '---'; sleep 1; echo 'Downloading/Verifying Flash Image'
 Download
 echo '---'; sleep 1; echo 'Extracting Image'
 Extract
@@ -114,27 +114,27 @@ Reboot
 
 function WarningNand () {
 	cat <<WNAND
-If you have important data in /opt (aka /dev/mtdblock3), please backup before running this utility.
+If you have important data in /opt (/dev/mtdblock3), please backup before installing.
 ...
-Are you sure you want to run a nand flash? [Y/n]
+Are you sure you want to install to NAND flash? [Y/n]
 WNAND
 
 function WarningUsb () {
 	cat <<WUSB
-If you have important data on your disk, please backup now. ALL DATA WILL BE ERASED!
+If you have important data on your USB drive, please back it up before installing. ALL DATA WILL BE ERASED!
 ...
-Are you sure you want to run a usb install? [Y/n]
+Are you sure you want to install to USB? [Y/n]
 WUSB
 
 read item
 	case "$item" in
 		y*|Y*) ;;
-		n|N) echo "Fine, don't continue!"; exit 1;;
-		*) echo "Fail, please answer Y/n"; exit 1;;
+		n|N) echo ""; exit 1;;
+		*) echo "Please answer Y/n"; exit 1;;
 	esac
 }
 
-# List availiable disks (just in case someone didn't read the directions & unplug)
+# List availiable disks
 function ListDisk () {
 	# List disks to format
 	/sbin/fdisk -l | grep 'Disk /dev/sd' | awk '{print NR " "$2 " " $3 " MB" }'
@@ -168,30 +168,30 @@ function Download () {
 	
 		## Make sure wget is present ##
 		if [[ -z "$(which wget)" ]]; then
-		 	echo "Something is horribly wrong & you're missing wget"
+		 	echo "Wget is missing, cannot continue."
 			## Add auto-fetch wget here (use curl or something)##
 		exit 1
 		fi
 	
 		if [[ "$FlashType" == "nand" ]]; then
 			wget -c http://plugapps.com/os/pogoplug/plugbox-pogoplug.tar.gz
-			wget -c http://plugapps.com/os/pogoplug/plugbox-pogoplug.tar.gz.MD5
+			wget -c http://plugapps.com/os/pogoplug/plugbox-pogoplug.tar.gz.md5
 				if [[ ! -f plugbox-pogoplug.tar.gz ]]; then
-					echo "Unable to download flash image:("
+					echo "Unable to download flash image."
 					exit 1
 				fi
 		elif [[ "$FlashType" == "usb" ]]; then
 			wget -c http://plugapps.com/os/pogoplug/plugbox-pogoplug.tar.gz
-			wget -c http://plugapps.com/os/pogoplug/plugbox-pogoplug.tar.gz.MD5
+			wget -c http://plugapps.com/os/pogoplug/plugbox-pogoplug.tar.gz.md5
 				if [[ ! -f plugbox-pogoplug.tar.gz ]]; then
-					echo "Unable to download flash image :("
+					echo "Unable to download flash image."
 					exit 1
 				fi
 		else
-			echo "For some reason you didn't get any of the files :("
+			echo "For some reason you didn't get any of the files."
 		fi
 	fi
-	MD5 plugbox-pogoplug.tar.gz plugbox-pogoplug.tar.gz.MD5
+	MD5 plugbox-pogoplug.tar.gz plugbox-pogoplug.tar.gz.md5
 }
 
 # MD5 hash check
@@ -209,7 +209,7 @@ function Extract () {
 
 # Install the extracted tar
 function Install () {
-	touch /plugapps
+	touch /new_root/plugapps
 	if [ -f /root/.bash_profile ]; then
 		rm /root/.bash_profile
 	fi
@@ -239,14 +239,14 @@ MODRCS
 # Reboot (Hopefully everything went smoothly)
 function Reboot () {
 	cat <<REBOOT
-Congrats, you've just flashed your device!
+PlugApps installation is complete!
 You now need to reboot so that the changes can take effect.
-You will need to remove your previous ssh keys (on client) otherwise you won't be able to login.
+You will need to remove your previous ssh keys (on your connected computer) otherwise you won't be able to login.
 	rm ~/.ssh/known_hosts
 	
 Log back in with:
-	User: root
-	Pass: ceadmin
+	Username: root
+	Password: ceadmin
 
 If everything completed successfully you will be greeted with 'root@PlugApps' upon reboot.
 
