@@ -1,1 +1,0 @@
-GNUNETD_USER=nobody

@@ -1,1 +1,0 @@
-export CRAFTY_BOOK_PATH="/usr/share/crafty"

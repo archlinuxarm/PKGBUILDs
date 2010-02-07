@@ -1,1 +1,0 @@
-SPAMD_OPTS="-c"
