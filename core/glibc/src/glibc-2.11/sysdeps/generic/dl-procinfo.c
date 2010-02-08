@@ -1,1 +1,0 @@
-/* No architecture specific definitions.  */
