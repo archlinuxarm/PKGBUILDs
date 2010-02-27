@@ -42,9 +42,8 @@ HISTCONTROL="erasedups"
 
 INPUTRC="/etc/inputrc"
 LESS="-R"
-LC_COLLATE="C"
 
-export HISTSIZE HISTCONTROL INPUTRC LESS LC_COLLATE
+export HISTSIZE HISTCONTROL INPUTRC LESS
 
 # Load profiles from /etc/profile.d
 if test -d /etc/profile.d/; then
