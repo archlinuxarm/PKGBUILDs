@@ -1,0 +1,167 @@
+#!/bin/sh
+#
+# Cloud Engines HBPlug for my.pogoplug.com
+#
+# Modified for Plugbox Linux
+#
+
+INSTDIR=/usr/local/cloudengines
+MODULES=/lib/modules/#FIXME#
+RETVAL=0
+
+start()
+{
+    cd $INSTDIR
+
+    echo -n "Loading fs modules:          "
+    if [ -f $INSTDIR/bin/vfat.ko ]; then
+        insmod $INSTDIR/bin/fat.ko
+        insmod $INSTDIR/bin/vfat.ko
+        insmod $INSTDIR/bin/hfs.ko
+        insmod $INSTDIR/bin/hfsplus.ko
+        insmod $INSTDIR/bin/fuse.ko
+    else
+        modprobe vfat
+    fi
+    if [ $? ]; then
+        echo "Success"
+    else
+        echo "Failure"
+    fi
+
+    if [ -f $INSTDIR/bin/ufsd.ko ]; then
+        insmod $INSTDIR/bin/ufsd.ko
+    fi
+    if [ -f $INSTDIR/bin/qfsd.ko ]; then
+        insmod $INSTDIR/bin/qfsd.ko
+    fi
+
+    echo -n "Loading tun.ko..."
+        modprobe tun
+
+    echo -n "Loading xce.ko:              "
+    if [ -f $INSTDIR/bin/xce.ko ]; then
+        insmod $INSTDIR/bin/xce.ko
+    else
+        modprobe xce
+    fi
+    if [ $? ]; then
+        echo "Success"
+        if [ ! -e /dev/xce ]; then 
+            mknod /dev/xce c 10 241
+        fi
+    else
+        echo "Failure"
+    fi
+
+    # Make sure watchdog is off...
+    echo "wdog=off" > /dev/xce
+
+#     if [ -f $INSTDIR/bin/mv_eth_tool ]; then
+#         $INSTDIR/bin/mv_eth_tool -skb 1
+#     fi
+    echo -n "Starting hbplug:             "
+    ulimit -n 65536
+    ulimit -c unlimited
+    nohup $INSTDIR/bin/hbwd $INSTDIR/bin/hbplug > /dev/null 2>&1 &
+    echo "Success"
+
+    return $RETVAL
+}
+
+stop() {
+    echo -n "Shutting down hbplug:        "
+    if pidof hbwd > /dev/null; then
+        killall hbwd > /dev/null 2>&1
+        retries=120
+        while pidof hbwd > /dev/null && [ $retries -gt 0 ]; do
+            sleep 1;
+            let retries--
+        done
+        if [ $retries -eq 0 ]; then
+            echo "Failure"
+        else
+            echo "Success"
+        fi
+        killall -9 ffmpeg
+    else
+        echo "Not Running"
+    fi
+
+    echo -n "Unloading fs modules:        "
+    if [ -f $INSTDIR/bin/vfat.ko ]; then
+        rmmod $INSTDIR/bin/fuse.ko
+        rmmod $INSTDIR/bin/hfsplus.ko
+        rmmod $INSTDIR/bin/hfs.ko
+        rmmod $INSTDIR/bin/vfat.ko
+        rmmod $INSTDIR/bin/fat.ko
+    else
+        modprobe -r vfat
+    fi
+    if [ $? ]; then
+        echo "Success"
+    else
+        echo "Failure"
+    fi
+
+    if [ -f $INSTDIR/bin/qfsd.ko ]; then
+        rmmod $INSTDIR/bin/qfsd.ko
+    fi
+    if [ -f $INSTDIR/bin/ufsd.ko ]; then
+        rmmod $INSTDIR/bin/ufsd.ko
+    fi
+
+    echo -n "Unloading tun.ko:            "
+    if [ -f $INSTDIR/bin/tun.ko ]; then
+        if rmmod tun > /dev/null 2>&1; then
+            echo "Success"
+        else
+            echo "Failure"
+        fi
+    else
+        modprobe -r tun
+        echo "Success"
+    fi
+
+    # Make sure watchdog is off...
+    echo "wdog=off" > /dev/xce
+
+    echo -n "Unloading xce.ko:            "
+    if [ -f $INSTDIR/bin/xce.ko ]; then
+        if rmmod xce > /dev/null 2>&1; then
+            echo "Success"
+        else
+            echo "Failure"
+        fi
+    else
+        modprobe -r xce
+        echo "Success"
+    fi
+
+    return $RETVAL
+}
+
+restart() {
+    stop
+    start
+}
+
+#
+# Usage statement.
+#
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    *)
+        echo "usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
