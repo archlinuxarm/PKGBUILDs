@@ -2,43 +2,27 @@
 # initscripts functions
 #
 
-# width:
-
 STAT_COL=80
-if [ -t 1 ]; then
-  # stty will fail when stdin isn't a terminal (but we're in this block, so stdout is)
-  if [ -t 0 ]; then
-    STAT_COL="$(/bin/stty size)"
-    # stty gives "rows cols"; strip the rows number, we just want columns
-    STAT_COL="${STAT_COL##* }"
-  else
-    # tput will fail at boot time if /usr/share/terminfo isn't yet mounted
-    # or TERM is otherwise unrecognized
-    STAT_COL="$(/bin/tput cols 2>/dev/null)"
-  fi
-  if [ "0$STAT_COL" -eq 0 ]; then
-    # if output was 0 (serial console), set default width to 80
-    USECOLOR=""
-    STAT_COL=80
-  fi
-else
+if [ ! -t 1 ]; then
   USECOLOR=""
+
+elif [ -t 0 ]; then
+  STAT_COL="$(/bin/stty size)"
+  STAT_COL="${STAT_COL##* }"
+
+else
+  /bin/tput cols &>/dev/null
+  if [ $? -eq 0 ]; then
+    STAT_COL=$(/bin/tput cols)
+  fi
+fi
+if [ "0$STAT_COL" -eq 0 ]; then
   STAT_COL=80
+  USECOLOR=""
 fi
 
-if [ -t 1 ]; then
-  STAT_COL=$(/bin/stty size)
-  # strip the rows number, we just want columns
-  STAT_COL=${STAT_COL##* }
-  if [ "$STAT_COL" = "0" ]; then
-    # if output was 0 (serial console), set default width to 80
-    STAT_COL=80
-  fi
-fi
-# we use 13 characters for our own stuff
 STAT_COL=$(($STAT_COL - 13))
 
-# disable colors on broken terminals
 TERM_COLORS="$(/bin/tput colors 2>/dev/null)"
 if [ $? = 3 ]; then
 	TERM_COLORS=8
@@ -56,10 +40,8 @@ else
 fi
 unset TERM_COLORS
 
-# clear the TZ envvar, so daemons always respect /etc/localtime
 unset TZ
 
-# colors:
 if [ "$USECOLOR" = "YES" -o "$USECOLOR" = "yes" ]; then
 	C_MAIN="\033[1;37;40m"      # main text
 	C_OTHER="\033[1;34;40m"     # prefix & brackets
@@ -86,12 +68,8 @@ else
 	DEL_TEXT=""
 fi
 
-# prefixes:
-
 PREFIX_REG="::"
 PREFIX_HL=" >"
-
-# functions:
 
 deltext() {
 	printf "${DEL_TEXT}"
@@ -154,10 +132,6 @@ status() {
 	fi
 }
 
-#  usage : in_array( $needle, $haystack )
-# return : 0 - found
-#          1 - not found
-# Copied from makepkg
 in_array() {
   local needle=$1; shift
   [ -z "$1" ] && return 1 # Not Found
@@ -171,8 +145,6 @@ in_array() {
   done
   return 1 # Not Found
 }
-
-# daemons:
 
 add_daemon() {
 	[ -d /var/run/daemons ] || /bin/mkdir -p /var/run/daemons
@@ -209,7 +181,6 @@ stop_daemon() {
 	/etc/rc.d/$1 stop
 }
 
-# Status functions
 status_started() {
   deltext
   echo -ne "$C_OTHER[${C_STRT}STARTED$C_OTHER]$C_CLEAR "
@@ -229,8 +200,22 @@ ck_status() {
   fi		
 }
 
+declare -A hook_funcs
 
-#Source additional functions at the end to allow overrides
+add_hook() {
+	[ -z "$1" -o -z "$2" ] && return 1
+	hook_funcs["$1"]="${hook_funcs["$1"]} $2"
+}
+
+run_hook() {
+	local func
+
+	[ -z "$1" ] && return 1
+	for func in ${hook_funcs["$1"]}; do
+		${func}
+	done
+}
+
 for f in /etc/rc.d/functions.d/*; do
   if [ -e $f ]; then
     . $f
@@ -238,4 +223,3 @@ for f in /etc/rc.d/functions.d/*; do
 done
 
 # End of file
-

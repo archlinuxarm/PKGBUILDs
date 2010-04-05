@@ -6,6 +6,8 @@
 . /etc/rc.conf
 . /etc/rc.d/functions
 
+run_hook single_start
+
 if [ "$PREVLEVEL" = "3" -o "$PREVLEVEL" = "5" ]; then
 	# Find daemons NOT in the DAEMONS array. Shut these down first
 	if [ -d /var/run/daemons ]; then
@@ -26,28 +28,44 @@ if [ "$PREVLEVEL" = "3" -o "$PREVLEVEL" = "5" ]; then
 fi
 
 if [ "$PREVLEVEL" != "N" ]; then
+	run_hook single_prekillall
+
+	# Terminate all processes
 	stat_busy "Sending SIGTERM To Processes"
 	/sbin/killall5 -15 &> /dev/null
 	/bin/sleep 5
 	stat_done
 
 	stat_busy "Sending SIGKILL To Processes"
-	/sbin/killall5 -9
+	/sbin/killall5 -9 &> /dev/null
 	/bin/sleep 1
 	stat_done
 
-	if [ -x /sbin/udevadm ]; then
-		stat_busy "Starting UDev Daemon"
-		/sbin/udevd --daemon
-		stat_done
-		stat_busy "Loading UDev uevents"
-		/sbin/udevadm trigger
-		/sbin/udevadm settle
-		stat_done
-	else
-		# Static /dev, our last resort
-		status "Using static /dev filesystem" /bin/true
+	run_hook single_postkillall
+
+	stat_busy "Starting UDev Daemon"
+	/sbin/udevd --daemon
+	stat_done
+
+	run_hook single_udevlaunched
+
+	# Trigger udev uevents
+	if /bin/pidof -o %PPID /sbin/udevd >/dev/null; then
+	  stat_busy "Triggering UDev uevents"
+	  /sbin/udevadm control --property=STARTUP=1
+	  /sbin/udevadm trigger
+	  stat_done
 	fi
+
+	# Wait for udev uevents
+	if /bin/pidof -o %PPID /sbin/udevd >/dev/null; then
+		stat_busy "Waiting for UDev uevents to be processed"
+		/sbin/udevadm settle
+		/sbin/udevadm control --property=STARTUP=
+		stat_done
+	fi
+
+	run_hook single_udevsettled
 
 	# try syslog-NG first, then fall back to good ol' syslogd
 	if [ -x /etc/rc.d/syslog-ng ]; then
@@ -57,6 +75,8 @@ if [ "$PREVLEVEL" != "N" ]; then
 		[ -x /etc/rc.d/klogd ] && /etc/rc.d/klogd start
 	fi
 fi
+
+run_hook single_end
 
 if [ "$RUNLEVEL" = "1" ]; then
 	printsep
