@@ -12,8 +12,10 @@ printhl "${C_H2}http://www.plugapps.com"
 printhl "Copyright 2009-2010 Mike Staszel"
 printsep
 
+run_hook sysinit_start
+
 # mount /proc, /sys and our RAM /dev
-/bin/mount -n -t tmpfs none /dev -o mode=0755
+/bin/mount -n -t tmpfs udev /dev -o mode=0755,size=10M,nosuid
 /bin/mount -n -t proc none /proc
 /bin/mount -n -t sysfs none /sys
 
@@ -31,15 +33,6 @@ else
 	/bin/dmesg -n 3
 fi
 
-# enable rtc access
-/sbin/modprobe rtc-cmos >/dev/null 2>&1
-RTC_MAJOR=$(/bin/grep -w rtc /proc/devices 2>/dev/null)
-RTC_MAJOR="${RTC_MAJOR%% *}"
-if [ -n "$RTC_MAJOR" ]; then
-	/bin/mknod /dev/rtc0 c $RTC_MAJOR 0
-	/bin/ln -s /dev/rtc0 /dev/rtc
-fi
-
 HWCLOCK_PARAMS="--hctosys"
 if [ "$HARDWARECLOCK" = "UTC" ]; then
 	HWCLOCK_PARAMS="$HWCLOCK_PARAMS --utc"
@@ -49,26 +42,41 @@ else
 	HWCLOCK_PARAMS=""
 fi
 
-# Set clock early to fix some bugs with filesystem checks
-# Clock is set again later to match rc.conf
-if [ -n "$HWCLOCK_PARAMS" -a -f /etc/localtime ]; then
-	/sbin/hwclock $HWCLOCK_PARAMS --noadjfile
+if [ -n "$HWCLOCK_PARAMS" ]; then
+	# enable rtc access
+	/sbin/modprobe rtc-cmos >/dev/null 2>&1
+	RTC_MAJOR=$(/bin/grep -w rtc /proc/devices 2>/dev/null)
+	RTC_MAJOR="${RTC_MAJOR%% *}"
+	if [ -n "$RTC_MAJOR" ]; then
+		/bin/mknod /dev/rtc0 c $RTC_MAJOR 0
+		/bin/ln -s /dev/rtc0 /dev/rtc
+	fi
+
+	# Do a clock set here for a few reasons:
+	# 1. Make creation time on udev nodes sane (FS#8665)
+	# 2. Filesystem checks can depend on system time
+	# 3. This will set the clock, if using non-UTC, off the last known
+	#    configured timezone. Any new timezone put in rc.conf is copied over at
+	#    a later time.
+	# This does *NOT* take into account a time adjustment file as /var may not be
+	# mounted yet. A second set occurs later to match rc.conf.
+	if [ -f /etc/localtime ]; then
+		/sbin/hwclock $HWCLOCK_PARAMS --noadjfile
+	fi
 fi
 
 echo > /proc/sys/kernel/hotplug
 
-if [ -x /sbin/udevadm ]; then
-	stat_busy "Starting UDev"
-	/sbin/udevd --daemon
-	stat_done
-else
-	# Static /dev, our last resort
-	status "Using static /dev filesystem" true
-fi
+stat_busy "Starting UDev Daemon"
+/sbin/udevd --daemon
+stat_done
+
+run_hook sysinit_udevlaunched
 
 # Trigger udev uevents
 if /bin/pidof -o %PPID /sbin/udevd >/dev/null; then
   stat_busy "Triggering UDev uevents"
+  /sbin/udevadm control --property=STARTUP=1
   /sbin/udevadm trigger
   stat_done
 fi
@@ -84,35 +92,17 @@ if ! [ "$load_modules" = "off" ]; then
 		done
 		stat_done
 	fi
-	if [ -d /proc/acpi ]; then
-		stat_busy "Loading standard ACPI modules"
-		ACPI_MODULES="ac battery button fan processor thermal"
-		k="$(echo $BLACKLIST ${MOD_BLACKLIST[@]} | /bin/sed 's|-|_|g')"
-		j="$(echo ${MODULES[@]} | /bin/sed 's|-|_|g')"
-		#add disabled MODULES (!) to blacklist - much requested feature
-		for m in ${j}; do
-    			[ "$m" != "${m#!}" ] && k="${k} ${m#!}"
-		done
-		# add disablemodules= from commandline to blacklist
-		k="${k} $(echo ${disablemodules} | /bin/sed 's|-|_|g' | /bin/sed 's|,| |g')"
-		for n in ${ACPI_MODULES}; do
-			if ! echo ${k} | /bin/grep "\<$n\>" 2>&1 >/dev/null; then
-				/sbin/modprobe $n > /dev/null 2>&1
-			fi
-		done
-		stat_done
-	fi
 fi
 
 # Wait for udev uevents
 if /bin/pidof -o %PPID /sbin/udevd >/dev/null; then
 	stat_busy "Waiting for UDev uevents to be processed"
-	udevstart="$(/bin/date +%s%0N)"
 	/sbin/udevadm settle
+	/sbin/udevadm control --property=STARTUP=
 	stat_done
-	udevend="$(/bin/date +%s%0N)"
-	printhl "   UDev uevent processing time: $((($udevend-$udevstart)/1000000))ms"
 fi
+
+run_hook sysinit_udevsettled
 
 # bring up the loopback interface
 if [ -d /sys/class/net/lo ]; then
@@ -127,13 +117,6 @@ fi
 
 # If necessary, find md devices and manually assemble RAID arrays
 if [ -f /etc/mdadm.conf -a "$(/bin/grep ^ARRAY /etc/mdadm.conf 2>/dev/null)" ]; then
-	# udev won't create these md nodes, so we do it ourselves
-	for dev in $(/bin/grep ^ARRAY /etc/mdadm.conf | /bin/awk '{print $2}'); do
-		path=$(echo $dev | /bin/sed 's|/[^/]*$||')
-		node=$(echo $dev | /bin/sed "s|^$path/||")
-		minor=$(echo $node | /bin/sed 's|^[^0-9]*||')
-		[ ! -e $path/$node ] && /bin/mknod $path/$node b 9 $minor
-	done
 	status "Activating RAID arrays" /sbin/mdadm --assemble --scan
 fi
 
@@ -142,7 +125,6 @@ if [ "$USELVM" = "yes" -o "$USELVM" = "YES" ]; then
 		# Kernel 2.6.x, LVM2 groups
 		/sbin/modprobe -q dm-mod 2>/dev/null
 		stat_busy "Activating LVM2 groups"
-		/sbin/lvm vgscan --ignorelockingfailure --mknodes >/dev/null
 		/sbin/lvm vgchange --ignorelockingfailure -a y >/dev/null
 		if [ $? -ne 0 ]; then
 			stat_fail
@@ -221,7 +203,6 @@ if [ -f /etc/crypttab -a -n "$(/bin/grep -v ^# /etc/crypttab | /bin/grep -v ^$)"
 	# Maybe someone has LVM on an encrypted block device
 	if [ "$USELVM" = "yes" -o "$USELVM" = "YES" ]; then
 		if [ -x /sbin/lvm -a -d /sys/block ]; then
-			/sbin/lvm vgscan --ignorelockingfailure --mknodes >/dev/null
 			/sbin/lvm vgchange --ignorelockingfailure -a y >/dev/null
 		fi
 	fi
@@ -254,11 +235,11 @@ if [ -x /sbin/fsck ]; then
 		echo
 		echo "********************** REBOOT REQUIRED *********************"
 		echo "*                                                          *"
-		echo "* The system will be rebooted automatically in 10 seconds. *"
+		echo "* The system will be rebooted automatically in 15 seconds. *"
 		echo "*                                                          *"
 		echo "************************************************************"
 		echo
-		/bin/sleep 10
+		/bin/sleep 15
 		fsck_reboot
 	fi
 	if [ ${fsckret} -gt 1 -a ${fsckret} -ne 32 ]; then
@@ -281,13 +262,14 @@ fi
 
 stat_busy "Mounting Local Filesystems"
 /bin/mount -n -o remount,rw /
-/bin/rm -f /etc/mtab*
+: >| /etc/mtab
 # make sure / gets written to /etc/mtab
 /bin/mount -o remount,rw /
 # Write /proc, /sys and /dev to /etc/mtab
 if [ -e /proc/mounts ]; then
 	/bin/grep -e "/proc " -e "/sys " -e "/dev " /proc/mounts >> /etc/mtab
 fi
+run_hook sysinit_premount
 # now mount all the local filesystems
 /bin/mount -a -t $NETFS -O no_netdev
 stat_done
@@ -295,17 +277,24 @@ stat_done
 status "Activating Swap" /sbin/swapon -a
 
 stat_busy "Configuring System Clock"
-if [ ! -f /var/lib/hwclock/adjtime ]; then
-	echo "0.0 0 0.0" > /var/lib/hwclock/adjtime
-fi
 if [ "$TIMEZONE" != "" -a -e "/usr/share/zoneinfo/$TIMEZONE" ]; then
 	/bin/rm -f /etc/localtime
 	/bin/cp "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
 fi
 
+clock_pid=""
 if [ -n "$HWCLOCK_PARAMS" ]; then
-	/sbin/hwclock --adjust #Adjust for system drift
+	# This time, we set the clock for real. Use the adjustment file now that
+	# /var will definitely be available, and then set the system clock once
+	# the hardware clock has been adjusted accordingly. The backgrounding magic
+	# is due to the fact that the second call to hwclock will almost always
+	# take ~1 second because of the clock granularity, and we might as well
+	# stay busy.
+	(
+	/sbin/hwclock --adjust
 	/sbin/hwclock $HWCLOCK_PARAMS
+	) &
+	clock_pid=$!
 fi
 stat_done
 
@@ -323,7 +312,7 @@ stat_busy "Removing Leftover Files"
 /bin/rm -rf /tmp/* /tmp/.* &>/dev/null
 /bin/rm -f /forcefsck &>/dev/null
 (cd /var/run && /usr/bin/find . ! -type d -exec /bin/rm -f -- {} \; )
-: > /var/run/utmp
+: >| /var/run/utmp
 /bin/chmod 0664 /var/run/utmp
 # Keep {x,k,g}dm happy with xorg
 /bin/mkdir /tmp/.ICE-unix && /bin/chmod 1777 /tmp/.ICE-unix
@@ -345,7 +334,7 @@ fi
 status "Updating Module Dependencies" /sbin/depmod -A
 
 # Flush old locale settings
-: >/etc/profile.d/locale.sh
+: >| /etc/profile.d/locale.sh
 /bin/chmod 755 /etc/profile.d/locale.sh
 # Set user defined locale
 [ -z "$LOCALE" ] && LOCALE="en_US"
@@ -360,10 +349,10 @@ if echo "$LOCALE" | /bin/grep -qi utf ; then
 	# but also when user has set vt.default_utf8=0 but LOCALE is *.UTF-8.
 	for i in /dev/tty[0-9]*; do
 		/usr/bin/kbd_mode -u < ${i}
-		printf "\e%%G" > ${i}
+		printf "\033%%G" > ${i}
 	done
 	# the $CONSOLE check helps us avoid this when running scripts from cron
-	echo 'if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\e%%G"; fi' >>/etc/profile.d/locale.sh
+	echo 'if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\033%%G"; fi' >>/etc/profile.d/locale.sh
 	stat_done
 	[ -n "$KEYMAP" ] && status "Loading Keyboard Map: $KEYMAP" /bin/loadkeys -q -u $KEYMAP
 else
@@ -371,10 +360,10 @@ else
 	# make non-UTF-8 consoles work on 2.6.24 and newer kernels
 	for i in /dev/tty[0-9]*; do
 		/usr/bin/kbd_mode -a < ${i}
-		printf "\e%%@" > ${i}
+		printf "\033%%@" > ${i}
 	done
 	# the $CONSOLE check helps us avoid this when running scripts from cron
-	echo 'if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\e%%@"; fi' >>/etc/profile.d/locale.sh
+	echo 'if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\033%%@"; fi' >>/etc/profile.d/locale.sh
 	stat_done
 	[ -n "$KEYMAP" ] && status "Loading Keyboard Map: $KEYMAP" /bin/loadkeys -q $KEYMAP
 fi
@@ -396,10 +385,10 @@ if [ -n "$CONSOLEFONT" ]; then
 		stat_fail
 	else
 		for i in /dev/tty[0-9]*; do
-			printf "\e(K" > ${i}
+			printf "\033(K" > ${i}
 		done
 		# the $CONSOLE check helps us avoid this when running scripts from cron
-		echo 'if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\e(K"; fi' >>/etc/profile.d/locale.sh
+		echo 'if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\033(K"; fi' >>/etc/profile.d/locale.sh
 		stat_done
 	fi
 fi
@@ -418,4 +407,12 @@ fi
 
 /bin/dmesg >| /var/log/dmesg.log
 
+# final hwclock setting needs to be done at this point
+if [ -n "$clock_pid" ]; then
+	wait $clock_pid
+fi
+
+run_hook sysinit_end
+
 # End of file
+

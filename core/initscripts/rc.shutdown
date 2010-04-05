@@ -6,6 +6,8 @@
 . /etc/rc.conf
 . /etc/rc.d/functions
 
+run_hook shutdown_start
+
 # avoid staircase effect
 /bin/stty onlcr
 
@@ -22,35 +24,36 @@ if [ -x /etc/rc.local.shutdown ]; then
 	/etc/rc.local.shutdown
 fi
 
-if [ "$PREVLEVEL" = "3" -o "$PREVLEVEL" = "5" ]; then
-	# Find daemons NOT in the DAEMONS array. Shut these down first
-	if [ -d /var/run/daemons ]; then
-		for daemon in $(/bin/ls -1t /var/run/daemons); do
-		  if ! in_array $daemon ${DAEMONS[@]}; then
-				stop_daemon $daemon
-		  fi
-		done
-	fi
-	# Shutdown daemons in reverse order
-	let i=${#DAEMONS[@]}-1
-	while [ $i -ge 0 ]; do
-		if [ "${DAEMONS[$i]:0:1}" != '!' ]; then
-			ck_daemon ${DAEMONS[$i]#@} || stop_daemon ${DAEMONS[$i]#@}
+# Find daemons NOT in the DAEMONS array. Shut these down first
+if [ -d /var/run/daemons ]; then
+	for daemon in $(/bin/ls -1t /var/run/daemons); do
+		if ! in_array $daemon ${DAEMONS[@]}; then
+			stop_daemon $daemon
 		fi
-		let i=i-1
 	done
 fi
+# Shutdown daemons in reverse order
+let i=${#DAEMONS[@]}-1
+while [ $i -ge 0 ]; do
+	if [ "${DAEMONS[$i]:0:1}" != '!' ]; then
+		ck_daemon ${DAEMONS[$i]#@} || stop_daemon ${DAEMONS[$i]#@}
+	fi
+	let i=i-1
+done
 
 # Terminate all processes
-stat_busy "Terminating Processes"
+stat_busy "Sending SIGTERM To Processes"
+run_hook shutdown_prekillall
 /sbin/killall5 -15 &> /dev/null
 /bin/sleep 5
 stat_done
 
-stat_busy "Killing Processes"
+stat_busy "Sending SIGKILL To Processes"
 /sbin/killall5 -9 &> /dev/null
 /bin/sleep 1
 stat_done
+
+run_hook shutdown_postkillall
 
 stat_busy "Saving Random Seed"
 RANDOM_SEED=/var/lib/misc/random-seed
@@ -105,12 +108,14 @@ if [ -f /etc/crypttab -a -n "$(/bin/grep -v ^# /etc/crypttab | /bin/grep -v ^$)"
 	CS=/sbin/cryptsetup.static
 	do_uncrypt() {
 		if [ $# -ge 3 ]; then
-			stat_append "${1}.."
-			$CS remove $1 >/dev/null 2>&1
-			if [ $? -ne 0 ]; then
-				stat_append "failed "
-			else
-				stat_append "ok "
+			if [ -b /dev/mapper/$1 ] ;then
+				stat_append "${1}.."
+				$CS remove $1 >/dev/null 2>&1
+				if [ $? -ne 0 ]; then
+					stat_append "failed "
+				else
+					stat_append "ok "
+				fi
 			fi
 		fi
 	}
@@ -131,6 +136,8 @@ fi
 stat_busy "Remounting Root Filesystem Read-only"
 /bin/mount -n -o remount,ro /
 stat_done
+
+run_hook shutdown_poweroff
 
 # Power off or reboot
 if [ "$RUNLEVEL" = "0" ]; then
