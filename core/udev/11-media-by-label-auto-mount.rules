@@ -1,0 +1,22 @@
+# Plugbox Linux USB and SD-card automounter
+
+KERNEL!="sd[a-z]*|mmcblk[0-9]p[0-9]", GOTO="media_by_label_auto_mount_end"
+ACTION=="add", PROGRAM!="/sbin/blkid %N", GOTO="media_by_label_auto_mount_end"
+# Do not mount devices on boot because otherwise fsck may fail
+ACTION=="add", PROGRAM!="/bin/grep ' / / rw[, ]' /proc/self/mountinfo", GOTO="media_by_label_auto_mount_end"
+
+# Global mount options
+ACTION=="add", ENV{mount_options}="noatime,users"
+# Filesystem specific options
+ACTION=="add", PROGRAM=="/sbin/blkid -o value -s TYPE %E{device}", RESULT=="vfat|ntfs", ENV{mount_options}="%E{mount_options},utf8,gid=100,umask=002"
+
+# Get label
+ACTION=="add", PROGRAM=="/sbin/blkid -o value -s LABEL %N", ENV{dir_name}="%c"
+# Use basename to correctly handle labels such as ../mnt/foo
+ACTION=="add", PROGRAM=="/usr/bin/basename '%E{dir_name}'", ENV{dir_name}="%c"
+ACTION=="add", ENV{dir_name}!="?*", ENV{dir_name}="usbhd-%k"
+
+ACTION=="add", ENV{dir_name}=="?*", RUN+="/bin/mkdir -p '/media/%E{dir_name}'", RUN+="/bin/mount -o %E{mount_options} /dev/%k '/media/%E{dir_name}'"
+ACTION=="remove", ENV{dir_name}=="?*", RUN+="/bin/umount -l '/media/%E{dir_name}'"
+ACTION=="remove", ENV{dir_name}=="?*", RUN+="/bin/rmdir '/media/%E{dir_name}'"
+LABEL="media_by_label_auto_mount_end"
