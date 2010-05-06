@@ -1,19 +1,41 @@
-# Maintainer: Mike Staszel <mikestaszel@plugapps.com>
+# Maintainer: Mike Staszel <mikestaszel@plugbox.org>
+
+# toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
 
 pkgname=linux-api-headers
 pkgver=2.6.33.3
+_basever=2.6.33
 pkgrel=1
-pkgdesc="The Linux kernel headers for SheevaPlug and TonidoPlug"
+pkgdesc="Kernel headers sanitized for use in userspace"
 arch=('arm')
+url="http://www.gnu.org/software/libc"
 license=('GPL')
-url="http://sheeva.with-linux.com/sheeva/"
-depends=('coreutils' 'module-init-tools')
 provides=("kernel-headers=${pkgver}")
 conflicts=("glibc<=2.10.1-4" 'kernel-headers')
 replaces=('kernel-headers')
-source=(http://sheeva.with-linux.com/sheeva/$pkgver/sheeva-$pkgver-KernelHeaders.tar.gz)
-md5sums=('c8546ac716584af212097a1cf13f9047')
+source=(ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-${_basever}.tar.bz2
+        http://www.kernel.org/pub/linux/kernel/v2.6/patch-${pkgver}.bz2
+        scsi.patch)
+md5sums=('c3883760b18d50e8d78819c54d579b00'
+         'dd6cd6a3aea70a2d90d1e8fd6abc3b45'
+         'b6d05566fcfe07770d9386f0588f8758')
 
 build() {
-  cp -R $startdir/src/usr $startdir/pkg/
+  cd ${srcdir}/linux-${_basever}
+  patch -Np1 -i ${srcdir}/patch-${pkgver} || return 1
+  
+  # fix issues with transition of scsi.h from glibc
+  patch -Np1 -i ${srcdir}/scsi.patch || return 1
+
+  make mrproper
+  make headers_check || return 1
+}
+
+package() {
+  cd ${srcdir}/linux-${_basever}
+  make INSTALL_HDR_PATH=${pkgdir}/usr headers_install
+
+  rm -rf ${pkgdir}/usr/include/drm
+  
+  rm -f $(find ${pkgdir} -name .install -or -name ..install.cmd)
 }
