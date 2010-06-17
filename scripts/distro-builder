@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Plugbox Linux Distribution Image Builder
-# Version 0.1.2
+# Version 0.1.3
 #
 # Licensed under the GPLv2.
 #
@@ -13,6 +13,8 @@
 # ==== Variables to set ====
 INSTALLEDPKGS="base kernel26-withlinux openssh openssl heimdal"
 RELEASEVER=1.1
+MAKETARGZ=0
+MAKEUBIIMG=1
 # ==== The Process ====
 mkdir -p $1
 echo  -e "\033[1mInstalling packages...\033[0m"
@@ -30,10 +32,35 @@ echo "en_US.UTF-8 UTF-8" >> $1/etc/locale.gen
 echo "en_US ISO-8859-1" >> $1/etc/locale.gen
 chroot $1/ /usr/sbin/locale-gen
 chroot $1/ /usr/bin/pacman -Scc
+echo $RELEASEVER > $1/etc/plugbox-version
 
-echo  -e "\033[1mCreating a rootfs.tar.gz...\033[0m"
-cd $1
-echo $RELEASEVER > /etc/plugbox-version
-tar czf ../Plugbox-Linux-$RELEASEVER.tar.gz ./*
-cd ../
-echo  -e "\033[1mAll done!\033[0m"
+# Here is the rootfs.tar.gz part if you set MAKETARGZ to 1
+if [ $MAKETARGZ = 1 ]; then
+     echo  -e "\033[1mCreating a rootfs.tar.gz...\033[0m"
+     cd $1
+     tar czf ../Plugbox-Linux-$RELEASEVER.tar.gz ./*
+     cd ../
+else
+     echo -e "\033[1mNot creating a rootfs.tar.gz...\033[0m"
+fi
+
+# Here is the UBI image part if you set MAKEUBIIMG to 1
+if [ $MAKEUBIIMG = 1 ]; then
+     echo -e "\033[1mCreating a rootfs.ubi.img...\033[0m"
+     cat << EOF > ./ubi.cfg
+[ubifs]
+mode=ubi
+image=rootfs.ubifs.img
+vol_id=0
+vol_size=356MiB
+vol_type=dynamic
+vol_name=rootfs
+vol_flags=autoresize
+EOF
+     mkfs.ubifs -x zlib -m 2048  -e 129024 -c 4096 -r $1 rootfs.ubifs.img
+     ubinize -o rootfs.ubi.img -m 2048 -p 128KiB -s 512 ./ubi.cfg
+     rm -f ubi.cfg rootfs.ubifs.img
+     echo  -e "\033[1mAll done!\033[0m"
+else
+     echo  -e "\033[1mAll done!\033[0m"
+fi
