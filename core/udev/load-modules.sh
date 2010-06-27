@@ -46,7 +46,7 @@ if [ "$MOD_AUTOLOAD" = "yes" -o "$MOD_AUTOLOAD" = "YES" ]; then
     # If no modules could be found, try if the alias name is a module name
     # In that case, omit the --use-blacklist parameter to imitate normal modprobe behaviour
     [ -z "${mods}" ] && $MODPROBE -qni $1 && mods="$1" && USEBLACKLIST=""
-    [ -z "${mods}" ] && $LOGGER -p info -t "$(basename $0)" "'$1' is not a valid module or alias name"
+    [ -z "${mods}" ] && $LOGGER -p local0.debug -t "$(basename $0)" "'$1' is not a valid module or alias name"
     for mod in ${mods}; do
       # Find the module and all its dependencies
       deps="$($MODPROBE -i --show-depends ${mod})"
@@ -61,9 +61,9 @@ if [ "$MOD_AUTOLOAD" = "yes" -o "$MOD_AUTOLOAD" = "YES" ]; then
       for dep in $deps; do
         if echo "${BLACKLIST}" | /bin/grep -q -e " ${dep} " -e "^${dep} " -e " ${dep}\$"; then
           if [ "${dep}" = "${mod}" ]; then
-            $LOGGER -p info -t "$(basename $0)" "Not loading module '${mod}' for alias '$1' because it is blacklisted"
+            $LOGGER -p local0.info -t "$(basename $0)" "Not loading module '${mod}' for alias '$1' because it is blacklisted"
           else
-            $LOGGER -p info -t "$(basename $0)" "Not loading module '${mod}' for alias '$1' because its dependency '${dep}' is blacklisted"
+            $LOGGER -p local0.info -t "$(basename $0)" "Not loading module '${mod}' for alias '$1' because its dependency '${dep}' is blacklisted"
           fi
           continue 2
         fi
@@ -74,7 +74,7 @@ if [ "$MOD_AUTOLOAD" = "yes" -o "$MOD_AUTOLOAD" = "YES" ]; then
       $MODPROBE $USEBLACKLIST ${mod}
     done
   else
-    $MODPROBE $1
+    $MODPROBE $USEBLACKLIST $1
   fi
 fi
 # vim: set et ts=4:
