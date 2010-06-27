@@ -1,22 +1,22 @@
-# Plugbox Linux USB and SD-card automounter
+KERNEL!="sd[a-z][0-9]", GOTO="media_by_label_auto_mount_end"
 
-KERNEL!="sd[a-z]*|mmcblk[0-9]p[0-9]", GOTO="media_by_label_auto_mount_end"
-ACTION=="add", PROGRAM!="/sbin/blkid %N", GOTO="media_by_label_auto_mount_end"
-# Do not mount devices on boot because otherwise fsck may fail
-ACTION=="add", PROGRAM!="/bin/grep ' / / rw[, ]' /proc/self/mountinfo", GOTO="media_by_label_auto_mount_end"
+# Import FS infos
+IMPORT{program}="/sbin/blkid -o udev -p %N"
+
+# Get a label if present, otherwise specify one
+ENV{ID_FS_LABEL}!="", ENV{dir_name}="%E{ID_FS_LABEL}"
+ENV{ID_FS_LABEL}=="", ENV{dir_name}="usbhd-%k"
 
 # Global mount options
-ACTION=="add", ENV{mount_options}="exec,suid,noatime,users"
-# Filesystem specific options
-ACTION=="add", PROGRAM=="/sbin/blkid -o value -s TYPE %E{device}", RESULT=="vfat|ntfs", ENV{mount_options}="%E{mount_options},utf8,gid=100,umask=002"
+ACTION=="add", ENV{mount_options}="noatime"
+# Filesystem-specific mount options
+ACTION=="add", ENV{ID_FS_TYPE}=="vfat|ntfs", ENV{mount_options}="$env{mount_options},utf8,gid=100,umask=002"
 
-# Get label
-ACTION=="add", PROGRAM=="/sbin/blkid -o value -s LABEL %N", ENV{dir_name}="%c"
-# Use basename to correctly handle labels such as ../mnt/foo
-ACTION=="add", PROGRAM=="/usr/bin/basename '%E{dir_name}'", ENV{dir_name}="%c"
-ACTION=="add", ENV{dir_name}!="?*", ENV{dir_name}="usbhd-%k"
+# Mount the device
+ACTION=="add", RUN+="/bin/mkdir -p /media/%E{dir_name}", RUN+="/bin/mount -o $env{mount_options} /dev/%k /media/%E{dir_name}"
 
-ACTION=="add", ENV{dir_name}=="?*", RUN+="/bin/mkdir -p '/media/%E{dir_name}'", RUN+="/bin/mount -o %E{mount_options} /dev/%k '/media/%E{dir_name}'"
-ACTION=="remove", ENV{dir_name}=="?*", RUN+="/bin/umount -l '/media/%E{dir_name}'"
-ACTION=="remove", ENV{dir_name}=="?*", RUN+="/bin/rmdir '/media/%E{dir_name}'"
+# Clean up after removal
+ACTION=="remove", ENV{dir_name}!="", RUN+="/bin/umount -l /media/%E{dir_name}", RUN+="/bin/rmdir /media/%E{dir_name}"
+
+# Exit
 LABEL="media_by_label_auto_mount_end"
