@@ -1,69 +1,171 @@
-# Maintainer: Mike Staszel <mikestaszel@plugapps.com>
+# Maintainer: Mike Staszel <mikestaszel@plugboxlinux.org>
+# Contributor: Jonny Gerold <fsk141@archplug.org>
 
-pkgbase=gcc
-pkgname=('gcc' 'gcc-libs')
+# toolchain build order: kernel-headers->glibc->binutils->gcc->binutils->glibc
+# NOTE: libtool requires rebuilt with each new gcc version
+
+pkgname=('gcc' 'gcc-libs' 'gcc-fortran' 'gcc-objc')
 pkgver=4.4.3
-pkgrel=4
-pkgdesc='The GNU Compiler Collection'
-arch=(arm)
-license=(GPL LGPL custom)
-url='http://gcc.gnu.org'
-groups=('base-devel')
-makedepends=(flex 'gcc>=3.4' 'gawk>=3.1.5' 'make>=3.80')
-source=(http://gcc-uk.internet.bs/releases/gcc-$pkgver/gcc-{core,g++,fortran,objc}-$pkgver.tar.bz2)
+pkgrel=5
+_libstdcppmanver=4.4.0
+pkgdesc="The GNU Compiler Collection"
+arch=('arm')
+license=('GPL' 'LGPL' 'custom')
+url="http://gcc.gnu.org"
+makedepends=('binutils>=2.20' 'mpfr>=3.0.0' 'cloog-ppl>=0.15.3')
+options=('!libtool' '!emptydirs')
+source=(ftp://gcc.gnu.org/pub/gcc/releases/gcc-${pkgver}/gcc-{core,g++,fortran,objc}-${pkgver}.tar.bz2
+	ftp://gcc.gnu.org/pub/gcc/libstdc++/doxygen/libstdc++-man.${_libstdcppmanver}.tar.bz2
+	gcc-hash-style-both.patch)
+
 md5sums=('054b66f315b3d04ad06544ce26e72365'
          'cd179ec4f05ee17ce76464da25a2674c'
          '0f8fa5e9edbcf156a061312cae0715ee'
-         '34711c4de46eaf79aa018206dbec4389')
-options=('!libtool')
+         '34711c4de46eaf79aa018206dbec4389'
+         '3b94fe4a3cd49819bf57ecc407851b9b'
+         '6fd395bacbd7b6e47c7b74854b478363')
+
+  _basedir="${srcdir}/gcc-${pkgver}"
 
 build() {
-  mkdir -p $srcdir/gcc-build
-  cd $srcdir/gcc-build
+  if ! locale -a | grep ^de_DE > /dev/null; then
+    echo "You need the de_DE locale to build gcc."
+    return 1
+  fi
+  
+  cd ${_basedir}
+  
+  # Do not install libiberty
+  sed -i 's/install_to_$(INSTALL_DEST) //' libiberty/Makefile.in
 
-  ../gcc-$pkgver/configure --prefix=/usr \
-       --enable-languages=c,c++,fortran,objc,obj-c++ \
-       --disable-libstdcxx-pch \
-       --enable-__cxa_atexit \
-       --with-arch=armv5te \
-       --disable-multilib \
-       --enable-threads=posix || return 1
-  make || return 1
+  # Do not run fixincludes
+  sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
+
+  patch -Np0 -i ${srcdir}/gcc-hash-style-both.patch || return 1
+
+  echo ${pkgver} > gcc/BASE-VER
+
+  mkdir build && cd build
+	
+	../configure --prefix=/usr \
+	--build=$CHOST \
+	--target=$CHOST \
+	--enable-shared \
+	--enable-languages=c,c++,fortran,objc,obj-c++ \
+	--enable-threads=posix \
+	--mandir=/usr/share/man \
+	--infodir=/usr/share/info \
+	--enable-__cxa_atexit \
+	--disable-multilib \
+	--libdir=/usr/lib \
+	--libexecdir=/usr/lib \
+	--enable-clocale=gnu \
+	--disable-libstdcxx-pch \
+	
+	make || return 1
 }
 
-package_gcc() {
-  depends=("gcc-libs==$pkgver-$pkgrel" 'binutils>=2.19.1' 'mpfr>=2.4.1' 'cloog-ppl>=0.15.3')
-  groups=(base-devel)
-  license=(GPL)
+package_gcc-libs()
+{
+  pkgdesc="Runtime libraries shipped by GCC for C and C++ languages"
+  groups=('base')
+  depends=('glibc>=2.10.1-5')
+  install=gcc-libs.install
 
-  cd $srcdir/gcc-build
-  make DESTDIR=$pkgdir install || return 1
+  cd ${_basedir}/build
+  make -j2 -C $CHOST/libgcc DESTDIR=${pkgdir} install-shared
+  for lib in libmudflap libgomp libssp libstdc++-v3/src; do
+    make -j2 -C $CHOST/$lib DESTDIR=${pkgdir} install-toolexeclibLTLIBRARIES
+  done
+  make -j2 -C $CHOST/libstdc++-v3/po DESTDIR=${pkgdir} install
+  make -j2 -C $CHOST/libgomp DESTDIR=${pkgdir} install-info
 
-  ln -sf gcc $pkgdir/usr/bin/cc
-  ln -sf g++ $pkgdir/usr/bin/c++
+  make -j2 DESTDIR=${pkgdir} install-target-libgfortran
 
-  # Remove libraries provided by gcc-libs.
-  rm -f $pkgdir/usr/lib/lib*
+  make -j2 DESTDIR=${pkgdir} install-target-libobjc
+  # I thought I said to only install the lib...
+  rm -rf ${pkgdir}/usr/lib/gcc/
+
+  # remove static libraries
+  find ${pkgdir} -name *.a -delete
+  
+  # Install Runtime Library Exception
+  install -Dm644 ${_basedir}/COPYING.RUNTIME \
+    ${pkgdir}/usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION
 }
 
-package_gcc-libs() {
-  depends=('glibc>=2.11')
-  groups=(base)
-  pkgdesc='Runtime libraries shipped by GCC for C and C++ languages'
-  license=(LGPL custom)
+package_gcc()
+{
+  depends=('binutils>=2.20' 'mpfr>=3.0.0' 'cloog-ppl>=0.15.3')
+  groups=('base-devel')
+  install=gcc.install
 
-  cd $srcdir/gcc-build
-  make DESTDIR=$pkgdir install-target-libgcc install-target-libmudflap install-target-libssp install-target-libstdc++-v3 install-target-libgomp install-target-libgfortran install-target-libobjc || return 1
+  cd ${_basedir}/build
+  
+  # much, much easier to install the lot and clean-up the mess
+  make -j2 DESTDIR=${pkgdir} install || return 1
+  rm -rf $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{adainclude,adalib,finclude}
+  mkdir -p $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{adainclude,adalib,finclude}
+  rm -rf $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/include/objc
+  mkdir -p $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/include/objc
+  rm $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{cc1obj{,plus},f951,libgfortranbegin.a}
+  rm $pkgdir/usr/lib/{*.so*,lib{gfortran,objc}.a}
+  rm $pkgdir/usr/share/info/{gfortran,libgomp}.info
+  rm $pkgdir/usr/share/locale/{de,fr}/LC_MESSAGES/libstdc++.mo
+  rm $pkgdir/usr/share/man/man1/gfortran.1
 
-  # make target `install-target-libstdc++-v3' installs include files. 
-  # Those are provided by gcc.
-  rm -rf $pkgdir/usr/include
+  # many packages require these symlinks
+  install -dm755 ${pkgdir}/lib
+  ln -sf /usr/bin/cpp ${pkgdir}/lib/cpp
+  ln -sf gcc ${pkgdir}/usr/bin/cc
+  ln -sf g++ ${pkgdir}/usr/bin/c++
 
-  # make target `install-target-libgomp' installs include files as well.
-  # Those, too, should be provided by gcc.
-  rm -rf $pkgdir/usr/lib/gcc
+  # install the libstdc++ man pages
+  install -dm755 ${pkgdir}/usr/share/man/man3
+  install -m644 ${srcdir}/libstdc++-man-${_libstdcppmanver}/man3/* \
+    ${pkgdir}/usr/share/man/man3/
+  # deal with conflicts...
+  rm -f ${pkgdir}/usr/share/man/man3/{ctime,queue,random,regex,string}.3
 
-  # Install Runtime Library Exception license.
-  install -Dm644 ../gcc-$pkgver/COPYING.RUNTIME \
-                 $pkgdir/usr/share/licenses/$pkgname/RUNTIME.LIBRARY.EXCEPTION
+  # Install Runtime Library Exception
+  install -Dm644 ${_basedir}/COPYING.RUNTIME \
+    ${pkgdir}/usr/share/licenses/gcc/RUNTIME.LIBRARY.EXCEPTION
+}
+
+package_gcc-fortran()
+{
+  pkgdesc="Fortran front-end for GCC"
+  depends=("gcc=$pkgver")
+  install=gcc-fortran.install
+
+  cd ${_basedir}/build
+  make -j2 DESTDIR=$pkgdir install-target-libgfortran
+  make -j2 -C $CHOST/libgomp DESTDIR=$pkgdir install-nodist_fincludeHEADERS
+  make -j2 -C gcc DESTDIR=$pkgdir fortran.install-{common,man,info}
+  install -Dm755 gcc/f951 $pkgdir/usr/lib/gcc/$CHOST/$pkgver/f951
+  
+  # remove libraries included in gcc-libs
+  rm -f ${pkgdir}/usr/lib/libgfortran.so*
+  
+  # Install Runtime Library Exception
+  install -Dm644 ${_basedir}/COPYING.RUNTIME \
+    ${pkgdir}/usr/share/licenses/gcc-fortran/RUNTIME.LIBRARY.EXCEPTION
+}
+
+package_gcc-objc()
+{
+  pkgdesc="Objective-C front-end for GCC"
+  depends=("gcc=$pkgver")
+
+  cd ${_basedir}/build
+  make -j2 DESTDIR=$pkgdir install-target-libobjc
+  install -dm755 $pkgdir/usr/lib/gcc/$CHOST/$pkgver/
+  install -m755 gcc/cc1obj{,plus} $pkgdir/usr/lib/gcc/$CHOST/$pkgver/
+
+  # remove libraries included in gcc-libs
+  rm -f ${pkgdir}/usr/lib/libobjc.so*
+
+  # Install Runtime Library Exception
+  install -Dm644 ${_basedir}/COPYING.RUNTIME \
+    ${pkgdir}/usr/share/licenses/gcc-objc/RUNTIME.LIBRARY.EXCEPTION
 }
