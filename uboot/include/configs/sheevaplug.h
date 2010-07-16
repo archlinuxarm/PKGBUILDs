@@ -99,16 +99,7 @@
 #define CONFIG_CMD_PING
 #define CONFIG_CMD_USB
 #define CONFIG_SYS_LONGHELP
-/* CHANGE THIS TO THE IPS YOU WANT TO USE! */
-#define CONFIG_PREBOOT "setenv arcNumber 2097;setenv mainlineLinux yes;" \
-        "setenv ipaddr 192.168.ip.dockstar;setenv netmask 255.255.255.0;" \
-        "setenv ifnchostonline 'ping 192.168.ip.netconsole';" \
-        "setenv startnc 'setenv ncip 192.168.ip.netconsole;setenv stdin nc;setenv stdout nc;setenv stderr nc;version';" \
-        "run ifnchostonline startnc"
-/* Without netconsole */
-/*
 #define CONFIG_PREBOOT "setenv arcNumber 2097;setenv mainlineLinux yes"
-*/
 
 /*
  * NAND configuration
@@ -133,10 +124,8 @@
 #define CONFIG_ENV_ADDR			0xA0000
 #define CONFIG_ENV_OFFSET		0xA0000	/* env starts here */
 
-+/* The MAC for the Ethernet interface */
-+/* CHANGE THIS TO THE MAC FOUND ON THE BOTTOM OF YOUR DOCKSTAR! */
-+#define CONFIG_ETHADDR 00:10:75:12:34:56
-+
+/* The MAC for the Ethernet interface */
+#define CONFIG_ETHADDR 00:10:75:12:34:56
 
 /*
  * Default environment variables
@@ -153,9 +142,9 @@
 
 /* CHANGE THIS TO THE IPS YOU WANT TO USE! */
 #define CONFIG_EXTRA_ENV_SETTINGS \
-	"x_bootargs=console=ttyS0,115200 netconsole=@192.168.ip.dockstar/,@192.168.ip.netconsole/ mtdparts="CONFIG_MTDPARTS \
-	"x_bootargs_root=root=/dev/sda2 rootdelay=5\0" \
-	"x_bootload_kernel=ext2load usb 0:1 0x800000 /uImage\0" \
+	"x_bootargs=console=ttyS0,115200 netconsole=@192.168.1.123/,@192.168.1.124/ mtdparts="CONFIG_MTDPARTS \
+	"x_bootargs_root=root=/dev/sda1 rootdelay=5\0" \
+	"x_bootload_kernel=ext2load usb 0:1 0x800000 /boot/uImage\0" \
 	"x_bootcmd_usb=usb start\0"
 
 /*
