@@ -28,7 +28,7 @@
 /*
  * Version number information
  */
-#define CONFIG_IDENT_STRING	"\nMarvell-Sheevaplug"
+#define CONFIG_IDENT_STRING	"\nSeagate FreeAgent DockStar"
 
 /*
  * High Level Configuration Options (easy to change)
@@ -81,7 +81,7 @@
 #define CONFIG_INITRD_TAG	1	/* enable INITRD tag */
 #define CONFIG_SETUP_MEMORY_TAGS 1	/* enable memory tag */
 
-#define	CONFIG_SYS_PROMPT	"PlugApps>> "	/* Command Prompt */
+#define	CONFIG_SYS_PROMPT	"DockStar>> "	/* Command Prompt */
 #define	CONFIG_SYS_CBSIZE	1024	/* Console I/O Buff Size */
 #define	CONFIG_SYS_PBSIZE	(CONFIG_SYS_CBSIZE \
 		+sizeof(CONFIG_SYS_PROMPT) + 16)	/* Print Buff */
@@ -98,6 +98,17 @@
 #define CONFIG_CMD_NAND
 #define CONFIG_CMD_PING
 #define CONFIG_CMD_USB
+#define CONFIG_SYS_LONGHELP
+/* CHANGE THIS TO THE IPS YOU WANT TO USE! */
+#define CONFIG_PREBOOT "setenv arcNumber 2097;setenv mainlineLinux yes;" \
+        "setenv ipaddr 192.168.ip.dockstar;setenv netmask 255.255.255.0;" \
+        "setenv ifnchostonline 'ping 192.168.ip.netconsole';" \
+        "setenv startnc 'setenv ncip 192.168.ip.netconsole;setenv stdin nc;setenv stdout nc;setenv stderr nc;version';" \
+        "run ifnchostonline startnc"
+/* Without netconsole */
+/*
+#define CONFIG_PREBOOT "setenv arcNumber 2097;setenv mainlineLinux yes"
+*/
 
 /*
  * NAND configuration
@@ -113,35 +124,39 @@
 /*
  *  Environment variables configurations
  */
-#ifdef CONFIG_CMD_NAND
-#define CONFIG_ENV_IS_IN_NAND		1
-#define CONFIG_ENV_SECT_SIZE		0x20000	/* 128K */
-#else
 #define CONFIG_ENV_IS_NOWHERE		1	/* if env in SDRAM */
-#endif
 /*
  * max 4k env size is enough, but in case of nand
  * it has to be rounded to sector size
  */
 #define CONFIG_ENV_SIZE			0x20000	/* 128k */
-#define CONFIG_ENV_ADDR			0x60000
-#define CONFIG_ENV_OFFSET		0x60000	/* env starts here */
+#define CONFIG_ENV_ADDR			0xA0000
+#define CONFIG_ENV_OFFSET		0xA0000	/* env starts here */
+
++/* The MAC for the Ethernet interface */
++/* CHANGE THIS TO THE MAC FOUND ON THE BOTTOM OF YOUR DOCKSTAR! */
++#define CONFIG_ETHADDR 00:10:75:12:34:56
++
 
 /*
  * Default environment variables
  */
-#define CONFIG_BOOTCOMMAND		"${x_bootcmd_kernel}; "	\
-	"setenv bootargs ${x_bootargs} ${x_bootargs_root}; "	\
-	"${x_bootcmd_usb}; bootm 0x6400000;"
+#define CONFIG_BOOTCOMMAND \
+        "${x_bootcmd_usb}; "    \
+        "setenv bootargs ${x_bootargs} ${x_bootargs_root}; "    \
+        "setenv x_startkernel 'bootm 0x800000';" \
+        "run x_bootload_kernel x_startkernel;" \
+        "reset" /* If loading from USB failed we just reset, my experience was that the second time the device will be found */
 
-#define CONFIG_MTDPARTS		"orion_nand:512k(uboot),"	\
-	"3m@1m(kernel),1m@4m(psm),13m@5m(rootfs) rw\0"
+#define CONFIG_MTDPARTS		"orion_nand:1m(u-boot),"	\
+	"4m@1m(uImage),32m@5m(root),219m@37m(data) rw\0"
 
-#define CONFIG_EXTRA_ENV_SETTINGS	"x_bootargs=console"	\
-	"=ttyS0,115200 mtdparts="CONFIG_MTDPARTS	\
-	"x_bootcmd_kernel=nand read 0x6400000 0x100000 0x300000\0" \
-	"x_bootcmd_usb=usb start\0" \
-	"x_bootargs_root=root=/dev/mtdblock3 rw rootfstype=jffs2\0"
+/* CHANGE THIS TO THE IPS YOU WANT TO USE! */
+#define CONFIG_EXTRA_ENV_SETTINGS \
+	"x_bootargs=console=ttyS0,115200 netconsole=@192.168.ip.dockstar/,@192.168.ip.netconsole/ mtdparts="CONFIG_MTDPARTS \
+	"x_bootargs_root=root=/dev/sda2 rootdelay=5\0" \
+	"x_bootload_kernel=ext2load usb 0:1 0x800000 /uImage\0" \
+	"x_bootcmd_usb=usb start\0"
 
 /*
  * Size of malloc() pool
@@ -188,6 +203,7 @@
 #ifdef CONFIG_CMD_USB
 #define CONFIG_USB_EHCI			/* Enable EHCI USB support */
 #define CONFIG_USB_EHCI_KIRKWOOD	/* on Kirkwood platform	*/
+#define CONFIG_EHCI_HCD_INIT_AFTER_RESET
 #define CONFIG_EHCI_IS_TDI
 #define CONFIG_USB_STORAGE
 #define CONFIG_DOS_PARTITION
