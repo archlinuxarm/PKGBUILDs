@@ -1,0 +1,54 @@
+#!/bin/bash
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+. /etc/conf.d/mediatomb
+
+PID=$(cat $MT_PIDFILE 2> /dev/null)
+MEDIATOMB="-d -u $MT_USER -g $MT_GROUP -P $MT_PIDFILE -l $MT_LOGFILE -m $MT_HOME -f $MT_CFGDIR -p $MT_PORT"
+
+case "$1" in
+    start)
+        stat_busy "Starting MediaTomb UPnP MediaServer"
+
+        # Ensure the daemon is able to write into MT_CFGDIR
+        chown $MT_USER:$MT_GROUP "/$MT_HOME/$MT_CFGDIR"
+
+        # MediaTomb does not remove MT_PIDFILE on shutdown
+        [ -z "$(pidof -o %PPID /usr/bin/mediatomb)" ] && rm -f $MT_PIDFILE
+
+        [ -z "$(cat $MT_PIDFILE 2> /dev/null)" ] && /usr/bin/mediatomb $MEDIATOMB $MT_OPTIONS
+
+        if [ $? -gt 0 ]; then
+            stat_fail
+        else
+            add_daemon mediatomb
+            stat_done
+        fi
+    ;;
+
+    stop)
+        stat_busy "Stopping MediaTomb UPnP MediaServer"
+
+        [ ! -z "$PID" ] && kill $PID &> /dev/null
+
+        if [ $? -gt 0 ]; then
+            stat_fail
+        else
+            rm -f $MT_PIDFILE
+            rm_daemon mediatomb
+            stat_done
+        fi
+    ;;
+
+    restart)
+        $0 stop
+        sleep 1
+        $0 start
+    ;;
+
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+
+esac
+exit 0
