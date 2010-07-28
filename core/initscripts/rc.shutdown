@@ -12,7 +12,7 @@ run_hook shutdown_start
 /bin/stty onlcr
 
 echo " "
-printhl "Shutting down..."
+printhl "Initiating Shutdown..."
 echo " "
 
 # avoid NIS hanging syslog-ng on shutdown by unsetting the domainname
@@ -99,13 +99,25 @@ stat_busy "Deactivating Swap"
 stat_done
 
 stat_busy "Unmounting Filesystems"
-/bin/umount -a -r -t noramfs,notmpfs,nosysfs,noproc -O no_netdev
+/bin/umount -a -r -t noramfs,notmpfs,nosysfs,noproc,nodevtmpfs -O no_netdev
 stat_done
 
 # Kill non-root encrypted partition mappings
 if [ -f /etc/crypttab -a -n "$(/bin/grep -v ^# /etc/crypttab | /bin/grep -v ^$)" ]; then
 	stat_busy "Deactivating encrypted volumes:"
-	CS=/sbin/cryptsetup.static
+        # Arch cryptsetup packages traditionally contained the binaries
+        #  /usr/sbin/cryptsetup
+        #  /sbin/cryptsetup.static
+        # By default, initscripts used the /sbin/cryptsetup.static.
+        # Newer packages will only have /sbin/cryptsetup and no static binary
+        # This ensures maximal compatibility with the old and new layout
+        if [ -x /sbin/cryptsetup ]; then
+                CS=/sbin/cryptsetup
+        elif [ -x /usr/sbin/cryptsetup ]; then
+                CS=/usr/sbin/cryptsetup
+        else
+                CS=/sbin/cryptsetup.static
+	fi
 	do_uncrypt() {
 		if [ $# -ge 3 ]; then
 			if [ -b /dev/mapper/$1 ] ;then

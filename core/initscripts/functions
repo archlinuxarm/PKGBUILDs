@@ -2,27 +2,35 @@
 # initscripts functions
 #
 
+# width:
+
 STAT_COL=80
 if [ ! -t 1 ]; then
   USECOLOR=""
 
+# stty will fail when stdin isn't a terminal
 elif [ -t 0 ]; then
   STAT_COL="$(/bin/stty size)"
+  # stty gives "rows cols"; strip the rows number, we just want columns
   STAT_COL="${STAT_COL##* }"
 
 else
+  # is /usr/share/terminfo already mounted, and TERM recognized?
   /bin/tput cols &>/dev/null
   if [ $? -eq 0 ]; then
     STAT_COL=$(/bin/tput cols)
   fi
 fi
 if [ "0$STAT_COL" -eq 0 ]; then
+  # if output was 0 (serial console), set default width to 80
   STAT_COL=80
   USECOLOR=""
 fi
 
+# we use 13 characters for our own stuff
 STAT_COL=$(($STAT_COL - 13))
 
+# disable colors on broken terminals
 TERM_COLORS="$(/bin/tput colors 2>/dev/null)"
 if [ $? = 3 ]; then
 	TERM_COLORS=8
@@ -40,8 +48,10 @@ else
 fi
 unset TERM_COLORS
 
+# clear the TZ envvar, so daemons always respect /etc/localtime
 unset TZ
 
+# colors:
 if [ "$USECOLOR" = "YES" -o "$USECOLOR" = "yes" ]; then
 	C_MAIN="\033[1;37;40m"      # main text
 	C_OTHER="\033[1;34;40m"     # prefix & brackets
@@ -68,8 +78,12 @@ else
 	DEL_TEXT=""
 fi
 
+# prefixes:
+
 PREFIX_REG="::"
 PREFIX_HL=" >"
+
+# functions:
 
 deltext() {
 	printf "${DEL_TEXT}"
@@ -132,6 +146,10 @@ status() {
 	fi
 }
 
+#  usage : in_array( $needle, $haystack )
+# return : 0 - found
+#          1 - not found
+# Copied from makepkg
 in_array() {
   local needle=$1; shift
   [ -z "$1" ] && return 1 # Not Found
@@ -145,6 +163,8 @@ in_array() {
   done
   return 1 # Not Found
 }
+
+# daemons:
 
 add_daemon() {
 	[ -d /var/run/daemons ] || /bin/mkdir -p /var/run/daemons
@@ -181,6 +201,7 @@ stop_daemon() {
 	/etc/rc.d/$1 stop
 }
 
+# Status functions
 status_started() {
   deltext
   echo -ne "$C_OTHER[${C_STRT}STARTED$C_OTHER]$C_CLEAR "
@@ -200,6 +221,40 @@ ck_status() {
   fi		
 }
 
+###############################
+# Custom hooks in initscripts #
+###############################
+# Hooks can be used to include custom code in various places in the rc.* scripts
+#
+# Define a hook function in a functions.d file using:
+#  function_name() {
+#    ...
+#  }
+#  add_hook hook_name function_name
+# It is allowed to register several hook functions for the same hook
+# Is is also allowed to register the same hook function for several hooks
+#
+# Currently, the following hooks exist:
+# sysinit_start: at the beginning of rc.sysinit
+# multi_start: at the beginning of rc.multi
+# single_start: at the beginning of rc.single
+# shutdown_start: at the beginning of rc.shutdown
+# sysinit_end: at the end of rc.sysinit
+# multi_end: at the end of rc.multi
+# single_end: at the end of rc.single
+# sysinit_udevlaunched: after udev has been launched in rc.sysinit
+# single_udevlaunched: after udev has been launched in rc.single
+# sysinit_udevsettled: after uevents have settled in rc.sysinit
+# single_udevsettled: after uevents have settled in rc.single
+# sysinit_premount: before local filesystems are mounted, but after root is mounted read-write in rc.sysinit
+# shutdown_prekillall: before all processes are being killed in rc.shutdown
+# single_prekillall: before all processes are being killed in rc.single
+# shutdown_postkillall: after all processes have been killed in rc.shutdown
+# single_postkillall: after all processes have been killed in rc.single
+# shutdown_poweroff: directly before powering off in rc.shutdown
+#
+# Make sure to never override the add_hook and run_hook functions via functions.d
+
 declare -A hook_funcs
 
 add_hook() {
@@ -216,6 +271,33 @@ run_hook() {
 	done
 }
 
+# Function for setting console font if required
+set_consolefont() { 
+    if [ -n "$CONSOLEFONT" ]; then
+        stat_busy "Loading Console Font: $CONSOLEFONT"
+        #CONSOLEMAP in UTF-8 shouldn't be used
+        if [ -n "$CONSOLEMAP" ] && echo "$LOCALE" | /bin/grep -qi utf ; then
+                CONSOLEMAP=""
+        fi
+        for i in /dev/tty[0-9]*; do
+                if [ -n "$CONSOLEMAP" ]; then
+                        /usr/bin/setfont -m $CONSOLEMAP $CONSOLEFONT -C ${i} >/dev/null 2>&1
+                else
+                        /usr/bin/setfont $CONSOLEFONT -C ${i} >/dev/null 2>&1
+                fi
+        done
+        if [ $? -ne 0 ]; then
+                stat_fail
+        else
+                if [ -n "$CONSOLEMAP" ]; then
+                        echo 'if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\033(K"; fi' >>/etc/profile.d/locale.sh
+                fi
+                stat_done
+        fi
+    fi
+}
+
+# Source additional functions at the end to allow overrides
 for f in /etc/rc.d/functions.d/*; do
   if [ -e $f ]; then
     . $f
