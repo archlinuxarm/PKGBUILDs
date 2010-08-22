@@ -1,0 +1,77 @@
+# $Id: PKGBUILD 85736 2010-07-19 02:41:06Z kevin $
+# Maintainer: judd <jvinet@zeroflux.org>
+pkgbase=dhcp
+pkgname=('dhcp'
+         'dhclient')
+# separate patch levels with a period to maintain proper versioning.
+pkgver=4.2.0
+_pkgver=4.2.0
+pkgrel=1
+arch=('i686' 'x86_64' 'arm')
+license=('custom:isc-dhcp')
+url="https://www.isc.org/software/dhcp"
+source=(http://ftp.isc.org/isc/${pkgname}/${pkgname}-${_pkgver}.tar.gz
+dhcpd dhcp.conf.d dhcp-4.1.1-missing-ipv6-not-fatal.patch dhclient-script-pathFixes.patch)
+md5sums=('83abd7c4f9c24d8dd024ca5a71380c0a'
+         'df22cffa7d7415ece7bb025b7bf774dd'
+         '49da3192e5c885e3c7d02f447c2dea5e'
+         'fd64aeb4f399dcc41ea43089a3811094'
+         'ddcc5cd576ec631ade6c4da21952b50b')
+
+build() {
+  cd ${srcdir}/${pkgname}-${_pkgver}
+  # Define _GNU_SOURCE to fix IPV6.
+  sed '/^CFLAGS="$CFLAGS/ s/INGS"/INGS -D_GNU_SOURCE"/' -i configure
+  # Make not having ipv6 non-fatal.
+  patch -Np0 -i ${srcdir}/dhcp-4.1.1-missing-ipv6-not-fatal.patch
+  ./configure --prefix=/usr --sysconfdir=/etc \
+      --with-srv-lease-file=/var/state/dhcp/dhcpd.leases \
+      --with-srv6-lease-file=/var/state/dhcp/dhcpd6.leases
+  make || return 1
+}
+
+package_dhcp(){
+  pkgdesc="A DHCP server, client, and relay agent"
+  depends=('openssl>=0.9.8a')
+  backup=('etc/dhcpd.conf' 'etc/conf.d/dhcp')
+  install=dhcp.install
+  
+  cd ${srcdir}/${pkgname}-${_pkgver}
+  make DESTDIR=${pkgdir} install
+  install -D -m755 ${srcdir}/dhcpd ${pkgdir}/etc/rc.d/dhcpd
+  install -D -m644 ${srcdir}/dhcp.conf.d ${pkgdir}/etc/conf.d/${pkgbase}
+  mkdir -p ${pkgdir}/var/state/dhcp
+  rm -f ${pkgdir}/etc/dhclient.conf
+  rm -f ${pkgdir}/usr/sbin/dhclient
+  rm -f ${pkgdir}/usr/share/man/man{5,8}/dhclient*
+  
+  # install licenses
+  install -m644 -D ${srcdir}/${pkgbase}-${_pkgver}/LICENSE \
+                   ${pkgdir}/usr/share/licenses/dhcp/LICENSE
+}
+
+package_dhclient(){
+  
+  pkgdesc="dhclient is standalone client from the dhcp package"
+  depends=('bash')
+
+  cd ${srcdir}/${pkgname}-${_pkgver}/client/scripts
+  patch -Np1 -i ${srcdir}/dhclient-script-pathFixes.patch linux || return 1
+  cd ${srcdir}/${pkgname}-${_pkgver}/client
+  make DESTDIR=${pkgdir} install
+  install -m755 -d ${startdir}/pkg/var/lib/dhclient
+
+  #not needed after fresh install
+  rm -f ${pkgdir}/var/lib/dhclient/dhcpd.leases
+
+  #move dhclient.conf to dhclient.conf.example
+  mv ${pkgdir}/etc/dhclient.conf ${pkgdir}/etc/dhclient.conf.example
+
+  # install dhclient linux script
+  mkdir ${pkgdir}/sbin
+  install -m755 -D ${srcdir}/${pkgname}-${_pkgver}/client/scripts/linux \
+                   ${pkgdir}/sbin/dhclient-script
+  # install licenses
+  install -m644 -D ${srcdir}/${pkgname}-${_pkgver}/LICENSE \
+                   ${pkgdir}/usr/share/licenses/dhclient/LICENSE
+}
