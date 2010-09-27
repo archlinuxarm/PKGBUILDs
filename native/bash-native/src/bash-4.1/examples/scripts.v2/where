@@ -1,0 +1,111 @@
+#! /bin/bash
+#
+# original from:
+# @(#) where.ksh 1.1 94/07/11
+# 91/01/12 john h. dubois iii (john@armory.com)
+# 92/08/10 Only print executable *files*.
+# 92/10/06 Print err msg if no match found.
+# 92/11/27 Added implicit *
+# 93/07/23 Print help only if -h is given.
+# 94/01/01 Added -x option
+# 94/07/11 Don't bother with eval
+#
+# conversion to bash v2 syntax done by Chet Ramey
+
+name=${0##*/}
+Usage="Usage: $name [-hx] 'pattern' ..."
+typeset -i exact=0
+
+phelp()
+{
+echo "$name: find executable files in PATH that match patterns.
+$Usage
+$name searches each directory specified in the PATH environment variable
+for executable files that match the specified patterns.  Patterns are
+given as Korn shell filename patterns.  They are surrounded by implicit
+'*' characters, so that \"foo\" will match any executble file whose name
+contains contains \"foo\".  This can be overridden by using '^' and '$' to
+force a match to start at the beginning and end at the end of a filename
+respectively.  Characters that are special to the shell must generally
+be protected from the shell by surrounding them with quotes.
+Examples:
+$name foo
+lists all executable files in PATH that contain foo.
+$name '^b*sh$'
+lists all executable files in PATH that start with b and end with sh.
+An error message is printed if a no matching file is found for a pattern.
+Options:
+-h: Print this help.
+-x: Find exact matches only; equivalent to putting ^ and $ at the start
+    and end of each pattern."
+}
+
+istrue()
+{
+	test 0 -ne "$1"
+}
+
+isfalse()
+{
+	test 0 -eq "$1"
+}
+
+while getopts "xh" opt; do
+	case "$opt" in
+	x)	exact=1;;
+	h)	phelp ; exit 0;;
+	*)	echo -e "$Usage\nUse -h for help." 1>&2; exit 2;;
+	esac
+done
+
+shift $((OPTIND-1))
+
+set +f			# make sure filename globbing is on
+Args=("$@")		# save args
+
+OIFS=$IFS
+IFS=:		# Make PATH be split on :
+Paths=($PATH)
+IFS=$OIFS
+
+for arg in "${Args[@]}"; do
+
+    # get rid of leading ^
+    if istrue $exact; then
+	arg=${arg}
+    else
+	    case "$arg" in
+	    ^*)	arg=${arg#?};;
+	    *) arg="*$arg" ;;	# Pattern is not anchored at start
+	    esac
+    fi
+
+    # get rid of trailing $
+    if istrue $exact; then
+	arg="$arg"
+    else
+	case "$arg" in
+	*\$)	arg=${arg%?} ;;
+	*)	arg="$arg*" ;;
+	esac
+    fi
+
+    found=0	# Pattern not found yet
+    Patterns=
+    # Make a pattern for each element of PATH
+    for PathElem in "${Paths[@]}"; do
+	[ -z "$PathElem" ] && PathElem=.
+	Patterns="$Patterns $PathElem/$arg"
+    done
+
+    # Find all pattern matches that are executable regular files.
+    for file in $Patterns; do
+	if [ -x "$file" ] && [ -f "$file" ]; then
+	    echo "$file"
+	    found=1
+	fi
+    done
+    if [ $found = 0 ]; then
+	echo "$arg: not found." 1>&2
+    fi
+done

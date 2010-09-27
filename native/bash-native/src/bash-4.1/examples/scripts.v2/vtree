@@ -1,0 +1,137 @@
+#! /bin/bash
+#
+# original from:
+# vtree: visual directory tree
+# @(#) vtree.sh 1.1 91/07/01
+# 90/04 john h. dubois iii (john@armory.com)
+# 91/07/01 fixed bug that caused problems when dir given on command line,
+#          added some info to help, changed to 4-space indenting
+#
+# conversion to bash v2 syntax done by Chet Ramey
+#
+help=\
+"Syntax: vtree [startdir] [namelen=#] [linelen=#]
+If startdir is not specified, tree will start at current dir.
+
+namelen specifies the minimum number of characters of a directory name that
+are guaranteed to be printed.
+This is a tradeoff between the number of tree levels that can fit on a
+screen line and the number of chars of each dir name that can be printed.
+In most cases it will be possible to print more than namelen characters of
+the name (a name up to namelen+1 chars will always be printed in full),
+but in some cases truncation down to namelen chars will occur.
+If truncation occurs, a '>' is printed at the end of the name.
+namelen=8 (the default) typically causes about 5 dirs/1000 to be truncated.
+namelen=7 typically causes about 10 dirs/1000 to be truncated.
+namelen=8 will allow 6 full length dirs to be printed in 79 columns.
+namelen=7 will allow 7 full length dirs to be printed in 79 columns;
+
+linelen specifies the maximum number of characters to print on one screen
+line.  All characters beyond this are truncated.  The default is 1024.
+To avoid line wrap on an 80 column terminal with autowrap, use linelen=79.
+"
+
+for i in "$@"; do
+    case $i in
+    -h) echo "$help"; exit;;
+    *=*)
+        vars="$vars $i"
+        ;;
+    *)
+        if [ ! -x $i ] || [ ! -d $i ]; then     # arg must be a dir and executable
+            echo "$i: directory not accessible."
+            exit
+        fi
+        cd $i
+        ;;
+    esac
+    shift
+done
+
+pwd     # print path of root of tree
+
+# find all directories depth first; ignore permission errors
+find . -type d -print 2> /dev/null | \
+gawk -F/ '
+
+# Do this block for NR == 1 instead of BEGIN because command line var
+# assignments are not done until after BEGIN block is executed.
+NR == 1 {
+    if (namelen)
+        MaxLen = namelen;
+    else
+        MaxLen = 8;
+    if (!linelen)
+        linelen = 1024
+    HSpace = substr("              ",1,MaxLen);     # used to indent tree
+    n = 0;          # number of dirs found on one major branch
+}
+
+$0 != "." {     # do for every line produced by find except tree root dir
+    if (NF == 2 && n > 0)   # print major branch whenever a new one starts
+        list();
+    Depth[n] = NF - 1;      # record depth and name of dir
+     Name[n++] = $NF;
+}
+
+END {
+    list()  # print last major branch
+}
+
+function list() {
+    Line = Name[0];     # initialize first line of branch to be branch base
+    for (i = 1; i < n; i++) {   # for each name in major branch
+        if (Depth[i] == Depth[i-1] + 1)
+            AddHLink(); # if moving deeper into branch, use same line
+        else {
+            print substr(Line,1,linelen);   # last line is done; print it
+            Line = "";  # start new line
+            # print indentation, vert links, and vert/horiz links
+            for (d = 1; d < Depth[i] - 1; d++)  # for each level of indentation
+                # if a vert. link has been established for this level
+                if (VLink[d])
+                    Line = Line HSpace " |  ";
+                else        # print empty indentation
+                    Line = Line HSpace "    ";
+            # Print last part of vert. link
+            if (VLink[d] == i) {
+                VLink[d] = 0;   # mark level for no vert link
+                Line = Line HSpace " \\--";
+            }
+            else
+                Line = Line HSpace " |--";
+        }
+        Line = Line Name[i];    # Add dir name to line
+    }
+    print substr(Line,1,linelen);   # print last line of major branch
+    n = 0;      # reset name counter
+}
+
+function AddHLink() {
+    NDepth = Depth[i];  # Depth of this name
+    VLink[NDepth - 1] = 0;
+    # search until a name found at a level less than this one
+    for (j = i + 1; j < n && Depth[j] >= NDepth; j++)
+        # keep track of last name that VLink should connect to
+        if (Depth[j] == NDepth)
+            VLink[NDepth - 1] = j;
+    if (VLink[NDepth - 1]) {
+        NLine = substr(Line,1,(NDepth - 2) * (MaxLen + 4) + MaxLen + 1);
+        if (length(NLine) < length(Line))
+            Line = substr(NLine,1,length(NLine) - 1) ">"
+        else
+            Line = NLine;
+        Line = Line substr("--------------+--",
+            18 - ((NDepth - 1) * (MaxLen + 4) - length(Line)));
+    }
+    else {
+        NLine = substr(Line,1,(NDepth - 2) * (MaxLen + 4) + MaxLen + 3);
+        if (length(NLine) < length(Line))
+            Line = substr(NLine,1,length(NLine) - 1) ">"
+        else
+            Line = NLine;
+        Line = Line substr("-----------------",
+            1,(NDepth - 1) * (MaxLen + 4) - length(Line));
+    }
+}
+' $vars

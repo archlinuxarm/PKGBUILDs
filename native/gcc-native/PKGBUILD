@@ -1,0 +1,75 @@
+# Maintainer: Alexander Foremny <alexanderforemny@gmail.com>
+
+# Necessary to build:
+# ln -s /path/to/buildenv /usr/arm-softfloat-linux-gnueabi/sysroot
+
+pkgname=gcc-native
+pkgver=4.4.3
+pkgrel=1
+pkgdesc="The GNU Compiler Collection"
+arch=('i686' 'x86_64')
+group=(arm-crossdev)
+license=('GPL' 'LGPL')
+url="http://gcc.gnu.org"
+depends=('binutils-native' 'mpfr-native>=2.3.2' 'gmp-native' 'zlib-native' 'cloog-ppl-native>=0.15' 'gcc-libs-native')
+makedepends=('glibc-native' 'binutils-native' 'gcc>=3.4' 'gawk>=3.1.5' 'make>=3.80' 'mpfr>=2.3.2' 'gmp>=4.2' 'ppl>=0.10' 'cloog-ppl>=0.15' sed)
+source=(ftp://gcc.gnu.org/pub/gcc/releases/gcc-${pkgver}/gcc-{core,g++}-${pkgver}.tar.bz2
+        arm-cross-gcc.sh)
+md5sums=('054b66f315b3d04ad06544ce26e72365'
+         'cd179ec4f05ee17ce76464da25a2674c'
+         '96b06f90f0c5039826469e670078d61f')
+
+_PREFIX=/usr/arm-softfloat-linux-gnueabi
+_LIBDIR=/usr/lib/$CARCH
+_LINKER=$_LIBDIR/ld-linux.so.2
+
+build() {
+  if [ ! -L $_PREFIX/sysroot ]; then
+    error "sysroot link is missing."
+    error "Please ln -s /path/to/the/arch-arm-env ${_PREFIX}/sysroot"
+    exit 1
+  fi
+
+  cd $srcdir/gcc-$pkgver
+
+  mkdir $srcdir/gcc-build
+  cd $srcdir/gcc-build
+
+  export PATH="$PATH:$_PREFIX/bin"
+  CFLAGS="" CXXFLAGS="" ../gcc-${pkgver}/configure \
+      --prefix=$_PREFIX \
+      --build=$CHOST \
+      --host=$CHOST \
+      --target=arm-softfloat-linux-gnueabi \
+      --enable-languages=c,c++ \
+      --enable-shared \
+      --enable-threads=posix \
+      --enable-__cxa_atexit \
+      --disable-libstdcxx-pch \
+      --disable-multilib \
+      --with-arch=armv4t \
+      --with-sysroot=$_PREFIX/sysroot
+  make LDFLAGS="-Wl,-dynamic-linker,$_LINKER" || return 1
+  make DESTDIR=$pkgdir install || return 1
+
+  # Rename host triplet qualified binaries to standard names.
+  for n in gcc cpp gcov gccbug g++ c++; do
+    ln -s $_PREFIX/bin/arm-softfloat-linux-gnueabi-$n $pkgdir$_PREFIX/bin/$n
+  done
+
+  # Remove libiberty. This is provided by binutils-native.
+  rm -rf $pkgdir$_PREFIX/lib/libiberty.a
+
+  # Remove man and info pages and include files.
+  #rm -rf $pkgdir$_PREFIX/{man,info,arm-softfloat-linux-gnueabi}
+  rm -rf $pkgdir$_PREFIX/{man,info}
+
+  # Create sysroot symlink.
+  ln -sf / $pkgdir$_PREFIX/sysroot
+
+  # Copy profile.d script.
+  install -Dm755 $srcdir/arm-cross-gcc.sh \
+                 $pkgdir/etc/profile.d/arm-cross-gcc.sh
+}
+
+# vim: set ft=sh ts=2 sw=2 et:

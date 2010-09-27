@@ -1,0 +1,127 @@
+#! /bin/bash
+#
+# original from:
+#
+# @(#) p.ksh 1.1 93/11/09
+# p: page compressed & plain files in the order given 
+# 92/01/23 john h. dubois iii (john@armory.com)
+# 92/02/14 changed incorrect zpack to pcat
+# 92/02/16 added help
+# 92/10/11 search for file.Z and file.z if file not found
+# 92/10/18 pass options to pager
+# 93/11/09 Understand gzipped files too
+#          Wait after printing message about unreadable files
+#          Make less prompt include name of file being uncompressed
+#
+# conversion to bash v2 by Chet Ramey; renamed to pf
+#
+DefPager=/local/bin/less
+
+istrue()
+{
+	test 0 -ne "$1"
+}
+
+warn()
+{
+	echo "$@" 1>&2
+}
+
+if [ "$1" = -h ]; then
+    echo \
+"$0: page a file.
+Usage: $0 [pager-option ...] [filename ...]
+Files are paged by the program specified in the user's PAGER
+environment variable, or by $DefPager if PAGER is not set.
+If no filename is given, text to page is read from the standard input.
+If filenames are given, they are either paged directly, or unpacked/
+uncompressed and then paged.  Files are assumed to be in packed, compressed,
+or gzipped format if the filename ends in .Z, .z, or .gz respectively.
+If a filename that does not end in .Z, .z, or .gz is not found, it is
+searched for with one of those extensions attached.
+Each group of plain files is paged by a single instance of the pager.
+Each packed or compressed file is paged by a separate instance of the
+pager. 
+Initial arguments beginning with + or - are taken to be pager options and
+are passed to each instance of the pager.  
+If a pager option takes a value it should be given with the option as a
+single argument (with no space between the option and the value)."
+    exit 0
+fi
+
+# Get pager options
+while [ $# -gt 0 ]; do
+    case "$1" in
+    -*|+*)	Opts="$Opts $1" ; shift;;
+    *)	break;;
+    esac
+done
+
+[ -z "$PAGER" ] && PAGER=$DefPager
+
+# Read from stdin
+[ $# = 0 ] && exec $PAGER $Opts
+
+typeset -i filenum=0 badfile=0
+
+for file; do
+    if [ ! -r "$file" ]; then
+	case "$file" in
+	*.[Zz]|*.gz)
+		# Check if user specified a compressed file without giving its extension
+		for ext in Z z gz; do
+		    if [ -r "$file.$ext" ]; then
+			file="$file.$ext"
+			break
+		    fi
+		done;;
+	esac
+    fi
+    if [ ! -r "$file" ]; then
+	warn "$file: cannot read."
+	badfile=1
+    else
+	files[filenum]=$file
+	let filenum+=1
+    fi
+done
+
+if istrue $badfile && [ $filenum -gt 0 ]; then
+    echo -n "Press return to continue..." 1>&2
+    read
+fi
+
+unset plain
+
+for file in "${files[@]}"; do
+    case "$file" in
+    *.[zZ]|*.gz)
+	set -- Z zcat z pcat gz gzcat
+	# Find correct uncompression program
+	while [ $# -gt 0 ]; do
+	    case "$file" in
+	    *.$1)
+		# Page any uncompressed files so that they will be read
+		# in the correct order
+		[ ${#plain[@]} -gt 0 ] && $PAGER $Opts "${plain[@]}"
+		unset plain[*]
+		# If page is less, set the prompt to include the name of
+		# the file being uncompressed.  Escape the . in the extension
+		# because less treats is specially in prompts (other dots
+		# in filenames will still be mucked with).
+		case "$PAGER" in
+		*less)  Prompt="-P[${file%.$1}\\.$1] (%pb\\%)" ;;
+		*)	unset Prompt ;;
+		esac
+		$2 "$file" | $PAGER "$Prompt" $Opts
+		break
+	    esac
+	    shift 2
+	done
+	;;
+    *)	plain[${#plain[@]}]=$file;;
+    esac
+done
+
+# Page any uncompressed files that haven't been paged yet
+[ ${#plain[@]} -gt 0 ] && exec $PAGER $Opts "${plain[@]}"
