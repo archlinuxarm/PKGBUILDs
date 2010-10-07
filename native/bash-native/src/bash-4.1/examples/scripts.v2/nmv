@@ -1,0 +1,187 @@
+#! /bin/bash
+#
+# original from:
+# @(#) ncp.ksh,nmv.ksh 1.1 94/07/23
+# 92/01/18 john h. dubois iii (john@armory.com)
+# 92/01/31 added check for no args left after shifts
+# 92/02/17 added help
+# 92/02/25 remove path component from filename before tacking it onto dest.
+# 92/03/15 exec mv or cp
+# 93/07/13 Added -i
+# 93/09/29 Made abort if file exists optional.
+# 93/11/19 Exit before invoking mv if no files to move
+# 94/01/03 Added o option
+# 94/04/13 Added x option.
+#          Fixed appending of source filename, broken by earlier change.
+# 94/07/23 Append only the filename part of the source path.
+#
+# conversion to bash v2 syntax done by Chet Ramey
+
+false()
+{
+	return 1
+}
+
+true()
+{
+	return 0
+}
+
+phelp()
+{
+echo "$name: do a $cmd with extra checking and options.
+$Usage
+$name is used as a front end for $cmd to get the [icfo] options, and so
+that a trailing / will force the last component of the path to be
+interpreted as a directory, so that   $name foo bar/   will fail if bar is
+not an existing directory, instead of changing the name of foo to bar. 
+Effectively,  $name foo bar/   is short for  $name foo bar/foo
+Options: 
+-h prints this help.
+-c checks first for the existence of each file, and fails if it exists.
+-i is like -c except that if the file exists and stdin and stdout are a
+   tty, a query is printed and a reply is read; a file is overwritten only
+   if the reply begins with 'y'.
+-f unsets -c and -i (in case $cmd is aliased to $name).
+-o (overwrite only) checks that the named file(s) exist and fails for any
+   that do not.  It is the complement of the -c option.
+Whichever of [cifo] comes later on the command line determines the behaviour.
+Any of these options must come before any standard $cmd options."
+}
+
+# interactive: Attempt to overwrite file should result in interactive
+# query rather than automatic failure.
+# noover: Do not overwrite files (if interactive is true, query, else fail)
+# overwrite: Only overwriting is allowed, not creation of new files.
+# debug: Print debugging info.
+typeset interactive=false noover=false overwrite=false debug=false
+name=${0##*/}
+
+case "$name" in
+ncp|nmv) cmd=/bin/${name#?} ;;
+*) echo "$name: Must be invoked as ncp or nmv." 1>&2 ; exit 2;;
+esac
+
+Usage="Usage: $name [-cfhio] $cmd-cmd-line"
+
+while getopts :cfhiox opt; do
+    case $opt in
+    h) phelp; exit 0;;
+    x) debug=true ;;
+    c) noover=true ;;
+    i) noover=true ; interactive=true ;;
+    f) noover=false ; interactive=false ;;
+    o) overwrite=true ; noover=false ; interactive=false;;
+    +?) echo "$name: options should not be preceded by a '+'." 1>&2; exit 2;;
+    ?)  echo "$name: $OPTARG: bad option.  Use -h for help." 1>&2 ; exit 2;;
+    esac
+done
+ 
+# remove args that were options
+shift $((OPTIND - 1))
+
+if [ $# -lt 2 ]; then
+    echo -e "$Usage\nUse -h for help."
+    exit
+fi
+
+Check()
+{
+    if [ ! -f "$1" ] && $overwrite; then
+	echo "$name: $1: File does not exist." 1>&2
+	return 1
+    elif [ -f "$1" ] && $noover; then
+	if [ $interactive = false ] || [ ! -t 0 ] || [ ! -t 1 ]; then
+	    echo "$name: $1: File exists." 1>&2
+	    return 1
+	else
+	    while :; do
+		echo -n \
+"$name: $1: File exists.  Overwrite? (y)es/(n)o/(a)bort/(Y)es for all: " 1>&2
+		read reply
+		case "$reply" in
+		y*)
+		    echo "$name: Overwriting $1."
+		    return 0
+		    ;;
+		Y*)
+		    echo "$name: Overwriting $1."
+		    interactive=false
+		    noover=false
+		    return 0
+		    ;;
+		[nN]*)
+		    echo "$name: Skipping $2."
+		    return 1
+		    ;;
+		[aA]*)
+		    echo "$name: Aborting."
+		    exit 1
+		    ;;
+		*)
+		    echo "$name: Invalid response." 1>&2
+		    ;;
+		esac
+	    done
+	fi
+    else
+	return 0
+    fi
+}
+
+# i is the index of the filename being examined
+# lastarg is the index of the last filename before the dest directory name
+typeset -i i=0 lastarg=$(($#-1))
+
+# Sets argv[0..$#-1]
+argv=("$@")
+$debug && echo argv = "${argv[@]}" 1>&2
+dest=${argv[lastarg]}
+
+if $debug; then
+    echo \
+"interactive=$interactive noover=$noover overwrite=$overwrite debug=$debug
+lastarg=$lastarg dest=$dest name=$name cmd=$cmd
+files=$*" 1>&2
+fi
+
+if $noover || $overwrite; then
+    $debug && echo "checking for existance of directories..." 1>&2
+    # If the destination is not intended to be a directory...
+    if [ $# -eq 2 ] && [ ! -d "$dest" ]; then
+	Check "$dest" "$1" || exit 0		# No files to copy
+    else
+	while [ $i -lt $lastarg ]; do
+	    Check "$dest/${argv[i]##*/}" "${argv[i]}" || unset argv[i]
+	    let i+=1
+	done
+    fi
+fi
+
+[ ${#argv[@]} -lt 2 ] && exit 0
+
+# If only 2 args are given, mv/cp will not insist that the destination
+# be a directory, which we want if the destination ends in "/" or if
+# the original number of args was >2.
+# $# is still the original number of args.
+# Tack the file name onto the destination to force this behaviour.
+
+lastisslash()
+{
+	case "$1" in
+	*/)	return 0;;
+	*)	return 1;;
+	esac
+}
+
+if [ ${#argv[@]} = 2 ] && { lastisslash "$2" || [ $# -gt 2 ]; }; then
+    $debug && echo "Appending filename." 1>&2
+    # Don't know which element of argv[] holds the source filename, 
+    # since may have started with more than 1 source file & had some unset.
+    # So, compact args to make it easy to find the set one.
+    argv=("${argv[@]}")
+    argv[1]="${argv[1]}/${argv[0]##*/}"
+fi
+
+$debug && echo "Executing command: $cmd ${argv[@]}" 1>&2
+exec $cmd "${argv[@]}"

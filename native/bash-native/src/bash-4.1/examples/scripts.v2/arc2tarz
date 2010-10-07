@@ -1,0 +1,85 @@
+#! /bin/bash
+#
+# original from:
+# arc2tarz: convert arced file to tarred, compressed form.
+# @(#) arc2tarz.ksh 1.0 92/02/16
+# 91/03/28 john h. dubois iii (john@armory.com)
+# 92/02/16 added -h option for help
+#
+# conversion to bash v2 syntax by Chet Ramey
+
+unset ENV
+Usage="Usage: $0 arcfile [-hcg] [ tarzfile ]"
+
+phelp()
+{
+echo "$Usage
+arcfile is the name of an arc file to convert to tarred, compressed form. 
+The file must have a .arc extension, but only the base name needs to be
+given.  If no output file name is given, it will be created in the current
+directory with the name being the arcfile basename followed by .tar.EXT.
+If the -c option is given, compress will be used, and EXT will be Z.
+The default (also available with -g) is to use gzip, in which case EXT
+is gz.  If the basename is too long the extension may be truncated.  All
+uppercase letters in the names of files in the archive are moved to lowercase."
+}
+
+compress=gzip
+ext=gz
+
+while getopts "hcg" opt; do
+	case "$opt" in
+	h)	phelp; exit 0;;
+	c)	compress=compress; ext=Z;;
+	g)	compress=gzip ; ext=gz ;;
+	*)	echo "$Usage" 1>&2 ; exit 2;;
+	esac
+done
+
+shift $((OPTIND - 1))
+
+if [ $# = 0 ]; then
+	phelp
+	exit 0
+fi
+
+[ -z "$TMP" ] && tmpdir=/tmp/arc2tarz.$$ || tmpdir=$TMP/arc2tarz.$$
+
+case "$1" in
+*.arc)	arcfile=$1 ;;
+*)	arcfile=$1.arc ;;
+esac
+
+if [ ! -f $arcfile ] || [ ! -r $arcfile ]; then
+	echo "Could not open arc file \"$arcfile\"."
+	exit 1
+fi
+
+case "$arcfile" in
+/*)	;;
+*)	arcfile=$PWD/$arcfile ;;
+esac
+
+basename=${arcfile%.arc}
+basename=${basename##*/}
+[ $# -lt 2 ] && tarzname=$PWD/$basename.tar.$ext || tarzname=$2
+
+trap 'rm -rf $tmpdir $tarzname' 1 2 3 6 15
+
+mkdir $tmpdir
+cd $tmpdir
+echo "unarcing files..."
+arc -ie $arcfile
+
+# lowercase
+for f in *; do
+	new=$(echo $f | tr A-Z a-z)
+	if [ "$f" != "$new" ]; then
+		mv $f $new
+	fi
+done
+
+echo "tarring/compressing files..."
+tar cf - * | $compress > $tarzname
+cd -
+rm -rf $tmpdir

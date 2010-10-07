@@ -1,0 +1,281 @@
+#! /bin/bash
+#
+# original from:
+# fman: new man program
+# @(#) fman.ksh 1.5 94/04/16
+# 91/07/03 john h. dubois iii (john@armory.com)
+# 91/07/11 made it unpack man pages if neccessary
+# 91/07/16 fixed test for whether man file pattern was expanded
+# 92/01/21 made it read /etc/default/man to get section order,
+#          and only display the first section found.
+# 92/02/06 changed name to fman
+# 92/02/07 fixed bug in notfound
+# 92/02/13 incorporated changes from DOS version
+# 92/03/11 changed to use MANPATH from environment if set,
+#          and search all directories given in MANPATH
+# 92/03/15 exec pager or man w/o forking
+# 92/05/31 try using index if one exists
+# 92/10/01 Added "See also <other sections>"
+# 92/10/18 If PAGER is less, search for name of man page to make it easier
+#          to find information in man pages for multiple items
+# 92/11/11 Make it work for compressed files not listed in index;
+#          deal with man pages listed in index that don't exist.
+# 93/03/30 Fixed bug in MANPATH processing
+# 93/06/17 Include paths in "See also:" message if they would be needed
+#          to get to a man page.  Allow MANPATH spec on command line.
+# 93/07/09 Added -h and -e options.
+# 94/04/16 Added x option.
+#
+# conversion to bash v2 syntax done by Chet Ramey
+
+istrue()
+{
+	test 0 -ne "$1"
+}
+
+isfalse()
+{
+	test 0 -eq "$1"
+}
+
+# Finds all sections that man page $1 is in and puts them in the the
+# global array Sections[].  
+# The filename of each page is put in FileNames[] with the same index.
+# Global vars used:
+# patharr[] MANPATH directories.
+
+FindSectionsInIndex ()
+{
+    typeset index indexes section mpath page=$1
+    typeset -i i=0 NIndex=0
+
+    for mpath in "${patharr[@]}"; do
+	if [ -r $mpath/index ]; then
+	    indexes="$indexes $mpath/index"
+	    let NIndex+=1
+	fi
+    done
+    [ -z "$indexes" ] && return
+    # Make grep give filename
+    [ NIndex -lt 2 ] && indexes="$indexes /dev/null"
+    # set positional parameters to
+    # indexfile:searchname pagename section ...
+    # e.g.
+    # /usr/man/index:FP_OFF Routines DOS
+    set -- `grep "^$page[ 	]" $indexes`
+    while [ $# -gt 2 ]; do
+	FileNames[i]=${1%%index*}cat$3/$2.$3
+	Sections[i]=$3
+	shift 3
+	let i+=1
+    done
+}
+
+# Finds all sections that man page $1 is in by searching each man directory
+# in the order given in patharr[],
+# and puts them in the the global array Sections[].  
+# The filename of each page is put in FileNames[] with the same index.
+# Global vars used:
+# patharr[] MANPATH directories.
+FindSectionsInDirs ()
+{
+    local page=$1 mpath AllPaths Path
+    typeset -i i
+
+    for mpath in "${patharr[@]}"; do
+	AllPaths="$AllPaths $mpath/cat[0-9]*/$page.* $mpath/man[0-9]*/$page.*"
+    done
+
+    i=0
+    for Path in $AllPaths; do
+	istrue $debug && echo Path = $Path
+	case "$Path" in
+	*\*)	;;
+	*)
+	    # Remove compressed-file suffix to make FileNames be the same
+	    # as it is when built by FindSectionsInIndex()
+	    FileNames[i]=${Path%.[zZ]}
+	    Path=${Path%/*}
+	    Sections[i]=${Path##*/*.}
+	    let i+=1 ;;
+	esac
+    done
+}
+
+# FindSection: display man page.
+# Uses ordarr[] (built from $ORDER) to display the version of the man
+# page that occurs first in $ORDER.
+# Sections[] gives the sections that a man page was found in.
+# If the global variable "exist" is set to 1, nothing is displayed;
+# the function instead returns zero if a page is found, nonzero if not.
+# The filename of each page is in FileNames[] with the same index.
+# Global vars used:
+# Sections[], FileNames[], ordarr[]
+FindSection ()
+{
+    typeset -i NumPages i foundsec
+    local section OtherSec filename NPAGER=$PAGER POpt page=$1 Pat
+    local PageFile
+
+    NumPages=${#Sections[*]}	# Number of versions of man page found.
+    isfalse $NumPages && return 1 
+    case "$PAGER" in
+    *less)	Popt="-p$page" ;;
+    esac
+
+    # For each section in ORDER, determine if any man page was found in
+    # that section
+    for section in "${ordarr[@]}"; do
+	i=0
+	foundsec=0
+	while [ $i -lt $NumPages ]; do
+	    if [ "${Sections[i]}" = $section ]; then
+		# Found a man page from this section of ORDER
+		filename=${FileNames[i]}
+		if [ -z "$PageFile" ]; then
+		    PageFile=$filename
+		else
+		    if istrue $foundsec; then
+			OtherSec="$OtherSec$page(${filename%/*/*} $section) "
+		    else
+			OtherSec="$OtherSec$page($section) "
+		    fi
+		fi
+		foundsec=1
+		istrue $exist && return
+	    fi
+	    let i+=1
+	done
+    done
+    # No pages with the specified section found.
+    [ -z "$PageFile" ] && return 1
+    # Return if all we want to know is whether the man page exists.
+    [ "$exist" = 1 ] && return 0
+    if [ -z "$OtherSec" ]; then
+	NPAGER="exec $PAGER"
+    fi
+    if [ -r $PageFile ]; then
+	$NPAGER $POpt $PageFile
+    elif [ -r $PageFile.z ]; then
+	pcat $PageFile.z | $NPAGER $POpt
+    elif [ -r $PageFile.Z ]; then
+	zcat $PageFile.Z | $NPAGER $POpt
+    elif [ -f $PageFile.gz ]; then
+	gzip -dc $PageFile.gz | $NPAGER $POpt
+    else
+	echo "$PageFile: cannot open." 1>&2
+	OtherSec=
+	unset Sections[i]
+	let i+=1
+	continue
+    fi
+    echo "See also $OtherSec"
+    exit 0
+}
+
+phelp()
+{
+echo "$name: print man pages.
+$name locates and prints the specified manual pages from the online UNIX
+documentation.
+$Usage
+Options:
+-e: Determine whether the specified man page exists.  Nothing is printed;
+    $0 exits with a zero status if the page exists and a nonzero status if
+    it does not.
+-h: Print this help."
+}
+
+# main program
+
+typeset -i exist=0 debug=0
+
+name=${0##*/}
+Usage="Usage: $name [-eh] [[manpath] section] command-name"
+
+while getopts :hex opt; do
+    case $opt in
+    h) phelp; exit 0;;
+    e) exist=1 ;;
+    x) debug=1 ;;
+    +?) echo "$name: options should not be preceded by a '+'." 1>&2; exit 2;;
+    ?) 
+	echo "$name: $OPTARG: bad option.  Use -h for help." 1>&2 ; exit 2 ;;
+    esac
+done
+ 
+# remove args that were options
+shift $((OPTIND-1))
+
+if [ $# -lt 1 ]; then
+    echo -e "$Usage\nUse -h for help." 1>&2
+    exit
+fi
+
+P=$PAGER
+O=1:n:l:6:8:2:3:4:5:7:p:o
+T=$TERM
+M=${MANPATH:-/usr/local/man:/usr/man}
+[ -f /etc/default/man ] && . /etc/default/man
+[ -n "$P" ] && PAGER=$P
+[ -n "$O" ] && ORDER=$O
+[ -n "$T" ] && TERM=$T
+[ -n "$M" ] && MANPATH=$M
+
+case $# in
+0)  echo "No man page specified." ; exit 1;;
+1)  page=$1;;
+2)  ORDER=$(echo $1 | tr a-z A-Z) ; page=$2;;
+3)  MANPATH=$1 
+    [ -n "$2" ] && ORDER=$(echo $2 | tr a-z A-Z)
+    page=$3;;
+*)  echo "Too many arguments."; exit 1;;
+esac
+
+aargs=("$@")
+[ ! -t 0 ] && PAGER=cat
+
+OIFS=$IFS
+IFS=:
+patharr=($MANPATH)
+i=0
+for d in $MANPATH; do
+    for sec in $ORDER; do
+	ordarr[i]=$d/cat${sec}
+	let i+=1
+	ordarr[i]=$d/man${sec}
+	let i+=1
+    done
+done
+IFS=$OIFS
+
+istrue $debug && echo patharr = "${patharr[@]}"
+
+# if less or more is being used, remove multiple blank lines
+export LESS="-s $LESS"
+export MORE="-s $MORE"
+
+# Try using index
+FindSectionsInIndex "$page"
+# Exit 0 if a page was found and we're just testing for existence.
+FindSection "$page" && exit 0
+
+# Try searching directories
+unset Sections[*]
+FindSectionsInDirs "$page"
+FindSection "$page" && exit 0
+
+istrue $exist && exit 1
+
+# Try using man
+# If using more or less, make man run faster by letting more or less compress
+# multiple blank lines instead of rmb
+#case "$PAGER" in
+#*more|*less)	manopt=-b;;
+#esac
+
+#cmd=(man $manopt -p$PAGER "${aargs[@]}")
+export PAGER
+cmd=(man $manopt "${aargs[@]}")
+istrue $debug && echo "$name: running ${cmd[*]}" 1>&2
+exec "${cmd[@]}"

@@ -1,0 +1,187 @@
+#! /bin/bash
+#
+# original from:
+# @(#) pages.sh 1.0 92/09/26
+# 92/09/05 John H. DuBois III (jhdiii@armory.com)
+# 92/09/26 Added help
+#
+# conversion to bash v2 syntax by Chet Ramey
+
+Usage="$0 [-h] [-n lines/page] page-ranges [file ...]"
+
+usage()
+{
+	echo "$Usage" 1>&2
+}
+
+phelp()
+{
+echo "$0: print selected pages.
+Usage: $Usage
+
+If no file names are given, the standard input is read.
+
+The input is grouped into pages and a selected subset of them is printed.
+Formfeeds are acted on correctly.
+
+If the output device does automatic line wrap, lines that longer than
+the width of the output device will result in incorrect output.
+The first non-option argument is a list of pages to print.
+
+Pages are given as a list of ranges separated by commas.
+A range is either one number, two numbers separted by a dash,
+or one number followed by a dash.  A range consisting of one
+number followed by a dash extends to the end of the document.
+
+Options: 
+-n sets the number of lines per page to n.  The default is 66."
+}
+
+while getopts "n:h" opt; do
+	case "$opt" in
+	n)	LinesPerPage=$OPTARG;;
+	h)	phelp; exit 0;;
+	*)	usage; exit 2;;
+	esac
+done
+
+shift $(($OPTIND - 1))
+
+if [ $# -eq 0 ]; then
+    echo $0: no page ranges given. 1>&2
+    usage
+    exit 1
+fi
+
+PageList=$1
+shift
+
+gawk "
+BEGIN {
+    PageList = \"$PageList\"; LinesPerPage = \"$LinesPerPage\""'
+    if (LinesPerPage == "")
+	LinesPerPage = 66
+    else
+	if (LinesPerPage !~ "[1-9][0-9]*")
+	    ErrExit("Bad value for lines per page: " LinesPerPage)
+    LinesPerPage += 0
+    NumRanges = split(PageList,Ranges,",")
+    for (i = 1; i <= NumRanges; i++) {
+	if ((StartRange = EndRange = Ranges[i]) !~ "^[0-9]+(-([0-9]+)?)?$")
+	    ErrExit("Bad range \"" StartRange "\"")
+	sub("-.*","",StartRange)
+	sub(".*-","",EndRange)
+	if (EndRange == "")
+	    EndRange = 2 ^ 30
+	# Force StartRange and EndRange to be numeric values
+	if ((StartRange += 0) == 0 || (EndRange += 0) == 0)
+	    ErrExit("Invalid page number \"0\" in range " Ranges[i])
+	if (StartRange > EndRange)
+	    ErrExit("Start page comes after end page in range " Ranges[i])
+	TmpRangeStarts[i] = StartRange
+	TmpRangeEnds[i] = EndRange
+    }
+
+    # Sort ranges
+    qsort(TmpRangeStarts,k)
+    RangeEnds[0] = 0
+    for (i = 1; i <= NumRanges; i++) {
+	RangeEnds[i] = TmpRangeEnds[k[i]]
+	if ((RangeStarts[i] = TmpRangeStarts[k[i]]) <= RangeEnds[i - 1])
+	    ErrExit("Overlapping ranges: " Ranges[k[i]] "," Ranges[k[i - 1]])
+    }
+
+    RangeNum = LineNum = PageNum = 1
+    InRange = In(PageNum,RangeStarts[RangeNum],RangeEnds[RangeNum])
+    FS = "\014"
+}
+
+{
+    if (LineNum > LinesPerPage)
+	NewPage()
+    if (InRange)
+	printf "%s",$1
+    # Deal with formfeeds
+    for (i = 2; i <= NF; i++) {
+	if (InRange)
+	    printf "\014"
+	NewPage()
+	if (InRange)
+	    printf "%s",$i
+    }
+    if (InRange)
+	print ""
+    LineNum++
+}
+
+function NewPage() {
+    PageNum++
+    LineNum = 1
+    # At the start of each page, check whether we are in a print range
+    WereInRange = InRange
+    InRange = In(PageNum,RangeStarts[RangeNum],RangeEnds[RangeNum])
+    # If last page was in range and we no longer are, move to next range
+    if (WereInRange && !InRange && ++RangeNum > NumRanges)
+	exit
+}
+
+function In(a,Min,Max) {
+    return (Min <= a && a <= Max)
+}
+
+function ErrExit(S) {
+    print S > "/dev/stderr"
+    Err = 1
+    exit 1
+}
+
+# Arr is an array of values with arbitrary indices.
+# Array k is returned with numeric indices 1..n.
+# The values in k are the indices of array arr, 
+# ordered so that if array arr is stepped through
+# in the order arr[k[1]] .. arr[k[n]], it will be stepped
+# through in order of the values of its elements.
+# The return value is the number of elements in the array (n).
+function qsort(arr,k,  ArrInd,end) {
+    end = 0
+    for (ArrInd in arr)
+	k[++end] = ArrInd;
+    qsortseg(arr,k,1,end);
+    return end
+}
+
+function qsortseg(arr,k,start,end,  left,right,sepval,tmp,tmpe,tmps) {
+    # handle two-element case explicitely for a tiny speedup
+    if ((end - start) == 1) {
+	if (arr[tmps = k[start]] > arr[tmpe = k[end]]) {
+	    k[start] = tmpe
+	    k[end] = tmps
+	}
+	return
+    }
+    left = start;
+    right = end;
+    sepval = arr[k[int((left + right) / 2)]]
+    # Make every element <= sepval be to the left of every element > sepval
+    while (left < right) {
+	while (arr[k[left]] < sepval)
+	    left++
+	while (arr[k[right]] > sepval)
+	    right--
+	if (left < right) {
+	    tmp = k[left]
+	    k[left++] = k[right]
+	    k[right--] = tmp 
+	}
+    }
+    if (left == right)
+	if (arr[k[left]] < sepval)
+	    left++
+	else
+	    right--
+    if (start < right)
+	qsortseg(arr,k,start,right)
+    if (left < end)
+	qsortseg(arr,k,left,end)
+}
+' "$@"

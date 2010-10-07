@@ -1,0 +1,80 @@
+#! /bin/bash
+#
+# original from:
+# @(#) untar.ksh 1.0 93/11/10
+# 92/10/08 john h. dubois iii (john@armory.com)
+# 92/10/31 make it actually work if archive isn't in current dir!
+# 93/11/10 Added pack and gzip archive support
+#
+# conversion to bash v2 syntax done by Chet Ramey
+
+phelp()
+{
+echo \
+"$name: extract tar archives into directories, uncompressing if neccessary.
+Usage: $name archive[.tar[.[Z|gz]]] ..
+If an archive name given does not end in .tar, .tar.Z, or .tar.gz, it is
+searched for first with .tar added, then .tar.Z, and then .tar.gz added. 
+The real filename must end in either .tar, .tar.Z, or .tar.gz.  A
+directory with the name of the archive is created in the current directory
+(not necessarily the directory that the archive is in) if it does not
+exist, and the the contents of the archive are extracted into it. 
+Absolute pathnames in tarfiles are suppressed."
+}
+
+if [ $# -eq 0 ]; then
+    phelp
+    exit 1
+fi
+
+name=${0##/}
+OWD=$PWD
+
+for file; do
+    cd $OWD
+    case "$file" in
+    *.tar.Z)	ArchiveName=${file%%.tar.Z} zcat=zcat;;
+    *.tar.z)	ArchiveName=${file%%.tar.z} zcat=pcat;;
+    *.tar.gz)	ArchiveName=${file%%.tar.gz} zcat=gzcat;;
+    *)	ArchiveName=$file
+	for ext in "" .Z .z .gz; do
+	    if [ -f "$file.tar$ext" ]; then
+		file="$file.tar$ext"
+		break
+	    fi
+	done
+	if [ ! -f "$file" ]; then
+	    echo "$file: cannot find archive." 1>&2
+	    continue
+	fi
+	;;
+    esac
+    if [ ! -r "$file" ]; then
+	echo "$file: cannot read." >&2
+	continue
+    fi
+    DirName=${ArchiveName##*/}
+    [ -d "$DirName" ] || {
+	mkdir "$DirName" || {
+		echo "$DirName: could not make archive directory." 1>&2
+		continue
+	}
+    }
+
+    cd $DirName || {
+	echo "$name: cannot cd to $DirName" 1>&2
+	continue
+    }
+
+    case "$file" in
+    /*)	;;
+    *) file=$OWD/$file ;;
+    esac
+
+    echo "Extracting archive $file into directory $DirName..."
+    case "$file" in
+    *.tar.Z|*.tar.z|*.tar.gz) $zcat $file | tar xvf -;;
+    *.tar) tar xvf $file;;
+    esac
+    echo "Done extracting archive $file into directory $DirName."
+done

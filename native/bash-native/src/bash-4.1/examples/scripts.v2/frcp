@@ -1,0 +1,288 @@
+#! /bin/bash
+#
+# original from:
+#
+# @(#) frcp.ksh 2.2 93/11/14
+# 92/06/29 john h. dubois iii (john@armory.com)
+# 92/10/14 Cleaned up, improved, added -d and -r options
+# 92/11/11 Made work with a dest of '.'
+# 93/07/09 Added -l and -n options, & login as anonymous if no .netrc entry
+# 93/11/14 Use either passwd or password in .netrc, since ftp does.
+#
+# conversion to bash v2 syntax by Chet Ramey
+#
+# frcp: ftp front end with rcp-like syntax.
+# Note: requires any machine names given to be listed with
+#       user and password in .netrc.  If not, anonymous FTP is
+#	done.
+#
+# full path to ftp binary
+if [ -x /usr/bin/ftp ]; then
+	FTP=/usr/bin/ftp;
+elif [ -x /usr/ucb/ftp ]; then
+	FTP=/usr/ucb/ftp
+else
+	FTP=ftp
+fi
+
+istrue()
+{
+	test 0 -ne "$1"
+}
+isfalse()
+{
+	test 0 -eq "$1"
+}
+
+# For each filename given, put the filename in filename[n]
+# and the machine it is on in machine[n].
+function SplitNames {
+    typeset file
+    typeset -i i=1
+
+    unset filename[*] machine[*]
+    for file; do
+	case "$file" in
+	*:*) machine[i]=${file%%:*} ;;
+	*)   machine[i]=$LocalMach ;;
+	esac
+	filename[i]=${file#*:}
+	let i+=1
+    done
+}
+
+function verboseprint {
+    echo "$@"
+    echo "$@" 1>&2
+}
+
+function MakeDir {
+    OFS=$IFS
+    local IFS=/ dir component
+
+    case "$1" in
+    /*)	;;
+     *) dir=.
+    esac
+    set -- $1
+    IFS=$OFS
+    for component; do
+	dir=$dir/$component
+	if [ ! -d "$dir" ]; then
+	    if mkdir "$dir"; then :; else
+		echo "Could not make directory $dir." >&2
+		return 1
+	    fi
+	fi
+    done
+    return 0
+}
+
+lastisdot ()
+{
+	case "$1" in
+	*/.|*/..)	return 0;;
+	*)	return 1;;
+	esac
+}
+
+# CopyFiles: issue ftp(TC) commands to copy files.
+# Usage: CopyFiles [sourcemachine:]sourcepath ... [destmachine:]destpath
+# Global vars:
+# Uses LocalMach (should be name of local machine)
+# Sets global arrs machine[]/filename[]
+function CopyFiles {
+    unset machine[*] filename[*]
+
+    SplitNames "$@"	# split names into filename[1..n] and machine[1..n]
+
+    local DestMach=${machine[$#]}	# Machine to copy files to
+    local DestPath=${filename[$#]} 	# Destination file/dir
+
+    unset machine[$#] filename[$#]
+
+    [ -z "$DestPath" ] && DestPath=.	# dest was given as machine:
+
+    # Try to determine if destination should be a directory
+    # so that it can be forced to be a directory.
+
+    case "$DestPath" in
+    */)	;;	# don't add / if trailing / already present
+    *)  if [ $# -gt 2 ] || # if more than two args given, last must be a dir
+	    # If dest in on local machine, check whether it is a directory
+    	   [ $DestMach = $LocalMach ] && [ -d "$DestPath" ] || 
+	    # If dest ends with . or .., it is a directory
+	   lastisdot "$DestPath"
+	then
+		DestPath=$DestPath/
+	fi ;;
+    esac
+
+    # If one of the above tests made us think dest is a directory,
+    # but it isn't, complain
+    case "$DestPath" in
+    */)	if [ "$DestMach" = "$LocalMach" ] && [ ! -d "$DestPath" ]; then
+		echo "Destination is not a directory." 1>&2
+		exit 1
+        fi ;;
+    esac
+
+    DoCopy "$DestMach" "$DestPath"
+}
+
+# Usage: OpenMachine machine-name
+# Emits login sequence or doesn't, depending on .netrc file and global
+# variables anon and noanon
+OpenMachine ()
+{
+    local machine=$1 netrc=$HOME/.netrc user= password=
+
+    if isfalse $anon && [ -r $netrc ]; then
+	set -- $(gawk '
+	/machine (.* )?'"$machine"'($| )/,/^ *$/ {
+	    Fields[$1] = $2
+	    if ("passwd" in Fields)
+		Fields["password"] = Fields["passwd"]
+	    if ("login" in Fields && "password" in Fields) {
+		print Fields["login"] " " Fields["password"]
+		exit
+	    }
+	}
+	' $netrc )
+	user=$1
+	password=$2
+    fi
+    if [ -z "$password" ]; then
+	if istrue $noanon; then
+	    echo "No .netrc entry for machine $machine" 1>&2
+	    exit 1
+	fi
+	user=anonymous
+	password=$USER@$LocalMach
+    fi
+    verboseprint open $machine
+    echo user $user "*******" 1>&2
+    echo user $user $password
+}
+
+# Usage: DoCopy destination-machine destination-path
+# Copies the files in global arrs machine[]/filename[] to the given dest
+# Global vars:
+# Uses machine[], filename[], LocalMach, check
+DoCopy ()
+{
+    local DestMach=$1
+    local DestPath=$2
+    local OpenMach	# Machine that connection is currently open to
+    local OWD=$PWD SourceMach SourceFile
+    local FileName
+    typeset -i i=1
+
+    while [ $i -le ${#machine[*]} ]; do
+	istrue $check && verboseprint "runique"
+
+	SourceMach=${machine[i]}
+	SourceFile=${filename[i]}
+
+	DestFile=$DestPath
+	# if DestPath is a dir,
+	# add source filename to it without source path
+	case "$DestFile" in
+	*/)	DestFile=$DestFile${SourceFile##*/} ;;
+	esac
+
+	if [ $SourceMach = $LocalMach ]; then
+	    if [ $DestMach != "$OpenMach" ]; then
+		OpenMachine $DestMach
+		OpenMach=$DestMach
+	    fi
+	    verboseprint put $SourceFile $DestFile
+	elif [ $DestMach = $LocalMach ]; then
+	    if istrue $check && [ -f "$DestFile" ]; then
+		echo "$DestFile already exists." 1>&2
+		continue
+	    fi
+	    # If destination is on local machine,
+	    # the dest will be a full dir/filename
+	    if istrue $createdirs; then
+		MakeDir "${DestFile%/*}" || continue
+	    fi
+	    if [ $SourceMach != "$OpenMach" ]; then
+		OpenMachine $SourceMach
+		OpenMach=$SourceMach
+	    fi
+	    # If source filename has wildcards ([, ], *, ?) do an mget
+	    case "$SourceFile" in
+	    \[*\]|*\**|*\?*)
+		verboseprint lcd "$DestFile"
+		verboseprint mget "$SourceFile"
+		verboseprint lcd $OWD ;;
+	    *)  verboseprint get "$SourceFile" "$DestFile" ;;
+	    esac
+	else
+	    echo "Neither source machine \"$SourceMach\" "\
+"nor destination machine \"$DestMach\" is local." 1>&2
+	fi
+	let i+=1
+    done
+}
+
+# Start of main program
+name=${0##*/}
+
+if [ "$1" = -h ]; then
+    echo \
+"$name: do ftp transfers using rcp-style parameters.
+Usage: $name <source> <destpath>   or   $name <source> [<source> ...] <destdir>
+At least one of <source> and <destpath> must be the local system.
+A remote filename is given as machinename:filename
+If remote filenames contain wildcards, they will be globbed on the remote
+machine.  Make sure they are quoted when $name is invoked.
+If the invoking user's .netrc file (see ftp(TC)) contains an entry for the
+remote system with a login and password supplied, $name will log in using
+the given login and password.  If not, $name will login in as user
+anonymous and with the user@localsystem as the password.
+Options:
+-c: check: do not overwrite files.
+-d: create directories as needed.
+-f: force: overwrite files (default).
+-h: print this help.
+-l: fail if there is no entry with login and password for the remote system,
+    instead of logging in as anonymous.
+-n: log in as anonymous even if there is an entry for the remote system in
+    the user's .netrc file.
+-r: read source/dest filename pairs from the standard input,
+    one pair per line, and copy files accordingly."
+    exit 0
+fi
+
+typeset -i check=0 createdirs=0 readinput=0 anon=0 noanon=0
+
+while getopts :cdflnr Option
+do
+    case "$Option" in
+    c) check=1;;
+    d) createdirs=1;;
+    f) check=0;;
+    l) noanon=1;;
+    n) anon=1;;
+    r) readinput=1;;
+    \?) echo "$OPTARG: invalid option."; exit 1;;
+    esac
+done
+
+shift $((OPTIND-1))
+
+LocalMach=`hostname` 
+
+if istrue $readinput; then
+    while read line; do
+	CopyFiles $line
+    done | $FTP -nv
+else
+    if [ $# -lt 2 ]; then
+	echo "$name: Not enough arguments.  Use -h for help." 1>&2
+	exit
+    fi
+    CopyFiles "$@" | $FTP -nv
+fi

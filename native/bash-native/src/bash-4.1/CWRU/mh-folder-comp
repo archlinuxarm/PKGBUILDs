@@ -1,0 +1,449 @@
+From jwe@che.utexas.edu Wed Sep 21 17:23:40 1994
+Flags: 10
+Return-Path: jwe@che.utexas.edu
+Received: from po.CWRU.Edu (root@po.CWRU.Edu [129.22.4.2]) by odin.INS.CWRU.Edu with ESMTP (8.6.8.1+cwru/CWRU-2.1-ins)
+	id RAA04010; Wed, 21 Sep 1994 17:23:39 -0400 (from jwe@che.utexas.edu for <chet@odin.INS.CWRU.Edu>)
+Received: from life.ai.mit.edu (life.ai.mit.edu [128.52.32.80]) by po.CWRU.Edu with SMTP (8.6.8.1+cwru/CWRU-2.2)
+	id RAA02121; Wed, 21 Sep 1994 17:23:28 -0400 (from jwe@che.utexas.edu for <chet@po.cwru.edu>)
+Received: from schoch.che.utexas.edu by life.ai.mit.edu (4.1/AI-4.10) for chet@po.cwru.edu id AA09989; Wed, 21 Sep 94 17:23:17 EDT
+Received: from localhost (jwe@localhost) by schoch.che.utexas.edu (8.6.8.1/8.6) with SMTP id QAA05737; Wed, 21 Sep 1994 16:22:01 -0500
+Message-Id: <199409212122.QAA05737@schoch.che.utexas.edu>
+To: march@tudor.com
+Cc: bug-bash@prep.ai.mit.edu
+Subject: Re: Completion feature possible?
+In-Reply-To: Your message of 21 Sep 94 13:30:22 EDT
+Date: Wed, 21 Sep 94 16:22:00 EDT
+From: John Eaton <jwe@che.utexas.edu>
+
+Gregory F. March <march@tudor.com> wrote:
+
+: I was having a discussion about MH with one of my friends the other
+: day and I got to thinking that the +folder/subfolder scheme for naming
+: mail folders is a real pain because completion doesn't work on
+: them. Someone then mentioned that zsh (I think) has the ability to
+: specify how to complete (I guess where to look for the files) for
+: different prefixes. Bash right now knows about '@', '~', and '$' (any
+: others?). It would be really helpful if one could define something
+: like:
+: 
+: 	completion '+' "$HOME/Mail"
+: 
+: in a config file someplace. Would this be easy? Is there a list of
+: TODO item that someone might want to add this to?
+
+It would be nice to have a general completion feature like this.
+
+Until that happens, maybe you will find the following patch useful.
+It makes MH folder name completion work with bash.  The diffs are
+relative to version 1.14.2.
+
+I realize that changes to readline.c and and complete.c are not good
+since they add some MH-specific stuff to the readline code and not to
+bash, but when I first wrote this, I had no idea what else to do.
+
+Chet, would you consider adding this if it were cleaned up a bit?
+Made optional with cpp conditionals?
+
+This feature has been very useful to me for the last several years
+(since about 1.05 or 1.06, I think).
+
+Thanks,
+
+--
+John W. Eaton      | 4.3BSD is not perfect.  -- Leffler, et al. (1989).
+jwe@che.utexas.edu |
+
+
+-------------------------------cut here-------------------------------
+diff -rc bash-1.14.2/bashline.c bash-1.14.2.local/bashline.c
+*** bash-1.14.2/bashline.c	Wed Aug  3 09:32:45 1994
+--- bash-1.14.2.local/bashline.c	Wed Sep 21 15:39:04 1994
+***************
+*** 58,63 ****
+--- 58,64 ----
+  static char *hostname_completion_function ();
+  static char *command_word_completion_function ();
+  static char *command_subst_completion_function ();
++ static char *mh_folder_completion_function ();
+  
+  static void snarf_hosts_from_file (), add_host_name ();
+  static void sort_hostname_list ();
+***************
+*** 90,95 ****
+--- 91,98 ----
+    bash_complete_username_internal (),
+    bash_complete_hostname (), bash_possible_hostname_completions (),
+    bash_complete_hostname_internal (),
++   bash_complete_mh_folder (), bash_possible_mh_folder_completions (),
++   bash_complete_mh_folder_internal (),
+    bash_complete_variable (), bash_possible_variable_completions (),
+    bash_complete_variable_internal (),
+    bash_complete_command (), bash_possible_command_completions (),
+***************
+*** 134,140 ****
+    rl_terminal_name = get_string_value ("TERM");
+    rl_instream = stdin;
+    rl_outstream = stderr;
+!   rl_special_prefixes = "$@";
+  
+    /* Allow conditional parsing of the ~/.inputrc file. */
+    rl_readline_name = "Bash";
+--- 137,143 ----
+    rl_terminal_name = get_string_value ("TERM");
+    rl_instream = stdin;
+    rl_outstream = stderr;
+!   rl_special_prefixes = "$@+";
+  
+    /* Allow conditional parsing of the ~/.inputrc file. */
+    rl_readline_name = "Bash";
+***************
+*** 193,198 ****
+--- 196,207 ----
+    rl_bind_key_in_map ('@', bash_possible_hostname_completions,
+  		      emacs_ctlx_keymap);
+  
++   rl_add_defun ("complete-mh-folder", bash_complete_mh_folder, META('+'));
++   rl_add_defun ("possible-mh-folder-completions",
++ 		bash_possible_mh_folder_completions, -1);
++   rl_bind_key_in_map ('+', bash_possible_mh_folder_completions,
++ 		      emacs_ctlx_keymap);
++ 
+    rl_add_defun ("complete-variable", bash_complete_variable, -1);
+    rl_bind_key_in_map ('$', bash_complete_variable, emacs_meta_keymap);
+    rl_add_defun ("possible-variable-completions",
+***************
+*** 656,661 ****
+--- 665,677 ----
+    if (!matches && *text == '@')
+      matches = completion_matches (text, hostname_completion_function);
+  
++   /* Another one.  Why not?  If the word starts in '+', then look for
++      matching mh folders for completion first. */
++   if (!matches && *text == '+')
++     {
++       matches = completion_matches (text, mh_folder_completion_function);
++     }
++ 
+    /* And last, (but not least) if this word is in a command position, then
+       complete over possible command names, including aliases, functions,
+       and command names. */
+***************
+*** 1077,1082 ****
+--- 1093,1185 ----
+      return ((char *)NULL);
+  }
+  
++ /* How about a completion function for mh folders? */
++ static char *
++ mh_folder_completion_function (text, state)
++      int state;
++      char *text;
++ {
++   extern int rl_filename_completion_desired;
++ 
++   extern char *get_mh_path ();
++ 
++   static char *mh_path = (char *)NULL;
++   static int len;
++   static int istate;
++   static char *val;
++   char *hint;
++ 
++   static char *mh_folder_hint = (char *)NULL;
++ 
++   /* If we don't have any state, make some. */
++   if (!state)
++     {
++       val = (char *)NULL;
++ 
++       if (mh_path)
++ 	free (mh_path);
++ 
++       mh_path = get_mh_path ();
++       if (!mh_path && !(hint[1] == '/' || hint[1] == '.'))
++ 	return ((char *)NULL);
++ 
++       len = strlen (mh_path);
++     }
++ 
++   if (mh_folder_hint)
++     free (mh_folder_hint);
++ 
++   hint = text;
++   if (*hint == '+')
++     hint++;
++ 
++   mh_folder_hint = (char *)xmalloc (2 + len + strlen (hint));
++   if (*hint == '/' || *hint == '.') {
++     len = -1;
++     sprintf (mh_folder_hint, "%s", hint);
++   } else
++     sprintf (mh_folder_hint, "%s/%s", mh_path, hint);
++ 
++   istate = (val != (char *)NULL);
++ 
++  again:
++   val = filename_completion_function (mh_folder_hint, istate);
++   istate = 1;
++ 
++   if (!val)
++     {
++       return ((char *)NULL);
++     }
++   else
++     {
++       char *ptr = val + len + 1, *temp;
++       struct stat sb;
++       int status = stat (val, &sb);
++ 
++       if (status != 0)
++ 	return ((char *)NULL);
++ 
++       if ((sb.st_mode & S_IFDIR) == S_IFDIR)
++ 	{
++ 	  temp = (char *)xmalloc (2 + strlen (ptr));
++ 	  *temp = '+';
++ 	  strcpy (temp + 1, ptr);
++ 
++ 	  free (val);
++ 	  val = "";
++ 
++ 	  rl_filename_completion_desired = 1;
++ 
++ 	  return (temp);
++ 	}
++       else
++ 	{
++ 	  free (val);
++ 	}
++       goto again;
++     }
++ }
++ 
+  /* History and alias expand the line. */
+  static char *
+  history_expand_line_internal (line)
+***************
+*** 1628,1633 ****
+--- 1731,1773 ----
+  {
+    bash_specific_completion
+      (what_to_do, (Function *)username_completion_function);
++ }
++ 
++ static void
++ bash_complete_mh_folder (ignore, ignore2)
++      int ignore, ignore2;
++ {
++   bash_complete_mh_folder_internal (TAB);
++ }
++ 
++ static void
++ bash_possible_mh_folder_completions (ignore, ignore2)
++      int ignore, ignore2;
++ {
++   bash_complete_mh_folder_internal ('?');
++ }
++ 
++ static void
++ bash_complete_mh_folder_internal (what_to_do)
++      int what_to_do;
++ {
++   Function  *orig_func;
++   CPPFunction *orig_attempt_func;
++   char *orig_rl_completer_word_break_characters;
++   extern char *rl_completer_word_break_characters;
++ 
++   orig_func = rl_completion_entry_function;
++   orig_attempt_func = rl_attempted_completion_function;
++   orig_rl_completer_word_break_characters = rl_completer_word_break_characters;
++   rl_completion_entry_function = (Function *)mh_folder_completion_function;
++   rl_attempted_completion_function = (CPPFunction *)NULL;
++   rl_completer_word_break_characters = " \t\n\"\'";
++ 
++   rl_complete_internal (what_to_do);
++ 
++   rl_completion_entry_function = orig_func;
++   rl_attempted_completion_function = orig_attempt_func;
++   rl_completer_word_break_characters = orig_rl_completer_word_break_characters;
+  }
+  
+  static void
+Only in bash-1.14.2.local: bashline.c.orig
+diff -rc bash-1.14.2/lib/readline/complete.c bash-1.14.2.local/lib/readline/complete.c
+*** bash-1.14.2/lib/readline/complete.c	Tue Jul 26 12:59:57 1994
+--- bash-1.14.2.local/lib/readline/complete.c	Wed Sep 21 15:41:19 1994
+***************
+*** 733,751 ****
+  	      if (rl_filename_completion_desired)
+  		{
+  		  struct stat finfo;
+! 		  char *filename = tilde_expand (matches[0]);
+  
+! 		  if ((stat (filename, &finfo) == 0) && S_ISDIR (finfo.st_mode))
+  		    {
+! 		      if (rl_line_buffer[rl_point] != '/')
+! 			rl_insert_text ("/");
+  		    }
+! 		  else
+  		    {
+! 		      if (rl_point == rl_end)
+! 			rl_insert_text (temp_string);
+  		    }
+- 		  free (filename);
+  		}
+  	      else
+  		{
+--- 733,768 ----
+  	      if (rl_filename_completion_desired)
+  		{
+  		  struct stat finfo;
+! 		  char *tilde_expand ();
+! 		  char *plus_expand ();
+! 		  char *filename = (char *) NULL;
+  
+! 		  switch (*matches[0])
+  		    {
+! 		    case '+':
+! 		      filename = plus_expand (matches[0]);
+! 		      break;
+! 		    case '~':
+! 		    default:
+! 		      filename = tilde_expand (matches[0]);
+! 		      break;
+  		    }
+! 
+! 		  if (filename)
+  		    {
+! 		      if ((stat (filename, &finfo) == 0)
+! 			  && S_ISDIR (finfo.st_mode))
+! 			{
+! 			  if (rl_line_buffer[rl_point] != '/')
+! 			    rl_insert_text ("/");
+! 			}
+! 		      else
+! 			{
+! 			  if (rl_point == rl_end)
+! 			    rl_insert_text (temp_string);
+! 			}
+! 		      free (filename);
+  		    }
+  		}
+  	      else
+  		{
+Only in bash-1.14.2.local/lib/readline: diffs
+diff -rc bash-1.14.2/lib/readline/readline.c bash-1.14.2.local/lib/readline/readline.c
+*** bash-1.14.2/lib/readline/readline.c	Fri Aug 12 12:47:46 1994
+--- bash-1.14.2.local/lib/readline/readline.c	Wed Sep 21 15:36:07 1994
+***************
+*** 23,28 ****
+--- 23,29 ----
+  #define READLINE_LIBRARY
+  
+  #include <stdio.h>
++ #include <string.h>
+  #include <sys/types.h>
+  #include <fcntl.h>
+  #if !defined (NO_SYS_FILE)
+***************
+*** 3518,3523 ****
+--- 3519,3616 ----
+  }
+  
+  #endif /* TEST */
++ 
++ #define cr_whitespace(c) ((c) == '\r' || (c) == '\n' || whitespace(c))
++ 
++ char *
++ get_mh_path ()
++ {
++   static FILE *fp = (FILE *)NULL;
++   char buf[512];      /* XXX */
++   char profile[512];  /* XXX */
++   char *bp;
++   char *temp_home;
++   char *temp_path;
++ 
++   temp_home = (char *)getenv ("HOME");
++   if (!temp_home)
++     return ((char *)NULL);
++ 
++   strcpy (profile, temp_home);
++   strcat (profile, "/.mh_profile");
++ 
++   if (fp)
++     fclose (fp);
++ 
++   fp = fopen (profile, "r");
++   if (fp == (FILE *)NULL)
++     return ((char *)NULL);
++ 
++   while (fgets (buf, 512, fp) != (char *)NULL)  /* XXX */
++     {
++       if ((bp = strstr (buf, "Path:")) != (char *)NULL)
++ 	{
++ 	  bp += 5;
++ 	  while (whitespace (*bp))
++ 	    bp++;
++ 
++ 	  if (*bp == '\0')
++ 	    return ((char *)NULL);
++ 
++ 	  temp_path = (char *)xmalloc (3 + strlen (bp) + strlen (temp_home));
++ 
++ 	  strcpy (temp_path, temp_home);
++ 	  strcat (temp_path, "/");
++ 	  strcat (temp_path, bp);
++ 
++ 	  bp = temp_path;
++ 
++ 	  while (!(cr_whitespace (*bp)))
++ 	    bp++;
++ 
++ 	  *bp = '\0';
++ 
++ 	  return temp_path;
++ 	}
++     }
++ 
++   return ((char *)NULL);
++ }
++ 
++ /* Expand FILENAME if it begins with a plus.  This always returns
++    a new string. */
++ char *
++ plus_expand (filename)
++      char *filename;
++ {
++   static char *dirname = (char *)NULL;
++ 
++   if (filename && *filename == '+')
++     {
++       char *mh_path = get_mh_path ();
++ 
++       if (filename[1] == '/' || filename[1] == '.')
++ 	{
++ 	  dirname = (char *)xmalloc (1 + strlen (filename));
++ 
++ 	  strcpy(dirname, filename+1);
++ 
++ 	  return dirname;
++ 	}
++ 
++       if (mh_path)
++ 	{
++ 	  dirname = (char *)xmalloc (1 + strlen (filename) + strlen (mh_path));
++ 
++ 	  strcpy (dirname, mh_path);
++ 	  strcat (dirname, "/");
++ 	  strcat (dirname, filename+1);
++ 
++ 	  return dirname;
++ 	}
++     }
++   return (char *)NULL;
++ }
+  
+  
+  /*
+
