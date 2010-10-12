@@ -1,59 +1,56 @@
-# $Id: PKGBUILD 61524 2009-12-17 23:03:33Z ibiru $
 # Maintainer: kevin <kevin@archlinux.org>
 # Contributor: Giovanni Scafora <giovanni@archlinux.org>
 # TU: Kritoke <kritoke@gamebox.net>
 # Contributor: Luca Roccia <little_rock@users.sourceforge.net>
- 
-pkgname=boost
-pkgver=1.41.0
-_boostver=1_41_0
-pkgrel=2
-pkgdesc="Free peer-reviewed portable C++ source libraries"
-arch=('arm')
+
+# Plugbox modifications: Chane bindir to linuxarm.
+
+pkgbase=boost
+pkgname=('boost-libs' 'boost')
+pkgver=1.43.0
+_boostver=1_43_0
+pkgrel=1
+arch=('i686' 'x86_64')
 url="http://www.boost.org/"
-depends=('bzip2' 'zlib')
-makedepends=('python>=2.6')
-optdepends=('python: for python bindings')
-source=(http://downloads.sourceforge.net/sourceforge/${pkgname}/${pkgname}_${_boostver}.tar.gz
-	fix-gzip-crc.patch
-	serialization_fix.patch)
+makedepends=('python>=2.6' 'bzip2' 'zlib')
+source=(http://downloads.sourceforge.net/sourceforge/${pkgbase}/${pkgbase}_${_boostver}.tar.gz)
 license=('custom')
-options=(!ccache)
+options=('!ccache')
+md5sums=('734565ca4819bf04bd8e903e116c3fb1')
+
+_stagedir="${srcdir}/stagedir"
 
 build() {
-  cd "${srcdir}/${pkgname}_${_boostver}"
-  patch -Np1 -i $srcdir/fix-gzip-crc.patch || return 1
-  patch -Np1 -i $srcdir/serialization_fix.patch || return 1
-
   # build bjam
-  cd ${srcdir}/${pkgname}_${_boostver}/tools/jam/src
+  cd "${srcdir}/${pkgbase}_${_boostver}/tools/jam/src"
   ./build.sh cc || return 1
 
   _bindir="bin.linuxarm"
-  [ "${CARCH}" = "arm" ] && _bindir="bin.linuxarm"
 
-  install -m755 -d ${pkgdir}/usr/bin
-  install -m755 ${_bindir}/bjam ${pkgdir}/usr/bin/bjam || return 1
- 
+  install -m755 -d "${_stagedir}"/usr/bin
+  install -m755 ${_bindir}/bjam "${_stagedir}"/usr/bin/bjam || return 1
+
   # build bcp
-  cd ${srcdir}/${pkgname}_${_boostver}/tools/bcp
-  ../jam/src/${_bindir}/bjam || return 1
-  install -m755 ${srcdir}/${pkgname}_${_boostver}/dist/bin/bcp \
-                ${pkgdir}/usr/bin/bcp || return 1
+  cd "${srcdir}/${pkgbase}_${_boostver}/tools/bcp"
+  ../jam/src/${_bindir}/bjam --toolset=gcc || return 1
+  install -m755 "${srcdir}/${pkgbase}_${_boostver}/dist/bin/bcp" \
+                ${_stagedir}/usr/bin/bcp || return 1
 
   # build libs
-  cd ${srcdir}/${pkgname}_${_boostver}
+  cd "${srcdir}/${pkgbase}_${_boostver}"
   # default "minimal" install: "release link=shared,static
   # runtime-link=shared threading=multi"
   # --layout=tagged will add the "-mt" suffix for multithreaded libraries
   # and installs includes in /usr/include/boost.
   # --layout=system no longer adds the -mt suffix for multi-threaded libs.
+  # install to ${_stagedir} in preparation for split packaging
+
   ./tools/jam/src/${_bindir}/bjam \
-            --disable-long-double \
             release debug-symbols=off threading=single,multi \
             runtime-link=shared link=shared,static \
             cflags=-fno-strict-aliasing \
-            --prefix=${pkgdir}/usr \
+            toolset=gcc \
+            --prefix="${_stagedir}" \
             -sPYTHON_ROOT=/usr \
             -sPYTHON_VERSION=2.6 \
             -sTOOLS=gcc \
@@ -61,14 +58,39 @@ build() {
             install || return 1
 
   # build pyste
-  cd ${srcdir}/${pkgname}_${_boostver}/libs/python/pyste/install
-  python setup.py install --root=${pkgdir} || return 1
-
-  # license
-  install -m755 -d ${pkgdir}/usr/share/licenses/${pkgname}
-  install -m644 ${srcdir}/${pkgname}_${_boostver}/LICENSE_1_0.txt \
-                ${pkgdir}/usr/share/licenses/${pkgname}/ || return 1
+  cd "${srcdir}/${pkgbase}_${_boostver}/libs/python/pyste/install"
+  python setup.py install --root=${_stagedir} || return 1
 }
-md5sums=('ddb04c9b9164a36a91dcf36819666dd9'
-         '682f124a765b2935c7352f38c08848cc'
-         '01337211d40a4a4c9b83c481baade701')
+
+package_boost() {
+    pkgdesc="Free peer-reviewed portable C++ source libraries - Development"
+    depends=("boost-libs=${pkgver}")
+    optdepends=('python: for python bindings')
+
+    install -dm 755 "${pkgdir}"/usr/{include,lib}
+    # headers/source files
+    cp -r "${_stagedir}"/include/ "${pkgdir}"/usr/
+
+    # static libs
+    cp -r "${_stagedir}"/lib/*.a "${pkgdir}"/usr/lib/
+
+    # utilities (bjam, bcp, pyste)
+    cp -r "${_stagedir}"/usr/* "${pkgdir}"/usr/
+
+    # license
+    install -D -m644 "${srcdir}/${pkgbase}_${_boostver}/LICENSE_1_0.txt" \
+        "${pkgdir}"/usr/share/licenses/boost/LICENSE_1_0.txt || return 1
+}
+
+package_boost-libs() {
+    pkgdesc="Free peer-reviewed portable C++ source libraries - Runtime"
+    depends=('gcc-libs' 'bzip2' 'zlib')
+
+    install -dm 755 "${pkgdir}/usr/lib"
+    #shared libs
+    cp -r "${_stagedir}"/lib/*.so{,.*} "${pkgdir}/usr/lib/"
+
+    # license
+    install -D -m644 "${srcdir}/${pkgbase}_${_boostver}/LICENSE_1_0.txt" \
+        "${pkgdir}"/usr/share/licenses/boost-libs/LICENSE_1_0.txt || return 1
+}
