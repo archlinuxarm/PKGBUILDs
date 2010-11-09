@@ -1,0 +1,52 @@
+# Maintainer: Mike Staszel <mikestaszel@gmail.com>
+
+# This PKGBUILD makes a kernel for the iConnect with official patches
+# Lots of patches are broken, only the linux-2.6.28-firmware_proc one works
+
+pkgname=kernel26-iconnect
+pkgver=2.6.36
+pkgrel=1
+pkgdesc="The Linux Kernel and modules for iConnect"
+arch=('arm')
+license=('GPL2')
+url="http://www.kernel.org"
+depends=('coreutils' 'module-init-tools')
+makedepends=('uboot-mkimage')
+conflicts=('kernel26')
+provides=('kernel26')
+install=kernel26-iconnect.install
+source=(http://www.kernel.org/pub/linux/kernel/v2.6/linux-$pkgver.tar.bz2
+        iconnect-2.6.36.config
+        linux-2.6.28-firmware_proc.patch)
+md5sums=('61f3739a73afb6914cb007f37fb09b62'
+         'd1dad495da77bf952f3812b8033d6931'
+         '2fac0d359a66217480126d8dca803d3c')
+LDFLAGS=""
+
+build() {
+   cd $srcdir/
+   cp *.patch iconnect-2.6.36.config linux-$pkgver/
+   cd linux-$pkgver
+   
+   # Apply Aholler's DockStar hardware patches
+   patch -p1 -i linux-2.6.28-firmware_proc.patch 
+
+   # Prepare for make
+   mv iconnect-2.6.36.config .config
+   echo "Press ENTER 4972 times..."
+   make oldconfig
+
+   # Make!
+   make modules uImage || return 1
+
+   # Pack up the created uImage
+   mkdir -p $pkgdir/boot
+   cp $srcdir/linux-$pkgver/arch/arm/boot/uImage $pkgdir/boot/
+
+   # Make and package kernel modules
+   mkdir -p $pkgdir/{lib/modules,boot}
+   make INSTALL_MOD_PATH=${pkgdir} modules_install || return 1
+
+   # Remove the symlink to the build machine's build directory
+   rm $pkgdir/lib/modules/$pkgver/build
+}
