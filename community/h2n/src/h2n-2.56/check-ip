@@ -1,0 +1,213 @@
+#!/usr/bin/perl
+#
+
+# This program performs a DNS query for the PTR record
+# of an IP address in the 'in-addr.arpa.' zone.
+#
+# Exit status: 0 - the IP address resolves to a DNS domain name
+#              1 - the IP address does not resolve to a DNS domain name
+#              2 - usage error
+#
+
+use Net::DNS;
+
+my $program_name = $0;
+   $program_name =~ s/.*\///;
+(my $usage = <<EOT) =~ s/^\s*\|//gm;
+	|Usage: $program_name [IP address]
+	|
+EOT
+
+my $skip_prompt = 0;
+my ($IP_address, $contact_name, $domain_name, $error, $exit_status);
+
+if (@ARGV) {
+    #
+    # There's a passed argument on the command line.
+    #
+    if ($#ARGV && $#ARGV > 0) {
+	#
+	# There is more than the maximum of one argument.
+	#
+	$error = "Error: Too many arguments.";
+	$exit_status = 2;
+    } else {
+	$IP_address = $ARGV[0];
+	shift;
+    }
+    $skip_prompt = 1;
+}
+
+while ("true") {
+    if ($error) {
+	print STDERR "$error\n";
+	print STDERR $usage if $exit_status >= 2;
+	last if $skip_prompt;
+	$error = "";
+    }
+    if (!$skip_prompt) {
+	print STDOUT "Enter IP address: ";
+	$IP_address = readline(*STDIN);
+	chop($IP_address);
+	exit $exit_status unless $IP_address;
+	$IP_address =~ s/^\s*(\S+)\s*$/$1/;	# remove surrounding whitespace
+    }
+    $error = "";
+    $exit_status = 0;
+    if ($IP_address =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/) {
+	if ($4 > 255 || $3 > 255 || $2 > 255 || $1 > 255) {
+	    $error = "Invalid IP address format\n";
+	}
+    } else {
+	$error = "Invalid IP address format\n";
+    }
+    if ($error) {
+	$exit_status = 2;
+	next;
+    }
+    
+    $domain_name = $contact_name = "";
+    #
+    # If no error is encountered, the subroutine will return the
+    # appropriate information through the "$domain_name" and
+    # "$contact_name" parameters.  This requires that they be
+    # passed by reference, not value.  Use the "\$" construct
+    # to accomplish this.
+    #
+    $error = &LOOKUP_IP_ADDR($IP_address, \$domain_name, \$contact_name);
+    if ($error) {
+	$exit_status = 1;
+	next;
+    } else {
+	if ($domain_name) {
+	    print STDOUT "This IP address points to '$domain_name'.\n";
+	    $exit_status = 0;
+	} else {
+	    print STDOUT "No DNS domain name exists for this IP address.\n";
+	    $exit_status = 1;
+	}
+	if ($contact_name) {
+	    unless ($contact_name =~ /@/) {
+		#
+		# Translate the first unescaped "." to the "@" symbol.
+		#
+		$contact_name =~ s/([^\\])[.]/$1@/;
+	    }
+	    $contact_name =~ s/\\([@.])/$1/g;	# remove escapes from "@" & "."
+	    $contact_name = "<$contact_name>";
+	} else {
+	    $contact_name = "unavailable";
+	}
+	print STDOUT "The zone contact address is $contact_name.\n\n";
+	last if $skip_prompt;
+    }
+}
+exit $exit_status;
+
+
+#
+# Subroutine to lookup the forward-mapping domain name to which an
+# IP address points.  The e-mail address of the DNS administrator
+# who is reponsible for the reverse-mapping zone in which the IP
+# address is located is also returned.
+#
+# Returns an error message if the status code of the DNS query is
+# not NOERROR nor NXDOMAIN.
+# NOTE: The "$domain_name" and "$contact_name" parameters are
+#       references (pointers), not values.  When passing back
+#       a value, make sure to use the "$$" construct in the
+#       assignment statement.
+#
+sub LOOKUP_IP_ADDR {
+    my ($IP_address, $domain_name, $contact_name) = @_;
+    my ($cname, $error, $packet, $rcode, $res, $rrtype, $zone);
+    my (@answer, @authority);
+
+    $error = "";
+
+    $res = new Net::DNS::Resolver;
+    $res->dnsrch(0);		# don't apply the search list
+    $res->tcp_timeout(10);	# lower the timeout from 120 to 10 seconds
+
+    # DNS questions will be asked using the 'send' method instead
+    # of the 'query' method because 'send' returns an object even
+    # if the Answer Section is empty.  Also, if the name in question
+    # looks like an IP address, Net::DNS will implicitly convert it
+    # to the proper 'in-addr.arpa' format.
+
+    $packet = $res->send($IP_address, "PTR");
+    if (!$packet) {
+	$error  = "Unable to lookup the PTR record for [$IP_address].\n";
+	$error .= "Reason: failed query.\n";
+	return $error;
+    }
+    $rcode = $packet->header->rcode;
+    if ($rcode !~ /^(NOERROR|NXDOMAIN)$/) {
+	$error  = "Unable to lookup the PTR record for [$IP_address].\n";
+	$error .= "Reason: query returned a status of $rcode.\n";
+	return $error;
+    }
+
+    @answer = $packet->answer;
+    if (@answer) {
+	$rrtype = $answer[0]->type;
+	if ($rrtype eq "PTR") {
+	    $$domain_name = $answer[0]->ptrdname;
+	} elsif ($rrtype eq "CNAME") {
+	    #
+	    # Assume that this IP address belongs to a sub-class-C network
+	    # that has been delegated using the RFC-2317 technique, e.g.,
+	    #
+	    # 4.3.2.1.in-addr.arpa.	  CNAME  4.0-15.3.2.1.in-addr.arpa.
+	    # 4.0-15.3.2.1.in-addr.arpa.  PTR    foo.bar.com.
+	    #
+	    # We'll follow this chain by calling ourself recursively with
+	    # the RDATA field of the CNAME replacing the IP address.
+	    # NOTE: The "$domain_name" and "$contact_name" variables are
+	    #       already references.  Do *not* use the "\$" construct!
+	    #
+	    $cname = $answer[0]->rdatastr;
+	    $error = &LOOKUP_IP_ADDR($cname, $domain_name, $contact_name);
+	    return $error;
+	}
+    }
+
+    # Now see if we can obtain the contact e-mail address from
+    # the SOA record of the appropriate zone.
+    #
+    @authority = $packet->authority;
+    if (@authority) {
+	$rrtype = $authority[0]->type;
+	if ($rrtype eq "SOA") {
+	    #
+	    # This will be true in the following circumstances:
+	    #
+	    #   1. A response code of NXDOMAIN.  This means that there
+	    #      is no DNS entry for the IP address in the reverse-mapping
+	    #      namespace.
+	    #
+	    #   2. A response code of NOERROR and the Answer Section
+	    #      is empty.  This usually means that the searched-for
+	    #      domain name exists but not with the searched-for
+	    #      record type (PTR in this case).
+	    #
+	    $$contact_name = $authority[0]->rname;
+	} elsif ($rrtype eq "NS") {
+	    #
+	    # This is usually the case when the response returned one
+	    # or more DNS records in the Answer Section.  We'll use
+	    # the owner field of the NS record to make another query
+	    # for the SOA record.
+	    # NOTE: No error message will be reported if the response
+	    #       to the SOA query has an empty Answer Section.
+	    # 
+	    $zone = $authority[0]->name;
+	    $packet = $res->send($zone, "SOA");
+	    @answer = $packet->answer;
+	    $$contact_name = $answer[0]->rname if @answer;
+	}
+    }
+    
+    return $error;
+}
+

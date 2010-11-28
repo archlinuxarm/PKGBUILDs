@@ -1,0 +1,395 @@
+#!/usr/bin/perl
+#
+# check_del, v 1.20 11/16/1999 19:26:56 cricket
+# Enhanced to v1.32 17 December 2003 by Andris Kalnozols
+
+use Getopt::Std;
+use FileHandle;		# for calling `autoflush'
+use Net::DNS;
+use IO::Socket;		# for distinguishing not-running/not-responding servers
+use Errno qw(:POSIX);	# for obtaining standard error messages
+
+my $program_name = $0;
+   $program_name =~ s/.*\///;
+my $usage = "Usage: $program_name [-v[v]] [-m] [-F] [-o origin] -f db_file\n";
+my $bad = 0;
+my $good = 0;
+my $refused = 0;
+my $servfail = 0;
+my $debug_flag = 0;
+
+my ($address, $count, $file, $host, $i, $track_multi_homed);
+my ($non_response_limit, $noresponse, $notrunning, $origin, $retrans);
+my ($server, $tmp, $verbose, @argv, %NSaddr, %NoResponse, %NotRunning);
+our ($opt_F, $opt_f, $opt_m, $opt_o, $opt_v);
+
+autoflush STDOUT 1;
+autoflush STDERR 1;
+
+# Save a copy of the argument list for later reference
+# since the 'getopts' function leaves @ARGV empty.
+#
+@argv = @ARGV;
+getopts('vmFo:f:');
+
+if ($opt_f) {
+    $file = $opt_f;
+} else {
+    die "$usage";
+}
+$origin  = ($opt_o) ? lc($opt_o) : ".";
+$origin .= "." if $origin !~ /\.$/;
+$track_multi_homed = ($opt_m) ? 1 : 0;
+if ($opt_F) {
+    $retrans = 5;
+    $non_response_limit = 2;
+} else {
+    $retrans = 10;
+    $non_response_limit = 3;
+}
+if ($opt_v) {
+    $verbose = 1;
+    #
+    # Neither 'getopts' nor 'GetOptions' can detect all variations of
+    # a duplicate instance of an argument, e.g.,
+    #
+    #   check_del -vv    check_del -v -v    check_del -v -Fv   etc.
+    #
+    # Inspect the command-line argument vector for another occurrence
+    # of the '-v' switch which, for backwards compatibility with the
+    # C-version of this program, enables the results of the SOA queries
+    # to be completely displayed.
+    #
+    $i = $count = 0;
+    while ($i <= $#argv && $count < 2) {
+	if ($argv[$i] =~ /^-[fo]/) {
+	    $i += 2;
+	    next;
+	} elsif ($argv[$i] =~ /^-.*v.*v/) {
+	    $count = 2;
+	    last;
+	} elsif ($argv[$i] =~ /^-.*v/) {
+	    $count++;
+	}
+	$i++;
+    }
+    $debug_flag = 1 if $count > 1;
+}
+
+# Read the file specified by the '-f' switch and check
+# the delegation of the NS resource records that we find.
+#
+&READ_RRs($file, $origin);
+
+# Summarize our results and report name servers
+# that were either not running or unresponsive.
+#
+if ($track_multi_homed) {
+    #
+    # Remove a multi-homed host from a "not running/not responding"
+    # category if at least one interface always responded to a query.
+    # This should prevent properly-responding bastion hosts from
+    # being wrongly flagged as unresponsive if this program is run
+    # behind a firewall.  The other solution to this problem is having
+    # the resolver on the host running this program point to a name server
+    # that has the appropriate sortlist feature implemented.
+    #
+    for $host ( keys %NotRunning ) {
+	for $address ( keys %{ $NotRunning{$host} } ) {
+	    delete($NotRunning{$host}) if $NotRunning{$host}{$address} == 0;
+	    last;
+	}
+    }
+    for $host ( keys %NoResponse ) {
+	for $address ( keys %{ $NoResponse{$host} } ) {
+	    delete($NoResponse{$host}) if $NoResponse{$host}{$address} == 0;
+	    last;
+	}
+    }
+}
+$notrunning = scalar(keys(%NotRunning));
+$noresponse = scalar(keys(%NoResponse));
+@argv = sort { $b <=> $a } ($good, $bad, $servfail, $refused, $notrunning, $noresponse);
+$i = length($argv[0]);		# for right-justifying the numeric fields
+
+print "\n";
+printf "%${i}d proper domain delegation%s\n", $good, ($good > 1) ? "s" : "" if $good > 0;
+printf "%${i}d improper domain delegation%s\n", $bad, ($bad > 1) ? "s" : "" if $bad > 0;
+printf "%${i}d SERVFAIL answer%s\n", $servfail, ($servfail > 1) ? "s" : "" if $servfail > 0;
+printf "%${i}d REFUSED answer%s\n", $refused, ($refused > 1) ? "s" : "" if $refused > 0;
+printf "%${i}d server%s not running\n", $notrunning, ($notrunning > 1) ? "s" : "" if $notrunning > 0;
+printf "%${i}d server%s not responding\n", $noresponse, ($noresponse > 1) ? "s" : "" if $noresponse > 0;
+if ($notrunning > 0) {
+    printf "\nServer%s not running:\n", ($notrunning > 1) ? "s" : "";
+    foreach $server (keys %NotRunning) {
+	print "\t", $server, "\n";
+    }
+}
+if ($noresponse > 0) {
+    printf "\nServer%s not responding:\n", ($noresponse > 1) ? "s" : "";
+    foreach $server (keys %NoResponse) {
+	print "\t", $server, "\n";
+    }
+}
+
+exit 0;
+
+
+sub READ_RRs {
+    my ($file, $origin) = @_;
+    my ($dot, $include_file, $last_owner, $new_origin, $owner, $rdata, $rest);
+    my ($rrtype, $tmp);
+    local *DELEGATION;
+
+    open(DELEGATION, $file) or die "Couldn't open file '$file': $!\n";
+    $last_owner = $origin;
+    $dot = ($origin ne ".") ? "." : "";
+    while (<DELEGATION>) {
+	next if /^$/ || /^\s*;/;
+	if (/^[^\$]/ && /^(.*?\s)(NS|SOA)\s+(.+)/i) {
+	    #                ^
+	    # Note: Minimal matching must be used in the first group of the
+	    #       Regular Expression.  Otherwise, the following SOA record
+	    #       will be mistakenly matched as an NS record:
+	    #
+	    #       @      1D IN SOA       ns hostmaster ( 123 3H 1H 1W 10M )
+	    #                              ^^
+	    $tmp = lc($1);
+	    $rrtype = uc($2);
+	    $rdata = lc($3);
+
+	    # Interpret the owner field.
+	    #
+	    if ($tmp =~ /^\s/) {
+		$owner = $last_owner;
+	    } elsif ($tmp =~ /^\@\s/) {
+		$owner = $origin;
+		$last_owner = $owner;
+	    } else {
+		($owner, $rest) = split(' ', $tmp);
+		$owner .= "$dot$origin" if $owner !~ /\w\.$/;
+		$last_owner = $owner;
+	    }
+	    next if $rrtype eq "SOA";
+
+	    # Finish processing the NS record and check the delegation.
+	    #
+	    if ($rdata =~ /^\@\s/) {
+		$rdata = $origin;
+	    } else {
+		$rdata .= "$dot$origin" if $rdata !~ /\w\.$/;
+	    }
+	    &CHECK_NS($owner, $rdata);
+
+	} elsif (/^\$ORIGIN\s+(\S+)/) {
+	    $new_origin = lc($1);
+	    $dot = ($new_origin ne ".") ? "." : "";
+	    $new_origin .= "$dot$origin" if $new_origin !~ /\w\.$/;
+	    $origin = $new_origin;
+
+	} elsif (/^\$INCLUDE\s+(\S+)\s*(\S+)?/) {
+	    $include_file = $1;
+	    $new_origin = lc($2);
+	    if ($new_origin) {
+		$dot = ($new_origin ne ".") ? "." : "";
+		$new_origin .= "$dot$origin" if $new_origin !~ /\w\.$/;
+	    } else {
+		$new_origin = $origin;
+	    }
+	    # Stop what we're doing with the current file and make a
+	    # recursive call to process the specified $INCLUDE file.
+	    # If the $INCLUDE directive also specified an origin
+	    # argument, it will be passed along as well.
+	    # Upon return, we'll automatically revert back to the
+	    # origin and default owner name that was in effect before
+	    # the subroutine call.  This is the default behavior as of
+	    # BIND version 8 and differs from that described in RFC-1035.
+	    #
+	    &READ_RRs($include_file, $new_origin);
+	}
+    }
+    close(*DELEGATION);
+}
+
+
+sub CHECK_NS {
+    my ($owner, $rdata) = @_;
+    my $d_owner = lc($owner);
+    my $d_rdata = lc($rdata);
+    my ($aa_bit, $ancount, $arcount, $j, $nscount, $packet);
+    my ($rcode, $res, $rr, $socket, @answer);
+
+    $d_owner =~ s/\.$//;
+    $d_rdata =~ s/\.$//;
+    $res = new Net::DNS::Resolver;
+    $res->defnames(0);
+    $res->dnsrch(0);
+    $res->retry(2);
+    $res->debug(0);
+    $res->retrans($retrans);
+
+    if (exists($NSaddr{$d_rdata})) {
+	#
+	# Get the number of IPv4 addresses that were returned from
+	# a previous DNS query for this name server's A record(s).
+	#
+	$i = scalar(@{ $NSaddr{$d_rdata} });
+    } else {
+	#
+	# Look up the IPv4 address(es) of the heretofore unseen name server.
+	#
+	$packet = $res->query($rdata, "A");
+	if ($packet) {
+	    @answer = $packet->answer;
+	    $i = 0;
+	    foreach $rr (@answer) {
+		#
+		# Since the Net::DNS module is not exactly a speed demon,
+		# make the time v space tradeoff and cache the IP address(es)
+		# in a hash for possible re-use.
+		#
+		$NSaddr{$d_rdata}[$i] = $rr->rdatastr;
+		$i++;
+	    }
+	} else {
+	    print "No IPv4 address for $d_rdata (domain $d_owner)\n";
+	    return;
+	}
+    }
+
+    for ($j = 0; $j < $i; $j++) {
+	#
+	# Save time by by not bothering to query a name server interface
+	# that has been repeatedly unresponsive to previous queries.
+	# In the case of a server that is demonstrated to not be running,
+	# i.e., getting an ECONNREFUSED error, the threshold for disabling
+	# further queries is set to one.
+	# NOTE: Beware of the Perl "autovivification" side-effect when
+	#       referencing multi-dimensional data structures, e.g.,
+	#       testing for the existence of $Hash{index_1}{index_2}
+	#       will cause $Hash{index_1} to be created even if it did
+	#       not yet exist before the test.  This spontaneous index
+	#       generation can be avoided by testing for the existence
+	#       of the first index before proceeding to test for the
+	#       simultaneous existence of both indices.
+	# 
+	$address = $NSaddr{$d_rdata}[$j];
+	if (exists($NotRunning{$d_rdata}) &&
+	    exists($NotRunning{$d_rdata}{$address})) {
+	    next if $NotRunning{$d_rdata}{$address} >= 1;
+	}
+	if (exists($NoResponse{$d_rdata}) &&
+	    exists($NoResponse{$d_rdata}{$address})) {
+	    next if $NoResponse{$d_rdata}{$address} >= $non_response_limit;
+	}
+	if ($track_multi_homed && $i > 1) {
+	    #
+	    # No need to worry about autovivification in this block.
+	    #
+	    if (!exists($NotRunning{$d_rdata}{$address})) {
+		$NotRunning{$d_rdata}{$address} = 0;
+	    }
+	    if (!exists($NoResponse{$d_rdata}{$address})) {
+		$NoResponse{$d_rdata}{$address} = 0;
+	    }
+	}
+	$res->recurse(0);
+	$res->nameservers($address);
+	$res->debug($debug_flag);
+	#
+	# Unlike the 'query' method, 'send' returns an
+	# object even if the Answer Section is empty.
+	#
+	$packet = $res->send($owner, "SOA");
+	if ($packet) {
+	    $aa_bit  = $packet->header->aa;
+	    $rcode   = $packet->header->rcode;
+	    $ancount = $packet->header->ancount;
+	    $nscount = $packet->header->nscount;
+	    $arcount = $packet->header->arcount;
+	    if ($rcode eq "SERVFAIL") {
+		$servfail++;
+		print "SERVFAIL response from $d_rdata (domain $d_owner)\n";
+	    } elsif ($rcode eq "REFUSED") {
+		$refused++;
+		print "REFUSED response from $d_rdata (domain $d_owner)\n";
+	    #
+	    # An authoritative server will have the `aa'
+	    # bit on and something in the answer section.
+	    #
+	    } elsif ($aa_bit == 1 && $ancount == 0 && $nscount == 1
+		     && $arcount == 0) {
+		#
+		# The Distributed Director load balancing product from
+		# Cisco Systems does not supply RFC-compliant answers
+		# to queries for a zone's SOA record.
+		#
+		$bad++;
+		print "DD-like response from $d_rdata (domain $d_owner)\n";
+	    } elsif ($aa_bit != 1 || $ancount == 0) {
+		$bad++;
+		print "Server $d_rdata is not authoritative for $d_owner\n";
+	    } elsif ($ancount > 1) {
+		$bad++;
+		print "Multiple SOA records found for $d_owner on $d_rdata\n";
+	    } elsif ($rcode ne "NOERROR") {
+		$bad++;
+		print "Server $d_rdata returned rcode $rcode (domain $d_owner)\n";
+	    } else {
+		$good++;
+		if ($verbose) {
+		    print "Server $d_rdata is authoritative for $d_owner\n";
+		}
+	    }
+	    return;
+
+	} else {
+	    #
+	    # If we are here, no response packet was returned.  Unfortunately,
+	    # the error message returned by Net::DNS tends to be rather generic,
+	    # i.e., "$res->errorstring" is likely to have "query timed out"
+	    # if using UDP (this is to be expected) and, for TCP, a common
+	    # "connection failed" message even with an unreachable host.
+	    #
+	    # We'd like to distinguish between a host which is non-responsive,
+	    # i.e., offline or down, and one which is online but not listening
+	    # on its "domain" port (53).  In the latter case, attempting to
+	    # make a 53/tcp connection should quickly return the ECONNREFUSED
+	    # (Connection refused) error.  Anything else will be interpreted
+	    # as a non-responsive host.  The Errno() module sets the value of
+	    # $!{$!} to the error text string that corresponds to "$!" (errno)
+	    # hash key.  All other keys of "%!" will have the empty string as
+	    # the hash value.
+	    # NOTE: This test is not absolutely conclusive because of the
+	    #       possibility that a firewall may be blocking TCP access
+	    #       to a listening name server that just couldn't send a
+	    #       timely answer to our original SOA query (via UDP).
+	    #
+	    $socket = IO::Socket::INET->new(PeerAddr => $address,
+					    PeerPort => '53',
+					    Proto    => 'tcp',
+					    Type     => SOCK_STREAM,
+					    Timeout  => $retrans);
+
+	    if ($!{ECONNREFUSED} || $!{EADDRNOTAVAIL}) {
+		print "No name server running on $d_rdata (domain $d_owner)\n";
+		if (exists($NotRunning{$d_rdata}{$address})) {
+		    $NotRunning{$d_rdata}{$address}++;
+		} else {
+		    $NotRunning{$d_rdata}{$address} = 1;
+		}
+	    } else {
+		$tmp = ($i > 1) ? " [$address]" : "";
+		print "No response from $d_rdata$tmp (domain $d_owner)\n";
+		if (exists($NoResponse{$d_rdata}{$address})) {
+		    $NoResponse{$d_rdata}{$address}++;
+		} else {
+		    $NoResponse{$d_rdata}{$address} = 1;
+		}
+	    }
+	    $socket->close if $socket;
+	    next;
+	}
+    }
+}
+

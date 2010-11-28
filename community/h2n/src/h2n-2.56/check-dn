@@ -1,0 +1,306 @@
+#!/usr/bin/perl
+#
+
+# This program checks for the availability of a domain name
+# within a specified DNS zone.
+#
+# Exit status: 0 - the domain name is available within the specified DNS zone
+#              1 - the domain name isn't available or the zone doesn't exist
+#              2 - usage error
+#
+
+use Net::DNS;
+
+my $program_name = $0;
+   $program_name =~ s/.*\///;
+(my $usage = <<EOT) =~ s/^\s*\|//gm;
+	|Usage: $program_name [[UQDN [DNS-zone] [DN-type]]
+	|       where UQDN     is an unqualified domain name, i.e., hostname
+	|             DNS-zone is the domain suffix that exists as a DNS zone
+	|              DN-type is the domain name's record type - A or CNAME
+	|
+EOT
+
+my $current_zone = "";
+my $last_dn_type = "A";
+my $last_zone = "";
+my $error = "";
+my $exit_status = 0;
+my $skip_prompt = 0;
+my $uqdn = "";
+my ($dn_type, $res, @searchlist);
+
+# Get the local resolver's default domain.
+#
+$res = new Net::DNS::Resolver;
+@searchlist = $res->searchlist;
+if (@searchlist) {
+    $current_zone = $last_zone = $searchlist[0];
+}
+
+if (@ARGV) {
+    #
+    # There's a passed argument on the command line.
+    #
+    if ($#ARGV && $#ARGV > 2) {
+	#
+	# There are more than the maximum of two arguments.
+	#
+	$error = "Error: Too many arguments.";
+	$exit_status = 2;
+    } else {
+	$uqdn = $ARGV[0];
+	shift;
+	if (@ARGV) {
+	    $current_zone = $ARGV[0] if @ARGV;
+	    shift;
+	    if (@ARGV) {
+		$dn_type = $ARGV[0] if @ARGV;
+		if ($dn_type !~ /^(A|CNAME)$/i) {
+		    $error = "Error: valid record types are A or CNAME.\n";
+		    $exit_status = 2;
+		}
+	    }
+	}
+    }
+    $skip_prompt = 1;
+}
+
+while ("true") {
+    if ($error) {
+	print STDERR "$error\n";
+	print STDERR $usage if $exit_status >= 2;
+	last if $skip_prompt;
+    }
+    unless ($skip_prompt) {
+	print STDOUT "Enter unqualified domain name: ";
+	$uqdn = readline(*STDIN);
+	chop($uqdn);
+	exit $exit_status if !$uqdn;
+	$uqdn =~ s/^\s*(\S+)\s*$/$1/;	# remove surrounding whitespace
+
+	$dn_type = "";
+	while ($dn_type !~ /^(A|CNAME)$/) {
+		print STDOUT "Enter DNS record type for '$uqdn' (A or CNAME)[$last_dn_type]: ";
+	    $dn_type = readline(*STDIN);
+	    chop($dn_type);
+	    $dn_type = $last_dn_type if !$dn_type;
+	    $dn_type =~ s/^\s*(\S+)\s*$/$1/;
+	    $dn_type = uc($dn_type);
+	}
+	$last_dn_type = $dn_type;
+
+	if (&CHECK_NAME($uqdn, $dn_type)) {
+	    $error = "Error: '$uqdn' is invalid as a DNS $dn_type record.\n";
+	    $exit_status = 1;
+	    next;
+	}
+
+	print STDOUT "Enter DNS zone name [$last_zone]: ";
+	$current_zone = readline(*STDIN);
+	chop($current_zone);
+	$current_zone = $last_zone if !$current_zone;
+	$current_zone =~ s/^\s*(\S+)\s*$/$1/;
+	$last_zone = $current_zone;
+    }
+    $error = &CHECK_DNS_NAME($uqdn, $current_zone);
+    if ($error) {
+	$exit_status = 1;
+	next;
+    } else {
+	print STDOUT "'$uqdn.$current_zone' is available.\n\n";
+	last if $skip_prompt;
+    }
+}
+exit $exit_status;
+
+
+#
+# Subroutine to check for bad names
+#
+# RFC-1123 changes RFC-952 by allowing domain names to begin with a number
+# as well as a letter.  It also extends the maximum length of a hostname
+# to 255 characters.  This subroutine makes the following checks:
+#
+#   1)	If the checking level is set to "strict", hostnames and aliases
+#	that are read from the host table must have a minimum length of
+#	two characters (RFC-952).
+#   2)	The character set of hostnames and domain names is limited to digits,
+#	the minus sign (-), the period (.), and any mix of upper/lowercase
+#	letters.  Hostname aliases (CNAMEs) are not held to this restriction
+#       nor are PTR, SRV, TXT, RP, and HINFO resource records.
+#   3)	Hostnames and domain label names must not begin or end with a
+#	minus sign or period.  Hostname aliases must not begin or end with
+#	an unescaped period nor contain adjacent unescaped periods.
+#
+# No check is made for maximum length of hostnames and/or domain labels.
+#
+# Return values:
+#   0 = valid
+#   1 = invalid
+#
+sub CHECK_NAME {
+    my ($name, $rrtype) = @_;
+    my $bad_chars;
+
+    return 1 if length($name) == 1;	# This restriction is for host files.
+    if ($rrtype eq "CNAME") {
+	#
+	# Remove all escape characters that are themselves escaped
+	# so that only true escape characters remain for testing.
+	#
+	$name =~ s/\\\\//g;
+	return 1 if $name =~ /^\.|[^\\]\.$|[^\\]\.\./;
+    } else {
+	$bad_chars = $name;
+	$bad_chars =~ tr/A-Za-z0-9.-//d;
+	return 1 if $bad_chars || $name =~ /^[.-]|[.-]$|\.\.|\.-|-\./;
+    }
+    return 0;
+}
+
+
+#
+# Subroutine to determine the availability of a DNS domain name.
+#
+# Returns a null string if the DNS name is available.  Otherwise, a
+# text string describing the nature of the unavailability is returned.
+#
+sub CHECK_DNS_NAME {
+    my ($uqdn, $zone) = @_;
+    my ($actual_zone, $ans_name, $ans_type, $error, $packet, $rcode, $res);
+    my ($uqdn_pattern, @answer, @authority);
+
+    # Initialize the standard error message.
+    #
+    $error  = "The domain name '$uqdn.$zone' is not available.\n";
+    $error .= "Reason: ";
+
+    $res = new Net::DNS::Resolver;
+    $res->defnames(0);	# don't append the default domain to single-label names
+    $res->dnsrch(0);		# don't apply the search list
+    $res->tcp_timeout(10);	# lower the timeout from 120 to 10 seconds
+
+    # DNS questions will be asked using the 'send' method instead
+    # of the 'query' method because 'send' returns an object even
+    # if the Answer Section is empty.
+
+    # In the spirit of "Trust but verify", make sure
+    # the DNS zone exists before proceding any further.
+    #
+    $packet = $res->send($zone, "SOA");
+    unless ($packet) {
+	$error  = "Unable to determine the availability of '$uqdn.$zone'.\n";
+	$error .= "Reason: SOA query failed for zone '$zone'.\n";
+	return $error;
+    }
+    $rcode = $packet->header->rcode;
+    if ($rcode ne "NOERROR") {
+	#
+	# We'll assume a return code of "NXDOMAIN".
+	#
+	$error .= "The zone '$zone' does not exist.\n";
+	return $error;
+    }
+    #
+    # We'll always issue a query for the domain name's CNAME because,
+    # if it exists, we don't want the nameserver to "chase" the CNAME
+    # into another zone if that's where it leads.  By setting the QTYPE
+    # to CNAME, the Authority Section will reflect the zone containing
+    # the CNAME, i.e., the queried domain name, instead of the zone
+    # containing the domain name to which the CNAME's RDATA field may
+    # ultimately point.
+    #
+    $packet = $res->send("$uqdn.$zone", "CNAME");
+    unless ($packet) {
+	$error  = "Unable to determine the availability of '$uqdn.$zone'.\n";
+	$error .= "Reason: failed query.\n";
+	return $error;
+    }
+    $rcode = $packet->header->rcode;
+    @answer = $packet->answer;
+    if (@answer) {
+	$ans_name = $answer[0]->name;
+	$ans_type = $answer[0]->type;
+    } else {
+	$ans_name = $ans_type = "";
+    }
+    @authority = $packet->authority;
+    if (@authority) {
+	#
+	#   * If the Answer Section has data, the zone's NS records
+	#     should appear in the Authority Section.
+	#   * If the Answer Section is empty because of a NODATA or
+	#     NXDOMAIN status, the Authority Section should contain
+	#     the SOA record from the authoritative zone.
+	#     NOTE: Dependending on setting of the AA header flag
+	#           (Authoritative Answer) in the response and the
+	#           settings of the nameserver configuration options
+	#           'auth-nxdomain' and 'rfc2308-type1', the Authority
+	#           Section of a NODATA or NXDOMAIN response may also
+	#           contain the authoritative zone's NS RRset.
+	#
+	$actual_zone = $authority[0]->name;
+    } else {
+	#
+	# The Authority Section of the response was empty.  Normally,
+	# this would mean that the response code and/or answer is for
+	# the same zone as the queried domain name.
+	#
+	if ($ans_type eq "SOA") {
+	    #
+	    # It's been observed that nameservers of certain ISPs,
+	    # e.g., 'pacbell.net', will sometimes put the SOA record
+	    # in the Answer Section instead of the Authority Section
+	    # for a NODATA response (the domain name exists but not
+	    # as the queried RRtype).
+	    # Moreover, the owner name of the SOA record is identical
+	    # to the queried domain name instead of the domain name's
+	    # zone.  We'll accommodate this broken behavior here.
+	    #
+	    $uqdn_pattern = "$uqdn.";
+	    $uqdn_pattern =~ s/\./\\./g;
+	    $actual_zone = $ans_name;
+	    $actual_zone =~ s/^$uqdn_pattern//i;	# strip the leading UQDN
+	} else {
+	    $actual_zone = $zone;
+	}
+    }
+
+    # Now that we know the response code and have determined (or inferred)
+    # the actual DNS zone of the queried domain name, the name's availability
+    # can be decided.
+    #
+    if ($rcode eq "NOERROR") {
+	#
+	# The domain name already exists as either the
+	# queried-for CNAME or some other record type.
+	#
+	if ($zone ne $actual_zone) {
+	    $error .= "It belongs to another zone ($actual_zone).\n";
+	} else {
+	    $error .= "It already exists as a DNS record.\n";
+	}
+    } elsif ($rcode eq "NXDOMAIN") {
+	if ($zone ne $actual_zone) {
+	    #
+	    # Although the domain name does not exist as any type
+	    # of DNS record, the authority for the negative answer
+	    # is in a different zone.
+	    #
+	    $error .= "It belongs to another zone ($actual_zone).\n";
+	} else {
+	    #
+	    # The domain name does not exist as a record of any
+	    # type in the zone being queried - it's available.
+	    # Erase the text in the pre-fabricated error string.
+	    #
+	    $error = "";
+	}
+    } else {
+	$error  = "Unable to determine the availability of '$uqdn.$zone'.\n";
+	$error .= "Reason: query returned a status of $rcode.\n";
+    }
+    return $error;
+}
+

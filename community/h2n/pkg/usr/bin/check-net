@@ -1,0 +1,382 @@
+#!/usr/bin/perl
+#
+
+# This program validates a network specification in one of the
+# following two formats:
+#
+#   network/CIDR  or  network:netmask
+#
+# where network matches a format of x[.x[.x[.x]]]
+#          CIDR is an integer from 1 to 32
+#       netmask matches the format of x.x.x.x
+#
+# A valid 'network/CIDR' specification returns the corresponding netmask.
+# A valid 'network:netmask' specification returns the corresponding CIDR size.
+#
+# Exit status: 0 - valid subnet specification
+#              1 - invalid specification
+#              2 - usage error
+#
+#
+#############################################################################
+#
+#                        NETWORKING TERMINOLOGY
+#                        ======================
+#
+#                   Determining the Class of an Address
+#                   -----------------------------------
+#
+#    Given a 32-bit address, xxxxxxxx.xxxxxxxx.xxxxxxxx.xxxxxxxx,
+#
+#    0xxxxxxx.xxxxxxxx.xxxxxxxx.xxxxxxxx  Class A  1-127.x.x.x
+#    10xxxxxx.xxxxxxxx.xxxxxxxx.xxxxxxxx  Class B  128-191.x.x.x
+#    110xxxxx.xxxxxxxx.xxxxxxxx.xxxxxxxx  Class C  192-223.x.x.x
+#    1110xxxx.xxxxxxxx.xxxxxxxx.xxxxxxxx  Class D  224-239.x.x.x (multicast)
+#    1111xxxx.xxxxxxxx.xxxxxxxx.xxxxxxxx  Class E  240-255.x.x.x (experimental)
+#
+#    The original concept of network classes has given way to a
+#    more efficient way of allocating networks of IP addresses 
+#    called Classless InterDomain Routing or CIDR.
+#
+#
+#                       CIDR Conversion Table
+#                       ---------------------
+#
+#       CIDR
+#      Length        Mask         # Networks    # Adresses
+#      ------   ---------------   ----------   -------------
+#        /0     0.0.0.0           special wildcard mask used in ACLs
+#                                 to match any address to [0.0.0.0]
+#        /1     128.0.0.0           128 A      2,147,483,648  
+#        /2     192.0.0.0            64 A      1,073,741,824  
+#        /3     224.0.0.0            32 A        536,870,912  
+#        /4     240.0.0.0            16 A        268,435,456  
+#        /5     248.0.0.0             8 A        134,217,728  
+#        /6     252.0.0.0             4 A         67,108,864  
+#        /7     254.0.0.0             2 A         33,554,432 
+#        /8     255.0.0.0             1 A         16,777,216  
+#        /9     255.128.0.0         128 B          8,388,608  
+#        /10    255.192.0.0          64 B          4,194,304  
+#        /11    255.224.0.0          32 B          2,097,152  
+#        /12    255.240.0.0          16 B          1,048,576  
+#        /13    255.248.0.0           8 B            524,288  
+#        /14    255.252.0.0           4 B            262,144  
+#        /15    255.254.0.0           2 B            131,072  
+#        /16    255.255.0.0           1 B             65,536  
+#        /17    255.255.128.0       128 C             32,768  
+#        /18    255.255.192.0        64 C             16,384  
+#        /19    255.255.224.0        32 C              8,192  
+#        /20    255.255.240.0        16 C              4,096  
+#        /21    255.255.248.0         8 C              2,048  
+#        /22    255.255.252.0         4 C              1,024  
+#        /23    255.255.254.0         2 C                512 
+#        /24    255.255.255.0         1 C                256  
+#        /25    255.255.255.128    2 subnets             128  
+#        /26    255.255.255.192    4 subnets              64  
+#        /27    255.255.255.224    8 subnets              32  
+#        /28    255.255.255.240   16 subnets              16  
+#        /29    255.255.255.248   32 subnets               8  
+#        /30    255.255.255.252   64 subnets               4  
+#        /31    255.255.255.254       none                 2
+#        /32    255.255.255.255     1/256 C                1
+#
+#
+#
+#                      RFC-1918 Reserved Network Numbers
+#                      ---------------------------------
+#
+#  The following networks are reserved for use by entities which do not 
+#  require globally unique address space.  The obvious advantage for the
+#  Internet at large is the conservation of globally unique address space
+#  by not using it where global uniqueness is not required.
+#
+#  Class    Start         End          # Addrs              Comment
+#  ----- ----------- --------------- ----------  -------------------------------
+#    A   10.0.0.0    10.255.255.255  16,777,216    a single Class A network
+#    B   172.16.0.0  172.31.255.255   1,048,576   16 contiguous Class B networks
+#    C   192.168.0.0 192.168.255.255     65,536  256 contiguous Class C networks
+#
+
+
+my $program_name = $0;
+   $program_name =~ s/.*\///;
+(my $usage = <<EOT) =~ s/^\s*\|//gm;
+	|Usage: $program_name [network/CIDRsize] or [network:netmask]
+	|       where network  is a specification of 1 to 4 8-bit octets, e.g.,
+	|                      15, 15.0.0.0, 192.6.19, 192.6.19.0, etc.
+	|             CIDRsize is a number from 1 to 32
+	|             netmask  is a four-octet network mask
+	|
+EOT
+
+my $error = "";
+my $exit_status = 0;
+my $skip_prompt = 0;
+my ($cidr, $cidr_in, $input_buffer, $mask, $mask_in, $network);
+
+if (@ARGV) {
+    #
+    # There's a passed argument on the command line.
+    #
+    if ($#ARGV) {
+	#
+	# There is more than argument - only one is allowed.
+	#
+	print STDERR "Too many arguments.\n";
+	print STDERR $usage;
+	exit 2;
+    } else {
+	$input_buffer = $ARGV[0];
+	$skip_prompt = 1;
+    }
+}
+
+while ("true") {
+    if ($error) {
+	print STDERR $error;
+	print STDERR $usage if $exit_status >= 2;
+	last if $skip_prompt;
+    }
+    unless ($skip_prompt) {
+	print STDOUT "Enter network/CIDR or network:mask : ";
+	$input_buffer = readline(*STDIN);
+	$input_buffer = "" unless defined($input_buffer);
+	chop($input_buffer);
+	exit $exit_status unless $input_buffer;
+    }
+    $input_buffer =~ s/^\s*(\S+)\s*$/$1/;	# remove surrounding whitespace
+    if ($input_buffer =~ /\//) {
+	($network, $cidr_in) = split(/\//, $input_buffer);
+	($cidr_in, $mask_in) = split(/:/, $cidr_in);
+    } else {
+	($network, $mask_in) = split(/:/, $input_buffer);
+	$cidr_in = undef;
+    }
+    ($network, $cidr, $mask) = &CHECK_NET($network, $cidr_in, $mask_in);
+    unless ($network) {
+	#
+	# The global variables "$error" and "$exit_status"
+	# have already been set by the CHECK_NET subroutine.
+	# 
+	next;
+    } else {
+	if ($cidr_in) {
+	    print STDOUT "The netmask for network $network/$cidr is $mask\n\n";
+	} else {
+	    print STDOUT "The CIDRsize for network $network:$mask is /$cidr\n\n";
+	}
+	last if $skip_prompt;
+    }
+}
+exit $exit_status;
+
+
+#
+# Subroutine to validate a 'network/CIDR[:netmask]' specification.
+#
+# Returned value:
+#   success: The corresponding (network, CIDRsize, netmask) list
+#            where "network" is normalized to the least number of
+#            octets, e.g., "15.0.0.0/8" is returned as "15/8".
+#   failure: The undefined value.  The global variables "$error" and
+#            "$exit_status" will hold the respective error message
+#            and program exit status code.
+#
+sub CHECK_NET {
+    my ($network, $cidr_in, $mask_in) = @_;
+    my ($bit_num, $cidr, $factor, $int_mask, $mask, $num_octets, $octet);
+    my ($octet_1, $octet_2, $octet_3, $octet_4, $octet_count, $remainder);
+    my ($rightmost_octet);
+
+    $error = "";	# This subroutine's caller will display
+    $exit_status = 0;	# any error messages that get generated.
+
+    unless ($network) {
+	$error = "Missing network specification.\n";
+	$exit_status = 2;
+    } elsif ($network !~ /^\d+([.]\d+){0,3}$/) {
+	$error = "Invalid network specification.\n";
+	$exit_status = 2;
+    } else {
+	($octet_1, $octet_2, $octet_3, $octet_4) = split(/\./, $network, 4);
+	if (defined($octet_4)) {
+	    $num_octets = 4;
+	    $exit_status = 1 if $octet_4 > 255;
+	} elsif (defined($octet_3)) {
+	    $num_octets = 3;
+	    $exit_status = 1 if $octet_3 > 255;
+	} elsif (defined($octet_2)) {
+	    $num_octets = 2;
+	    $exit_status = 1 if $octet_2 > 255;
+	} else {
+	    $num_octets = 1;
+	    $exit_status = 1 if ($octet_1 == 0 or $octet_1 > 255);
+	}
+	$error = "Invalid network specification (octet out of range).\n" if $exit_status;
+    }
+    unless (defined($cidr_in) || defined($mask_in)) {
+	$error .= "Must specify at least a CIDRsize or netmask.\n";
+	$exit_status = 2;
+    } else {
+	if (defined($cidr_in)) {
+	    unless ($cidr_in =~ /^\d+$/) {
+		$error .= "Invalid CIDR specification.\n";
+		$exit_status = 2;
+	    } elsif ($cidr_in < 1 || $cidr_in > 32) {
+		$error .= "Invalid CIDR size (must be 1 to 32).\n";
+		$exit_status++;		# No inadvertent reset of usage display.
+	    } else {
+		$cidr = $cidr_in;
+	    }
+	}
+	if ($mask_in) {
+	    unless ($mask_in =~ /^\d+([.]\d+){3}$/) {
+		$error .= "Invalid netmask specification.\n";
+		$exit_status = 2;
+	    } else {
+		#
+		# Prepare a 32-bit integer version of the netmask.
+		#
+		$int_mask = $octet_count = 0;
+		foreach $octet (split(/\./, $mask_in)) {
+		    last if $octet > 255 || ($octet == 0 && $octet_count == 0);
+		    $octet_count++;
+		    $int_mask += $octet;
+		    $int_mask = $int_mask << 8 if $octet_count < 4;
+		}
+		if ($octet_count < 4) {
+		    $error .= "Invalid netmask specification (octet out of range).\n";
+		    $exit_status++;
+		} else {
+		    #
+		    # Start inspecting the 32-bit mask from right to left.
+		    # Once a "1" is found, make sure that there are no
+		    # intervening "0"s between that point and the leftmost bit.
+		    #
+		    $cidr = 0;
+		    foreach $bit_num (reverse 1..32) {
+			if ($int_mask & 0x00000001) {
+			    $cidr = $bit_num unless $cidr;
+			} elsif ($cidr) {
+			    $error .= "Invalid netmask specification (non-contiguous).\n";
+			    $exit_status++;
+			    last;
+			}
+			$int_mask = $int_mask >> 1;
+		    }
+		    #
+		    # "$bit_num" will equal 1 if all 32 bits of the netmask
+		    # were scanned without error.  An undocumented feature
+		    # is the ability to redundantly specify both a CIDR size
+		    # and a netmask specification.  If this is the case, they
+		    # must be equivalent to each other.
+		    #
+		    if ($bit_num = 1 && $cidr_in && ($cidr_in != $cidr)) {
+			$error .= "CIDRsize and netmask specifications do not equate.\n";
+			$exit_status++;
+		    }
+		}
+	    }
+	}
+    }
+    if ($exit_status) {
+	$error .= "\n" if $exit_status == 1;
+	$exit_status = 2 if $exit_status > 2;
+	return;
+    }
+
+    #
+    # So far, the network/CIDR input consists of syntactically valid fields.
+    # Now it's time to check if the network/CIDR combination is logically
+    # valid.  We'll start by checking for some very general formatting errors.
+    #
+
+    if ($cidr <= 8) {
+	if (($num_octets >= 2 && $octet_2 != 0) ||
+	    ($num_octets >= 3 && $octet_3 != 0) ||
+	    ($num_octets == 4 && $octet_4 != 0)) {
+	    $error  = "CIDR sizes /1-8 require just the first non-zero network octet to be specified.\n";
+	    $error .= "If other octets are included, they must be zeros.\n";
+	} else {
+	    $network = $rightmost_octet = $octet_1;
+	    $octet = "first";
+	    $mask = "255.0.0.0";	# subject to change a bit later
+	}
+
+    } elsif ($cidr <= 16) {
+	if ($num_octets < 2) {
+	    $error = "CIDR sizes /9-16 require the first two network octets to be specified.\n";
+	} elsif (($num_octets >= 3 && $octet_3 != 0) ||
+		 ($num_octets == 4 && $octet_4 != 0)) {
+	    $error  = "CIDR sizes /9-16 require just the first two network octets to be specified.\n";
+	    $error .= "If other octets are included, they must be zeros.\n";
+	} else {
+	    $network = "$octet_1.$octet_2";
+	    $rightmost_octet = $octet_2;
+	    $octet = "second";
+	    $mask = "255.255.0.0";
+	}
+
+    } elsif ($cidr <= 24) {
+	if ($num_octets < 3) {
+	    $error = "CIDR sizes /17-24 require the first three network octets to be specified.\n";
+	} elsif ($num_octets == 4 && $octet_4 != 0) {
+	    $error  = "CIDR sizes /17-24 require just the first three network octets to be specified.\n";
+	    $error .= "If the fourth octet is included, it must be zero.\n";
+	} else {
+	    $network = "$octet_1.$octet_2.$octet_3";
+	    $rightmost_octet = $octet_3;
+	    $octet = "third";
+	    $mask = "255.255.255.0";
+	}
+
+    } elsif ($cidr <= 32) {
+	if ($num_octets < 4) {
+	    $error = "CIDR sizes /25-32 require all four network octets to be specified.\n";
+	} else {
+	    $rightmost_octet = $octet_4;
+	    $octet = "fourth";
+	    $mask = "255.255.255.255";
+	}
+    }
+    if ($error) {
+	$error .= "\n";
+	$exit_status = 1;
+	return;
+    }
+
+    #
+    # Finally, if the CIDR size is not 8, 16, 24, or 32, the rightmost
+    # non-zero network octet must be evenly divisible by the appropriate
+    # power of two.  Make sure this is so.
+    #
+
+    $remainder = $cidr % 8;
+    if ($remainder) {
+	$factor = 256 >> $remainder;	# right-shift the indicated no. of bits
+	#
+	# For "$remainder" of   1,  2,  3,  4, 5, 6, or 7
+	#        "$factor" is 128, 64, 32, 16, 8, 4, or 2
+	#
+	if ($rightmost_octet % $factor) {
+	    $error  = "Invalid network specification for CIDR size of /$cidr.\n";
+	    $error .= "The $octet octet must be evenly divisible by $factor.\n";
+	    $error .= "\n";
+	    $exit_status = 1;
+	    return;
+	} else {
+	    #
+	    # Fixup the last "255" octet of the netmask
+	    # to its correct value.
+	    #
+	    $octet = 256 - $factor;
+	    if ($mask =~ /255$/) {
+		$mask =~ s/255$/$octet/;
+	    } else {
+		$mask =~ s/255(\.0.*)+$/$octet$1/;
+	    }
+	}
+    }
+    return ($network, $cidr, $mask);
+}
+

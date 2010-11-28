@@ -1,0 +1,245 @@
+
+This is the version 2.56 distribution of 'h2n', a DNS utility for
+performing the following functions:
+
+  * Convert network information in host table format into its
+    equivalent complement of zone data files usable by a BIND
+    name server.
+
+  * Analyze zone data transferred from an authoritative name server
+    for internal consistency and compliance with the requirements
+    of the basic DNS-related RFCs.
+
+The main characteristic of this version of h2n over the original
+is the heavy emphasis on error and consistency checking.
+
+
+Contents
+--------
+  CHANGES ..... change history
+  README ...... this file
+  h2n ......... program file
+  h2n.conf .... sample configuration file for site-specific defaults
+  h2n.1 ....... man(1) page
+  h2n.html .... HTML version of h2n.1
+  h2n.txt ..... plain-text version of h2n.1
+  build-dns ... script for calling h2n and managing zone files
+  check_del ... Perl script for checking delegation of name servers
+  check-dn .... script for checking availability of domain names
+  check-ip .... script for looking up IP addresses and zone contacts
+  check-named . script for reporting syslog messages resulting from
+                the last [re]start/reload/reconfig of the name server
+  check-net ... script verifying network CIDR and mask notations
+
+
+Requirements
+------------
+  1. A Perl 5 interpreter.  If you see a lot of complaints about
+     syntax errors when h2n is starting up, it means that you are
+     running Perl 4.  Also, the -P option for preserving upper-case
+     characters in the host file requires the "Tie::CPHash" Perl
+     module to be installed.  This module can be obtained from the
+     CPAN site at < http://search.cpan.org/search?module=Tie::CPHash >.
+
+  2. The DiG program is required for certain options (-V, -I audit)
+     and to obtain the version of BIND that is running on the master
+     name server (-h option) in order to optimize its functionality.
+     Go to < http://www.isc.org/ > to obtain the latest source
+     code.  Already-compiled versions of DiG may be available
+     for your particular Unix platform via a Web search.
+     NOTE: Although DiG is not required for h2n to build zone
+           data files from a host table, references to external
+           domain names will not be able to be validated.  This
+           hobbles h2n in its efforts to prevent garbage in from
+           becoming garbage out.
+
+  3. The 'check_del' utility.  You have a couple of choices:
+
+      a) Use the version written in Perl that's included with the
+         h2n distribution.  You'll need the Net::DNS module from
+         CPAN < http://search.cpan.org/search?module=Net::DNS >.
+         The Net::DNS home page, < http://www.net-dns.org/ >,
+         also has this module available for download.
+
+      b) A version written in C can be found in the BIND 8
+         distribution under the 'contrib/nutshell' directory.
+         You'll have to compile BIND first since 'check_del'
+         needs to be linked with some of BIND's static libraries.
+
+     'check_del' is only needed when h2n is used to verify a
+     DNS zone via the -V option.
+
+
+New Features
+------------
+The complete list of new features is summarized the CHANGES file.
+Among them are:
+
+  * h2n now assumes that the master name server is RFC-2308-compliant
+    (BIND 8.2 and newer) and will generate $TTL directives by default
+    unless one of the following two conditions is true:
+
+      1. A query for 'version.bind. chaos txt' reveals that a BIND
+         version earlier than 8.2 is running on the master name server
+         (the host specified with the -h option).
+
+      2. The BIND version is unknown *and* exactly four arguments
+         (any of which can be null) are specified in the -o option
+         *and* no +t option is specified *and* no $TTL directive is
+         discovered in an existing DB file.
+
+  * Static elements of a BIND 8/9 configuration file (ACL, logging,
+    options, etc.) can be put into a file that's specified with the
+    new +C option.  This file will be prepended via an 'include'
+    statement to the dynamically-generated elements (zone statements,
+    +L/+O/+o[ms] options) that h2n writes as the 'named.conf' file
+    (+c option).  Additional configuration statements can be appended
+    to 'named.conf' if h2n finds a file called 'spcl-conf'.
+
+  * Host-specific items like the pathname of the DiG utility and network
+    connectivity information can now be placed into a configuration file
+    instead of having to hard-code them into the h2n program itself.
+    See the included 'h2n.conf' file for specific details.
+
+  * By default, h2n converts host file names to lower-case characters
+    in the zone data files that it generates.  The character-case of
+    host file names can be preserved with the new -P option.  If -P
+    is specified, h2n will require Perl to load the 'Tie::CPHash' module.
+    See < http://search.cpan.org/search?module=Tie::CPHash > to
+    obtain this module for addition to your Perl installation.
+
+  * The new -T option allows top-of-zone, i.e. zone apex, related
+    DNS records to be configured without having to resort to the
+    creation of a 'spcl' file.  For example, say a domain's Web
+    server has the following host file entry:
+
+      192.253.253.80  web.movie.edu
+
+    The following -T option will enable the URLs < http://movie.edu >
+    and < http://www.movie.edu > to resolve to the site's Web server
+    as well as adding the global MX record(s) from the -m option(s)
+    to the zone apex:
+
+      -T RR='@ A 192.253.253.80'  ALIAS=www  mode=M
+
+  * The -N/-n/-a options now understand network specifications using
+    CIDR format in addition to using network mask notation.  Netmasks
+    are checked for contiguous bits and network/CIDRsize specifications
+    are similarly validated.  Network sizes /8 to /32 are supported.
+    A /8 network specification will generate a single class-A sized
+    reverse-mapping zone file.  Networks specified with a CIDR size
+    of /9 through 16 will generate the equivalent number of class-B
+    sized zone files while CIDR sizes /17 through /24 will generate
+    the equivalent number of class-C reverse-mapping zone files.
+
+  * The -n option has been enhanced to accommodate sub-class-C networks
+    delegated via RFC-2317.  Networks sized /25 to /32 can include the
+    following arguments:
+
+      + A 'domain=' argument for specifying the domain (zone)
+        name in which the PTR records are to reside.  If omitted,
+        the name defaults to the naming scheme illustrated by the
+        following examples:
+
+          192.168.4.0/25  ->  0-127.4.168.192.in-addr.arpa
+          192.168.4.0/26  ->  0-63.4.168.192.in-addr.arpa
+          192.168.4.0/27  ->  0-31.4.168.192.in-addr.arpa
+          192.168.4.0/28  ->  0-15.4.168.192.in-addr.arpa
+          192.168.4.0/29  ->  0-7.4.168.192.in-addr.arpa
+          192.168.4.0/31  ->  0-1.4.168.192.in-addr.arpa
+          192.168.4.0/32  ->  0.4.168.192.in-addr.arpa
+
+        PTR records can even be written to the forwarding-mapping
+        domain in the -d option as long as the -d option precedes
+        the -n option.
+
+        The default reverse-mapping 'db.*' files that h2n generates
+        fit the following pattern:
+
+          192.168.4.0/25  ->  db.192.168.4.0-127
+          192.168.4.0/26  ->  db.192.168.4.0-63
+          192.168.4.0/27  ->  db.192.168.4.0-31
+          192.168.4.0/28  ->  db.192.168.4.0-15
+          192.168.4.0/29  ->  db.192.168.4.0-7
+          192.168.4.0/31  ->  db.192.168.4.0-1
+          192.168.4.0/32  ->  db.192.168.4.0
+
+        Special characters that are are valid in a domain name but
+        troublesome in filenames will get translated to the "%"
+        character in the 'db.*' files, e.g.,
+
+          domain=0/28.4.168.192.in-addr.arpa  ->  db.192.168.4.0%28
+
+      + A 'ptr-owner=' argument to the -n option is for added
+        flexibility in accommodating RFC-2317 naming schemes
+        for network sizes /25 to /32.  It takes the form of
+        a template based on the four octets of the matching
+        IP address with semantic similarities to the $GENERATE
+        directive that's available in BIND 8/9 master zone files.
+
+        To illustrate, given an IP address of "A.B.C.D", the
+        corresponding octets are given template token names
+        of "$1.$2.$3.$4".
+
+        Class-A network:
+          $ORIGIN  A.in-addr.arpa.
+          D.C.B      PTR      host.example.com.
+         --------
+         $4.$3.$2  <- effective template
+
+        Class-B network:
+          $ORIGIN  B.A.in-addr.arpa.
+          D.C        PTR      host.example.com.
+         -----
+         $4.$3     <- effective template
+
+        Class-C network:
+          $ORIGIN  C.B.A.in-addr.arpa.
+          D          PTR      host.example.com.
+         ---
+         $4        <- effective template
+
+        NOTE: the 'ptr-owner' template is fixed for /8 to /24
+              networks.  It may not appear as an argument for
+              such networks specified with the -n option.
+
+        Here's an example where the 'ptr-owner' argument can come
+        into play:
+
+          1. A hostmaster who manages 'example.com' also wants to manage
+             the 192.168.4.80/28 network that has been assigned to
+             him.  Furthermore, he wants to maintain the forward- and
+             reverse-mapping DNS data in a single zone file.
+
+          2. The hostmaster's upstream provider obliges by making the
+             following RFC-2317 quasi-delegation (no new delegation
+             in the 'in-addr.arpa' domain is being created - just
+             CNAMEs that point to an already-existing forward-mapping
+             domain [example.com]):
+
+             $ORIGIN  168.192.in-addr.arpa.
+             $GENERATE 80-95  $.4   IN CNAME    192-168-4-$.example.com.
+
+          3. The hostmaster adds the following line to his h2n
+             options file at the appropriate location after the
+             '-d example.com' option line:
+
+             -n 192.168.4.80/28  domain=example.com  ptr-owner=$1-$2-$3-$4
+
+             Task complete.
+          
+    As you can see, the 'domain=' and 'ptr-owner=' arguments provide
+    the necessary flexibility to accommodate almost any RFC-2317
+    naming scheme.  In addition, it's possible for multiple sub-class-C 
+    networks to have their reverse-mapping domain names reside in the
+    same DNS zone as long as the domain name in each PTR record's owner
+    field is unique.  h2n will perform the necessary validations to
+    make sure that there are no network overlaps of any kind.
+
+
+Feel free to contact me for questions, comments, and enhancement requests.
+
+Andris Kalnozols
+Hewlett-Packard Laboratories
+andris@hpl.hp.com
+
