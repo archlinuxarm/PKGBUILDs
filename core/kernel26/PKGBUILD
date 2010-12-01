@@ -1,0 +1,60 @@
+# Maintainer: Mike Staszel <mikestaszel@gmail.com>
+
+# This PKGBUILD builds a kernel for most plugs.
+
+pkgname=kernel26
+pkgver=2.6.36.1
+pkgrel=1
+pkgdesc="The Linux Kernel and modules"
+arch=('arm')
+license=('GPL2')
+url="http://www.kernel.org"
+depends=('coreutils' 'module-init-tools')
+makedepends=('uboot-mkimage')
+conflicts=('kernel26')
+replaces=('kernel26-withlinux' 'kernel26-dockstar')
+provides=('kernel26')
+install=kernel26.install
+source=(http://www.kernel.org/pub/linux/kernel/v2.6/linux-$pkgver.tar.bz2
+        $pkgver.config
+        0001-MTD-partitons-used-by-the-Seagate-FreeAgent-DockStar.patch
+        0002-LED-definitions-for-the-Seagate-FreeAgent-DockStar.patch
+        scsi.h)
+md5sums=('0f1398ad1fcfc14f2420010bc8a03ca9'
+         '8a6da52da0464eb435de9c718fa526b8'
+         '0ed85186b0b5446c4afbbc45639a7466'
+         'e81eae381cc2c282d169c879cc4da54b'
+         '4e6a77d9f8ebc242eb3b7694cf86643b')
+LDFLAGS=""
+
+build() {
+   cd $srcdir/
+   cp 000* $pkgver.config linux-$pkgver/
+   cd linux-$pkgver
+   mv $pkgver.config .config
+
+   # Apply Aholler's DockStar hardware patches
+   patch -p1 -i 0001-MTD-partitons-used-by-the-Seagate-FreeAgent-DockStar.patch
+   patch -p1 -i 0002-LED-definitions-for-the-Seagate-FreeAgent-DockStar.patch
+
+   # Just in case you want to change things
+   # make menuconfig
+
+   # Make!
+   make modules uImage || return 1
+
+   # Pack up the created uImage
+   mkdir -p $pkgdir/boot
+   cp $srcdir/linux-$pkgver/arch/arm/boot/uImage $pkgdir/boot/uImage
+
+   # Make and package kernel modules
+   mkdir -p $pkgdir/{lib/modules,boot}
+   make INSTALL_MOD_PATH=${pkgdir} modules_install || return 1
+
+   # Remove the symlink to the build machine's build directory
+   rm $pkgdir/lib/modules/$pkgver/build
+
+   # Hack to put in scsi.h
+   mkdir -p $pkgdir/usr/include/scsi
+   cp $srcdir/scsi.h $pkgdir/usr/include/scsi/
+}
