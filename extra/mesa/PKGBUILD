@@ -6,10 +6,10 @@
 pkgbase="mesa"
 pkgname=('mesa' 'libgl' 'unichrome-dri' 'mga-dri' 'savage-dri')
 pkgver=7.7.1
-pkgrel=1
+pkgrel=3
 arch=(arm)
 makedepends=('glproto>=1.4.11' 'pkgconfig' 'libdrm>=2.4.19' 'libxxf86vm>=1.1.0' 'libxdamage>=1.1.2' 'expat>=2.0.1' 'libx11>=1.3.3' 'libxt>=1.0.7' 
-'gcc-libs>=4.4.3' 'dri2proto=2.1' 'python')
+'gcc-libs>=4.4.3' 'dri2proto>=2.1' 'python')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=(!makeflags)
@@ -85,7 +85,7 @@ package_libgl() {
 }
 
 package_mesa() {
-  depends=('libgl' 'libx11>=1.3.2' 'libxt>=1.0.7' 'gcc-libs>=4.4.2' 'dri2proto=2.1' 'libdrm>=2.4.17-2')
+  depends=('libgl' 'libx11>=1.3.2' 'libxt>=1.0.7' 'gcc-libs>=4.4.2' 'dri2proto>=2.1' 'libdrm>=2.4.17-2')
   pkgdesc="Mesa 3-D graphics libraries and include files"
 
   cd "${srcdir}/Mesa-${pkgver}" || return 1
