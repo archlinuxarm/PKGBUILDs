@@ -1,31 +1,40 @@
-# Maintainer: Mike Staszel <mikestaszel@plugboxlinux.org>
-# Contributor: Jonny Gerold <fsk141@archplug.org>
+# $Id: PKGBUILD 87242 2010-08-11 12:46:24Z allan $
+# Maintainer: Jan de Groot <jgc@archlinux.org>
+# Maintainer: Allan McRae <allan@archlinux.org>
 
-# toolchain build order: kernel-headers->glibc->binutils->gcc->binutils->glibc
+# toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
 # NOTE: libtool requires rebuilt with each new gcc version
 
 pkgname=('gcc' 'gcc-libs' 'gcc-fortran' 'gcc-objc')
-pkgver=4.4.3
-pkgrel=5
-_libstdcppmanver=4.4.0
+pkgver=4.5.1
+pkgrel=1
+#_snapshot=4.5-20100610
+_libstdcppmanver=20100719	# Note: check source directory name when updating this
 pkgdesc="The GNU Compiler Collection"
 arch=('arm')
 license=('GPL' 'LGPL' 'custom')
 url="http://gcc.gnu.org"
-makedepends=('binutils>=2.20' 'mpfr>=3.0.0' 'cloog-ppl>=0.15.3')
+makedepends=('binutils>=2.20.1' 'libmpc>=0.8.2-2' 'cloog-ppl>=0.15.9-2' 'elfutils')
 options=('!libtool' '!emptydirs')
 source=(ftp://gcc.gnu.org/pub/gcc/releases/gcc-${pkgver}/gcc-{core,g++,fortran,objc}-${pkgver}.tar.bz2
-	ftp://gcc.gnu.org/pub/gcc/libstdc++/doxygen/libstdc++-man.${_libstdcppmanver}.tar.bz2
+	#ftp://gcc.gnu.org/pub/gcc/snapshots/${_snapshot}/gcc-{core,g++,fortran,objc}-${_snapshot}.tar.bz2
+	ftp://gcc.gnu.org/pub/gcc/libstdc++/doxygen/libstdc++-api.${_libstdcppmanver}.man.tar.bz2
+	gcc_pure64.patch
 	gcc-hash-style-both.patch)
-
-md5sums=('054b66f315b3d04ad06544ce26e72365'
-         'cd179ec4f05ee17ce76464da25a2674c'
-         '0f8fa5e9edbcf156a061312cae0715ee'
-         '34711c4de46eaf79aa018206dbec4389'
-         '3b94fe4a3cd49819bf57ecc407851b9b'
+md5sums=('dc8959e31b01a65ce10d269614815054'
+         'b294953ff0bb2f20c7acb2bf005d832a'
+         '7567c2f8df8a8bf61b48fe414b88de65'
+         '3c11b7037896e967eddf8178af2ddd98'
+         '226ae0c6364cfe2c1f7ac88d06088d5a'
+         '4030ee1c08dd1e843c0225b772360e76'
          '6fd395bacbd7b6e47c7b74854b478363')
 
+
+if [ -n "${_snapshot}" ]; then
+  _basedir="${srcdir}/gcc-${_snapshot}"
+else
   _basedir="${srcdir}/gcc-${pkgver}"
+fi
 
 build() {
   if ! locale -a | grep ^de_DE > /dev/null; then
@@ -34,55 +43,54 @@ build() {
   fi
   
   cd ${_basedir}
-  
+
+  # "Add" ppl-0.11 compatibility
+  sed -i "/ppl_minor_version=/s#10#11#" configure
+
   # Do not install libiberty
   sed -i 's/install_to_$(INSTALL_DEST) //' libiberty/Makefile.in
 
   # Do not run fixincludes
   sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
 
-  patch -Np0 -i ${srcdir}/gcc-hash-style-both.patch || return 1
+  if [ "${CARCH}" = "x86_64" ]; then
+    patch -Np1 -i ../gcc_pure64.patch
+  fi
+  patch -Np0 -i ${srcdir}/gcc-hash-style-both.patch
 
   echo ${pkgver} > gcc/BASE-VER
 
-  mkdir build && cd build
-	
-	../configure --prefix=/usr \
-	--build=$CHOST \
-	--target=$CHOST \
-	--enable-shared \
-	--enable-languages=c,c++,fortran,objc,obj-c++ \
-	--enable-threads=posix \
-	--mandir=/usr/share/man \
-	--infodir=/usr/share/info \
-	--enable-__cxa_atexit \
-	--disable-multilib \
-	--libdir=/usr/lib \
-	--libexecdir=/usr/lib \
-	--enable-clocale=gnu \
-	--disable-libstdcxx-pch \
-	
-	make || return 1
+  mkdir build && cd build      
+  ../configure --prefix=/usr --enable-languages=c,c++,fortran,objc,obj-c++ \
+      --host=arm-unknown-linux-gnueabi --build=arm-unknown-linux-gnueabi \
+      --enable-shared --enable-threads=posix --enable-__cxa_atexit \
+      --enable-clocale=gnu --enable-gnu-unique-object \
+      --enable-lto --enable-plugin \
+      --disable-multilib --disable-libstdcxx-pch \
+      --with-system-zlib --with-ppl --with-cloog \
+      --libdir=/usr/lib --libexecdir=/usr/lib \
+      --mandir=/usr/share/man --infodir=/usr/share/info
+  make
 }
 
 package_gcc-libs()
 {
   pkgdesc="Runtime libraries shipped by GCC for C and C++ languages"
   groups=('base')
-  depends=('glibc>=2.10.1-5')
+  depends=('glibc>=2.11.1-2')
   install=gcc-libs.install
 
   cd ${_basedir}/build
-  make -j2 -C $CHOST/libgcc DESTDIR=${pkgdir} install-shared
+  make -j1 -C $CHOST/libgcc DESTDIR=${pkgdir} install-shared
   for lib in libmudflap libgomp libssp libstdc++-v3/src; do
-    make -j2 -C $CHOST/$lib DESTDIR=${pkgdir} install-toolexeclibLTLIBRARIES
+    make -j1 -C $CHOST/$lib DESTDIR=${pkgdir} install-toolexeclibLTLIBRARIES
   done
-  make -j2 -C $CHOST/libstdc++-v3/po DESTDIR=${pkgdir} install
-  make -j2 -C $CHOST/libgomp DESTDIR=${pkgdir} install-info
+  make -j1 -C $CHOST/libstdc++-v3/po DESTDIR=${pkgdir} install
+  make -j1 -C $CHOST/libgomp DESTDIR=${pkgdir} install-info
 
-  make -j2 DESTDIR=${pkgdir} install-target-libgfortran
+  make -j1 DESTDIR=${pkgdir} install-target-libgfortran
 
-  make -j2 DESTDIR=${pkgdir} install-target-libobjc
+  make -j1 DESTDIR=${pkgdir} install-target-libobjc
   # I thought I said to only install the lib...
   rm -rf ${pkgdir}/usr/lib/gcc/
 
@@ -96,23 +104,21 @@ package_gcc-libs()
 
 package_gcc()
 {
-  depends=('binutils>=2.20' 'mpfr>=3.0.0' 'cloog-ppl>=0.15.3')
+  depends=('binutils>=2.20.1' 'libmpc>=0.8.1-2' 'cloog-ppl>=0.15.9-2' 'elfutils')
   groups=('base-devel')
   install=gcc.install
 
   cd ${_basedir}/build
   
   # much, much easier to install the lot and clean-up the mess
-  make -j2 DESTDIR=${pkgdir} install || return 1
-  rm -rf $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{adainclude,adalib,finclude}
-  mkdir -p $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{adainclude,adalib,finclude}
-  rm -rf $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/include/objc
-  mkdir -p $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/include/objc
-  rm $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{cc1obj{,plus},f951,libgfortranbegin.a}
-  rm $pkgdir/usr/lib/{*.so*,lib{gfortran,objc}.a}
-  rm $pkgdir/usr/share/info/{gfortran,libgomp}.info
-  rm $pkgdir/usr/share/locale/{de,fr}/LC_MESSAGES/libstdc++.mo
-  rm $pkgdir/usr/share/man/man1/gfortran.1
+  make -j1 DESTDIR=${pkgdir} install
+  rm -f $pkgdir/usr/bin/*gfortran
+  rm -f $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{finclude,include/objc}/*
+  rm -f $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{cc1obj{,plus},f951,libgfortranbegin.a}
+  rm -f $pkgdir/usr/lib/{*.so*,lib{gfortran,objc}.a}
+  rm -f $pkgdir/usr/share/info/{gfortran,libgomp}.info
+  rm -f $pkgdir/usr/share/locale/{de,fr}/LC_MESSAGES/libstdc++.mo
+  rm -f $pkgdir/usr/share/man/man1/gfortran.1
 
   # many packages require these symlinks
   install -dm755 ${pkgdir}/lib
@@ -120,9 +126,38 @@ package_gcc()
   ln -sf gcc ${pkgdir}/usr/bin/cc
   ln -sf g++ ${pkgdir}/usr/bin/c++
 
+  # POSIX conformance launcher scripts for c89 and c99
+  cat > $pkgdir/usr/bin/c89 <<"EOF"
+#!/bin/sh
+fl="-std=c89"
+for opt; do
+  case "$opt" in
+    -ansi|-std=c89|-std=iso9899:1990) fl="";;
+    -std=*) echo "`basename $0` called with non ANSI/ISO C option $opt" >&2
+	    exit 1;;
+  esac
+done
+exec gcc $fl ${1+"$@"}
+EOF
+
+  cat > $pkgdir/usr/bin/c99 <<"EOF"
+#!/bin/sh
+fl="-std=c99"
+for opt; do
+  case "$opt" in
+    -std=c99|-std=iso9899:1999) fl="";;
+    -std=*) echo "`basename $0` called with non ISO C99 option $opt" >&2
+	    exit 1;;
+  esac
+done
+exec gcc $fl ${1+"$@"}
+EOF
+
+  chmod 755 $pkgdir/usr/bin/c{8,9}9
+
   # install the libstdc++ man pages
   install -dm755 ${pkgdir}/usr/share/man/man3
-  install -m644 ${srcdir}/libstdc++-man-${_libstdcppmanver}/man3/* \
+  install -m644 ${srcdir}/libstdc++-api-${_libstdcppmanver}.man/man3/* \
     ${pkgdir}/usr/share/man/man3/
   # deal with conflicts...
   rm -f ${pkgdir}/usr/share/man/man3/{ctime,queue,random,regex,string}.3
@@ -135,13 +170,13 @@ package_gcc()
 package_gcc-fortran()
 {
   pkgdesc="Fortran front-end for GCC"
-  depends=("gcc=$pkgver")
+  depends=("gcc=$pkgver-$pkgrel")
   install=gcc-fortran.install
 
   cd ${_basedir}/build
-  make -j2 DESTDIR=$pkgdir install-target-libgfortran
-  make -j2 -C $CHOST/libgomp DESTDIR=$pkgdir install-nodist_fincludeHEADERS
-  make -j2 -C gcc DESTDIR=$pkgdir fortran.install-{common,man,info}
+  make -j1 DESTDIR=$pkgdir install-target-libgfortran
+  make -j1 -C $CHOST/libgomp DESTDIR=$pkgdir install-nodist_fincludeHEADERS
+  make -j1 -C gcc DESTDIR=$pkgdir fortran.install-{common,man,info}
   install -Dm755 gcc/f951 $pkgdir/usr/lib/gcc/$CHOST/$pkgver/f951
   
   # remove libraries included in gcc-libs
@@ -155,10 +190,10 @@ package_gcc-fortran()
 package_gcc-objc()
 {
   pkgdesc="Objective-C front-end for GCC"
-  depends=("gcc=$pkgver")
+  depends=("gcc=$pkgver-$pkgrel")
 
   cd ${_basedir}/build
-  make -j2 DESTDIR=$pkgdir install-target-libobjc
+  make -j1 DESTDIR=$pkgdir install-target-libobjc
   install -dm755 $pkgdir/usr/lib/gcc/$CHOST/$pkgver/
   install -m755 gcc/cc1obj{,plus} $pkgdir/usr/lib/gcc/$CHOST/$pkgver/
 
