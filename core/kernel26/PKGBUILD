@@ -3,6 +3,9 @@
 
 noautobuild=1
 
+# We split up the LED patch for the GoFlexNet because it was failing.
+# This is hopefully temporary.
+
 # In kernel26-headers, scsi.h is explicitly copied to the package
 # this is done at the very end of this PKGBUILD
 
@@ -11,10 +14,10 @@ pkgname=('kernel26' 'kernel26-headers')
 _kernelname=${pkgname#kernel26}
 _basekernel=2.6.37
 pkgver=${_basekernel}
-pkgrel=4
+pkgrel=5
 plugrel=1
 makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'make')
-_patchname="patch-${pkgver}-${pkgrel}-ARCH"
+_patchname="patch-${pkgver}-4-ARCH"
 replaces=('kernel26-withlinux' 'kernel26-dockstar')
 arch=(arm)
 CARCH=arm
@@ -30,12 +33,11 @@ source=(ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-$_basekernel.tar.bz2
 md5sums=('c8ee37b4fdccdb651e0603d35350b434'
          '732176aeb134678b4e369e1d5d5fca2e'
          'f56257dbca522a0699cd5478224a6008'
-         '927bb9b3d5e48efa39740fdb1987799f'
+         'a6de179f742c92feaf24033569110182'
          '25584700a0a679542929c4bed31433b6')
 
 build() {
   cd ${srcdir}/linux-$_basekernel
-
   # Add -ARCH patches
   # See http://projects.archlinux.org/linux-2.6-ARCH.git/
   patch -Np1 -i ${srcdir}/${_patchname}
@@ -50,12 +52,11 @@ build() {
 
   # get kernel version  
   make prepare
-
   # Configure the kernel. Replace the line below with one of your choice.
   #make menuconfig # CLI menu for configuration
   #make nconfig # new CLI menu for configuration
   #make oldconfig # using old config from previous kernel version
-
+  yes "" | make config
   # Build!
   make ${MAKEFLAGS} uImage modules
 }
@@ -63,7 +64,7 @@ build() {
 package_kernel26() {
   pkgdesc="The Linux Kernel and modules"
   groups=('base')
-  depends=('coreutils' 'module-init-tools')
+  depends=('coreutils' 'module-init-tools>=3.12-2')
   replaces=('kernel24' 'kernel24-scsi' 'kernel26-scsi'
             'alsa-driver' 'ieee80211' 'hostap-driver26'
             'pwc' 'nforce' 'squashfs' 'unionfs' 'ivtv'
@@ -71,8 +72,9 @@ package_kernel26() {
             'gspcav1' 'atl2' 'wlan-ng26' 'rt2500' 'nouveau-drm'
             'kernel26-withlinux' 'kernel26-dockstar')
   install=kernel26.install
+  optdepends=('crda: to set the correct wireless channels of your country')
+  
   KARCH=arm
-
   cd ${srcdir}/linux-$_basekernel
   # get kernel version
   _kernver="$(make kernelrelease)"
@@ -89,6 +91,10 @@ package_kernel26() {
 
   # remove build and source links
   rm -f ${pkgdir}/lib/modules/${_kernver}/{source,build}
+  # remove the firmware
+  rm -rf ${pkgdir}/lib/firmware
+  # gzip -9 all modules to save 100MB of space
+  find "$pkgdir" -name '*.ko' -exec gzip -9 {} \;
 }
 
 package_kernel26-headers() {
@@ -98,7 +104,6 @@ package_kernel26-headers() {
   mkdir -p ${pkgdir}/lib/modules/${_kernver}
   cd ${pkgdir}/lib/modules/${_kernver}
   ln -sf ../../../usr/src/linux-${_kernver} build
-  
   cd ${srcdir}/linux-$_basekernel
   install -D -m644 Makefile \
     ${pkgdir}/usr/src/linux-${_kernver}/Makefile
