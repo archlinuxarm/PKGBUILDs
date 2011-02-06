@@ -1,0 +1,47 @@
+diff --git a/ubuntu/aufs/branch.c b/ubuntu/aufs/branch.c
+index cd4463c..ff6b158 100644
+--- a/fs/aufs/branch.c
++++ b/fs/aufs/branch.c
+@@ -22,6 +22,8 @@
+ 
+ #include <linux/file.h>
+ #include <linux/statfs.h>
++#include <linux/lglock.h>
++#include <linux/percpu.h>
+ #include "aufs.h"
+ 
+ /*
+@@ -851,7 +853,8 @@ static int au_br_mod_files_ro(struct super_block *sb, aufs_bindex_t bindex)
+ 		goto out;
+ 
+ 	/* no need file_list_lock() since sbinfo is locked? defered? */
+-	list_for_each_entry(file, &sb->s_files, f_u.fu_list) {
++        lg_global_lock(files_lglock);
++	do_file_list_for_each_entry(sb, file) {
+ 		if (special_file(file->f_dentry->d_inode->i_mode))
+ 			continue;
+ 
+@@ -861,6 +864,7 @@ static int au_br_mod_files_ro(struct super_block *sb, aufs_bindex_t bindex)
+ 			err = -EBUSY;
+ 			FiMustNoWaiters(file);
+ 			fi_read_unlock(file);
++			lg_global_unlock(files_lglock);
+ 			goto out_free;
+ 		}
+ 
+@@ -889,10 +893,13 @@ static int au_br_mod_files_ro(struct super_block *sb, aufs_bindex_t bindex)
+ 			if (p) {
+ 				a = p;
+ 				a[n++] = hf;
+-			} else
++			} else {
++				lg_global_unlock(files_lglock);
+ 				goto out_free;
++			}
+ 		}
+-	}
++	} while_file_list_for_each_entry;
++	lg_global_unlock(files_lglock);
+ 
+ 	err = 0;
+ 	if (n)
