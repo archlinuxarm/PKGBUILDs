@@ -1,0 +1,98 @@
+diff -uNr ndiswrapper-1.56.old/driver/usb.c ndiswrapper-1.56/driver/usb.c
+--- ndiswrapper-1.56.old/driver/usb.c	2010-02-10 18:09:32.000000000 -0800
++++ ndiswrapper-1.56/driver/usb.c	2010-07-25 02:29:25.442145846 -0700
+@@ -191,9 +191,15 @@
+ 	if (wrap_urb->flags & WRAP_URB_COPY_BUFFER) {
+ 		USBTRACE("freeing DMA buffer for URB: %p %p",
+ 			 urb, urb->transfer_buffer);
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 35)
+ 		usb_buffer_free(IRP_WRAP_DEVICE(irp)->usb.udev,
++                                urb->transfer_buffer_length,
++                                urb->transfer_buffer, urb->transfer_dma);
++#else
++		usb_free_coherent(IRP_WRAP_DEVICE(irp)->usb.udev,
+ 				urb->transfer_buffer_length,
+ 				urb->transfer_buffer, urb->transfer_dma);
++#endif
+ 	}
+ 	if (urb->setup_packet)
+ 		kfree(urb->setup_packet);
+@@ -303,9 +309,16 @@
+ 			       || PageHighMem(virt_to_page(buf))
+ #endif
+ 		    )) {
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 35)
+ 		urb->transfer_buffer =
+-			usb_buffer_alloc(wd->usb.udev, buf_len, alloc_flags,
++                        usb_buffer_alloc(wd->usb.udev, buf_len, alloc_flags,
++                                         &urb->transfer_dma);
++#else
++		urb->transfer_buffer =
++			usb_alloc_coherent(wd->usb.udev, buf_len, alloc_flags,
+ 					 &urb->transfer_dma);
++#endif
+ 		if (!urb->transfer_buffer) {
+ 			WARNING("couldn't allocate dma buf");
+ 			IoAcquireCancelSpinLock(&irp->cancel_irql);
+diff -uNr ndiswrapper-1.56.old/driver/wrapndis.c ndiswrapper-1.56/driver/wrapndis.c
+--- ndiswrapper-1.56.old/driver/wrapndis.c	2010-02-10 18:09:32.000000000 -0800
++++ ndiswrapper-1.56/driver/wrapndis.c	2010-07-25 02:06:13.184631757 -0700
+@@ -936,6 +936,10 @@
+ 	EXIT2(return);
+ }
+ 
++#ifndef netdev_mc_count
++#define netdev_mc_count(net_dev) net_dev->mc_count
++#endif
++
+ static void set_multicast_list(struct ndis_device *wnd)
+ {
+ 	struct net_device *net_dev;
+@@ -950,20 +954,26 @@
+ 		packet_filter |= NDIS_PACKET_TYPE_PROMISCUOUS |
+ 			NDIS_PACKET_TYPE_ALL_LOCAL;
+ 	} else if (net_dev->flags & IFF_ALLMULTI ||
+-		   net_dev->mc_count > wnd->multicast_size) {
++		   netdev_mc_count(net_dev) > wnd->multicast_size) {
+ 		packet_filter |= NDIS_PACKET_TYPE_ALL_MULTICAST;
+ 		TRACE2("0x%08x", packet_filter);
+-	} else if (net_dev->mc_count > 0) {
++	} else if (netdev_mc_count(net_dev) > 0) {
+ 		int i, size;
+ 		char *buf;
++#ifndef netdev_for_each_mc_addr
+ 		struct dev_mc_list *mclist;
+-		size = min(wnd->multicast_size, net_dev->mc_count);
+-		TRACE2("%d, %d", wnd->multicast_size, net_dev->mc_count);
++#else
++		struct netdev_hw_addr *mclist;
++#endif
++
++		size = min(wnd->multicast_size, netdev_mc_count(net_dev));
++		TRACE2("%d, %d", wnd->multicast_size, netdev_mc_count(net_dev));
+ 		buf = kmalloc(size * ETH_ALEN, GFP_KERNEL);
+ 		if (!buf) {
+ 			WARNING("couldn't allocate memory");
+ 			EXIT2(return);
+ 		}
++#ifndef netdev_for_each_mc_addr
+ 		mclist = net_dev->mc_list;
+ 		for (i = 0; i < size && mclist; mclist = mclist->next) {
+ 			if (mclist->dmi_addrlen != ETH_ALEN)
+@@ -972,6 +982,15 @@
+ 			TRACE2(MACSTRSEP, MAC2STR(mclist->dmi_addr));
+ 			i++;
+ 		}
++#else
++		i = 0;
++		netdev_for_each_mc_addr(mclist, net_dev){
++                        memcpy(buf + i++ * ETH_ALEN,
++                               mclist->addr, ETH_ALEN);
++                        TRACE2(MACSTRSEP, MAC2STR(mclist->addr));
++
++		}
++#endif
+ 		res = mp_set(wnd, OID_802_3_MULTICAST_LIST, buf, i * ETH_ALEN);
+ 		if (res == NDIS_STATUS_SUCCESS && i > 0)
+ 			packet_filter |= NDIS_PACKET_TYPE_MULTICAST;
