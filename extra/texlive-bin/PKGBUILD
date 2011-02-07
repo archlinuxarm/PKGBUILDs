@@ -1,0 +1,303 @@
+# Maintainer: francois <francois.archlinux.org>
+
+# PlugApps: Kevin Mihelich <kevin@plugapps.com>
+#  - Removed clisp makedepend, removed xindy from build and packaging (only thing that used clisp)
+#  - Added arm.patch to fix broken ARM assembly, will be fixed in texlive 1.5.1
+#  - Changed banner from Arch Linux to PlugApps, might as well eh?
+
+plugrel=1
+
+pkgname=texlive-bin
+pkgver=2010.1
+_luatex_ver=0.62.0
+pkgrel=5
+pkgdesc="TeX Live binaries"
+license=('GPL')
+arch=('i686' 'x86_64')
+depends=('t1lib' 'gd' 'libgraphite' 'poppler' 'libsigsegv')
+makedepends=('perl' 'ffcall')
+provides=('lcdf-typetools' 'kpathsea' 'pdfjam')
+conflicts=('pdfjam')
+options=('!libtool')
+url='http://tug.org/texlive/'
+source=('texmf.cnf'
+        'fix-fontforge-encoding.patch'
+        '09-texlive-fonts.conf'
+        'dvipng-fix-options.patch'
+        'ftp://ftp.archlinux.org/other/texlive/texlive-bin-source-20100926.tar.xz'
+        'ftp://ftp.archlinux.org/other/texlive/texlive-bin-texmf-20101105.tar.xz'
+        "http://foundry.supelec.fr/gf/download/frsrelease/381/1533/luatex-beta-${_luatex_ver}.tar.bz2"
+        'arm.patch')
+backup=(etc/texmf/web2c/texmf.cnf \
+  etc/texmf/chktex/chktexrc \
+	etc/texmf/web2c/mktex.cnf \
+	etc/texmf/web2c/updmap.cfg \
+	etc/texmf/web2c/fmtutil.cnf \
+	etc/texmf/tex/generic/config/language.dat \
+	etc/texmf/tex/generic/config/language.def \
+	etc/texmf/tex/generic/config/pdftexconfig.tex \
+	etc/texmf/ttf2pk/ttf2pk.cfg \
+	etc/texmf/dvips/config/config.ps \
+	etc/texmf/dvipdfmx/dvipdfmx.cfg \
+	etc/texmf/dvipdfm/config/config \
+	etc/texmf/xdvi/XDvi)
+
+build() {
+   if [ "${CARCH}" = "x86_64" ]; then
+     export CFLAGS="${CFLAGS} -fPIC"
+     export CXXFLAGS="${CXXFLAGS} -fPIC"
+   fi
+
+   cd $srcdir
+   patch -p0 -i arm.patch
+
+   # Building LuaTeX
+   cd luatex-beta-${_luatex_ver}
+   patch -p0 -i ../fix-fontforge-encoding.patch
+   mkdir build
+   cd build
+   ../source/configure --prefix=/usr -C \
+     --disable-native-texlive-build \
+     --with-banner-add="/PlugApps" \
+    --enable-cxx-runtime-hack \
+    --disable-all-pkgs \
+    --disable-dump-share \
+    --disable-ptex \
+    --enable-luatex  \
+    --without-system-ptexenc \
+    --with-system-graphite \
+    --without-system-icu \
+    --without-system-kpathsea \
+    --with-system-freetype2 \
+    --with-system-poppler \
+    --with-freetype2-libdir=/usr/lib \
+    --with-freetype2-include=/usr/include/freetype2 \
+    --with-system-gd \
+    --with-system-libpng \
+    --without-system-teckit \
+    --with-system-zlib \
+    --with-system-t1lib \
+    --disable-shared \
+    --disable-largefile \
+    --disable-ipc \
+    --without-mf-x-toolkit \
+    --without-x
+   make
+   make -C libs/zziplib
+   make -C libs/obsdcompat
+   make -C texk/kpathsea
+   make -C texk/web2c luatex
+
+   cd "$srcdir"
+   # this patch removes spurious error message with locale "xx_YY.utf8"
+   patch -p0 -i fix-fontforge-encoding.patch
+   ## fix dvipng (bug #20157)
+   pushd "source/texk/dvipng/dvipng-1.13"
+   patch -p0 -i "$srcdir/dvipng-fix-options.patch"
+   popd
+
+   #############################################################
+   ### configure
+   cd source
+   ## prevent compiling Xdvi with libXp
+   sed -i~ 's|-lXp ||' texk/xdvik/configure
+   test ! -d Work && mkdir Work
+   cd Work
+   echo "--> Initial configuration..."
+   # we use temporary prefix to avoid messing the existing $pkgdir/usr/share/texmf tree
+   ../configure --prefix=/usr -C \
+     --datarootdir=$srcdir/inst/usr/share \
+     --datadir=$srcdir/inst/usr/share \
+     --mandir=$srcdir/inst/usr/share/man \
+     --disable-native-texlive-build \
+     --with-banner-add="/PlugApps" \
+     --disable-multiplatform \
+     --disable-dialog \
+     --disable-psutils \
+     --disable-t1utils \
+     --disable-bibtexu \
+     --disable-xz \
+     --with-system-zlib \
+     --with-system-pnglib \
+     --with-system-ncurses \
+     --with-system-t1lib \
+     --with-system-gd \
+     --with-system-xpdf \
+     --with-system-freetype2 \
+     --with-system-graphite \
+     --with-freetype2-libdir=/usr/lib \
+     --with-freetype2-include=/usr/include/freetype2 \
+     --with-xdvi-x-toolkit=xaw \
+     --disable-dump-share \
+     --disable-aleph \
+     --disable-luatex
+#     --with-clisp-runtime=default \
+#     --enable-xindy --disable-xindy-rules --disable-xindy-docs
+   #############################################################
+   ### make
+   echo "-------------------------------------------------------"
+   echo "--> Building the whole beast ..."
+   echo "-------------------------------------------------------"
+   make
+}
+
+package() {
+   cd $srcdir
+   #############################################################
+   ### install texmf tree
+   echo "-------------------------------------------------------"
+   echo "--> installing the texmf tree"
+   echo "-------------------------------------------------------"
+   install -m755 -d $pkgdir/usr/share
+   cp -r texmf $pkgdir/usr/share/
+   install -d -m755 $pkgdir/etc/texmf/web2c
+   install -d -m755 $pkgdir/etc/texmf/chktex
+   install -d -m755 $pkgdir/etc/texmf/dvips/config
+   install -d -m755 $pkgdir/etc/texmf/dvipdfm/config
+   install -d -m755 $pkgdir/etc/texmf/dvipdfmx
+   install -d -m755 $pkgdir/etc/texmf/tex/generic/config
+   install -d -m755 $pkgdir/etc/texmf/ttf2pk
+   install -d -m755 $pkgdir/etc/texmf/xdvi
+   install -d -m755 $pkgdir/etc/fonts/conf.avail
+   install -m644 $srcdir/09-texlive-fonts.conf $pkgdir/etc/fonts/conf.avail/
+   # replace upstream texmf.cnf with ours
+   rm -f $pkgdir/usr/share/texmf/web2c/texmf.cnf
+   install -m644 $srcdir/texmf.cnf $pkgdir/etc/texmf/web2c/texmf.cnf
+   # since the location of texmf.cnf is hard-wired to be under /usr/share/texmf/web2c
+   # we make a symlink from /etc/texmf/web2c/texmf.cnf to the latter
+   ln -s /etc/texmf/web2c/texmf.cnf $pkgdir/usr/share/texmf/web2c/texmf.cnf
+   # fix location of TEXMFCACHE for luatools
+   sed -i 's#texlive2010#texlive#' $pkgdir/usr/share/texmf/web2c/texmfcnf.lua
+   ## remove aleph from fmtutil.cnf
+   sed -i -e '/aleph/d' $pkgdir/usr/share/texmf/web2c/fmtutil.cnf
+   # move man files to /usr/share/man
+   for i in 1 5; do
+     install -d -m755 $pkgdir/usr/share/man/man$i
+     mv $pkgdir/usr/share/texmf/doc/man/man$i/*.$i $pkgdir/usr/share/man/man$i/
+   done
+   # move info files to /usr/share/info
+   install -d -m755 $pkgdir/usr/share/info
+   mv $pkgdir/usr/share/texmf/doc/info/*.info $pkgdir/usr/share/info/
+   rm -rf $pkgdir/usr/share/texmf/doc/{man,info}
+   # copy config files to $TEXMFCONFIG tree
+   cp -a $pkgdir/usr/share/texmf/chktex/chktexrc \
+     	$pkgdir/etc/texmf/chktex/
+   cp -a $pkgdir/usr/share/texmf/web2c/mktex.cnf \
+   	  $pkgdir/etc/texmf/web2c/
+   cp -a $pkgdir/usr/share/texmf/web2c/updmap.cfg \
+   	  $pkgdir/etc/texmf/web2c/
+   cp -a $pkgdir/usr/share/texmf/web2c/fmtutil.cnf \
+   	  $pkgdir/etc/texmf/web2c/
+   cp -a $pkgdir/usr/share/texmf/dvips/config/config.ps \
+   	  $pkgdir/etc/texmf/dvips/config/
+   cp -a $pkgdir/usr/share/texmf/dvipdfm/config/config \
+   	  $pkgdir/etc/texmf/dvipdfm/config/
+   cp -a $pkgdir/usr/share/texmf/dvipdfmx/dvipdfmx.cfg \
+   	  $pkgdir/etc/texmf/dvipdfmx/
+   cp -a $pkgdir/usr/share/texmf/tex/generic/config/pdftexconfig.tex \
+   	  $pkgdir/etc/texmf/tex/generic/config/
+   cp -a $pkgdir/usr/share/texmf/tex/generic/config/language.dat \
+   	  $pkgdir/etc/texmf/tex/generic/config/
+   cp -a $pkgdir/usr/share/texmf/tex/generic/config/language.def \
+   	  $pkgdir/etc/texmf/tex/generic/config/
+   cp -a $pkgdir/usr/share/texmf/ttf2pk/ttf2pk.cfg \
+   	  $pkgdir/etc/texmf/ttf2pk/
+   cp -a $pkgdir/usr/share/texmf/xdvi/XDvi \
+   	  $pkgdir/etc/texmf/xdvi/
+   # remove TL specific warnings in the language.{dat,def} files:
+   sed -i -e '/DO NOT EDIT/,+3 d' $pkgdir/etc/texmf/tex/generic/config/language.*
+   # clean updmap.cfg
+   sed -i '/^\(Map\|MixedMap\)/d' $pkgdir/etc/texmf/web2c/updmap.cfg
+   sed -i '/^#! \(Map\|MixedMap\)/d' $pkgdir/etc/texmf/web2c/updmap.cfg
+
+   #############################################################
+   ### install
+   cd source
+   # fixes for xindy
+   #find utils/xindy -name Makefile -exec sed -i -e "s|^prefix =.\+$|prefix = $pkgdir/usr|" -e "s|^mandir =.\+$|mandir = \${prefix}/share/man|" -e "s|^datadir =.\+$|datadir = \${datarootdir}/texmf|" -e "s|^docdir =.\+$|docdir = \${datadir}/doc/xindy|" '{}' \;
+
+   echo "-------------------------------------------------------"
+   echo "--> Proceeding with make install ..."
+   echo "-------------------------------------------------------"
+   cd Work
+   make prefix=$srcdir/inst/usr texmf=$pkgdir/usr/share/texmf install
+
+   # restore install location of bin/lib/include
+   mv -f $srcdir/inst/usr/bin $pkgdir/usr/bin
+   mv -f $srcdir/inst/usr/lib $pkgdir/usr/lib
+   mv -f $srcdir/inst/usr/include $pkgdir/usr/include
+   # add symlinks to manpages since they are not included in the original texmf tree
+   for m in $srcdir/inst/usr/share/man/man1/*; do
+     bm=$(basename $m)
+     test -f $pkgdir/usr/share/man/man1/$bm || mv -f $m $pkgdir/usr/share/man/man1/
+   done
+
+   ## install luatex binary
+   install -m755 $srcdir/luatex-beta-${_luatex_ver}/build/texk/web2c/luatex $pkgdir/usr/bin/
+   cd $pkgdir/usr/bin
+   /bin/ln -s luatex texlua
+   /bin/ln -s luatex texluac
+
+   # symlinks in $pkgdir/usr/bin are incorrect
+   echo "--> Fixing symlinks for scripts ..."
+   for f in $pkgdir/usr/bin/* ; do
+	   if [ -L $f ]; then
+		   target=`ls -l "$f" | sed 's/^.\+ -> //'`
+		   if [[ "$target" == ..* ]]; then
+			   newtarget=`echo $target | sed -e 's#../#/usr/share/#'`
+			   rm -f $f
+			   ln -s $newtarget $f
+			   test -f $pkgdir/$newtarget && chmod a+x $pkgdir/$newtarget
+		   fi
+	   fi
+   done
+
+   # create symlinks for formats 
+   echo "--> Create symlinks for TeX formats ..."
+   PATH="$PATH:${pkgdir}/usr/bin" texlinks -f $pkgdir/usr/share/texmf/web2c/fmtutil.cnf $pkgdir/usr/bin/
+   #############################################################
+   # remove symlinks to scripts that are not in texlive-bin or texlive-core:
+   SYMLINKS_TO_REMOVE="authorindex \
+ebong \
+bibexport \
+cachepic \
+epspdf \
+epspdftk \
+fig4latex \
+makeglossaries \
+mathspic \
+mkgrkindex \
+pdfannotextractor \
+perltex \
+pdfthumb \
+ppower4 \
+pst2pdf \
+ps4pdf \
+splitindex \
+svn-multi \
+htcontext \
+htlatex \
+htmex \
+ht \
+httexi \
+httex \
+htxelatex \
+htxetex \
+mk4ht \
+ulqda \
+vpe \
+tlmgr"
+   for s in $SYMLINKS_TO_REMOVE; do
+     rm -f $pkgdir/usr/bin/$s
+   done
+   ###################################################################
+}
+
+md5sums=('626f900fb59f036d6fea95f08c74b00b'
+         'bfb9716aa00c86c08cd31e5b32edeb98'
+         '393a4bf67adc7ca5df2b386759d1a637'
+         '60e405158f53519348d9783e8d420670'
+         '0b2c3a4a1b1e4befb90d7fbb5f08a6e9'
+         '7ae1400dafdb079dcd08d233de83ec44'
+         '4b22a50866849ec14886906474a72a01'
+         '86c78e48013492e6b1c41373741d19fd')
