@@ -1,0 +1,428 @@
+diff -urNp coreutils-8.4-orig/configure.ac coreutils-8.4/configure.ac
+--- coreutils-8.4-orig/configure.ac	2010-01-11 18:20:42.000000000 +0100
++++ coreutils-8.4/configure.ac	2010-02-12 10:17:46.000000000 +0100
+@@ -126,6 +126,13 @@ if test "$gl_gcc_warnings" = yes; then
+   AC_SUBST([GNULIB_WARN_CFLAGS])
+ fi
+ 
++dnl Give the chance to enable PAM
++AC_ARG_ENABLE(pam, dnl
++[  --enable-pam              Enable use of the PAM libraries],
++[AC_DEFINE(USE_PAM, 1, [Define if you want to use PAM])
++LIB_PAM="-ldl -lpam -lpam_misc"
++AC_SUBST(LIB_PAM)])
++
+ AC_FUNC_FORK
+ 
+ optional_bin_progs=
+diff -urNp coreutils-8.4-orig/doc/coreutils.texi coreutils-8.4/doc/coreutils.texi
+--- coreutils-8.4-orig/doc/coreutils.texi	2010-01-03 18:06:20.000000000 +0100
++++ coreutils-8.4/doc/coreutils.texi	2010-02-12 10:17:46.000000000 +0100
+@@ -15081,8 +15081,11 @@ to certain shells, etc.).
+ @findex syslog
+ @command{su} can optionally be compiled to use @code{syslog} to report
+ failed, and optionally successful, @command{su} attempts.  (If the system
+-supports @code{syslog}.)  However, GNU @command{su} does not check if the
+-user is a member of the @code{wheel} group; see below.
++supports @code{syslog}.)
++
++This version of @command{su} has support for using PAM for
++authentication.  You can edit @file{/etc/pam.d/su} to customize its
++behaviour.
+ 
+ The program accepts the following options.  Also see @ref{Common options}.
+ 
+@@ -15124,6 +15127,8 @@ environment variables except @env{TERM},
+ @env{PATH} to a compiled-in default value.  Change to @var{user}'s home
+ directory.  Prepend @samp{-} to the shell's name, intended to make it
+ read its login startup file(s).
++Additionaly @env{DISPLAY} and @env{XAUTHORITY} environment variables 
++are preserved as well for PAM functionality.
+ 
+ @item -m
+ @itemx -p
+@@ -15163,33 +15168,6 @@ Exit status:
+ the exit status of the subshell otherwise
+ @end display
+ 
+-@cindex wheel group, not supported
+-@cindex group wheel, not supported
+-@cindex fascism
+-@subsection Why GNU @command{su} does not support the @samp{wheel} group
+-
+-(This section is by Richard Stallman.)
+-
+-@cindex Twenex
+-@cindex MIT AI lab
+-Sometimes a few of the users try to hold total power over all the
+-rest.  For example, in 1984, a few users at the MIT AI lab decided to
+-seize power by changing the operator password on the Twenex system and
+-keeping it secret from everyone else.  (I was able to thwart this coup
+-and give power back to the users by patching the kernel, but I
+-wouldn't know how to do that in Unix.)
+-
+-However, occasionally the rulers do tell someone.  Under the usual
+-@command{su} mechanism, once someone learns the root password who
+-sympathizes with the ordinary users, he or she can tell the rest.  The
+-``wheel group'' feature would make this impossible, and thus cement the
+-power of the rulers.
+-
+-I'm on the side of the masses, not that of the rulers.  If you are
+-used to supporting the bosses and sysadmins in whatever they do, you
+-might find this idea strange at first.
+-
+-
+ @node timeout invocation
+ @section @command{timeout}: Run a command with a time limit
+ 
+diff -urNp coreutils-8.4-orig/src/Makefile.am coreutils-8.4/src/Makefile.am
+--- coreutils-8.4-orig/src/Makefile.am	2010-01-03 18:06:20.000000000 +0100
++++ coreutils-8.4/src/Makefile.am	2010-02-12 10:17:46.000000000 +0100
+@@ -361,7 +361,7 @@ factor_LDADD += $(LIB_GMP)
+ uptime_LDADD += $(GETLOADAVG_LIBS)
+ 
+ # for crypt
+-su_LDADD += $(LIB_CRYPT)
++su_LDADD += $(LIB_CRYPT) @LIB_PAM@
+ 
+ # for various ACL functions
+ copy_LDADD += $(LIB_ACL)
+diff -urNp coreutils-8.4-orig/src/su.c coreutils-8.4/src/su.c
+--- coreutils-8.4-orig/src/su.c	2010-02-12 10:15:15.000000000 +0100
++++ coreutils-8.4/src/su.c	2010-02-12 10:24:29.000000000 +0100
+@@ -37,6 +37,16 @@
+    restricts who can su to UID 0 accounts.  RMS considers that to
+    be fascist.
+ 
++#ifdef USE_PAM
++
++   Actually, with PAM, su has nothing to do with whether or not a
++   wheel group is enforced by su.  RMS tries to restrict your access
++   to a su which implements the wheel group, but PAM considers that
++   to be fascist, and gives the user/sysadmin the opportunity to
++   enforce a wheel group by proper editing of /etc/pam.conf
++
++#endif
++
+    Compile-time options:
+    -DSYSLOG_SUCCESS	Log successful su's (by default, to root) with syslog.
+    -DSYSLOG_FAILURE	Log failed su's (by default, to root) with syslog.
+@@ -53,6 +63,15 @@
+ #include <pwd.h>
+ #include <grp.h>
+ 
++#ifdef USE_PAM
++# include <signal.h>
++# include <sys/wait.h>
++# include <sys/fsuid.h>
++# include <unistd.h>
++# include <security/pam_appl.h>
++# include <security/pam_misc.h>
++#endif /* USE_PAM */
++
+ #include "system.h"
+ #include "getpass.h"
+ 
+@@ -120,10 +139,17 @@
+ /* The user to become if none is specified.  */
+ #define DEFAULT_USER "root"
+ 
++#ifndef USE_PAM
+ char *crypt (char const *key, char const *salt);
++#endif
+ 
+-static void run_shell (char const *, char const *, char **, size_t)
++static void run_shell (char const *, char const *, char **, size_t,
++	const struct passwd *)
++#ifdef USE_PAM
++	;
++#else
+      ATTRIBUTE_NORETURN;
++#endif
+ 
+ /* If true, pass the `-f' option to the subshell.  */
+ static bool fast_startup;
+@@ -209,7 +235,26 @@ log_su (struct passwd const *pw, bool su
+ }
+ #endif
+ 
++#ifdef USE_PAM
++static pam_handle_t *pamh = NULL;
++static int retval;
++static struct pam_conv conv = {
++  misc_conv,
++  NULL
++};
++
++#define PAM_BAIL_P if (retval) { \
++  pam_end(pamh, PAM_SUCCESS); \
++  return 0; \
++}
++#define PAM_BAIL_P_VOID if (retval) {		\
++  pam_end(pamh, PAM_SUCCESS);			\
++return;						\
++}
++#endif
++
+ /* Ask the user for a password.
++   If PAM is in use, let PAM ask for the password if necessary.
+    Return true if the user gives the correct password for entry PW,
+    false if not.  Return true without asking for a password if run by UID 0
+    or if PW has an empty password.  */
+@@ -217,6 +262,44 @@ log_su (struct passwd const *pw, bool su
+ static bool
+ correct_password (const struct passwd *pw)
+ {
++#ifdef USE_PAM
++  struct passwd *caller;
++  char *tty_name, *ttyn;
++  retval = pam_start(PROGRAM_NAME, pw->pw_name, &conv, &pamh);
++  PAM_BAIL_P;
++
++  if (getuid() != 0 && !isatty(0)) {
++	fprintf(stderr, "standard in must be a tty\n");
++	exit(1);
++  }
++
++  caller = getpwuid(getuid());
++  if(caller != NULL && caller->pw_name != NULL) {
++	  retval = pam_set_item(pamh, PAM_RUSER, caller->pw_name);
++	  PAM_BAIL_P;
++  }
++
++  ttyn = ttyname(0);
++  if (ttyn) {
++    if (strncmp(ttyn, "/dev/", 5) == 0)
++       tty_name = ttyn+5;
++    else
++       tty_name = ttyn;
++    retval = pam_set_item(pamh, PAM_TTY, tty_name);
++    PAM_BAIL_P;
++  }
++  retval = pam_authenticate(pamh, 0);
++  PAM_BAIL_P;
++  retval = pam_acct_mgmt(pamh, 0);
++  if (retval == PAM_NEW_AUTHTOK_REQD) {
++    /* password has expired.  Offer option to change it. */
++    retval = pam_chauthtok(pamh, PAM_CHANGE_EXPIRED_AUTHTOK);
++    PAM_BAIL_P;
++  }
++  PAM_BAIL_P;
++  /* must be authenticated if this point was reached */
++  return 1;
++#else /* !USE_PAM */
+   char *unencrypted, *encrypted, *correct;
+ #if HAVE_GETSPNAM && HAVE_STRUCT_SPWD_SP_PWDP
+   /* Shadow passwd stuff for SVR3 and maybe other systems.  */
+@@ -241,6 +324,7 @@ correct_password (const struct passwd *p
+   encrypted = crypt (unencrypted, correct);
+   memset (unencrypted, 0, strlen (unencrypted));
+   return STREQ (encrypted, correct);
++#endif /* !USE_PAM */
+ }
+ 
+ /* Update `environ' for the new shell based on PW, with SHELL being
+@@ -254,12 +338,18 @@ modify_environment (const struct passwd 
+       /* Leave TERM unchanged.  Set HOME, SHELL, USER, LOGNAME, PATH.
+          Unset all other environment variables.  */
+       char const *term = getenv ("TERM");
++      char const *display = getenv ("DISPLAY");
++      char const *xauthority = getenv ("XAUTHORITY");
+       if (term)
+         term = xstrdup (term);
+       environ = xmalloc ((6 + !!term) * sizeof (char *));
+       environ[0] = NULL;
+       if (term)
+         xsetenv ("TERM", term);
++      if (display)
++        xsetenv ("DISPLAY", display);
++      if (xauthority)
++        xsetenv ("XAUTHORITY", xauthority);
+       xsetenv ("HOME", pw->pw_dir);
+       xsetenv ("SHELL", shell);
+       xsetenv ("USER", pw->pw_name);
+@@ -292,8 +382,13 @@ change_identity (const struct passwd *pw
+ {
+ #ifdef HAVE_INITGROUPS
+   errno = 0;
+-  if (initgroups (pw->pw_name, pw->pw_gid) == -1)
++  if (initgroups (pw->pw_name, pw->pw_gid) == -1) {
++#ifdef USE_PAM
++    pam_close_session(pamh, 0);
++    pam_end(pamh, PAM_ABORT);
++#endif
+     error (EXIT_CANCELED, errno, _("cannot set groups"));
++  }
+   endgrent ();
+ #endif
+   if (setgid (pw->pw_gid))
+@@ -302,6 +397,31 @@ change_identity (const struct passwd *pw
+     error (EXIT_CANCELED, errno, _("cannot set user id"));
+ }
+ 
++#ifdef USE_PAM
++static int caught=0;
++/* Signal handler for parent process later */
++static void su_catch_sig(int sig)
++{
++  ++caught;
++}
++
++int
++pam_copyenv (pam_handle_t *pamh)
++{
++  char **env;
++
++  env = pam_getenvlist(pamh);
++  if(env) {
++    while(*env) {
++	if (putenv (*env))
++	  xalloc_die ();
++	env++;
++    }
++  }
++  return(0);
++}
++#endif
++
+ /* Run SHELL, or DEFAULT_SHELL if SHELL is empty.
+    If COMMAND is nonzero, pass it to the shell with the -c option.
+    Pass ADDITIONAL_ARGS to the shell as more arguments; there
+@@ -309,17 +429,49 @@ change_identity (const struct passwd *pw
+ 
+ static void
+ run_shell (char const *shell, char const *command, char **additional_args,
+-           size_t n_additional_args)
++           size_t n_additional_args, const struct passwd *pw)
+ {
+   size_t n_args = 1 + fast_startup + 2 * !!command + n_additional_args + 1;
+   char const **args = xnmalloc (n_args, sizeof *args);
+   size_t argno = 1;
++#ifdef USE_PAM
++  int child;
++  sigset_t ourset;
++  int status;
++
++  retval = pam_open_session(pamh,0);
++  if (retval != PAM_SUCCESS) {
++    fprintf (stderr, "could not open session\n");
++    exit (1);
++  }
++
++/* do this at the last possible moment, because environment variables may
++   be passed even in the session phase
++*/
++  if(pam_copyenv(pamh) != PAM_SUCCESS)
++     fprintf (stderr, "error copying PAM environment\n");
++  
++  /* Credentials should be set in the parent */ 
++  if (pam_setcred(pamh, PAM_ESTABLISH_CRED) != PAM_SUCCESS) {
++    pam_close_session(pamh, 0);
++    fprintf(stderr, "could not set PAM credentials\n");
++    exit(1);
++  }
++
++  child = fork();
++  if (child == 0) {  /* child shell */
++  change_identity (pw);
++  pam_end(pamh, 0);
++#endif
+ 
+   if (simulate_login)
+     {
+       char *arg0;
+       char *shell_basename;
+ 
++      if(chdir(pw->pw_dir))
++	      error(0, errno, _("warning: cannot change directory to %s"), pw->pw_dir);
++
+       shell_basename = last_component (shell);
+       arg0 = xmalloc (strlen (shell_basename) + 2);
+       arg0[0] = '-';
+@@ -344,6 +496,67 @@ run_shell (char const *shell, char const
+     error (0, errno, "%s", shell);
+     exit (exit_status);
+   }
++#ifdef USE_PAM
++  } else if (child == -1) {
++      fprintf(stderr, "can not fork user shell: %s", strerror(errno));
++      pam_setcred(pamh, PAM_DELETE_CRED | PAM_SILENT);
++      pam_close_session(pamh, 0);
++      pam_end(pamh, PAM_ABORT);
++      exit(1);
++  }
++  /* parent only */
++  sigfillset(&ourset);
++  if (sigprocmask(SIG_BLOCK, &ourset, NULL)) {
++    fprintf(stderr, "%s: signal malfunction\n", PROGRAM_NAME);
++    caught = 1;
++  }
++  if (!caught) {
++    struct sigaction action;
++    action.sa_handler = su_catch_sig;
++    sigemptyset(&action.sa_mask);
++    action.sa_flags = 0;
++    sigemptyset(&ourset);
++    if (sigaddset(&ourset, SIGTERM)
++        || sigaddset(&ourset, SIGALRM)
++        || sigaction(SIGTERM, &action, NULL)
++        || sigprocmask(SIG_UNBLOCK, &ourset, NULL)) {
++      fprintf(stderr, "%s: signal masking malfunction\n", PROGRAM_NAME);
++      caught = 1;
++    }
++  }
++  if (!caught) {
++    do {
++      int pid;
++
++      pid = waitpid(-1, &status, WUNTRACED);
++
++      if (((pid_t)-1 != pid) && (0 != WIFSTOPPED (status))) {
++          kill(getpid(), WSTOPSIG(status));
++          /* once we get here, we must have resumed */
++          kill(pid, SIGCONT);
++      }
++    } while (0 != WIFSTOPPED(status));
++  }
++
++  if (caught) {
++    fprintf(stderr, "\nSession terminated, killing shell...");
++    kill (child, SIGTERM);
++  }
++  /* Not checking retval on this because we need to call close session */
++  pam_setcred(pamh, PAM_DELETE_CRED | PAM_SILENT);
++  retval = pam_close_session(pamh, 0);
++  PAM_BAIL_P_VOID;
++  retval = pam_end(pamh, PAM_SUCCESS);
++  PAM_BAIL_P_VOID;
++  if (caught) {
++    sleep(2);
++    kill(child, SIGKILL);
++    fprintf(stderr, " ...killed.\n");
++    exit(-1);
++  }
++  exit ((0 != WIFEXITED (status)) ? WEXITSTATUS (status)
++                                  : WTERMSIG (status) + 128);
++#endif /* USE_PAM */
+ }
+ 
+ /* Return true if SHELL is a restricted shell (one not returned by
+@@ -511,9 +724,9 @@ main (int argc, char **argv)
+   shell = xstrdup (shell ? shell : pw->pw_shell);
+   modify_environment (pw, shell);
+ 
++#ifndef USE_PAM
+   change_identity (pw);
+-  if (simulate_login && chdir (pw->pw_dir) != 0)
+-    error (0, errno, _("warning: cannot change directory to %s"), pw->pw_dir);
++#endif
+ 
+   /* error() flushes stderr, but does not check for write failure.
+      Normally, we would catch this via our atexit() hook of
+@@ -523,5 +736,5 @@ main (int argc, char **argv)
+   if (ferror (stderr))
+     exit (EXIT_CANCELED);
+ 
+-  run_shell (shell, command, argv + optind, MAX (0, argc - optind));
++  run_shell (shell, command, argv + optind, MAX (0, argc - optind), pw);
+ }
