@@ -1,0 +1,183 @@
+--- ntp-4.2.4/scripts/html2man.in.html2man	2006-06-06 22:17:10.000000000 +0200
++++ ntp-4.2.4/scripts/html2man.in	2007-01-08 12:47:31.000000000 +0100
+@@ -23,10 +23,10 @@
+ 	     'ntpq' => ['ntpq', 8, 'ntpd(8), ntpdc(8)'],
+ 	     'ntpdate' => ['ntpdate', 8, 'ntpd(8)'],
+ 	     'ntpdc' => ['ntpdc', 8, 'ntpd(8)'],
+-	     'ntptime' => ['ntpdtime', 8, 'ntpd(8), ntpdate(8)'],
++	     'ntptime' => ['ntptime', 8, 'ntpd(8), ntpdate(8)'],
+ 	     'ntptrace' => ['ntptrace', 8, 'ntpd(8)'],
+ 	     'keygen' => ['ntp-keygen', 8, 'ntpd(8), ntp_auth(5)'],
+-	     'confopt' => ['ntp.conf', 5, 'ntpd(8)'],
++	     'confopt' => ['ntp.conf', 5, 'ntpd(8), ntp_auth(5), ntp_mon(5), ntp_acc(5), ntp_clock(5), ntp_misc(5)'],
+ 	     'authopt' => ['ntp_auth', 5, 'ntp.conf(5), ntpd(8)'],
+ 	     'monopt' => ['ntp_mon', 5, 'ntp.conf(5)'],
+ 	     'accopt' => ['ntp_acc', 5, 'ntp.conf(5)'],
+@@ -34,17 +34,8 @@
+ 	     'miscopt' => ['ntp_misc', 5, 'ntp.conf(5)']);
+ 
+ # Disclaimer to go in SEE ALSO section of the man page
+-$seealso_disclaimer = 'These man pages are automatically hacked from the main NTP ' .
+-    'documentation pages, which are maintained in HTML format.  These files are ' .
+-    'included in the NTP source distribution.  If you installed NTP from a binary ' .
+-    'package, or it came pre-installed on your system, chances are the documentation ' .
+-    'was also included in the usual place for your system.  The HTML files are more ' .
+-    'correct and complete than these man pages, which are provided for your reference ' .
+-    'only.';
+-
+-# Disclaimer to go right at the top
+-$top_disclaimer = 'This file was automatically generated from HTML source, and may be ' .
+-    'incorrect.  See the SEE ALSO section at the end of this file for more info';
++$seealso_disclaimer = "Primary source of documentation: /usr/share/doc/ntp-*\n\n" .
++    "This file was automatically generated from HTML source.\n";
+ 
+ mkdir $MANDIR, 0777;
+ mkdir "$MANDIR/man8", 0777;
+@@ -64,7 +55,8 @@
+     $fileinfo = $manfiles{$filename};
+ 
+     $p = HTML::TokeParser->new("$filename.html") || die "Can't open $filename.html: $!";
+-    open(MANOUT, ">$MANDIR/man$fileinfo->[1]/$fileinfo->[0].$fileinfo->[1]")
++    $fileout = "$MANDIR/man$fileinfo->[1]/$fileinfo->[0].$fileinfo->[1]";
++    open(MANOUT, ">$fileout")
+ 	|| die "Can't open: $!";
+ 
+     $p->get_tag("title");
+@@ -73,7 +65,6 @@
+ 
+     # Setup man header
+     print MANOUT ".TH " . $fileinfo->[0] . " " . $fileinfo->[1] .  "\n";
+-    print MANOUT ".UC 4\n";
+     print MANOUT ".SH NAME\n";
+     $pat = $fileinfo->[0];
+     if ($name =~ /$pat/) {
+@@ -81,10 +72,12 @@
+ 	# Add the manpage name, if not in the HTML title already
+ 	print MANOUT "$fileinfo->[0] - ";
+     }
+-    print MANOUT "$name\n\n";
+-
+-    print MANOUT "$top_disclaimer\n";
++    print MANOUT "$name\n.SH \\ \n\n";
+ 
++    @fontstack = ();
++    $deflevel = 0;
++    $pre = 0;
++    $ignore = 0;
+     # Now start scanning.  We basically print everything after translating some tags.
+     # $token->[0] has "T", "S", "E" for Text, Start, End
+     # $token->[1] has the tag name, or text (for "T" case)
+@@ -92,19 +85,37 @@
+     while (my $token = $p->get_token) {
+ 	if($token->[0] eq "T") {
+ 	    my $text = $token->[1];
+-	    if($tag) {
+-		$text =~ s/^[\n ]*//;
+-		$text =~ s/[\n ]*$/ /;
++	    if (!$pre) {
++		if($tag) {
++		    $text =~ s/^[\n\t ]*//;
++		}
++		$text =~ s/^[\n\t ][\n\t ]+$//;
++		$text =~ s/[\n\t ]+/ /g;
++		$text =~ s/&nbsp\;/ /g;
++		$text =~ s/&gt\;/>/g;
++		$text =~ s/&lt\;/</g;
++		$text =~ s/&quot\;/"/g;
++		$text =~ s/&amp\;/&/g;
++		$text =~ s/^\./\\[char46]/;
+ 	    }
+-	    $text =~ s/&nbsp\;/ /g;
+-	    $text =~ s/^\./\\./;
+ 	    print MANOUT "$text";
+ 	    $tag = 0;
+ 	}
+ 	if($token->[0] eq "S") {
+ 	    if($token->[1] eq "h4") {
+ 		my $text = uc($p->get_trimmed_text("/h4"));
+-		print MANOUT ".SH $text\n";
++		# ignore these two sections in ntpd.html
++		if ($filename eq "ntpd" &&
++		    ($text eq "FILES" || $text eq "CONFIGURATION OPTIONS")) {
++			$ignore = 1;
++			close(MANOUT);
++			open(MANOUT, ">/dev/null");
++		} elsif ($ignore) {
++		    $ignore = 0;
++		    close(MANOUT);
++		    open(MANOUT, ">>$fileout");
++		}
++		print MANOUT "\n\n.SH $text\n";
+ 	    }
+ 	    if($token->[1] eq "tt") {
+ 		push @fontstack, "tt";
+@@ -118,22 +129,30 @@
+ 		my $text = $p->get_trimmed_text("/address");
+ 		print MANOUT "\n.SH AUTHOR\n$text\n";
+ 	    }
+-	    if($token->[1] eq "dt") {
+-		$tmp = $deflevel-4;
+-		print MANOUT "\n.RS $tmp\n";
++	    if($token->[1] eq "dt" || $token->[1] eq "br" && $deflevel > 0) {
++		print MANOUT "\n.TP 8\n";
+ 		$tag = 1;
+ 	    }
+ 	    if($token->[1] eq "dd") {
+-		print MANOUT "\n.RS $deflevel\n";
++		print MANOUT "\n";
+ 		$tag = 1;
+ 	    }
+ 	    if($token->[1] eq "dl") {
+-		$deflevel+=4;
++		$deflevel+=1;
++		if ($deflevel > 0) {
++		    print MANOUT "\n.RS ", $deflevel > 1 ? 8 : 0;
++		}
++	    }
++	    if($token->[1] eq "p") {
++		print MANOUT "\n";
++	    }
++	    if($token->[1] eq "pre") {
++		print MANOUT "\n.nf";
++		$pre = 1;
+ 	    }
+ 	}
+ 	elsif($token->[0] eq "E") {
+-	    if($token->[1] eq "dd") {
+-		print MANOUT "\n.RE\n";
++	    if($token->[1] eq "h4") {
+ 		$tag = 1;
+ 	    }
+ 	    if($token->[1] eq "tt") {
+@@ -157,15 +176,27 @@
+ 		print MANOUT "$fontswitch";
+ 	    }
+ 	    if($token->[1] eq "dl") {
+-		$deflevel-=4;
++		if ($deflevel > 0) {
++		    print MANOUT "\n.RE";
++		}
++		print MANOUT "\n";
++		$deflevel-=1;
+ 	    }
+-	    if($token->[1] eq "dt") {
+-		print MANOUT "\n.RE";
++	    if($token->[1] eq "p") {
++		print MANOUT "\n";
+ 		$tag = 1;
+ 	    }
++	    if($token->[1] eq "pre") {
++		print MANOUT "\n.fi";
++		$pre = 0;
++	    }
+ 	}
+     }
+-    print MANOUT ".SH SEE ALSO\n\n";
++    if ($ignore) {
++	close(MANOUT);
++	open(MANOUT, ">>$fileout");
++    }
++    print MANOUT "\n.SH SEE ALSO\n\n";
+     print MANOUT "$fileinfo->[2]\n\n";
+     print MANOUT "$seealso_disclaimer\n";
+     close(MANOUT);
