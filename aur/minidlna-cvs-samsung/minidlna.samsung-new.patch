@@ -1,0 +1,1706 @@
+diff -urNp minidlna-cvs/albumart.c minidlna-cvs.patched/albumart.c
+--- minidlna-cvs/albumart.c	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/albumart.c	2010-12-19 19:37:20.000000000 +0100
+@@ -27,6 +27,10 @@
+ 
+ #include <jpeglib.h>
+ 
++#ifdef THUMBNAIL_CREATION_SUPPORT
++# include <libffmpegthumbnailer/videothumbnailerc.h>
++#endif
++
+ #include "upnpglobalvars.h"
+ #include "albumart.h"
+ #include "sql.h"
+@@ -280,7 +284,8 @@ check_for_album_file(char * dir, const c
+ 	char * art_file;
+ 
+ 	/* First look for file-specific cover art */
+-	sprintf(file, "%s.cover.jpg", path);
++	//sprintf(file, "%s.cover.jpg", path);
++	sprintf(file, "%s.jpg", path);
+ 	if( access(file, R_OK) == 0 )
+ 	{
+ 		if( art_cache_exists(file, &art_file) )
+@@ -336,6 +341,36 @@ found_file:
+ 	return NULL;
+ }
+ 
++#ifdef THUMBNAIL_CREATION_SUPPORT
++
++/*
++ * generates jpegs for movies as thumbnail files. The new thumbs have the name of the movie, with an ".jpg" 
++ * appended. The thumbs are created with the minidlna-user (e.g. root).
++ */
++char *
++generate_albumart(char * dir, const char * path)
++{
++    int rc;
++    char * thumbfile = malloc(PATH_MAX);
++    
++    /* DPRINTF(E_DEBUG, L_METADATA, "generate_albumart - dir: %s, path: %s\n", dir, path); */
++
++    if (ends_with(path, ".avi") || ends_with(path, ".mkv") || ends_with(path, ".mpg")) {
++        video_thumbnailer* vt = video_thumbnailer_create();
++        vt->thumbnail_image_type = Jpeg;
++        /* DPRINTF(E_DEBUG, L_METADATA, "generate_albumart - movie\n"); */
++        sprintf(thumbfile, "%s.jpg", path);
++
++        rc = video_thumbnailer_generate_thumbnail_to_file(vt, path, thumbfile);
++        DPRINTF(E_DEBUG, L_METADATA, "rc: %d\n", rc);
++        video_thumbnailer_destroy(vt);
++        return thumbfile;
++    }
++    return 0;
++}
++
++#endif
++
+ sqlite_int64
+ find_album_art(const char * path, const char * image_data, int image_size)
+ {
+@@ -346,8 +381,14 @@ find_album_art(const char * path, const 
+ 	sqlite_int64 ret = 0;
+ 	char * mypath = strdup(path);
+ 
+-	if( (image_size && (album_art = check_embedded_art(path, image_data, image_size))) ||
+-	    (album_art = check_for_album_file(dirname(mypath), path)) )
++
++    album_art = check_embedded_art(path, image_data, image_size);
++    if (!album_art) album_art = check_for_album_file(dirname(mypath), path);
++#ifdef THUMBNAIL_CREATION_SUPPORT
++    if (!album_art) album_art = generate_albumart(dirname(mypath), path);
++#endif
++
++    if (album_art) 
+ 	{
+ 		sql = sqlite3_mprintf("SELECT ID from ALBUM_ART where PATH = '%q'", album_art ? album_art : path);
+ 		if( (sql_get_table(db, sql, &result, &rows, &cols) == SQLITE_OK) && rows )
+diff -urNp minidlna-cvs/icons.c minidlna-cvs.patched/icons.c
+--- minidlna-cvs/icons.c	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/icons.c	2010-12-19 20:30:47.000000000 +0100
+@@ -1301,3 +1301,145 @@ jpeg_lrg[] = "\xff\xd8\xff\xe0\x00\x10\x
+              "\x1e\x88\x20\xa8\xd8\xba\xe2\x7e\xdc\x26\x9a\x69\x08\xf7\x22\x22\x02\x82\x28\x82\x29\xe8\x88\x9e"
+              "\xda\x69\xa6\x90\x8f\xff\xd9";
+ #endif
++
++/* Chapter JPEG image */
++unsigned char
++jpeg_chapter[] =
++    "\xFF\xD8\xFF\xE0\x00\x10\x4A\x46\x49\x46\x00\x01\x01\x01\x00\x48"
++    "\x00\x48\x00\x00\xFF\xFE\x00\x13\x43\x72\x65\x61\x74\x65\x64\x20"
++    "\x77\x69\x74\x68\x20\x47\x49\x4D\x50\xFF\xDB\x00\x43\x00\x05\x03"
++    "\x04\x04\x04\x03\x05\x04\x04\x04\x05\x05\x05\x06\x07\x0C\x08\x07"
++    "\x07\x07\x07\x0F\x0B\x0B\x09\x0C\x11\x0F\x12\x12\x11\x0F\x11\x11"
++    "\x13\x16\x1C\x17\x13\x14\x1A\x15\x11\x11\x18\x21\x18\x1A\x1D\x1D"
++    "\x1F\x1F\x1F\x13\x17\x22\x24\x22\x1E\x24\x1C\x1E\x1F\x1E\xFF\xDB"
++    "\x00\x43\x01\x05\x05\x05\x07\x06\x07\x0E\x08\x08\x0E\x1E\x14\x11"
++    "\x14\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E"
++    "\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E"
++    "\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E\x1E"
++    "\x1E\x1E\x1E\xFF\xC0\x00\x11\x08\x00\x50\x00\x80\x03\x01\x22\x00"
++    "\x02\x11\x01\x03\x11\x01\xFF\xC4\x00\x1C\x00\x00\x01\x04\x03\x01"
++    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x07\x08\x09"
++    "\x02\x05\x06\x03\xFF\xC4\x00\x3D\x10\x00\x01\x03\x03\x02\x04\x02"
++    "\x06\x08\x02\x0B\x00\x00\x00\x00\x00\x01\x02\x03\x06\x00\x04\x05"
++    "\x07\x11\x12\x21\x31\xD2\x84\x85\x13\x22\xA4\xB2\xB4\xD1\x08\x14"
++    "\x41\x64\x65\x66\x83\xD3\x15\x74\x26\x27\x42\x46\x51\x61\x71\x76"
++    "\x94\xA5\xB3\xFF\xC4\x00\x14\x01\x01\x00\x00\x00\x00\x00\x00\x00"
++    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\xFF\xC4\x00\x14\x11\x01\x00"
++    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xFF"
++    "\xDA\x00\x0C\x03\x01\x00\x02\x11\x03\x11\x00\x3F\x00\x92\xB9\x99"
++    "\x06\x4D\x9C\x8D\xC3\x4C\xDC\x06\xD0\xDB\x8A\x42\x52\x1B\x49\xE4"
++    "\x0E\xDF\x68\x35\xAB\x7A\x53\x9B\x4F\x4B\xDD\xBF\x49\x1F\x2A\xF0"
++    "\x90\x2F\x6C\xBD\xE8\xFB\xC3\x9E\xF1\xA7\x10\xE2\x71\x47\xAE\x32"
++    "\xC8\xFE\x82\x7E\x54\x0D\xB3\xB2\xF9\x02\x7A\x64\x36\xFD\x16\xFB"
++    "\x69\x23\xB3\x69\x22\x7A\x64\xB6\xFD\x06\xFB\x69\xD2\x38\x5C\x39"
++    "\xEB\x89\xB0\x3E\x1D\x1F\x2A\xC4\xE0\xB0\x87\xAE\x1B\x1C\x7C\x32"
++    "\x3E\x54\x0D\x1B\xD3\xC9\x4A\x7A\x65\x3D\x9D\xAE\xDA\x48\xEE\xA1"
++    "\x4B\x53\xD3\x2D\xEC\xCD\x76\xD3\xCC\x63\xF8\x03\xD7\x07\x8C\x3E"
++    "\x11\x1F\x2A\xC4\xC6\xE3\xA7\xAE\x07\x14\x7C\x1B\x7F\x2A\x06\x3D"
++    "\xDD\x48\x99\x27\xA6\x63\xD9\x99\xED\xA4\x6E\xEA\x74\xD9\x3D\x33"
++    "\x5B\x78\x56\x7B\x29\xFA\x31\x88\xD1\xEB\x1E\xC4\x1F\x04\xDF\xCA"
++    "\xB1\x31\x58\xB9\xEB\x1B\xC3\x9F\x02\xDF\x6D\x04\x7C\x77\x55\x67"
++    "\x49\xE9\x9D\xDB\xC2\x31\xD9\x48\xDE\xD5\xB9\xFA\x7A\x67\xF6\xF0"
++    "\x6C\x76\x54\x8D\x31\x18\xA1\xEB\x18\xC2\x9F\x00\xD7\x6D\x62\x61"
++    "\xD1\x13\xD6\x2B\x83\x3E\x5E\xD7\x6D\x04\x69\x7B\x58\x75\x0D\x3D"
++    "\x24\x3E\xC4\xC7\x65\x23\x7B\x59\xF5\x21\x3D\x24\x7E\xC5\x6F\xFB"
++    "\x75\x28\x0C\x2A\x1A\x7A\xC4\xB0\x27\xCB\x9A\xED\xAC\x4C\x1E\x14"
++    "\x7A\xC4\x23\xE7\xCB\x59\xED\xA0\x8A\xCF\x6B\x6E\xA6\x27\xA4\x97"
++    "\xD8\x6D\xFF\x00\x6E\x91\xBB\xAE\x7A\xA2\x9E\x92\x8F\x60\xB6\xFD"
++    "\xBA\x96\x66\x09\x07\x3D\x61\xB1\xD3\xE5\x8C\xF6\xD6\x26\x01\x04"
++    "\x3D\x61\x51\xB3\xE5\x6C\x76\xD0\x44\x27\xB5\xEB\x55\x53\xD2\x55"
++    "\xFF\x00\x5F\x6D\xFB\x75\xB8\xD3\x5D\x74\xD4\xBB\xFD\x46\x8E\xE3"
++    "\x32\x79\xE6\xAF\xAC\xAF\xB2\x4C\x5A\x3E\xC3\x96\x2C\x24\x29\x0E"
++    "\xAC\x20\x9D\xD0\x84\xA8\x11\xC5\xB8\xE7\xD4\x0D\xF7\x1B\x83\x28"
++    "\xCE\x9E\xC0\x4F\x58\x3C\x64\xF9\x53\x1D\xB5\x02\xF4\x9D\x7B\xEA"
++    "\xD4\x3C\x7E\x3D\x65\xFF\x00\xBA\x28\x26\x0C\x8D\x7B\x66\xAF\xBF"
++    "\x98\x73\xDE\x34\xEC\xD3\x3B\x25\x5E\xD9\xCC\x80\xFB\xCB\x9E\xF1"
++    "\xA7\x8A\x80\xA2\x8A\x28\x0A\x28\xA4\x57\x79\x6C\x55\x9E\x52\xC7"
++    "\x17\x77\x93\xB2\xB7\xBF\xC8\x7A\x4F\xA9\x5A\xBA\xFA\x52\xED\xCF"
++    "\xA3\x4F\x13\x9E\x8D\x04\xEE\xBE\x14\x90\x4E\xC0\xEC\x39\x9A\x05"
++    "\xB4\x51\x45\x01\x45\x14\x50\x14\x51\x45\x01\x45\x14\x50\x15\x5B"
++    "\xBA\x48\xBD\xF5\x72\x1C\x3F\x1E\xB1\xF8\x84\x55\x91\x55\x6A\xE9"
++    "\x12\xF7\xD5\xF8\x60\xFC\x7E\xC7\xE2\x11\x41\x30\x25\x0B\xDB\x3F"
++    "\x91\x1F\x7A\x77\xDF\x34\xF5\x53\x1B\x2A\x5F\xF4\x8B\x25\xFC\xDB"
++    "\xBE\xF9\xA7\xCA\x80\xAE\x03\xE9\x13\x2F\xBF\x82\x68\xB4\x96\x53"
++    "\x8A\x09\xFA\xFD\x9D\xB2\x51\x6C\xA2\x9E\x20\x87\x1D\x71\x0D\x25"
++    "\x7B\x1E\x47\x84\xAF\x8B\x63\xCB\x95\x77\xF5\xA5\x9D\x46\x71\x73"
++    "\x28\x86\x52\x2F\x99\x42\x97\x61\x92\xB7\x53\x0E\xF0\x1D\x94\x9D"
++    "\xFA\x29\x27\xEC\x52\x48\x04\x7F\x98\x14\x0D\x46\x1F\xE8\xD1\x00"
++    "\xB8\xC6\xB1\x79\x2C\x73\x35\x21\x92\xB8\xD8\x5D\xD6\x65\xFC\xBD"
++    "\xC2\x5E\x53\xA4\x6E\xA5\x23\x85\x61\x20\x6F\xBE\xC0\x83\xCB\x6E"
++    "\x66\xB4\xFA\xDA\xC6\x66\x39\xAB\xFA\x19\x61\x16\xB7\x56\x6B\x27"
++    "\x65\x6D\x98\xB3\xB3\xFE\x25\x74\x77\x74\x8B\x26\x9B\x0E\xBE\xE6"
++    "\xDB\x9D\x86\xEB\x59\x03\x73\xB1\xDB\x99\xAD\xCE\x26\x35\xF4\x8F"
++    "\x8F\x58\x33\x1F\xC5\x4B\xE0\x59\x6C\x5D\xB2\x03\x36\xF9\x1C\xAD"
++    "\x9D\xCA\x6F\x83\x60\x6C\x9E\x24\xB6\x78\x14\xA0\x36\xE6\x49\xDF"
++    "\xED\x26\xBA\x4C\xDC\x0E\x4B\x93\xD4\x7D\x2B\x94\xDD\xE5\x71\xF7"
++    "\x86\x27\x6D\x7E\x8C\xC3\xCA\x4A\x99\x72\xED\xDB\x8B\x54\x34\x1C"
++    "\x69\xB4\xA4\xA4\x02\xB4\xA9\x45\x25\x43\x60\x79\x6F\x41\xAD\xD3"
++    "\x6D\x46\x9A\xE5\x19\xD4\x08\xFC\xA7\x0B\x83\x6E\x61\x0F\x4A\x14"
++    "\x51\x63\x72\xA6\xEC\x6E\x83\xCC\x29\xD6\x3D\x77\x77\x28\x07\x87"
++    "\x9A\x95\xD0\x1D\xF6\x1C\xC5\x68\xF4\xCB\x59\xA4\x77\xFA\xAD\x8F"
++    "\x83\x4B\x2E\xF4\xFF\x00\x28\x73\x16\xEF\xBB\x63\x73\x13\xCA\x2A"
++    "\xE8\x5B\xB8\xCA\x78\xD4\xD3\xE9\x52\x89\x04\xA0\x28\x83\xB0\x04"
++    "\xA7\x96\xFC\xF6\x51\x35\xD1\x8C\xF4\x92\xFF\x00\x58\xD4\x33\x36"
++    "\x56\x2C\x4E\x18\xC5\x23\x1C\xE3\x6A\x5A\x9C\x69\x56\x8D\x6C\xB0"
++    "\xF0\xE1\x00\x25\x6A\x00\x7A\xA5\x5E\xA9\x3B\xFF\x00\x85\x69\xB4"
++    "\xFB\x44\x25\xF8\x8D\x51\x84\xCC\xF2\x96\xDA\x77\x8B\x6F\x06\x2F"
++    "\x5B\xBC\xB5\x8E\x63\xD7\x6B\xE9\x52\xE5\xB1\x69\xB5\xF1\x14\x71"
++    "\x3C\xBE\x25\x12\xAE\x32\x90\x90\x3D\x5D\xCA\x8D\x06\xE7\x2B\xA8"
++    "\x7A\xB5\x96\xD5\xE9\xC4\x0A\x09\x81\x8A\x3C\x98\xF0\xB0\x71\xAB"
++    "\xEC\xAA\xDF\x42\x10\x97\xAD\xC3\x8A\x43\x81\x0A\x25\x6B\x52\x8F"
++    "\xA9\xC2\x12\x00\x42\xB8\xB7\xE5\x4D\xB6\xAC\xCF\x26\x7A\x81\x0E"
++    "\xD3\x6B\xFC\x7E\x2F\x09\x8A\xCC\xE3\x75\x1D\x9C\x56\x46\xCE\xF5"
++    "\x6E\xAD\x0C\xE6\x19\x24\x30\x01\x47\x5B\x7D\x8B\x85\x7F\xDA\x1B"
++    "\xA0\x24\x9D\x89\x3D\x1D\x95\x8E\xA2\xBF\xF4\x99\xD6\x2B\xCD\x39"
++    "\xCB\x60\x6D\x6F\x59\x18\x56\xDF\xB5\xCD\x32\xE2\xAD\x9E\x4A\xEC"
++    "\xB9\x2F\x89\xBF\x59\x2B\x41\x41\xDB\x91\x07\x8D\x5B\xFD\x95\xBA"
++    "\xB9\xD0\xB9\x1B\x1A\x55\x8D\xC6\xE3\xE4\x78\xF7\xE6\x96\x92\xC4"
++    "\x4B\xDE\xBE\xBB\x69\x42\xD6\xE7\x20\x09\xDC\x28\x27\xD6\x08\xD8"
++    "\x81\xB8\x1B\x9E\x1E\x83\x7E\x41\x9C\xF7\x57\xA6\x90\xD5\x47\xE1"
++    "\x79\x55\xE9\xFD\xBC\xEB\x21\x6A\xED\xED\xF5\xED\xE6\x45\xCB\x4C"
++    "\x2D\xA3\x01\xD5\x21\xB2\x0B\xA4\x38\xB5\x28\x00\x38\x41\xDF\x74"
++    "\xA8\x8D\xC7\x44\xD1\x5D\x77\xCD\xDC\xE2\xA7\x58\xBC\xAA\xA1\xB9"
++    "\x19\x1C\x76\x37\x71\x9D\xB2\xBC\x8F\x5F\x9B\xCC\x6D\xDA\x1B\x42"
++    "\xBD\x55\x7A\xDC\x69\x29\x5F\x00\x29\x2A\x04\x85\x6F\xCB\x91\x2A"
++    "\xE7\x9A\x43\x32\x99\xFF\x00\x00\x99\xE5\xC4\x09\xE9\xDD\x85\xA3"
++    "\xB6\x57\xB6\x97\x78\xD5\xDE\x61\xAE\xD8\x2F\x29\x6D\x80\x97\x41"
++    "\x71\x0A\x48\x20\xF1\x0E\x7B\xA9\x40\x72\xAF\x18\xF6\x90\xCD\x86"
++    "\x0E\x5E\xC6\x53\x19\xA5\x78\x3B\x8C\xC4\x6E\xF7\x11\x6A\xCC\x63"
++    "\x0A\x6D\x92\x5D\x7D\x20\x25\x6E\xBE\xA4\xFA\x4E\x00\x47\x34\x00"
++    "\x41\xDF\x7D\x89\x48\xA0\xEB\xB4\x3A\x51\xA9\xF3\x3B\x0C\x6C\x9E"
++    "\x51\x87\x8D\x62\xA3\x99\x1C\x43\x4F\xDB\xB5\x6C\xE3\xCA\xBE\x5D"
++    "\xC2\x83\x67\xD2\x10\x77\x42\x59\x50\xF4\x8A\x4A\x77\x2B\x00\xA3"
++    "\x72\x79\xD3\xA3\x5C\xFE\x9A\xE1\x2E\xA3\x5A\x75\x1A\x8E\x5F\x38"
++    "\xCB\x97\x78\xAC\x45\xAD\x93\xEB\x64\x92\xDA\x96\xD3\x29\x42\x8A"
++    "\x49\x00\x94\xEE\x93\xB6\xE0\x1D\xBE\xC1\x5D\x05\x01\x55\x9B\xA3"
++    "\xEB\xDF\x58\xA1\x63\xF3\x05\x87\xC4\x22\xAC\xCA\xAB\x13\x47\x17"
++    "\xBE\xB2\x42\x7F\xDC\x36\x1F\x10\x8A\x09\x83\x2D\x5E\xD2\x4C\xA0"
++    "\xFB\xE3\xBE\xF9\xA7\xEA\xA3\xEC\xC1\x7B\x49\xB2\xA3\xEF\xAF\x7B"
++    "\xE6\xA4\x15\x01\x45\x14\x50\x14\x51\x45\x01\x45\x14\x50\x22\xB4"
++    "\xC4\xE2\xAC\xF2\x97\xD9\x4B\x4C\x65\x95\xBD\xFE\x43\xD1\xFD\x76"
++    "\xE9\xA6\x12\x97\x6E\x7D\x1A\x78\x5B\xF4\x8B\x03\x75\xF0\xA4\x90"
++    "\x37\x27\x61\xC8\x52\xDA\x28\xA0\x28\xA2\x8A\x02\x8A\x28\xA0\x2A"
++    "\xAF\x34\x69\x7B\xEB\x34\x20\x6F\xFD\xE2\xB0\xF8\x96\xEA\xD0\xEA"
++    "\xAD\x34\x5D\x7B\xEB\x4C\x1C\x7E\x62\xC7\xFC\x4B\x74\x13\x06\x66"
++    "\xBD\xA5\x39\x7F\xE7\x5E\xF7\xCD\x48\xAA\x60\xA6\x91\xD9\x02\xA5"
++    "\x19\x45\xB5\x85\xC8\x3A\xDB\x97\x6E\x38\x85\xB5\x6E\xA5\xA5\x49"
++    "\x52\x8A\x81\x05\x20\x8E\x84\x7F\xA7\x4E\xB5\xCF\x3F\x1A\x93\x1E"
++    "\x91\xDC\xB9\xF0\x4E\x7C\xA8\x24\xF5\x15\x14\xDE\x8B\x4A\x4F\x48"
++    "\xD6\x64\xF8\x17\x7B\x69\x0B\xD1\x39\x61\xDF\x68\xC6\x6F\xFE\x03"
++    "\xBD\xB4\x12\xEA\x8A\x87\x0F\x44\x25\xE7\xA4\x57\x3A\x7C\xBD\xDE"
++    "\xDA\x44\xF4\x36\x66\x7A\x44\xB3\xE7\xCB\x9E\xED\xA0\x9A\x94\x54"
++    "\x1D\x7A\x13\x36\x3D\x21\xF2\x13\xE5\xAF\x76\xD2\x17\xA0\xD3\x93"
++    "\xD2\x19\x23\x3E\x58\xF7\x6D\x04\xF0\xA2\xA0\x13\xF0\x29\xE1\xE9"
++    "\x09\x92\x9F\x2A\x7F\xB6\x91\x3D\xA7\xF3\xF3\xD2\x0D\x27\x3E\x52"
++    "\xFF\x00\x6D\x05\x85\x51\x55\xCE\xF6\x9E\x6A\x11\xE9\x04\x94\x9F"
++    "\x28\x7F\xB2\x91\x3F\xA7\x3A\x8A\x77\xDA\x03\x2B\x3E\x4F\x71\xD9"
++    "\x41\x64\xB4\x55\x66\x3D\xA6\xBA\x92\x7A\x69\xF4\xB0\xF9\x35\xC7"
++    "\x65\x21\x7B\x4C\xB5\x30\xF4\xD3\xB9\x71\xF2\x5B\x8E\xCA\x0B\x41"
++    "\xAA\xAC\xD1\x45\xFF\x00\x5D\x90\x51\xF9\x8F\x1F\xF1\x2D\xD7\xAB"
++    "\xDA\x5F\xA9\xE7\xA6\x9C\x4C\x0F\x92\x5C\xF6\x57\x4B\xA2\x7A\x59"
++    "\xA9\x88\xD6\x68\x6D\xCD\xCC\x06\x4D\x67\x6D\x6B\x9B\xB4\xBA\xB8"
++    "\xB8\xBB\xC6\xBB\x6E\xD3\x4D\x34\xEA\x5C\x5A\x94\xB7\x12\x12\x36"
++    "\x4A\x4E\xC3\x7D\xC9\xD8\x0D\xC9\x00\x87\xFF\xD9";
++
+diff -urNp minidlna-cvs/linux/minidlna.init.d.script minidlna-cvs.patched/linux/minidlna.init.d.script
+--- minidlna-cvs/linux/minidlna.init.d.script	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/linux/minidlna.init.d.script	2010-12-16 22:03:06.000000000 +0100
+@@ -33,7 +33,10 @@
+ # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ # POSSIBILITY OF SUCH DAMAGE.
+ 
++set -e
++
+ MINIDLNA=/usr/sbin/minidlna
++PIDFILE=/var/run/minidlna.pid
+ ARGS='-f /etc/minidlna.conf'
+ 
+ test -f $MINIDLNA || exit 0
+@@ -41,21 +44,38 @@ test -f $MINIDLNA || exit 0
+ . /lib/lsb/init-functions
+ 
+ case "$1" in
++reload|force-reload)
++        ARGS="$ARGS -R"
++        ;;
++esac
++
++case "$1" in
+ start)  log_daemon_msg "Starting minidlna" "minidlna"
+-        start-stop-daemon --start --quiet --pidfile /var/run/minidlna.pid --startas $MINIDLNA -- $ARGS $LSBNAMES
++        start-stop-daemon --start --quiet --pidfile $PIDFILE --startas $MINIDLNA -- $ARGS $LSBNAMES
+         log_end_msg $?
+         ;;
+ stop)   log_daemon_msg "Stopping minidlna" "minidlna"
+-        start-stop-daemon --stop --quiet --pidfile /var/run/minidlna.pid
++        start-stop-daemon --stop --quiet -oknodo --pidfile $PIDFILE
+         log_end_msg $?
++        rm -f $PIDFILE
+         ;;
+ restart|reload|force-reload)
++        set +e
+         log_daemon_msg "Restarting minidlna" "minidlna"
+-        start-stop-daemon --stop --retry 5 --quiet --pidfile /var/run/minidlna.pid
+-        start-stop-daemon --start --quiet --pidfile /var/run/minidlna.pid --startas $MINIDLNA -- $ARGS $LSBNAMES
++        if [ -s $PIDFILE ] && kill -0 $(cat $PIDFILE) >/dev/null 2>&1; then
++                start-stop-daemon --stop --retry 5 --quiet -oknodo --pidfile $PIDFILE || true
++                sleep 1
++        else
++		log_warning_msg "minidlna is not running, attempting to start."
++                rm -f $PIDFILE
++        fi
++        start-stop-daemon --start --quiet --pidfile $PIDFILE --startas $MINIDLNA -- $ARGS $LSBNAMES
+         log_end_msg $?
+         ;;
+-*)      log_action_msg "Usage: /etc/init.d/minidlna {start|stop|restart|reload|force-reload}"
++status)
++        status_of_proc -p $PIDFILE $MINIDLNA minidlna && exit 0 || exit $?
++        ;;
++*)      log_action_msg "Usage: /etc/init.d/minidlna {start|stop|restart|reload|force-reload|status}"
+         exit 2
+         ;;
+ esac
+diff -urNp minidlna-cvs/Makefile minidlna-cvs.patched/Makefile
+--- minidlna-cvs/Makefile	2010-12-16 21:26:21.000000000 +0100
++++ minidlna-cvs.patched/Makefile	2010-12-19 20:32:07.000000000 +0100
+@@ -10,20 +10,32 @@
+ # or :
+ # $ make install
+ #
++
++# set, if you want to include thumbnail creation support
++# (requires libffmpegthumbnailer library)
++CREATE_THUMBNAILS=yes
++
++# installation paths
++INSTALLPREFIX ?= $(DESTDIR)/usr
++SBININSTALLDIR = $(INSTALLPREFIX)/sbin
++ETCINSTALLDIR = $(DESTDIR)/etc
++
++# needed programs
++CC = gcc
++RM = rm -f
++INSTALL = install
++
++# Compile flags
++
+ #CFLAGS = -Wall -O -D_GNU_SOURCE -g -DDEBUG
+ #CFLAGS = -Wall -g -Os -D_GNU_SOURCE
+ CFLAGS = -Wall -g -O3 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 \
++	-I/home/anders/privat/Projekte/minidlna/dev-install/include \
+ 	 -I/usr/include/ffmpeg \
+ 	 -I/usr/include/libavutil -I/usr/include/libavcodec -I/usr/include/libavformat \
+ 	 -I/usr/include/ffmpeg/libavutil -I/usr/include/ffmpeg/libavcodec -I/usr/include/ffmpeg/libavformat
+-#STATIC_LINKING: LDFLAGS = -static
+-CC = gcc
+-RM = rm -f
+-INSTALL = install
+ 
+-INSTALLPREFIX ?= $(DESTDIR)/usr
+-SBININSTALLDIR = $(INSTALLPREFIX)/sbin
+-ETCINSTALLDIR = $(DESTDIR)/etc
++#STATIC_LINKING: LDFLAGS = -static
+ 
+ BASEOBJS = minidlna.o upnphttp.o upnpdescgen.o upnpsoap.o \
+            upnpreplyparse.o minixml.o \
+@@ -36,9 +48,19 @@ BASEOBJS = minidlna.o upnphttp.o upnpdes
+ 
+ ALLOBJS = $(BASEOBJS) $(LNXOBJS)
+ 
++LDFLAGS = -L/home/anders/privat/Projekte/minidlna/dev-install/lib
+ LIBS = -lpthread -lexif -ljpeg -lsqlite3 -lavformat -lavutil -lavcodec -lid3tag -lFLAC -logg -lvorbis
+ #STATIC_LINKING: LIBS = -lvorbis -logg -lm -lsqlite3 -lpthread -lexif -ljpeg -lFLAC -lm -lid3tag -lz -lavformat -lavutil -lavcodec -lm
+ 
++#LIBS2 = -lffmpegthumbnailer -lstdc++ -lbz2 -lswscale -lavutil -lpng
++LIBS2 = -lstdc++ -lbz2 -lswscale -lavutil -lpng
++
++ifneq ($(CREATE_THUMBNAILS),no)
++  #LIBS += -lffmpegthumbnailer
++  LIBS2 := -lffmpegthumbnailer $(LIBS2)
++  CFLAGS += -DTHUMBNAIL_CREATION_SUPPORT
++endif
++
+ TESTUPNPDESCGENOBJS = testupnpdescgen.o upnpdescgen.o
+ 
+ EXECUTABLES = minidlna testupnpdescgen
+@@ -63,7 +85,7 @@ install:	minidlna
+ 
+ minidlna:	$(BASEOBJS) $(LNXOBJS) $(LIBS)
+ 	@echo Linking $@
+-	@$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(BASEOBJS) $(LNXOBJS) $(LIBS)
++	@$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(BASEOBJS) $(LNXOBJS) $(LIBS) $(LIBS2)
+ 
+ 
+ testupnpdescgen:	$(TESTUPNPDESCGENOBJS)
+diff -urNp minidlna-cvs/metadata.c minidlna-cvs.patched/metadata.c
+--- minidlna-cvs/metadata.c	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/metadata.c	2010-12-19 18:41:38.000000000 +0100
+@@ -36,6 +36,7 @@
+ #include "tagutils/tagutils.h"
+ 
+ #include "upnpglobalvars.h"
++#include "upnphttp.h"
+ #include "upnpreplyparse.h"
+ #include "metadata.h"
+ #include "albumart.h"
+@@ -640,7 +641,7 @@ GetVideoMetadata(const char * path, char
+ 	int audio_stream = -1, video_stream = -1;
+ 	enum audio_profiles audio_profile = PROFILE_AUDIO_UNKNOWN;
+ 	ts_timestamp_t ts_timestamp = NONE;
+-	int duration, hours, min, sec, ms;
++	int duration=0, hours, min, sec, ms;
+ 	aac_object_type_t aac_type = AAC_INVALID;
+ 	sqlite_int64 album_art = 0;
+ 	char nfo[PATH_MAX], *ext;
+@@ -1092,6 +1093,10 @@ GetVideoMetadata(const char * path, char
+ 	{
+ 		ret = sqlite3_last_insert_rowid(db);
+ 		check_for_captions(path, ret);
++
++		/* if option is set, create suitable Samsung MTA file for this video */
++		if (duration > 0 && GETFLAG(EXTERNAL_MTA_FILE_MASK))
++			generate_external_samsung_mta_file(path, duration);
+ 	}
+ 	free_metadata(&m, free_flags);
+ 
+diff -urNp minidlna-cvs/minidlna.c minidlna-cvs.patched/minidlna.c
+--- minidlna-cvs/minidlna.c	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/minidlna.c	2010-12-16 22:03:06.000000000 +0100
+@@ -472,6 +472,10 @@ init(int argc, char * * argv)
+ 				if( (strcmp(ary_options[i].value, "yes") == 0) || atoi(ary_options[i].value) )
+ 					SETFLAG(DLNA_STRICT_MASK);
+ 				break;
++			case ENABLE_EXTERNAL_MTA_FILES:
++				if( (strcmp(ary_options[i].value, "yes") == 0) || atoi(ary_options[i].value) )
++					SETFLAG(EXTERNAL_MTA_FILE_MASK);
++				break;
+ 			default:
+ 				fprintf(stderr, "Unknown option in file %s\n",
+ 				        optionsfile);
+diff -urNp minidlna-cvs/minidlna.conf minidlna-cvs.patched/minidlna.conf
+--- minidlna-cvs/minidlna.conf	2009-11-19 04:22:35.000000000 +0100
++++ minidlna-cvs.patched/minidlna.conf	2010-12-17 00:48:49.000000000 +0100
+@@ -45,3 +45,19 @@ notify_interval=900
+ # in its XML description
+ serial=12345678
+ model_number=1
++
++#
++# Samsung specific switches
++#
++# samsung_external_mta_files = yes|no
++#
++# Set to yes on Samsung TV (e.g. LE40C650 and similar) if you are running
++# miniDLNA on a slow device.  This will precalculate the MTA files needed
++# for the Smasung TV chapter menu while building the database instead of
++# generating the MTA file on-the-fly if requested.  Now, consider this: if
++# generating MTA files is too slow for on-the-fly generation, the building
++# of the database will considerably slow down by setting this to yes!
++# Also note that a precomputed MTA file will always(!) be sent if requested. 
++# No on-thy-fly generation takes place. So, to change this, remove all MTA
++# files as well.
++samsung_external_mta_files = no
+diff -urNp minidlna-cvs/options.c minidlna-cvs.patched/options.c
+--- minidlna-cvs/options.c	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/options.c	2010-12-19 18:42:07.000000000 +0100
+@@ -58,7 +58,8 @@ static const struct {
+ 	{ UPNPDBDIR, "db_dir" },
+ 	{ UPNPLOGDIR, "log_dir" },
+ 	{ ENABLE_TIVO, "enable_tivo" },
+-	{ ENABLE_DLNA_STRICT, "strict_dlna" }
++	{ ENABLE_DLNA_STRICT, "strict_dlna" },
++	{ ENABLE_EXTERNAL_MTA_FILES, "samsung_external_mta_files" }
+ };
+ 
+ int
+diff -urNp minidlna-cvs/options.h minidlna-cvs.patched/options.h
+--- minidlna-cvs/options.h	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/options.h	2010-12-19 18:41:49.000000000 +0100
+@@ -51,7 +51,8 @@ enum upnpconfigoptions {
+ 	UPNPDBDIR,			/* base directory to store the database and album art cache */
+ 	UPNPLOGDIR,			/* base directory to store the log file */
+ 	ENABLE_TIVO,			/* enable support for streaming images and music to TiVo */
+-	ENABLE_DLNA_STRICT		/* strictly adhere to DLNA specs */
++	ENABLE_DLNA_STRICT,		/* strictly adhere to DLNA specs */
++	ENABLE_EXTERNAL_MTA_FILES       /* Samsung: enable generation of external MTA files (for slower NAS devices) */
+ };
+ 
+ /* readoptionsfile()
+diff -urNp minidlna-cvs/scanner.c minidlna-cvs.patched/scanner.c
+--- minidlna-cvs/scanner.c	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/scanner.c	2010-12-17 00:50:14.000000000 +0100
+@@ -568,7 +568,8 @@ CreateDatabase(void)
+ 					"REF_ID TEXT DEFAULT NULL, "
+ 					"CLASS TEXT NOT NULL, "
+ 					"DETAIL_ID INTEGER DEFAULT NULL, "
+-					"NAME TEXT DEFAULT NULL"
++					"NAME TEXT DEFAULT NULL, "
++                    "BOOKMARK INTEGER DEFAULT 0" /* time position in seconds [ESamsungTV] */
+ 					");");
+ 	if( ret != SQLITE_OK )
+ 		goto sql_failed;
+diff -urNp minidlna-cvs/upnpdescgen.c minidlna-cvs.patched/upnpdescgen.c
+--- minidlna-cvs/upnpdescgen.c	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/upnpdescgen.c	2010-12-17 00:50:45.000000000 +0100
+@@ -118,6 +118,10 @@ static const char root_service[] =
+ 	"scpd xmlns=\"urn:schemas-upnp-org:service-1-0\"";
+ static const char root_device[] = 
+ 	"root xmlns=\"urn:schemas-upnp-org:device-1-0\"";
++static const char root_device_samsung[] = 
++	"root xmlns=\"urn:schemas-upnp-org:device-1-0\""
++    " xmlns:sec=\"http://www.sec.co.kr/dlna\""
++    " xmlns:dlna=\"urn:schemas-dlna-org:device-1-0\"";
+ 
+ /* root Description of the UPnP Device 
+  * fixed to match UPnP_IGD_InternetGatewayDevice 1.0.pdf 
+@@ -189,6 +193,75 @@ static const struct XMLElt rootDesc[] =
+ 	{0, 0}
+ };
+ 
++/* root Description of the UPnP Device for Samsung TV renderers */
++static const struct XMLElt rootDescSamsung[] =
++{
++/*0*/	{root_device_samsung, INITHELPER(1,2)},
++	{"specVersion", INITHELPER(3,2)},
++	{"device", INITHELPER(5,16)},
++	{"/major", "1"},
++	{"/minor", "0"},
++	{"/deviceType", "urn:schemas-upnp-org:device:MediaServer:1"},
++	{"/friendlyName", friendly_name},	/* required */
++	{"/manufacturer", ROOTDEV_MANUFACTURER},		/* required */
++	{"/manufacturerURL", ROOTDEV_MANUFACTURERURL},	/* optional */
++	{"/modelDescription", ROOTDEV_MODELDESCRIPTION}, /* recommended */
++/*10*/	{"/modelName", ROOTDEV_MODELNAME},	/* required */
++	{"/modelNumber", modelnumber},
++	{"/modelURL", ROOTDEV_MODELURL},
++	{"/serialNumber", serialnumber},
++        {"/sec:ProductCap", "smi,DCM10,getMediaInfo.sec,getCaptionInfo.sec"},
++        {"/sec:X_ProductCap", "smi,DCM10,getMediaInfo.sec,getCaptionInfo.sec"},
++	{"/UDN", uuidvalue},	/* required */
++	{"/dlna:X_DLNADOC xmlns:dlna=\"urn:schemas-dlna-org:device-1-0\"", "DMS-1.50"},
++	{"/presentationURL", presentationurl},	/* recommended */
++	{"iconList", INITHELPER(21,4)},
++/*20*/	{"serviceList", INITHELPER(45,3)},
++	{"icon", INITHELPER(25,5)},
++	{"icon", INITHELPER(30,5)},
++	{"icon", INITHELPER(35,5)},
++	{"icon", INITHELPER(40,5)},
++	{"/mimetype", "image/png"},
++	{"/width", "48"},
++	{"/height", "48"},
++	{"/depth", "24"},
++	{"/url", "/icons/sm.png"},
++/*30*/	{"/mimetype", "image/png"},
++	{"/width", "120"},
++	{"/height", "120"},
++	{"/depth", "24"},
++	{"/url", "/icons/lrg.png"},
++	{"/mimetype", "image/jpeg"},
++	{"/width", "48"},
++	{"/height", "48"},
++	{"/depth", "24"},
++	{"/url", "/icons/sm.jpg"},
++/*40*/	{"/mimetype", "image/jpeg"},
++	{"/width", "120"},
++	{"/height", "120"},
++	{"/depth", "24"},
++	{"/url", "/icons/lrg.jpg"},
++	{"service", INITHELPER(48,5)},
++	{"service", INITHELPER(53,5)},
++	{"service", INITHELPER(58,5)},
++	{"/serviceType", "urn:schemas-upnp-org:service:ContentDirectory:1"},
++	{"/serviceId", "urn:upnp-org:serviceId:ContentDirectory"},
++/*50*/	{"/controlURL", CONTENTDIRECTORY_CONTROLURL},
++	{"/eventSubURL", CONTENTDIRECTORY_EVENTURL},
++	{"/SCPDURL", CONTENTDIRECTORY_PATH},
++	{"/serviceType", "urn:schemas-upnp-org:service:ConnectionManager:1"},
++	{"/serviceId", "urn:upnp-org:serviceId:ConnectionManager"},
++	{"/controlURL", CONNECTIONMGR_CONTROLURL},
++	{"/eventSubURL", CONNECTIONMGR_EVENTURL},
++	{"/SCPDURL", CONNECTIONMGR_PATH},
++	{"/serviceType", "urn:microsoft.com:service:X_MS_MediaReceiverRegistrar:1"},
++	{"/serviceId", "urn:microsoft.com:serviceId:X_MS_MediaReceiverRegistrar"},
++/*60*/	{"/controlURL", X_MS_MEDIARECEIVERREGISTRAR_CONTROLURL},
++	{"/eventSubURL", X_MS_MEDIARECEIVERREGISTRAR_EVENTURL},
++	{"/SCPDURL", X_MS_MEDIARECEIVERREGISTRAR_PATH},
++	{0, 0}
++};
++
+ static const struct argument AddPortMappingArgs[] =
+ {
+ 	{NULL, 1, 11},
+@@ -560,7 +633,7 @@ genXML(char * str, int * len, int * tmpl
+ 	int top;
+ 	const char * eltname, *s;
+ 	char c;
+-	char element[64];
++	char element[256];
+ 	struct {
+ 		unsigned short i;
+ 		unsigned short j;
+@@ -659,6 +732,23 @@ genRootDesc(int * len)
+ 	return str;
+ }
+ 
++char *
++genRootDescSamsung(int * len)
++{
++	char * str;
++	int tmplen;
++	tmplen = 3072;
++	str = (char *)malloc(tmplen);
++	if(str == NULL)
++		return NULL;
++	* len = strlen(xmlver);
++	/*strcpy(str, xmlver); */
++	memcpy(str, xmlver, *len + 1);
++	str = genXML(str, len, &tmplen, rootDescSamsung);
++	str[*len] = '\0';
++	return str;
++}
++
+ /* genServiceDesc() :
+  * Generate service description with allowed methods and 
+  * related variables. */
+diff -urNp minidlna-cvs/upnpdescgen.h minidlna-cvs.patched/upnpdescgen.h
+--- minidlna-cvs/upnpdescgen.h	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/upnpdescgen.h	2010-12-16 22:03:06.000000000 +0100
+@@ -73,6 +73,8 @@ struct stateVar {
+  * returns: NULL on error, string allocated on the heap */
+ char *
+ genRootDesc(int * len);
++char *
++genRootDescSamsung(int * len);
+ 
+ /* for the two following functions */
+ char *
+diff -urNp minidlna-cvs/upnpglobalvars.h minidlna-cvs.patched/upnpglobalvars.h
+--- minidlna-cvs/upnpglobalvars.h	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/upnpglobalvars.h	2010-12-16 22:03:06.000000000 +0100
+@@ -128,6 +128,7 @@ extern int runtime_flags;
+ #define INOTIFY_MASK          0x0001
+ #define TIVO_MASK             0x0002
+ #define DLNA_STRICT_MASK      0x0004
++#define EXTERNAL_MTA_FILE_MASK      0x0008
+ 
+ #define SETFLAG(mask)	runtime_flags |= mask
+ #define GETFLAG(mask)	runtime_flags & mask
+diff -urNp minidlna-cvs/upnphttp.c minidlna-cvs.patched/upnphttp.c
+--- minidlna-cvs/upnphttp.c	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/upnphttp.c	2010-12-19 20:30:35.000000000 +0100
+@@ -75,6 +75,9 @@
+ #include "log.h"
+ #include "sql.h"
+ #include <libexif/exif-loader.h>
++#ifdef THUMBNAIL_CREATION_SUPPORT
++#include <libffmpegthumbnailer/videothumbnailerc.h>
++#endif
+ #ifdef TIVO_SUPPORT
+ #include "tivo_utils.h"
+ #include "tivo_commands.h"
+@@ -397,6 +400,10 @@ intervening space) by either an integer 
+ 			{
+ 				h->reqflags |= FLAG_CAPTION;
+ 			}
++			else if(strncasecmp(line, "getMediaInfo.sec", 16)==0)
++			{
++                h->reqflags |= FLAG_MEDIA_INFO;
++			}
+ 		}
+ next_header:
+ 		while(!(line[0] == '\r' && line[1] == '\n'))
+@@ -799,11 +806,11 @@ ProcessHttpQuery_upnphttp(struct upnphtt
+ 				sendXMLdesc(h, genRootDesc);
+ 				friendly_name[strlen(friendly_name)-3] = '\0';
+ 			}
++			else if (h->req_client == ESamsungTV)
++				sendXMLdesc(h, genRootDescSamsung);
+ 			else
+-			{
+ 				sendXMLdesc(h, genRootDesc);
+ 			}
+-		}
+ 		else if(strcmp(CONTENTDIRECTORY_PATH, HttpUrl) == 0)
+ 		{
+ 			sendXMLdesc(h, genContentDirectory);
+@@ -830,6 +837,11 @@ ProcessHttpQuery_upnphttp(struct upnphtt
+ 			SendResp_albumArt(h, HttpUrl+10);
+ 			CloseSocket_upnphttp(h);
+ 		}
++		else if((strncmp(HttpUrl, "/MTA/", 5) == 0) && (h->req_client == ESamsungTV))
++		{
++			SendResp_samsung_mta_file(h, HttpUrl+5);
++			CloseSocket_upnphttp(h);
++		}
+ 		#ifdef TIVO_SUPPORT
+ 		else if(strncmp(HttpUrl, "/TiVoConnect", 12) == 0)
+ 		{
+@@ -1169,7 +1181,7 @@ send_file(struct upnphttp * h, int sendf
+ void
+ SendResp_icon(struct upnphttp * h, char * icon)
+ {
+-	char * header;
++    char * header = 0;
+ 	char * data;
+ 	int size, ret;
+ 	char mime[12];
+@@ -1221,6 +1233,8 @@ SendResp_icon(struct upnphttp * h, char 
+ 	                        "Server: " MINIDLNA_SERVER_STRING "\r\n\r\n",
+ 	                        mime, size, date);
+ 
++	DPRINTF(E_INFO, L_HTTP, "%s", header);
++
+ 	if( (send_data(h, header, ret, MSG_MORE) == 0) && (h->req_command != EHead) )
+ 	{
+ 		send_data(h, data, size, 0);
+@@ -1283,20 +1297,21 @@ SendResp_albumArt(struct upnphttp * h, c
+ 				"Connection: close\r\n"
+ 				"Date: %s\r\n"
+ 				"EXT:\r\n"
+-				"realTimeInfo.dlna.org: DLNA.ORG_TLAG=*\r\n"
+ 				"contentFeatures.dlna.org: DLNA.ORG_PN=JPEG_TN\r\n"
+ 				"Server: " MINIDLNA_SERVER_STRING "\r\n",
+ 				size, date);
+ 
++		if( h->reqflags & FLAG_REALTIMEINFO )
++			strcat(header, "realTimeInfo.dlna.org: DLNA.ORG_TLAG=*\r\n");
++
+ 		if( h->reqflags & FLAG_XFERBACKGROUND )
+-		{
+-			strcat(header, "transferMode.dlna.org: Background\r\n\r\n");
+-		}
++			strcat(header, "transferMode.dlna.org: Background\r\n");
+ 		else //if( h->reqflags & FLAG_XFERINTERACTIVE )
+-		{
+-			strcat(header, "transferMode.dlna.org: Interactive\r\n\r\n");
+-		}
++			strcat(header, "transferMode.dlna.org: Interactive\r\n");
++
++        DPRINTF(E_INFO, L_HTTP, "%s", header);
+ 
++        strcat(header, "\r\n");
+ 
+ 		if( (send_data(h, header, strlen(header), MSG_MORE) == 0) && (h->req_command != EHead) && (sendfh > 0) )
+ 		{
+@@ -1348,13 +1363,23 @@ SendResp_caption(struct upnphttp * h, ch
+ 	lseek(sendfh, 0, SEEK_SET);
+ 
+ 	ret = snprintf(header, sizeof(header), "HTTP/1.1 200 OK\r\n"
++/*	                                       "Server: Samsung HTTP streaming server\r\n" */
++	                                       "Server: " MINIDLNA_SERVER_STRING "\r\n"
+ 	                                       "Content-Type: smi/caption\r\n"
+ 	                                       "Content-Length: %jd\r\n"
+-	                                       "Connection: close\r\n"
++	                                       "Cache-Control: no-cache\r\n"
++                                           "contentFeatures.dlna.org: DLNA.ORG_OP=00;DLNA.ORG_CI=0;\r\n"
++/*	                                       "Connection: close\r\n" */
+ 	                                       "Date: %s\r\n"
+-	                                       "EXT:\r\n"
+-	                                       "Server: " MINIDLNA_SERVER_STRING "\r\n\r\n",
+-	                                       size, date);
++	                                       "EXT:\r\n",
++                                           size, date);
++
++	if( h->reqflags & FLAG_XFERBACKGROUND )
++		strcat(header, "transferMode.dlna.org:Background\r\n");
++
++	DPRINTF(E_INFO, L_HTTP, "%s", header);
++
++	strcat(header, "\r\n");
+ 
+ 	if( (send_data(h, header, ret, MSG_MORE) == 0) && (h->req_command != EHead) && (sendfh > 0) )
+ 	{
+@@ -1422,20 +1447,26 @@ SendResp_thumbnail(struct upnphttp * h, 
+ 				"Connection: close\r\n"
+ 				"Date: %s\r\n"
+ 				"EXT:\r\n"
+-				"realTimeInfo.dlna.org: DLNA.ORG_TLAG=*\r\n"
+ 			 	"contentFeatures.dlna.org: DLNA.ORG_PN=JPEG_TN\r\n"
+ 				"Server: " MINIDLNA_SERVER_STRING "\r\n",
+ 				ed->size, date);
+ 
++		if( h->reqflags & FLAG_REALTIMEINFO )
++			strcat(header, "realTimeInfo.dlna.org: DLNA.ORG_TLAG=*\r\n");
++
+ 		if( h->reqflags & FLAG_XFERBACKGROUND )
+ 		{
+-			strcat(header, "transferMode.dlna.org: Background\r\n\r\n");
++			strcat(header, "transferMode.dlna.org: Background\r\n");
+ 		}
+ 		else //if( h->reqflags & FLAG_XFERINTERACTIVE )
+ 		{
+-			strcat(header, "transferMode.dlna.org: Interactive\r\n\r\n");
++			strcat(header, "transferMode.dlna.org: Interactive\r\n");
+ 		}
+ 
++        DPRINTF(E_INFO, L_HTTP, "%s", header);
++
++        strcat(header, "\r\n");
++
+ 		if( (send_data(h, header, strlen(header), MSG_MORE) == 0) && (h->req_command != EHead) )
+ 		{
+ 			send_data(h, (char *)ed->data, ed->size, 0);
+@@ -1572,10 +1603,12 @@ SendResp_resizedimg(struct upnphttp * h,
+ 	                                     "Connection: close\r\n"
+ 	                                     "Date: %s\r\n"
+ 	                                     "EXT:\r\n"
+-	                                     "realTimeInfo.dlna.org: DLNA.ORG_TLAG=*\r\n"
+ 	                                     "contentFeatures.dlna.org: DLNA.ORG_PN=JPEG_%s;DLNA.ORG_CI=1\r\n"
+ 	                                     "Server: " MINIDLNA_SERVER_STRING "\r\n",
+ 	                                     date, dlna_pn);
++	if( h->reqflags & FLAG_REALTIMEINFO )
++		strcat(header, "realTimeInfo.dlna.org: DLNA.ORG_TLAG=*\r\n");
++
+ 	if( h->reqflags & FLAG_XFERINTERACTIVE )
+ 	{
+ 		strcat(header, "transferMode.dlna.org: Interactive\r\n");
+@@ -1633,6 +1666,8 @@ SendResp_resizedimg(struct upnphttp * h,
+ 		strcat(header, str_buf);
+ 	}
+ 
++	DPRINTF(E_INFO, L_HTTP, "%s", header);
++
+ 	if( (send_data(h, header, strlen(header), 0) == 0) && (h->req_command != EHead) )
+ 	{
+ 		if( chunked )
+@@ -1683,7 +1718,7 @@ SendResp_dlnafile(struct upnphttp * h, c
+ 	off_t total, offset, size;
+ 	sqlite_int64 id;
+ 	int sendfh;
+-	static struct { sqlite_int64 id; char path[PATH_MAX]; char mime[32]; char dlna[64]; } last_file = { 0 };
++	static struct { sqlite_int64 id; char path[PATH_MAX]; char mime[32]; char dlna[128]; char duration[32]; } last_file = { 0 };
+ #if USE_FORK
+ 	pid_t newpid = 0;
+ #endif
+@@ -1691,7 +1726,7 @@ SendResp_dlnafile(struct upnphttp * h, c
+ 	id = strtoll(object, NULL, 10);
+ 	if( id != last_file.id )
+ 	{
+-		sprintf(sql_buf, "SELECT PATH, MIME, DLNA_PN from DETAILS where ID = '%lld'", id);
++		sprintf(sql_buf, "SELECT PATH, MIME, DLNA_PN, DURATION from DETAILS where ID = '%lld'", id);
+ 		ret = sql_get_table(db, sql_buf, &result, &rows, NULL);
+ 		if( (ret != SQLITE_OK) )
+ 		{
+@@ -1708,10 +1743,10 @@ SendResp_dlnafile(struct upnphttp * h, c
+ 		}
+ 		/* Cache the result */
+ 		last_file.id = id;
+-		strncpy(last_file.path, result[3], sizeof(last_file.path)-1);
+-		if( result[4] )
++		strncpy(last_file.path, result[4], sizeof(last_file.path)-1);
++		if( result[5] )
+ 		{
+-			strncpy(last_file.mime, result[4], sizeof(last_file.mime)-1);
++			strncpy(last_file.mime, result[5], sizeof(last_file.mime)-1);
+ 			/* From what I read, Samsung TV's expect a [wrong] MIME type of x-mkv. */
+ 			if( h->req_client == ESamsungTV )
+ 			{
+@@ -1730,12 +1765,16 @@ SendResp_dlnafile(struct upnphttp * h, c
+ 		{
+ 			last_file.mime[0] = '\0';
+ 		}
+-		if( result[5] )
+-			snprintf(last_file.dlna, sizeof(last_file.dlna), "DLNA.ORG_PN=%s", result[5]);
++		if( result[6] )
++			snprintf(last_file.dlna, sizeof(last_file.dlna), "DLNA.ORG_PN=%s", result[6]);
+ 		else if( h->reqflags & FLAG_DLNA )
+ 			strcpy(last_file.dlna, dlna_no_conv);
+ 		else
+ 			last_file.dlna[0] = '\0';
++
++        if( result[7] )
++            strncpy(last_file.duration, result[7], sizeof(last_file.duration)-1);
++
+ 		sqlite3_free_table(result);
+ 	}
+ #if USE_FORK
+@@ -1863,16 +1902,41 @@ SendResp_dlnafile(struct upnphttp * h, c
+ 		}
+ 	}
+ 
++	if( last_file.duration && h->reqflags & FLAG_MEDIA_INFO )
++    {
++        int dur = atoi(rindex(last_file.duration, '.')+1) +
++                (1000*atoi(rindex(last_file.duration, ':')+1)) +
++                (60000*atoi(rindex(last_file.duration, ':')-2)) +
++                (3600000*atoi(last_file.duration));
++        sprintf(hdr_buf, "MediaInfo.sec: SEC_Duration=%d;\r\n", dur);
++        strcat(header, hdr_buf);
++	}
++
++    /* Special Samsung DLNA flags */
++    if( h->req_client == ESamsungTV )
++    {
++		if( strncmp(last_file.mime, "image", 5) == 0 )
++            strcat(last_file.dlna, ";DLNA.ORG_FLAGS=00D00000000000000000000000000000");
++        else if (strncmp(last_file.mime, "video", 5) == 0)
++            strcat(last_file.dlna, ";DLNA.ORG_FLAGS=01500000000000000000000000000000");
++    }
++
+ 	sprintf(hdr_buf, "Accept-Ranges: bytes\r\n"
+ 			 "Connection: close\r\n"
+ 			 "Date: %s\r\n"
+ 			 "EXT:\r\n"
+-	                 "realTimeInfo.dlna.org: DLNA.ORG_TLAG=*\r\n"
+-			 "contentFeatures.dlna.org: %s\r\n"
+-			 "Server: " MINIDLNA_SERVER_STRING "\r\n\r\n",
++			 "contentFeatures.dlna.org:%s\r\n"
++			 "Server: " MINIDLNA_SERVER_STRING "\r\n",
+ 			 date, last_file.dlna);
+ 	strcat(header, hdr_buf);
+ 
++	if( h->reqflags & FLAG_REALTIMEINFO )
++            strcat(header, "realTimeInfo.dlna.org: DLNA.ORG_TLAG=*\r\n");
++
++	DPRINTF(E_INFO, L_HTTP, "%s", header);
++
++	strcat(header, "\r\n");
++
+ 	if( (send_data(h, header, strlen(header), MSG_MORE) == 0) && (h->req_command != EHead) && (sendfh > 0) )
+ 	{
+ 		send_file(h, sendfh, offset, h->req_RangeEnd);
+@@ -1886,3 +1950,333 @@ SendResp_dlnafile(struct upnphttp * h, c
+ #endif
+ 	return;
+ }
++
++/* encode 6 bit to base64 char */
++static char encode_base64(unsigned char c)
++{
++  if (c < 26)
++      return 'A' + c;
++  if (c < 52)
++      return 'a' + (c-26);
++  if (c < 62)
++      return '0' + (c-52);
++  if (c == 62)
++      return '+';
++
++  /* 63 */
++  return '/';
++}
++
++void
++adjust_buffer(char** buffer, int* length)
++{
++    *length += *length; /* double buffer size */
++    *buffer = realloc(*buffer, *length+1); /* get one for the terminating zero */
++}
++
++/* append data to buffer, if necessary get more memory and rebase current ptr */
++void
++add_to_buffer(char** buffer, int* length, char** ptr, const char* data, int datalen)
++{
++    if (*ptr - *buffer > *length) {
++        *ptr -= (int)*buffer;
++        adjust_buffer(buffer, length);
++        *ptr += (int)*buffer; /* rebase ptr */
++    }
++    memcpy(*ptr, data, datalen);
++    *ptr += datalen;
++}
++
++/*
++ * generates samsung MTA files for movies
++ * An MTA file contains XML with 5 chapter points each having an inline thumbnail
++ * in base64 encoding.
++ * The files are created with the minidlna-user (e.g. root).
++ *
++ * path         char*  IN   path and filename of movie
++ * duration     int    IN   duration of movie in seconds
++ */
++void
++generate_external_samsung_mta_file(const char* path, int duration)
++{
++    char mta_path[PATH_MAX];
++
++    snprintf(mta_path, sizeof(mta_path), "%s.mta", path);
++
++    if (ends_with(path, ".avi") || ends_with(path, ".mkv") || ends_with(path, ".mpg")) {
++        DPRINTF(E_DEBUG, L_METADATA, "Checking for external MTA file: %s\n", mta_path);
++        if (access(mta_path, F_OK) == 0)
++            return; /* already found one, ok */
++
++        /* check movie */
++        if (access(path, F_OK) == 0) {
++            int mta_size = 0;
++            char* body = generate_samsung_mta_file(path, duration);
++            mta_size = strlen(body);
++
++            FILE* mtafile = fopen(mta_path, "w");
++            if (mtafile) {
++                int size_written = fwrite((void *)body, 1, mta_size, mtafile);
++                fclose(mtafile);
++                if (size_written != mta_size) {
++                    DPRINTF(E_DEBUG, L_METADATA, "Could not write external MTA file: '%s'\n", mta_path);
++                    remove(mta_path);
++                } else
++                    DPRINTF(E_DEBUG, L_METADATA, "Could open external MTA file for writing: '%s'\n", mta_path);
++            }
++	}
++    }
++}
++
++char*
++generate_samsung_mta_file(const char* path, int duration)
++{
++    static const char mta_header[] =
++        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
++        "<SEC:SECMeta xsi:schemaLocation=\"urn:samsung:metadata:2009 Video_Metadata_v1.0.xsd\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:SEC=\"urn:samsung:metadata:2009\">\r\n"
++        "<SpecVersion>1.0</SpecVersion>\r\n"
++        "<MediaInformation>\r\n"
++        "<VideoLocator>\r\n"
++        "<MediaUri>file://samsung_content.con</MediaUri>\r\n"
++        "</VideoLocator>\r\n"
++        "</MediaInformation>\r\n"
++        "<ContentInformation>\r\n"
++        "<Chaptering>\r\n"
++        ;
++    static const char mta_chapter_header[] =
++        "<ChapterSegment>\r\n"
++        "<KeyFrame>\r\n"
++        "<InlineMedia>"
++        ;
++    static const char mta_chapter_closing[] =
++        "</InlineMedia>\r\n"
++        "</KeyFrame>\r\n"
++        "<MediaPosition>\r\n"
++        "<MediaTime timePoint=\"%d\"/>\r\n"
++        "</MediaPosition>\r\n"
++        "</ChapterSegment>\r\n"
++        ;
++    static const char mta_closing[] =
++        "</Chaptering>\r\n"
++        "</ContentInformation>\r\n"
++        "</SEC:SECMeta>\r\n"
++        ;
++
++    char* buffer = 0;
++    if (ends_with(path, ".avi") || ends_with(path, ".mkv") || ends_with(path, ".mpg"))
++    {
++#ifdef THUMBNAIL_CREATION_SUPPORT
++        video_thumbnailer* vt=0;
++#endif
++        int percentage;
++        int length = 100*1024;
++        char* ptr;
++
++        buffer = malloc(length+1); /* one for the terminating zero */
++        if (!buffer)
++            return ""; /* fail (empty string!) */
++
++        ptr = buffer;
++        add_to_buffer(&buffer, &length, &ptr, mta_header, strlen(mta_header));
++
++#ifdef THUMBNAIL_CREATION_SUPPORT
++        vt = video_thumbnailer_create();
++        vt->thumbnail_image_type = Jpeg;
++#endif
++        /* Samsung accepts exactly 5 positions nothing more, nothing less */
++        for( percentage = 16; percentage < 95; percentage+=16 )
++	{
++#ifdef THUMBNAIL_CREATION_SUPPORT
++            int rc;
++            image_data* imgdata = video_thumbnailer_create_image_data();
++#endif
++	    unsigned char* src = jpeg_chapter;
++	    int size = sizeof(jpeg_chapter)-1;
++	    int idx;
++
++            add_to_buffer(&buffer, &length, &ptr, mta_chapter_header, strlen(mta_chapter_header));
++
++#ifdef THUMBNAIL_CREATION_SUPPORT
++
++            vt->seek_percentage = percentage;
++
++            DPRINTF(E_DEBUG, L_METADATA, "generating %d%%-thumbnail for '%s'\n", percentage, path);
++            rc = video_thumbnailer_generate_thumbnail_to_buffer(vt, path, imgdata);
++            DPRINTF(E_DEBUG, L_METADATA, "rc: %d, thumbnail size=%d\n", rc, imgdata->image_data_size);
++
++            if (!rc && imgdata->image_data_size) {
++		src = imgdata->image_data_ptr;
++		size = imgdata->image_data_size;
++	    }
++#endif
++
++	    /* base 64 encoding of the image */
++	    for(idx=0; idx < size; idx += 3)
++	    {
++		unsigned char r1=0, r2=0, r3=0, b1=0, b2=0, b3=0, b4=0;
++
++		/* get 3 byte / 24 bit */
++		r1 = src[idx];
++                    
++		if (idx+1 < size)
++		    r2 = src[idx+1];
++
++		if (idx+2 < size)
++		    r3 = src[idx+2];
++
++		/* spread to 4 6-bit parts */
++		b1 = r1 >> 2;
++		b2 = ((r1 & 0x3) << 4) | (r2 >> 4);
++		b3 = ((r2 & 0xf) << 2) | (r3 >> 6);
++		b4 = r3 & 0x3f;
++
++		/* encode 6-bit output */
++		*ptr++ = encode_base64(b1);
++		*ptr++ = encode_base64(b2);
++
++		if (idx+1 < size)
++		    *ptr++ = encode_base64(b3);
++		else
++		    *ptr++ = '=';
++		
++		if (idx+2 < size)
++		    *ptr++ = encode_base64(b4);
++		else
++		    *ptr++ = '=';
++
++		/* check buffer size, realloc if necessary */
++		if (ptr+2 > buffer+length) {
++		    ptr -= (int)buffer;
++		    adjust_buffer(&buffer, &length);
++		    ptr += (int)buffer; /* rebase ptr */
++		}
++            }
++
++#ifdef THUMBNAIL_CREATION_SUPPORT
++            video_thumbnailer_destroy_image_data(imgdata);
++#endif
++            /* add time code for this thumbnail */
++            {
++                char tmp[sizeof(mta_chapter_closing)+10];
++                int pos = (duration * percentage) / 100;
++                snprintf(tmp, sizeof(mta_chapter_closing)+10, mta_chapter_closing, pos);
++                add_to_buffer(&buffer, &length, &ptr, tmp, strlen(tmp));
++            }
++        }
++#ifdef THUMBNAIL_CREATION_SUPPORT
++        video_thumbnailer_destroy(vt);
++#endif
++        add_to_buffer(&buffer, &length, &ptr, mta_closing, strlen(mta_closing));
++        *ptr = 0; /* terminate buffer! */
++    }
++    return buffer;
++}
++
++void
++SendResp_samsung_mta_file(struct upnphttp * h, char * object)
++{
++    char header[1500];
++    char sql_buf[256];
++    char **result;
++    int rows = 0;
++    char *path;
++    int duration = 0;
++    int sendfh = -1; /* default: no accessible mta file */
++    char *dash;
++
++    dash = strchr(object, '.');
++    if( dash )
++        *dash = '\0';
++
++    /* get path and duration of video */
++    sprintf(sql_buf, "select PATH, DURATION from DETAILS where ID = '%s';", object);
++    DPRINTF(E_DEBUG, L_HTTP, "Get MTA file SQL: %s\n", sql_buf);
++    sql_get_table(db, sql_buf, &result, &rows, NULL);
++    if( !rows )
++    {
++        DPRINTF(E_WARN, L_HTTP, "Object ID %s not found, responding ERROR 404\n", object);
++        Send404(h);
++        goto error;
++    }
++    path = result[2];
++    duration = (   1 * atoi(rindex(result[3], ':')+1)) +
++               (  60 * atoi(rindex(result[3], ':')-2)) +
++               (3600 * atoi(result[3]));
++
++    /* Is video (still) accessible? */
++    if( access(path, F_OK) == 0 ) {
++        time_t curtime = time(NULL);
++        char date[30];
++        char mta_path[PATH_MAX];
++        char* body = 0;
++        int size = 0;
++
++        snprintf(mta_path, sizeof(mta_path), "%s.mta", path);
++        DPRINTF(E_DEBUG, L_HTTP, "Looking for precalculated MTA file '%s'\n", mta_path);
++        if (access(mta_path, F_OK) == 0) { /* mta file accessible ? */
++            /* read MTA file from file*/
++            sendfh = open(mta_path, O_RDONLY);
++            if( sendfh < 0 ) {
++		DPRINTF(E_ERROR, L_HTTP, "Error opening precalculated MTA file '%s'\n", mta_path);
++            } else {
++                size = lseek(sendfh, 0, SEEK_END);
++                lseek(sendfh, 0, SEEK_SET);
++                DPRINTF(E_DEBUG, L_HTTP, "Found precalculated MTA file with size %d\n", size);
++            }
++        }
++
++        if (sendfh < 0) {        /* nothing could be read ?*/
++            /* generate MTA file on-the-fly (may take some time especially on slow NAS!) */
++            DPRINTF(E_INFO, L_HTTP, "Generating MTA file on-the-fly for object (ID='%s') on [%s], duration=%d\n", object, path, duration);
++            body = generate_samsung_mta_file(path, duration);
++            if (body)
++                size = strlen(body);
++            if (!size)
++                free(body);
++        }
++
++        if (!size) { /* still no data */
++            Send404(h);
++            goto error; /* give up */
++        }
++
++        /* create corresponding HTTP header for MTA file request */
++        memset(header, 0, sizeof(header));
++        strftime(date, 30,"%a, %d %b %Y %H:%M:%S GMT" , gmtime(&curtime));
++        sprintf(header, "HTTP/1.1 200 OK\r\n"
++                "Content-Type: image/jpeg\r\n"
++                "Content-Length: %d\r\n"
++                "Connection: close\r\n"
++                "Date: %s\r\n"
++                "EXT:\r\n"
++                "contentFeatures.dlna.org:DLNA.ORG_OP=00;DLNA.ORG_CI=0;\r\n"
++                "Server: " MINIDLNA_SERVER_STRING "\r\n",
++                size, date);
++
++        if( h->reqflags & FLAG_REALTIMEINFO )
++            strcat(header, "realTimeInfo.dlna.org: DLNA.ORG_TLAG=*\r\n");
++
++        if( h->reqflags & FLAG_XFERBACKGROUND )
++            strcat(header, "transferMode.dlna.org: Background\r\n");
++        else
++            strcat(header, "transferMode.dlna.org: Interactive\r\n");
++
++        DPRINTF(E_INFO, L_HTTP, "%s", header);
++
++        strcat(header, "\r\n");
++
++        /* send header and if ok and not only HEAD request, send body */
++        if( (send_data(h, header, strlen(header), MSG_MORE) == 0) && h->req_command != EHead )
++        {
++            if (sendfh < 0)
++                send_data(h, body, size, 0);
++            else {
++                send_file(h, sendfh, 0, size); /* always send complete file. No RANGEs */
++                close(sendfh);
++            }
++        }
++        free(body);
++    }
++  error:
++    sqlite3_free_table(result);
++}
+diff -urNp minidlna-cvs/upnphttp.h minidlna-cvs.patched/upnphttp.h
+--- minidlna-cvs/upnphttp.h	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/upnphttp.h	2010-12-16 22:06:19.000000000 +0100
+@@ -110,6 +110,7 @@ struct upnphttp {
+ #define FLAG_MIME_FLAC_FLAC     0x00800000
+ #define FLAG_NO_RESIZE          0x01000000
+ #define FLAG_MS_PFS		0x02000000 // Microsoft PlaysForSure client
++#define FLAG_MEDIA_INFO         0x04000000
+ 
+ /* New_upnphttp() */
+ struct upnphttp *
+@@ -170,5 +171,12 @@ SendResp_thumbnail(struct upnphttp *, ch
+  * send the actual file data for a UPnP-A/V or DLNA request. */
+ void
+ SendResp_dlnafile(struct upnphttp *, char * url);
++void
++SendResp_samsung_mta_file(struct upnphttp * h, char * object);
++void
++generate_external_samsung_mta_file(const char* path, int duration);
++char*
++generate_samsung_mta_file(const char* path, int duration);
++
+ #endif
+ 
+diff -urNp minidlna-cvs/upnpsoap.c minidlna-cvs.patched/upnpsoap.c
+--- minidlna-cvs/upnpsoap.c	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/upnpsoap.c	2010-12-17 12:21:28.000000000 +0100
+@@ -332,6 +332,12 @@ mime_to_ext(const char * mime, char * bu
+ #define FILTER_UPNP_GENRE                        0x00020000
+ #define FILTER_UPNP_ORIGINALTRACKNUMBER          0x00040000
+ #define FILTER_UPNP_SEARCHCLASS                  0x00080000
++#define FILTER_SEC				                 0x00100000
++#define FILTER_SEC_CAPTION_INFO			         0x00200000
++#define FILTER_SEC_CAPTION_INFO_EX               0x00400000
++#define FILTER_SEC_DCM_INFO	                     0x00800000
++#define FILTER_SEC_META_FILE_INFO                0x01000000
++#define FILTER_PARENT_ID                         0x02000000
+ 
+ static u_int32_t
+ set_filter_flags(char * filter, enum client_types client)
+@@ -451,6 +457,30 @@ set_filter_flags(char * filter, enum cli
+ 			flags |= FILTER_RES;
+ 			flags |= FILTER_RES_SIZE;
+ 		}
++		else if( strcmp(item, "sec:CaptionInfo") == 0)
++		{
++			flags |= FILTER_SEC;
++			flags |= FILTER_SEC_CAPTION_INFO;
++		}
++		else if( strcmp(item, "sec:CaptionInfoEx") == 0)
++		{
++			flags |= FILTER_SEC;
++			flags |= FILTER_SEC_CAPTION_INFO_EX;
++		}
++		else if( strcmp(item, "sec:dcmInfo") == 0)
++		{
++			flags |= FILTER_SEC;
++			flags |= FILTER_SEC_DCM_INFO;
++		}
++		else if( strcmp(item, "sec:MetaFileInfo") == 0)
++		{
++			flags |= FILTER_SEC;
++			flags |= FILTER_SEC_META_FILE_INFO;
++		}
++		else if( strcmp(item, "@parentID") == 0 )
++		{
++			flags |= FILTER_PARENT_ID;
++		}
+ 		item = strtok_r(NULL, ",", &saveptr);
+ 	}
+ 
+@@ -562,7 +592,7 @@ static void add_resized_res(int srcw, in
+ 		memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
+ 		passed_args->size += ret;
+ 	}
+-	ret = sprintf(str_buf, "protocolInfo=\"http-get:*:image/jpeg:DLNA.ORG_PN=%s;DLNA.ORG_CI=1\"&gt;"
++	ret = sprintf(str_buf, "protocolInfo=\"http-get:*:image/jpeg:DLNA.ORG_PN=%s;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=01500000000000000000000000000000\"&gt;"
+ 	                       "http://%s:%d/Resized/%s.jpg?width=%d,height=%d"
+ 	                       "&lt;/res&gt;",
+ 	                       dlna_pn, lan_addr[0].str, runtime_vars.port,
+@@ -574,7 +604,7 @@ static void add_resized_res(int srcw, in
+ #define SELECT_COLUMNS "SELECT o.OBJECT_ID, o.PARENT_ID, o.REF_ID, o.DETAIL_ID, o.CLASS," \
+                        " d.SIZE, d.TITLE, d.DURATION, d.BITRATE, d.SAMPLERATE, d.ARTIST," \
+                        " d.ALBUM, d.GENRE, d.COMMENT, d.CHANNELS, d.TRACK, d.DATE, d.RESOLUTION," \
+-                       " d.THUMBNAIL, d.CREATOR, d.DLNA_PN, d.MIME, d.ALBUM_ART, d.DISC "
++                       " d.THUMBNAIL, d.CREATOR, d.DLNA_PN, d.MIME, d.ALBUM_ART, d.DISC, c.PATH "
+ 
+ static int
+ callback(void *args, int argc, char **argv, char **azColName)
+@@ -583,7 +613,7 @@ callback(void *args, int argc, char **ar
+ 	char *id = argv[0], *parent = argv[1], *refID = argv[2], *detailID = argv[3], *class = argv[4], *size = argv[5], *title = argv[6],
+ 	     *duration = argv[7], *bitrate = argv[8], *sampleFrequency = argv[9], *artist = argv[10], *album = argv[11],
+ 	     *genre = argv[12], *comment = argv[13], *nrAudioChannels = argv[14], *track = argv[15], *date = argv[16], *resolution = argv[17],
+-	     *tn = argv[18], *creator = argv[19], *dlna_pn = argv[20], *mime = argv[21], *album_art = argv[22];
++	     *tn = argv[18], *creator = argv[19], *dlna_pn = argv[20], *mime = argv[21], *album_art = argv[22], *disc = argv[23], *caption_path = argv[24];
+ 	char dlna_buf[96];
+ 	char ext[5];
+ 	char str_buf[512];
+@@ -621,12 +651,23 @@ callback(void *args, int argc, char **ar
+ 	if( dlna_pn )
+ 		sprintf(dlna_buf, "DLNA.ORG_PN=%s", dlna_pn);
+ 	else if( passed_args->flags & FLAG_DLNA )
++    {
+ 		strcpy(dlna_buf, dlna_no_conv);
++        if (passed_args->client == ESamsungTV && mime && *mime == 'v')
++            strcat(dlna_buf, ";DLNA.ORG_FLAGS=01500000000000000000000000000000");
++    }
+ 	else
+ 		strcpy(dlna_buf, "*");
+-
++#if 0
++        if ( date && passed_args->client == ESamsungTV )
++            *rindex(date, 'T') = 0;
++#endif
+ 	if( strncmp(class, "item", 4) == 0 )
+ 	{
++#if 0
++        if( duration && passed_args->client == ESamsungTV )
++            *rindex(duration, '.') = 0;
++#endif
+ 		/* We may need special handling for certain MIME types */
+ 		if( *mime == 'v' )
+ 		{
+@@ -640,7 +681,7 @@ callback(void *args, int argc, char **ar
+ 						strcpy(mime+6, "avi");
+ 				}
+ 			}
+-			else if( passed_args->flags & FLAG_MIME_AVI_AVI )
++			else if( passed_args->flags & FLAG_MIME_AVI_AVI && passed_args->client != ESamsungTV)
+ 			{
+ 				if( strcmp(mime, "video/x-msvideo") == 0 )
+ 				{
+@@ -711,6 +752,31 @@ callback(void *args, int argc, char **ar
+ 			memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
+ 			passed_args->size += ret;
+ 		}
++		if( passed_args->filter & FILTER_SEC_CAPTION_INFO_EX) {
++            /* Get bookmark */
++            int posSecond = sql_get_int_field(db, "SELECT BOOKMARK from OBJECTS where OBJECT_ID = '%s';", id);
++            ret = sprintf(str_buf, "&lt;sec:dcmInfo&gt;CREATIONDATE=0,FOLDER=%s,BM=%d&lt;/sec:dcmInfo&gt;", parent, posSecond);
++            memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
++            passed_args->size += ret;
++		}
++ 		if( caption_path && passed_args->filter & FILTER_SEC_CAPTION_INFO_EX) {
++			char * caption_ext;
++			caption_ext = strrchr(caption_path, '.');
++			if( caption_ext ) {
++				++caption_ext;
++				ret = sprintf(str_buf, "&lt;sec:CaptionInfoEx sec:type=&quot;%s&quot;&gt;http://%s:%d/Captions/%s.%s&lt;/sec:CaptionInfoEx&gt;",
++					          caption_ext, lan_addr[0].str, runtime_vars.port, detailID, caption_ext);
++			    memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
++			    passed_args->size += ret;
++			}
++		}
++		if( passed_args->filter & FILTER_SEC_META_FILE_INFO) {
++            /* Advertise chapter data */
++			ret = sprintf(str_buf, "&lt;sec:MetaFileInfo sec:type=&quot;mta&quot;&gt;http://%s:%d/MTA/%s.mta&lt;/sec:MetaFileInfo&gt;",
++                                      lan_addr[0].str, runtime_vars.port, detailID);
++			memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
++			passed_args->size += ret;
++		}
+ 		if( artist && (passed_args->filter & FILTER_UPNP_ARTIST) ) {
+ 			ret = snprintf(str_buf, 512, "&lt;upnp:artist&gt;%s&lt;/upnp:artist&gt;", artist);
+ 			memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
+@@ -780,17 +846,18 @@ callback(void *args, int argc, char **ar
+ 			passed_args->size += ret;
+ 		}
+ #endif
++		/* <res>-tag for actual item */
+ 		if( passed_args->filter & FILTER_RES ) {
+ 			mime_to_ext(mime, ext);
+ 			if( (passed_args->client == EFreeBox) && tn && atoi(tn) ) {
+ 				ret = sprintf(str_buf, "&lt;res protocolInfo=\"http-get:*:%s:%s\"&gt;"
+ 				                       "http://%s:%d/Thumbnails/%s.jpg"
+ 				                       "&lt;/res&gt;",
+-				                       mime, "DLNA.ORG_PN=JPEG_TN", lan_addr[0].str, runtime_vars.port, detailID);
++ 				                       mime, "DLNA.ORG_PN=JPEG_TN;DLNA.ORG_CI=1", lan_addr[0].str, runtime_vars.port, detailID);
+ 				memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
+ 				passed_args->size += ret;
+ 			}
+-			ret = sprintf(str_buf, "&lt;res ");
++ 			ret = sprintf(str_buf, "&lt;res ");
+ 			memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
+ 			passed_args->size += ret;
+ 			if( size && (passed_args->filter & FILTER_RES_SIZE) ) {
+@@ -847,12 +914,51 @@ callback(void *args, int argc, char **ar
+ 					ret = sprintf(str_buf, "&lt;res protocolInfo=\"http-get:*:%s:%s\"&gt;"
+ 					                       "http://%s:%d/Thumbnails/%s.jpg"
+ 					                       "&lt;/res&gt;",
+-					                       mime, "DLNA.ORG_PN=JPEG_TN", lan_addr[0].str, runtime_vars.port, detailID);
++					                       mime, "DLNA.ORG_PN=JPEG_TN;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=01500000000000000000000000000000", lan_addr[0].str, runtime_vars.port, detailID);
+ 					memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
+ 					passed_args->size += ret;
+ 				}
+ 			}
+ 		}
++
++                /* additional <res>-tags for thumbnails, etc. */
++		if( album_art && atoi(album_art) )
++		{
++			/* Video and audio album art is handled differently */
++			if( *mime == 'v' && (passed_args->filter & FILTER_RES) && (passed_args->client != EXbox) )
++			{
++                                if( passed_args->client == ESamsungTV ) {
++                                    ret = sprintf(str_buf, "&lt;res protocolInfo=\"http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_SM;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=00D00000000000000000000000000000\"&gt;"
++                                                           "http://%s:%d/AlbumArt/%s-%s.jpg"
++				                           "&lt;/res&gt;",
++				                           lan_addr[0].str, runtime_vars.port, album_art, detailID);
++                                    memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
++                                    passed_args->size += ret;
++                                }
++				ret = sprintf(str_buf, "&lt;res protocolInfo=\"http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_TN;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=00D00000000000000000000000000000\"&gt;"
++				                       "http://%s:%d/AlbumArt/%s-%s.jpg"
++				                       "&lt;/res&gt;",
++				                       lan_addr[0].str, runtime_vars.port, album_art, detailID);
++				memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
++				passed_args->size += ret;
++			}
++			else if( passed_args->filter & FILTER_UPNP_ALBUMARTURI )
++			{
++				ret = sprintf(str_buf, "&lt;upnp:albumArtURI ");
++				memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
++				passed_args->size += ret;
++				if( passed_args->filter & FILTER_UPNP_ALBUMARTURI_DLNA_PROFILEID ) {
++					ret = sprintf(str_buf, "dlna:profileID=\"%s\" xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\"", "JPEG_TN");
++					memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
++					passed_args->size += ret;
++				}
++				ret = sprintf(str_buf, "&gt;http://%s:%d/AlbumArt/%s-%s.jpg&lt;/upnp:albumArtURI&gt;",
++						 lan_addr[0].str, runtime_vars.port, album_art, detailID);
++				memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
++				passed_args->size += ret;
++			}
++		}
++
+ 		ret = sprintf(str_buf, "&lt;/item&gt;");
+ 	}
+ 	else if( strncmp(class, "container", 9) == 0 )
+@@ -884,7 +990,7 @@ callback(void *args, int argc, char **ar
+ 		ret = snprintf(str_buf, 512, "&gt;"
+ 		                             "&lt;dc:title&gt;%s&lt;/dc:title&gt;"
+ 		                             "&lt;upnp:class&gt;object.%s&lt;/upnp:class&gt;",
+-		                             title, class);
++                                     title, (passed_args->client == ESamsungTV ? "container" : class));
+ 		memcpy(passed_args->resp+passed_args->size, &str_buf, ret+1);
+ 		passed_args->size += ret;
+ 		if( creator && (passed_args->filter & FILTER_DC_CREATOR) ) {
+@@ -954,7 +1060,7 @@ BrowseContentDirectory(struct upnphttp *
+ 	int StartingIndex = 0;
+ 	if( (ptr = GetValueFromNameValueList(&data, "RequestedCount")) )
+ 		RequestedCount = atoi(ptr);
+-	if( !RequestedCount )
++	if( !RequestedCount)
+ 		RequestedCount = -1;
+ 	if( (ptr = GetValueFromNameValueList(&data, "StartingIndex")) )
+ 		StartingIndex = atoi(ptr);
+@@ -979,12 +1085,18 @@ BrowseContentDirectory(struct upnphttp *
+ 	args.size = sprintf(resp, "%s", resp0);
+ 	/* See if we need to include DLNA namespace reference */
+ 	args.filter = set_filter_flags(Filter, h->req_client);
+-	if( args.filter & FILTER_DLNA_NAMESPACE )
++	if( args.filter & FILTER_DLNA_NAMESPACE || h->req_client == ESamsungTV )
+ 	{
+ 		ret = sprintf(str_buf, DLNA_NAMESPACE);
+ 		memcpy(resp+args.size, &str_buf, ret+1);
+ 		args.size += ret;
+ 	}
++	if ( h->req_client == ESamsungTV )
++	{
++		ret = sprintf(str_buf, SEC_NAMESPACE);
++		memcpy(resp+args.size, &str_buf, ret+1);
++		args.size += ret;
++	}
+ 	ret = sprintf(str_buf, "&gt;\n");
+ 	memcpy(resp+args.size, &str_buf, ret+1);
+ 	args.size += ret;
+@@ -1011,6 +1123,11 @@ BrowseContentDirectory(struct upnphttp *
+ 				ObjectId = sqlite3_mprintf("%s", ObjectId);
+ 		}
+ 	}
++    if (h->req_client == ESamsungTV )
++	{
++		if( strcmp(ObjectId, "V_T") == 0 )
++			ObjectId = strdup(VIDEO_DIR_ID);
++	}
+ 	DPRINTF(E_DEBUG, L_HTTP, "Browsing ContentDirectory:\n"
+ 	                         " * ObjectID: %s\n"
+ 	                         " * Count: %d\n"
+@@ -1021,11 +1138,32 @@ BrowseContentDirectory(struct upnphttp *
+ 				ObjectId, RequestedCount, StartingIndex,
+ 	                        BrowseFlag, Filter, SortCriteria);
+ 
+-	if( strcmp(BrowseFlag+6, "Metadata") == 0 )
++   if ( args.client == ESamsungTV && !StartingIndex &&
++        RequestedCount == -1/* && args.filter == FILTER_PARENT_ID*/ )
++   {
++       /* Samsung tries to search @parentID only */
++       char *parentID = strdup(ObjectId);
++       char *pos = rindex(ObjectId, '$');
++       if (pos)
++           *pos = 0;
++
++       sql = sqlite3_mprintf( SELECT_COLUMNS
++		                      "from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID)"
++		                      " left join CAPTIONS c on (c.ID = o.DETAIL_ID)"
++				              " where OBJECT_ID = '%s' %s limit %d, %d;",
++				              parentID, orderBy, StartingIndex, StartingIndex+1);
++       DPRINTF(E_DEBUG, L_HTTP, "Browse SQL: %s\n", sql);
++       ret = sqlite3_exec(db, sql, callback, (void *) &args, &zErrMsg);
++
++       totalMatches = args.returned;
++       free(parentID);
++    }
++    else if( strcmp(BrowseFlag+6, "Metadata") == 0 )
+ 	{
+ 		args.requested = 1;
+ 		sql = sqlite3_mprintf( SELECT_COLUMNS
+ 		                      "from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID)"
++                              " left join CAPTIONS c on (c.ID = o.DETAIL_ID)"
+ 		                      " where OBJECT_ID = '%s';"
+ 		                      , ObjectId);
+ 		ret = sqlite3_exec(db, sql, callback, (void *) &args, &zErrMsg);
+@@ -1062,17 +1200,20 @@ BrowseContentDirectory(struct upnphttp *
+ 
+ 		sql = sqlite3_mprintf( SELECT_COLUMNS
+ 		                      "from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID)"
++		                      " left join CAPTIONS c on (c.ID = o.DETAIL_ID)"
+ 				      " where PARENT_ID = '%s' %s limit %d, %d;",
+ 				      ObjectId, orderBy, StartingIndex, RequestedCount);
+ 		DPRINTF(E_DEBUG, L_HTTP, "Browse SQL: %s\n", sql);
+ 		ret = sqlite3_exec(db, sql, callback, (void *) &args, &zErrMsg);
+ 	}
++	if (sql) {
+ 	sqlite3_free(sql);
+ 	if( (ret != SQLITE_OK) && (zErrMsg != NULL) )
+ 	{
+ 		DPRINTF(E_WARN, L_HTTP, "SQL error: %s\nBAD SQL: %s\n", zErrMsg, sql);
+ 		sqlite3_free(zErrMsg);
+ 	}
++	}
+ 	/* Does the object even exist? */
+ 	if( !totalMatches )
+ 	{
+@@ -1157,12 +1298,18 @@ SearchContentDirectory(struct upnphttp *
+ 	args.size = sprintf(resp, "%s", resp0);
+ 	/* See if we need to include DLNA namespace reference */
+ 	args.filter = set_filter_flags(Filter, h->req_client);
+-	if( args.filter & FILTER_DLNA_NAMESPACE )
++	if( args.filter & FILTER_DLNA_NAMESPACE || h->req_client == ESamsungTV )
+ 	{
+ 		ret = sprintf(str_buf, DLNA_NAMESPACE);
+ 		memcpy(resp+args.size, &str_buf, ret+1);
+ 		args.size += ret;
+ 	}
++	if ( h->req_client == ESamsungTV )
++	{
++		ret = sprintf(str_buf, SEC_NAMESPACE);
++		memcpy(resp+args.size, &str_buf, ret+1);
++		args.size += ret;
++	}
+ 	ret = sprintf(str_buf, "&gt;\n");
+ 	memcpy(resp+args.size, &str_buf, ret+1);
+ 	args.size += ret;
+@@ -1307,6 +1454,7 @@ SearchContentDirectory(struct upnphttp *
+ 
+ 	sql = sqlite3_mprintf( SELECT_COLUMNS
+ 	                      "from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID)"
++	                      " left join CAPTIONS c on (c.ID = o.DETAIL_ID)"
+ 	                      " where OBJECT_ID glob '%s$*' and (%s) %s "
+ 	                      "%z %s"
+ 	                      " limit %d, %d",
+@@ -1314,6 +1462,7 @@ SearchContentDirectory(struct upnphttp *
+ 	                      (*ContainerID == '*') ? NULL :
+                               sqlite3_mprintf("UNION ALL " SELECT_COLUMNS
+ 	                                      "from OBJECTS o left join DETAILS d on (d.ID = o.DETAIL_ID)"
++                                          " left join CAPTIONS c on (c.ID = o.DETAIL_ID)"
+ 	                                      " where OBJECT_ID = '%s' and (%s) ", ContainerID, SearchCriteria),
+ 	                      orderBy, StartingIndex, RequestedCount);
+ 	DPRINTF(E_DEBUG, L_HTTP, "Search SQL: %s\n", sql);
+@@ -1396,6 +1545,82 @@ QueryStateVariable(struct upnphttp * h, 
+ 	ClearNameValueList(&data);	
+ }
+ 
++
++static void
++SamsungGetFeatureList(struct upnphttp * h, const char * action)
++{
++	static const char resp[] =
++		"<u:X_GetFeatureListResponse xmlns:u=\"urn:schemas-upnp-org:service:ContentDirectory:1\">"
++		"<FeatureList>"
++		"&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;"
++		"&lt;Features xmlns=&quot;urn:schemas-upnp-org:av:avs&quot; "
++		  "xmlns:xsi=&quot;http://www.w3.org/2001/XMLSchema-instance&quot; "
++		  "xsi:schemaLocation=&quot; urn:schemas-upnp-org:av:avs "
++		  "http://www.upnp.org/schemas/av/avs.xsd&quot;&gt;"
++		"&lt;Feature name=&quot;samsung.com_BASICVIEW&quot; version=&quot;1&quot;&gt;"
++		"&lt;container id=&quot;2&quot; type=&quot;object.item.videoItem&quot;/&gt;"
++		"&lt;container id=&quot;1&quot; type=&quot;object.item.audioItem&quot;/&gt;"
++		"&lt;container id=&quot;3&quot; type=&quot;object.item.imageItem&quot;/&gt;"
++		"&lt;/Feature&gt;"
++		"&lt;Feature name=&quot;samsung.com_DCMVIEW&quot; version=&quot;1&quot;&gt;"
++/*		"&lt;container id=&quot;I_M&quot; type=&quot;IMAGE_Monthly&quot;/&gt;" */
++/*		"&lt;container id=&quot;I_C&quot; type=&quot;IMAGE_Color&quot;/&gt;" */
++		"&lt;container id=&quot;3$12&quot; type=&quot;IMAGE_Timeline&quot;/&gt;"
++/*		"&lt;container id=&quot;I_P&quot; type=&quot;IMAGE_Composition&quot;/&gt;" */
++                "&lt;container id=&quot;" IMAGE_DIR_ID "&quot; type=&quot;IMAGE_Folder&quot;/&gt;"
++		"&lt;container id=&quot;3$11&quot; type=&quot;IMAGE_Title&quot;/&gt;"
++/*		"&lt;container id=&quot;I_L&quot; type=&quot;IMAGE_LatestDate&quot;/&gt;" */
++/*		"&lt;container id=&quot;I_E&quot; type=&quot;IMAGE_EarliestDate&quot;/&gt;" */
++		"&lt;container id=&quot;1$5&quot; type=&quot;AUDIO_Genre&quot;/&gt;"
++		"&lt;container id=&quot;1$6&quot; type=&quot;AUDIO_Artist&quot;/&gt;"
++		"&lt;container id=&quot;" MUSIC_DIR_ID "&quot; type=&quot;AUDIO_Folder&quot;/&gt;"
++/*		"&lt;container id=&quot;A_M&quot; type=&quot;AUDIO_Mood&quot;/&gt;" */
++		"&lt;container id=&quot;1$4&quot; type=&quot;AUDIO_Title&quot;/&gt;"
++		"&lt;container id=&quot;1$7&quot; type=&quot;AUDIO_Album&quot;/&gt;"
++		"&lt;container id=&quot;2$8&quot; type=&quot;VIDEO_Title&quot;/&gt;"
++/*		"&lt;container id=&quot;V_D&quot; type=&quot;VIDEO_Date&quot;/&gt;" */
++		"&lt;container id=&quot;" VIDEO_DIR_ID "&quot; type=&quot;VIDEO_Folder&quot;/&gt;"
++/*		"&lt;container id=&quot;V_L&quot; type=&quot;VIDEO_LatestDate&quot;/&gt;" */
++/*		"&lt;container id=&quot;V_E&quot; type=&quot;VIDEO_EarliestDate&quot;/&gt;" */
++		"&lt;/Feature&gt;"
++		"&lt;/Features&gt;"
++		"</FeatureList></u:X_GetFeatureListResponse>";
++
++	char body[4096];
++	int bodylen;
++
++	bodylen = snprintf(body, sizeof(body), resp);
++	BuildSendAndCloseSoapResp(h, body, bodylen);
++}
++
++static void
++SamsungSetBookmark(struct upnphttp * h, const char * action)
++{
++	static const char resp[] =
++            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
++            " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
++            "<s:Body><u:X_SetBookmarkResponse"
++            " xmlns:u=\"urn:schemas-upnp-org:service:ContentDirectory:1\">"
++            "</u:X_SetBookmarkResponse></s:Body></s:Envelope>";
++
++	char body[512];
++	int bodylen;
++	struct NameValueParserData data;
++
++	ParseNameValue(h->req_buf + h->req_contentoff, h->req_contentlen, &data);
++	char* ObjectID  = GetValueFromNameValueList(&data, "ObjectID");
++	char* PosSecond = GetValueFromNameValueList(&data, "PosSecond");
++        if (!atoi(PosSecond))
++            PosSecond="";
++
++        /* store Bookmark into OBJECTS */
++        if( sql_exec(db, "UPDATE OBJECTS set BOOKMARK = %d where OBJECT_ID='%s'", atoi(PosSecond), ObjectID) != SQLITE_OK )
++            DPRINTF(E_WARN, L_METADATA, "Error setting bookmark %d on objectId='%s'\n", atoi(PosSecond), ObjectID);
++
++	bodylen = snprintf(body, sizeof(body), resp);
++	BuildSendAndCloseSoapResp(h, body, bodylen);
++}
++
+ static const struct 
+ {
+ 	const char * methodName; 
+@@ -1414,6 +1639,8 @@ soapMethods[] =
+ 	{ "GetCurrentConnectionInfo", GetCurrentConnectionInfo},
+ 	{ "IsAuthorized", IsAuthorizedValidated},
+ 	{ "IsValidated", IsAuthorizedValidated},
++	{ "X_GetFeatureList", SamsungGetFeatureList},
++	{ "X_SetBookmark", SamsungSetBookmark},
+ 	{ 0, 0 }
+ };
+ 
+diff -urNp minidlna-cvs/upnpsoap.h minidlna-cvs.patched/upnpsoap.h
+--- minidlna-cvs/upnpsoap.h	2010-12-16 21:26:22.000000000 +0100
++++ minidlna-cvs.patched/upnpsoap.h	2010-12-16 22:03:06.000000000 +0100
+@@ -24,9 +24,11 @@
+ #define MAX_RESPONSE_SIZE 1048576
+ 
+ #define CONTENT_DIRECTORY_SCHEMAS \
++	" xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\"" \
+ 	" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"" \
+-	" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\"" \
+-	" xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\""
++	" xmlns:upnp= &apos;urn:schemas-upnp-org:metadata-1-0/upnp/&apos;"
++#define SEC_NAMESPACE \
++	" xmlns:sec=\"http://www.sec.co.kr/\""
+ #define DLNA_NAMESPACE \
+ 	" xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\""
+ 
