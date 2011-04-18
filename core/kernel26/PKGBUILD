@@ -5,19 +5,17 @@
 noautobuild=1
 plugrel=1
 
-# -- not doing this anymore, see how glibc pans out --
-# In kernel26-headers, scsi.h is explicitly copied to the package
-# this is done at the very end of this PKGBUILD
-
 pkgbase="kernel26"
 pkgname=('kernel26' 'kernel26-headers')
 _kernelname=${pkgname#kernel26}
-_basekernel=2.6.37
-pkgver=${_basekernel}.3
+_basekernel=2.6.38
+pkgver=${_basekernel}.2
 _pkgrel=1
-pkgrel="${_pkgrel}.${plugrel}"
+pkgrel=${_pkgrel}
+#pkgrel=${_pkgrel}.${plugrel}
 makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'make')
-_patchname="patch-${pkgver}-1-ARCH"
+_patchname="patch-${pkgver}-${_pkgrel}-ARCH"
+#_patchname="patch-${pkgver}-1-ARCH"
 replaces=('kernel26-withlinux' 'kernel26-dockstar')
 arch=(arm)
 CARCH=arm
@@ -27,16 +25,12 @@ license=('GPL2')
 url="http://www.kernel.org"
 source=(ftp://ftp.kernel.org/pub/linux/kernel/v2.6/linux-$_basekernel.tar.bz2
         ftp://ftp.archlinux.org/other/kernel26/${_patchname}.bz2
-        2.6.37.config
-        LEDs.patch
-        kernel26.preset
-        GoFlex-Home.patch)
-md5sums=('c8ee37b4fdccdb651e0603d35350b434'
-         'e872a32fac5b290780586c6b0ea35ea2'
-         'fd2566a7b961b8f402bfeac127229c7e'
-         'bcdd89efa758a653204458140f3ba1a7'
-         '25584700a0a679542929c4bed31433b6'
-         'c9371e30c966c1755edf3e8cc1ab543c')
+        ${_basekernel}.config
+        plugapps.patch)
+md5sums=('7d471477bfa67546f902da62227fa976'
+         'de1ec65e0e60311b7e1e7e427e0a9161'
+         'a324f3d0366e5d53d050cf20abdb2971'
+         '69f2db5a3e93e98f9ae7dd85c0e377c3')
 
 build() {
   cd ${srcdir}/linux-$_basekernel
@@ -44,24 +38,28 @@ build() {
   # See http://projects.archlinux.org/linux-2.6-ARCH.git/
   patch -Np1 -i ${srcdir}/${_patchname}
  
-  # Apply the LED patches
-  patch -Np1 -i ${srcdir}/LEDs.patch
-  patch -Np1 -i ${srcdir}/GoFlex-Home.patch
-  cat ../2.6.37.config >./.config
+  # Add PlugApps patch
+  patch -Np1 -i ${srcdir}/plugapps.patch
+
+  # Copy in our configuration
+  cp ../${_basekernel}.config ./.config
 
   if [ "${_kernelname}" != "" ]; then
     sed -i "s|CONFIG_LOCALVERSION=.*|CONFIG_LOCALVERSION=\"${_kernelname}\"|g" ./.config
   fi
 
-  # get kernel version  
+  # Prepare sources
   make prepare
   # Configure the kernel. Replace the line below with one of your choice.
   #make menuconfig # CLI menu for configuration
   #make nconfig # new CLI menu for configuration
   #make oldconfig # using old config from previous kernel version
 
-  # Copy back our configuration
-  cp ./.config ../2.6.37.config
+  # Copy back our configuration (use with new kernel version)
+  cp ./.config ../${_basekernel}.config
+  
+  # Halt the build for configuration only
+  #return 1
 
   # Build!
   make ${MAKEFLAGS} uImage modules
@@ -119,7 +117,7 @@ package_kernel26-headers() {
     ${pkgdir}/usr/src/linux-${_kernver}/.config
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/include
 
-  for i in acpi asm-generic config generated linux math-emu media net pcmcia scsi sound trace video; do
+  for i in acpi asm-generic config generated linux math-emu media net pcmcia scsi sound trace video xen; do
     cp -a include/$i ${pkgdir}/usr/src/linux-${_kernver}/include/
   done
 
@@ -132,7 +130,6 @@ package_kernel26-headers() {
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers ${pkgdir}/usr/src/linux-${_kernver}
   cp -a scripts ${pkgdir}/usr/src/linux-${_kernver}
-
   # fix permissions on scripts dir
   chmod og-w -R ${pkgdir}/usr/src/linux-${_kernver}/scripts
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/.tmp_versions
@@ -145,59 +142,65 @@ package_kernel26-headers() {
   # add headers for lirc package
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video
   cp drivers/media/video/*.h  ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/
-  for i in bt8xx cpia2 cx25840 cx88 em28xx et61x251 pwc saa7134 sn9c102 usbvideo; do
+  for i in bt8xx cpia2 cx25840 cx88 em28xx et61x251 pwc saa7134 sn9c102; do
    mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/$i
    cp -a drivers/media/video/$i/*.h ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/$i
   done
-
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/drivers/staging/usbvideo/
+  cp -a drivers/staging/usbvideo/*.h ${pkgdir}/usr/src/linux-${_kernver}/drivers/staging/usbvideo/
   # add docbook makefile
   install -D -m644 Documentation/DocBook/Makefile \
     ${pkgdir}/usr/src/linux-${_kernver}/Documentation/DocBook/Makefile
-
   # add dm headers
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/drivers/md
   cp drivers/md/*.h  ${pkgdir}/usr/src/linux-${_kernver}/drivers/md
-
   # add inotify.h
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/include/linux
   cp include/linux/inotify.h ${pkgdir}/usr/src/linux-${_kernver}/include/linux/
-
   # add wireless headers
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/
   cp net/mac80211/*.h ${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/
-
   # add dvb headers for external modules
+  # in reference to:
+  # http://bugs.archlinux.org/task/9912
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-core
   cp drivers/media/dvb/dvb-core/*.h ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-core/
-
   # add dvb headers for external modules
+  # in reference to:
+  # http://bugs.archlinux.org/task/11194
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/
   cp include/config/dvb/*.h ${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/
-
   # add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
+  # in reference to:
+  # http://bugs.archlinux.org/task/13146
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/
   cp drivers/media/dvb/frontends/lgdt330x.h ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/
   cp drivers/media/video/msp3400-driver.h ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/
-
   # add dvb headers  
+  # in reference to:
+  # http://bugs.archlinux.org/task/20402
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-usb
   cp drivers/media/dvb/dvb-usb/*.h ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-usb/
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends
   cp drivers/media/dvb/frontends/*.h ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners
   cp drivers/media/common/tuners/*.h ${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners/
-  
   # add xfs and shmem for aufs building
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/fs/xfs
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/mm
   cp fs/xfs/xfs_sb.h ${pkgdir}/usr/src/linux-${_kernver}/fs/xfs/xfs_sb.h
-
   # add headers vor virtualbox
+  # in reference to:
+  # http://bugs.archlinux.org/task/14568
   cp -a include/drm $pkgdir/usr/src/linux-${_kernver}/include/
-
   # add headers for broadcom wl
+  # in reference to:
+  # http://bugs.archlinux.org/task/14568
   cp -a include/trace $pkgdir/usr/src/linux-${_kernver}/include/
-
+  # add headers for crypto modules
+  # in reference to:
+  # http://bugs.archlinux.org/task/22081
+  cp -a include/crypto $pkgdir/usr/src/linux-${_kernver}/include/
   # copy in Kconfig files
   for i in `find . -name "Kconfig*"`; do 
     mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/`echo $i | sed 's|/Kconfig.*||'`
@@ -206,11 +209,17 @@ package_kernel26-headers() {
 
   chown -R root.root ${pkgdir}/usr/src/linux-${_kernver}
   find ${pkgdir}/usr/src/linux-${_kernver} -type d -exec chmod 755 {} \;
-
+  # strip scripts directory
+  find ${pkgdir}/usr/src/linux-${_kernver}/scripts  -type f -perm -u+w 2>/dev/null | while read binary ; do
+  case "$(file -bi "$binary")" in
+    *application/x-sharedlib*) # Libraries (.so)
+    /usr/bin/strip $STRIP_SHARED "$binary";;
+    *application/x-archive*) # Libraries (.a)
+    /usr/bin/strip $STRIP_STATIC "$binary";;
+    *application/x-executable*) # Binaries
+    /usr/bin/strip $STRIP_BINARIES "$binary";;
+    esac 
+  done 
   # remove unneeded architectures
   rm -rf ${pkgdir}/usr/src/linux-${_kernver}/arch/{alpha,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,xtensa}
-
-  # Add in scsi.h (Plugbox Linux)
-  #mkdir -p ${pkgdir}/usr/include/scsi
-  #cp ${srcdir}/linux-${_basekernel}/include/scsi/scsi.h ${pkgdir}/usr/include/scsi/
 }
