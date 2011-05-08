@@ -3,19 +3,20 @@
 # PlugApps: Kevin Mihelich <kevin@plugapps.com>
 #  - Removed clisp makedepend, removed xindy from build and packaging (only thing that used clisp)
 #  - Added arm.patch to fix broken ARM assembly, will be fixed in texlive 1.5.1
-#  - Changed banner from Arch Linux to PlugApps, might as well eh?
+#  - Use -fPIC with armv7
 
 plugrel=1
 
 pkgname=texlive-bin
 pkgver=2010.1
-_luatex_ver=0.62.0
-pkgrel=7
+_luatex_ver=0.66.0
+pkgrel=8
 pkgdesc="TeX Live binaries"
 license=('GPL')
 arch=('i686' 'x86_64')
-depends=('t1lib' 'gd' 'libgraphite' 'poppler' 'libsigsegv')
+depends=('t1lib' 'gd' 'libgraphite' 'poppler' 'libsigsegv' 'zziplib')
 makedepends=('perl' 'ffcall')
+optdepends=('ed: for texconfig')
 provides=('lcdf-typetools' 'kpathsea' 'pdfjam')
 conflicts=('pdfjam')
 options=('!libtool')
@@ -24,10 +25,11 @@ source=('texmf.cnf'
         'fix-fontforge-encoding.patch'
         '09-texlive-fonts.conf'
         'dvipng-fix-options.patch'
-        'ftp://ftp.archlinux.org/other/texlive/texlive-bin-source-20100926.tar.xz'
-        'ftp://ftp.archlinux.org/other/texlive/texlive-bin-texmf-20101105.tar.xz'
-        "http://foundry.supelec.fr/gf/download/frsrelease/381/1533/luatex-beta-${_luatex_ver}.tar.bz2"
-        'arm.patch')
+        'http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-source-20100926.tar.xz'
+        'http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-texmf-20101105.tar.xz'
+        #"http://foundry.supelec.fr/gf/download/frsrelease/387/1715/luatex-beta-${_luatex_ver}-source.tar.bz2"
+        "ftp://ftp.archlinux.org/other/texlive/luatex-svn4193.tar.xz"
+        "arm.patch")
 backup=(etc/texmf/web2c/texmf.cnf \
   etc/texmf/chktex/chktexrc \
 	etc/texmf/web2c/mktex.cnf \
@@ -42,23 +44,31 @@ backup=(etc/texmf/web2c/texmf.cnf \
 	etc/texmf/dvipdfm/config/config \
 	etc/texmf/xdvi/XDvi)
 
+md5sums=('626f900fb59f036d6fea95f08c74b00b'
+         'bfb9716aa00c86c08cd31e5b32edeb98'
+         '393a4bf67adc7ca5df2b386759d1a637'
+         '60e405158f53519348d9783e8d420670'
+         '0b2c3a4a1b1e4befb90d7fbb5f08a6e9'
+         '7ae1400dafdb079dcd08d233de83ec44'
+         '523802a23bc174374403415d9cc87946'
+         '86c78e48013492e6b1c41373741d19fd')
+
 build() {
-   if [ "${CARCH}" = "x86_64" ]; then
+   if [ "${CARCH}" = "armv7" ]; then
      export CFLAGS="${CFLAGS} -fPIC"
      export CXXFLAGS="${CXXFLAGS} -fPIC"
    fi
 
    cd $srcdir
-   patch -p0 -i arm.patch
-
    # Building LuaTeX
-   cd luatex-beta-${_luatex_ver}
+   #cd luatex-beta-${_luatex_ver}
+   cd luatex
    patch -p0 -i ../fix-fontforge-encoding.patch
    mkdir build
    cd build
    ../source/configure --prefix=/usr -C \
      --disable-native-texlive-build \
-     --with-banner-add="/PlugApps" \
+     --with-banner-add="/Arch Linux" \
     --enable-cxx-runtime-hack \
     --disable-all-pkgs \
     --disable-dump-share \
@@ -76,6 +86,7 @@ build() {
     --with-system-libpng \
     --without-system-teckit \
     --with-system-zlib \
+    --with-system-zziplib \
     --with-system-t1lib \
     --disable-shared \
     --disable-largefile \
@@ -83,7 +94,6 @@ build() {
     --without-mf-x-toolkit \
     --without-x
    make
-   make -C libs/zziplib
    make -C libs/obsdcompat
    make -C texk/kpathsea
    make -C texk/web2c luatex
@@ -110,7 +120,7 @@ build() {
      --datadir=$srcdir/inst/usr/share \
      --mandir=$srcdir/inst/usr/share/man \
      --disable-native-texlive-build \
-     --with-banner-add="/PlugApps" \
+     --with-banner-add="/Arch Linux" \
      --disable-multiplatform \
      --disable-dialog \
      --disable-psutils \
@@ -214,7 +224,7 @@ package() {
    ### install
    cd source
    # fixes for xindy
-   #find utils/xindy -name Makefile -exec sed -i -e "s|^prefix =.\+$|prefix = $pkgdir/usr|" -e "s|^mandir =.\+$|mandir = \${prefix}/share/man|" -e "s|^datadir =.\+$|datadir = \${datarootdir}/texmf|" -e "s|^docdir =.\+$|docdir = \${datadir}/doc/xindy|" '{}' \;
+#   find utils/xindy -name Makefile -exec sed -i -e "s|^prefix =.\+$|prefix = $pkgdir/usr|" -e "s|^mandir =.\+$|mandir = \${prefix}/share/man|" -e "s|^datadir =.\+$|datadir = \${datarootdir}/texmf|" -e "s|^docdir =.\+$|docdir = \${datadir}/doc/xindy|" '{}' \;
 
    echo "-------------------------------------------------------"
    echo "--> Proceeding with make install ..."
@@ -233,7 +243,8 @@ package() {
    done
 
    ## install luatex binary
-   install -m755 $srcdir/luatex-beta-${_luatex_ver}/build/texk/web2c/luatex $pkgdir/usr/bin/
+   #install -m755 $srcdir/luatex-beta-${_luatex_ver}/build/texk/web2c/luatex $pkgdir/usr/bin/
+   install -m755 $srcdir/luatex/build/texk/web2c/luatex $pkgdir/usr/bin/
    cd $pkgdir/usr/bin
    /bin/ln -s luatex texlua
    /bin/ln -s luatex texluac
@@ -256,48 +267,90 @@ package() {
    echo "--> Create symlinks for TeX formats ..."
    PATH="$PATH:${pkgdir}/usr/bin" texlinks -f $pkgdir/usr/share/texmf/web2c/fmtutil.cnf $pkgdir/usr/bin/
    #############################################################
-   # remove symlinks to scripts that are not in texlive-bin or texlive-core:
-   SYMLINKS_TO_REMOVE="authorindex \
-ebong \
-bibexport \
-cachepic \
-epspdf \
-epspdftk \
-fig4latex \
+   # remove dangling symlinks
+   _bibtexextra_scripts="bibexport"
+   _core_scripts="
+afm2afm
+arlatex
+autoinst
+bundledoc
+cmap2enc
+de-macro
+dviasm
+epstopdf
+findhyph
+font2afm
+fragmaster
+installfont-tl
+latex2man
+latexdiff
+latexdiff-vc
+latexmk
+latexrevise
+listings-ext.sh
+mkjobtexmf
+mkluatexfontdb
+mkt1font
+mptopdf
+ot2kpx
+pdf180
+pdf270
+pdf90
+pdfatfi
+pdfbook
+pdfcrop
+pdfflip
+pdfjam
+pdfjam-pocketmod
+pdfjam-slides3up
+pdfjam-slides6up
+pdfjoin
+pdfnup
+pdfpun
+pfm2kpx
+pkfix
+pkfix-helper
+purifyeps
+repstopdf
+rpdfcrop
+showglyphs
+texcount
+texdiff
+texdirflatten
+texloganalyser
+thumbpdf
+vpl2ovp
+vpl2vpl
+"
+   _htmlxml_scripts="ht htcontext htlatex htmex httex httexi htxelatex htxetex mk4ht"
+   _langextra_scripts="ebong"
+   _langgreek_scripts="mkgrkindex"
+   _latexextra_scripts="authorindex \
 makeglossaries \
-mathspic \
-mkgrkindex \
 pdfannotextractor \
-perltex \
 pdfthumb \
+perltex \
 ppower4 \
-pst2pdf \
 ps4pdf \
 splitindex \
 svn-multi \
-htcontext \
-htlatex \
-htmex \
-ht \
-httexi \
-httex \
-htxelatex \
-htxetex \
-mk4ht \
-ulqda \
-vpe \
-tlmgr"
-   for s in $SYMLINKS_TO_REMOVE; do
+vpe"
+   _pictures_scripts="cachepic epspdf epspdftk fig4latex mathspic"
+   _pstricks_scripts="pst2pdf"
+   _science_scripts="ulqda"
+   for s in \
+        ${_bibtexextra_scripts} \
+        ${_core_scripts} \
+        ${_htmlxml_scripts}    \
+        ${_langextra_scripts}  \
+        ${_langgreek_scripts}  \
+        ${_latexextra_scripts} \
+        ${_pictures_scripts}   \
+        ${_pstricks_scripts}   \
+        ${_science_scripts}    \
+        tlmgr; do
      rm -f $pkgdir/usr/bin/$s
    done
    ###################################################################
 }
 
-md5sums=('626f900fb59f036d6fea95f08c74b00b'
-         'bfb9716aa00c86c08cd31e5b32edeb98'
-         '393a4bf67adc7ca5df2b386759d1a637'
-         '60e405158f53519348d9783e8d420670'
-         '0b2c3a4a1b1e4befb90d7fbb5f08a6e9'
-         '7ae1400dafdb079dcd08d233de83ec44'
-         '4b22a50866849ec14886906474a72a01'
-         '86c78e48013492e6b1c41373741d19fd')
