@@ -1,20 +1,21 @@
-# $Id: PKGBUILD 110236 2011-02-18 04:46:54Z allan $
+# $Id: PKGBUILD 116984 2011-03-27 06:35:25Z allan $
 # Maintainer: Allan McRae <allan@archlinux.org>
 
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
 # NOTE: valgrind requires rebuilt with each new glibc version
 
-# PlugApps: Kevin Mihelich <kevin@mihelich>
+# ALARM: Kevin Mihelich <kevin@plugapps.com>
 #  - Added source file for glibc-ports-2.13, needed for building on ARM
 #  - Symlink glibc-ports-2.13 source dir to ports dir in glibc directory
 #  - Changed configure to enable ports add-on, specify our build host type
+#  - Disable distcc and ccache, make -j1
 
 plugrel=1
 noautobuild=1
 
 pkgname=glibc
 pkgver=2.13
-pkgrel=4
+pkgrel=5
 _glibcdate=20110117
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
@@ -25,7 +26,7 @@ depends=('linux-api-headers>=2.6.37' 'tzdata')
 makedepends=('gcc>=4.4')
 backup=(etc/locale.gen
         etc/nscd.conf)
-options=('!strip')
+options=('!strip' '!distcc' '!ccache')
 install=glibc.install
 source=(ftp://ftp.archlinux.org/other/glibc/${pkgname}-${pkgver}_${_glibcdate}.tar.xz
         http://ftp.gnu.org/gnu/glibc/${pkgname}-ports-${pkgver}.tar.gz
@@ -35,17 +36,19 @@ source=(ftp://ftp.archlinux.org/other/glibc/${pkgname}-${pkgver}_${_glibcdate}.t
         glibc-2.12.1-static-shared-getpagesize.patch
         glibc-2.12.2-ignore-origin-of-privileged-program.patch
         glibc-2.13-prelink.patch
+        glibc-2.13-futex.patch
         nscd
         locale.gen.txt
         locale-gen)
 md5sums=('b7b17d9c6b5b71b5e5322e04ca63c190'
-         '8ceda1d0006820cda04a9087aabc5eca'
+         '094e3c9b57da605917a780ab24575187'
          '4dadb9203b69a3210d53514bb46f41c3'
          '0c5540efc51c0b93996c51b57a8540ae'
          '40cd342e21f71f5e49e32622b25acc52'
          'a3ac6f318d680347bb6e2805d42b73b2'
          'b042647ea7d6f22ad319e12e796bd13e'
          '24dfab6fd244f3773523412588ecc52c'
+         '7d0154b7e17ea218c9fa953599d24cc4'
          'b587ee3a70c9b3713099295609afde49'
          '07ac979b6ab5eeb778d55f041529d623'
          '476e9113489f93b348b21e144b6a8fcf')
@@ -60,6 +63,8 @@ mksource() {
 
 build() {
   cd ${srcdir}/glibc
+
+  # ALARM: Symlink ports dir
   ln -s ${srcdir}/${pkgname}-ports-${pkgver} ./ports
 
   # timezone data is in separate package (tzdata)
@@ -85,9 +90,7 @@ build() {
   patch -Np1 -i ${srcdir}/glibc-2.13-prelink.patch
 
   # http://sourceware.org/bugzilla/show_bug.cgi?id=12403
-  if [[ $CARCH == "x86_64" ]]; then
-    sed -i '/__ASSUME_PRIVATE_FUTEX/d'  $srcdir/glibc/sysdeps/unix/sysv/linux/kernel-features.h
-  fi
+  patch -Np1 -i ${srcdir}/glibc-2.13-futex.patch
 
   install -dm755 ${pkgdir}/etc
   touch ${pkgdir}/etc/ld.so.conf
@@ -96,10 +99,9 @@ build() {
   mkdir glibc-build
   cd glibc-build
 
-  if [[ ${CARCH} = "i686" ]]; then
-    # Hack to fix NPTL issues with Xen, only required on 32bit platforms
-    export CFLAGS="${CFLAGS} -mno-tls-direct-seg-refs"
-  fi
+  # ALARM: Specify build host types
+  [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=arm-unknown-linux-gnueabi --build=arm-unknown-linux-gnueabi"
+  [[ $CARCH == "armv7" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabi --build=armv7l-unknown-linux-gnueabi"
 
   echo "slibdir=/lib" >> configparms
 
@@ -111,12 +113,16 @@ build() {
       --with-tls --with-__thread \
       --enable-bind-now --without-gd \
       --without-cvs --disable-profile \
-      --host=arm-unknown-linux-gnueabi --build=arm-unknown-linux-gnueabi
+      --disable-multi-arch $CONFIGFLAG
         
-  make
+  make -j1
+}
+
+check() {
+  cd ${srcdir}/glibc-build
 
   # some errors are expected - manually check log files
-  #make -k check || true
+  make -k check || true
 }
 
 package() {
