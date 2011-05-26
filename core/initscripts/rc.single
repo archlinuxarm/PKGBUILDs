@@ -8,81 +8,49 @@
 
 run_hook single_start
 
-if [ "$PREVLEVEL" != "N" ]; then
-
-	# Find daemons NOT in the DAEMONS array. Shut these down first
-	if [ -d /var/run/daemons ]; then
-		for daemon in $(/bin/ls -1t /var/run/daemons); do
-		  if ! in_array $daemon ${DAEMONS[@]}; then
-				stop_daemon $daemon
-		  fi
-		done
-	fi
-	# Shutdown daemons in reverse order
-	let i=${#DAEMONS[@]}-1
-	while [ $i -ge 0 ]; do
-		if [ "${DAEMONS[$i]:0:1}" != '!' ]; then
-			ck_daemon ${DAEMONS[$i]#@} || stop_daemon ${DAEMONS[$i]#@}
-		fi
-		let i=i-1
-	done
-
-	# Terminate all processes
-	stat_busy "Sending SIGTERM To Processes"
-	run_hook single_prekillall
-	/sbin/killall5 -15 &> /dev/null
-	/bin/sleep 5
-	stat_done
-
-	stat_busy "Sending SIGKILL To Processes"
-	/sbin/killall5 -9 &> /dev/null
-	/bin/sleep 1
-	stat_done
-
-	run_hook single_postkillall
-
-	stat_busy "Starting UDev Daemon"
-	/sbin/udevd --daemon
-	stat_done
-
+if [[ $PREVLEVEL != N ]]; then
+	kill_everything single
+	status "Starting UDev Daemon" /sbin/udevd --daemon
 	run_hook single_udevlaunched
 
 	# Trigger udev uevents
 	if /bin/pidof -o %PPID /sbin/udevd >/dev/null; then
-	  stat_busy "Triggering UDev uevents"
-	  /sbin/udevadm control --property=STARTUP=1
-	  /sbin/udevadm trigger --action=add
-	  stat_done
+		stat_busy "Triggering UDev uevents"
+		/sbin/udevadm trigger --action=add --type=subsystems
+		/sbin/udevadm trigger --action=add --type=devices
+		stat_done
 	fi
 
 	# Wait for udev uevents
 	if /bin/pidof -o %PPID /sbin/udevd >/dev/null; then
-		stat_busy "Waiting for UDev uevents to be processed"
-		/sbin/udevadm settle
-		/sbin/udevadm control --property=STARTUP=
-		stat_done
+		status "Waiting for UDev uevents to be processed" \
+			/sbin/udevadm settle --quiet --timeout=${UDEV_TIMEOUT:-30}
 	fi
 
 	run_hook single_udevsettled
 
 	# try syslog-NG first, then fall back to good ol' syslogd
-	if [ -x /etc/rc.d/syslog-ng ]; then
+	if [[ -x /etc/rc.d/syslog-ng ]]; then
 		/etc/rc.d/syslog-ng start
-	elif [ -x /etc/rc.d/syslogd ]; then
+	elif [[ -x /etc/rc.d/syslogd ]]; then
 		/etc/rc.d/syslogd start
-		[ -x /etc/rc.d/klogd ] && /etc/rc.d/klogd start
+		[[ -x /etc/rc.d/klogd ]] && /etc/rc.d/klogd start
 	fi
 fi
 
 run_hook single_end
 
-if [ "$RUNLEVEL" = "1" ]; then
+if [[ $RUNLEVEL = 1 ]]; then
 	printsep
 	printhl "Entering single-user mode..."
 	# make sure /dev/initctl is in place
-	/bin/kill -HUP 1
+	kill -HUP 1
 	exec /sbin/init -t1 S
 fi
 
+/bin/touch /var/log/boot
+kill `/bin/cat /run/bootlogd.pid`
+/bin/rm /run/bootlogd.pid
+
 # End of file
-# vim: set ts=2 noet:
+# vim: set ts=2 sw=2 noet:

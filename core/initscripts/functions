@@ -1,30 +1,25 @@
-#
+#!/bin/bash
 # initscripts functions
 #
 
 # width:
 
 STAT_COL=80
-if [ ! -t 1 ]; then
-  USECOLOR=""
-
-# stty will fail when stdin isn't a terminal
-elif [ -t 0 ]; then
-  STAT_COL="$(/bin/stty size)"
-  # stty gives "rows cols"; strip the rows number, we just want columns
-  STAT_COL="${STAT_COL##* }"
-
-else
-  # is /usr/share/terminfo already mounted, and TERM recognized?
-  /bin/tput cols &>/dev/null
-  if [ $? -eq 0 ]; then
-    STAT_COL=$(/bin/tput cols)
-  fi
+if [[ ! -t 1 ]]; then
+	USECOLOR=""
+elif [[ -t 0 ]]; then
+	# stty will fail when stdin isn't a terminal
+	STAT_COL="$(/bin/stty size)"
+	# stty gives "rows cols"; strip the rows number, we just want columns
+	STAT_COL="${STAT_COL##* }"
+elif /bin/tput cols &>/dev/null; then
+	# is /usr/share/terminfo already mounted, and TERM recognized?
+	STAT_COL=$(/bin/tput cols)
 fi
-if [ "0$STAT_COL" -eq 0 ]; then
-  # if output was 0 (serial console), set default width to 80
-  STAT_COL=80
-  USECOLOR=""
+if ((STAT_COL==0)); then
+	# if output was 0 (serial console), set default width to 80
+	STAT_COL=80
+	USECOLOR=""
 fi
 
 # we use 13 characters for our own stuff
@@ -32,28 +27,32 @@ STAT_COL=$(($STAT_COL - 13))
 
 # disable colors on broken terminals
 TERM_COLORS="$(/bin/tput colors 2>/dev/null)"
-if [ $? = 3 ]; then
-	TERM_COLORS=8
-elif [ -n "${TERM_COLORS}" ]; then
-	case "${TERM_COLORS}" in
-		*[!0-9]*)
-			USECOLOR=""
-			;;
-		*)
-			[ "${TERM_COLORS}" -lt 8 ] && USECOLOR=""
-			;;
+if (($? != 3)); then
+	case $TERM_COLORS in
+		*[!0-9]*) USECOLOR="";;
+		[0-7])    USECOLOR="";;
+		'')       USECOLOR="";;
 	esac
-else
-	USECOLOR=""
 fi
 unset TERM_COLORS
 
 # clear the TZ envvar, so daemons always respect /etc/localtime
 unset TZ
 
+# sanitize the locale settins
+unset LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY \
+      LC_MESSAGES LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE \
+      LC_MEASUREMENT LC_IDENTIFICATION LC_ALL
+if [[ $DAEMON_LOCALE =~ yes|YES && -n $LOCALE ]]; then
+	export LANG="${LOCALE}"
+else
+	export LANG=C
+fi
+
 # colors:
-if [ "$USECOLOR" = "YES" -o "$USECOLOR" = "yes" ]; then
+if [[ $USECOLOR = YES || $USECOLOR = yes ]]; then
 	C_MAIN="\033[1;37;40m"      # main text
+
 	C_OTHER="\033[1;34;40m"     # prefix & brackets
 	C_SEPARATOR="\033[1;30;40m" # separator
 
@@ -68,7 +67,7 @@ if [ "$USECOLOR" = "YES" -o "$USECOLOR" = "yes" ]; then
 	C_CLEAR="\033[1;0m"
 fi
 
-if [ -t 1 ]; then
+if [[ -t 1 ]]; then
 	SAVE_POSITION="\033[s"
 	RESTORE_POSITION="\033[u"
 	DEL_TEXT="\033[$(($STAT_COL+4))G"
@@ -127,23 +126,19 @@ stat_fail() {
 }
 
 stat_die() {
-	retval=1
-	[ "$1" = "" ] || retval=$1
 	stat_fail
-	exit $retval
+	exit ${1:-1}
 }
 
 status() {
 	stat_busy "$1"
 	shift
-	$* >/dev/null 2>&1
-	if [ $? -eq 0 ]; then
+	if "$@" >/dev/null 2>&1; then
 		stat_done
 		return 0
-	else
-		stat_fail
-		return 1
 	fi
+	stat_fail
+	return 1
 }
 
 #  usage : in_array( $needle, $haystack )
@@ -151,74 +146,149 @@ status() {
 #          1 - not found
 # Copied from makepkg
 in_array() {
-  local needle=$1; shift
-  [ -z "$1" ] && return 1 # Not Found
-  local item
-  for item in "$@"; do
-    local c="${item:0:1}"
-    if [ "x$c" = "x@" ]; then
-      item="${item:1}"
-    fi
-    [ "$item" = "$needle" ] && return 0 # Found
-  done
-  return 1 # Not Found
+	[[ $2 ]] || return 1
+	local needle=$1; shift
+	local item
+	for item in "$@"; do
+		[[ ${item#@} = $needle ]] && return 0
+	done
+	return 1 # Not Found
 }
 
 # daemons:
 
 add_daemon() {
-	[ -d /var/run/daemons ] || /bin/mkdir -p /var/run/daemons
-	/bin/touch /var/run/daemons/$1
+	[[ -d /run/daemons ]] || /bin/mkdir -p /run/daemons
+	> /run/daemons/"$1"
 }
 
 rm_daemon() {
-	/bin/rm -f /var/run/daemons/$1
+	/bin/rm -f /run/daemons/"$1"
 }
 
 ck_daemon() {
-	[ -f /var/run/daemons/$1 ] && return 1
+	[[ ! -f /run/daemons/$1 ]]
+}
+
+# Check if $1 is a valid daemon name
+have_daemon() {
+	[[ -f /etc/rc.d/$1 && -x /etc/rc.d/$1 ]]
+}
+
+# Check if $1 is started at boot
+ck_autostart() {
+	local d
+	for d in "${DAEMONS[@]}"; do
+		[[ "$1" = ${d#@} ]] && return 1
+	done
 	return 0
 }
 
-ck_depends() {
-	for daemon in $@; do
-		if ck_daemon $daemon; then
-			/etc/rc.d/$daemon start
-		fi
-	done
+start_daemon() {
+	have_daemon "$1" && /etc/rc.d/"$1" start
 }
 
-start_daemon() {
-	/etc/rc.d/$1 start
+ck_depends() {
+	for daemon in "$@"; do
+		ck_daemon "$daemon" && start_daemon "$daemon"
+	done
 }
 
 start_daemon_bkgd() {
 	stat_bkgd "Starting $1"
-	(/etc/rc.d/$1 start) &>/dev/null &
+	have_daemon "$1" && (start_daemon "$1") &>/dev/null &
 }
 
 stop_daemon() {
-	/etc/rc.d/$1 stop
+	have_daemon "$1" && /etc/rc.d/"$1" stop
 }
 
 # Status functions
 status_started() {
-  deltext
-  echo -ne "$C_OTHER[${C_STRT}STARTED$C_OTHER]$C_CLEAR "
+	deltext
+	echo -ne "$C_OTHER[${C_STRT}STARTED$C_OTHER]$C_CLEAR "
 }
 
 status_stopped() {
-  deltext
-  echo -ne "$C_OTHER[${C_STRT}STOPPED$C_OTHER]$C_CLEAR "
+	deltext
+	echo -ne "$C_OTHER[${C_STRT}STOPPED$C_OTHER]$C_CLEAR "
 }
 
 ck_status() {
-  ck_daemon $1
-  if [ $? -eq 1 ]; then
-    status_started
-  else
-    status_stopped
-  fi		
+	if ! ck_daemon "$1"; then
+		status_started
+	else
+		status_stopped
+	fi
+}
+
+kill_everything() {
+	# $1 = where we are being called from.
+	# This is used to determine which hooks to run.
+	# Find daemons NOT in the DAEMONS array. Shut these down first
+	for daemon in /run/daemons/*; do
+		[[ -f $daemon ]] || continue
+		daemon=${daemon##*/}
+		in_array "$daemon" "${DAEMONS[@]}" || stop_daemon "$daemon"
+	done
+
+	# Shutdown daemons in reverse order
+	for ((i=${#DAEMONS[@]}-1; i>=0; i--)); do
+		[[ ${DAEMONS[$i]:0:1} = '!' ]] && continue
+		ck_daemon ${DAEMONS[$i]#@} || stop_daemon ${DAEMONS[$i]#@}
+	done
+
+	# Terminate all processes
+	stat_busy "Sending SIGTERM To Processes"
+	run_hook "$1_prekillall"
+	/sbin/killall5 -15 &> /dev/null
+	/bin/sleep 5
+	stat_done
+
+	stat_busy "Sending SIGKILL To Processes"
+	/sbin/killall5 -9 &> /dev/null
+	/bin/sleep 1
+	stat_done
+
+	run_hook "$1_postkillall"
+}
+
+activate_vgs() {
+	[[ $USELVM =~ yes|YES && -x /sbin/lvm && -d /sys/block ]] || return
+	# Kernel 2.6.x, LVM2 groups
+	/sbin/modprobe -q dm-mod 2>/dev/null
+	stat_busy "Activating LVM2 groups"
+	if /sbin/vgchange --sysinit -a y >/dev/null; then
+		stat_done
+	else
+		stat_fail
+	fi
+}
+
+# Arch cryptsetup packages traditionally contained the binaries
+#  /usr/sbin/cryptsetup
+#  /sbin/cryptsetup.static
+# By default, initscripts used the /sbin/cryptsetup.static.
+# Newer packages will only have /sbin/cryptsetup and no static binary
+# This ensures maximal compatibility with the old and new layout
+for CS in /sbin/cryptsetup /usr/sbin/cryptsetup \
+	/sbin/cryptsetup.static ''; do
+	[[ -x $CS ]] && break
+done
+
+read_crypttab() {
+	# $1 = function to call with the split out line from the crypttab
+	local line nspo failed=0
+	while read line; do
+		[[ $line && ${line:0:1} != '#' ]] || continue
+		eval nspo=("${line%#*}")
+		if $1 "${nspo[0]}" "${nspo[1]}" "${nspo[2]}" "${nspo[*]:3}"; then
+			crypto_unlocked=1
+		else
+			failed=1
+		fi
+	done < /etc/crypttab
+	return $failed
 }
 
 ###############################
@@ -253,56 +323,55 @@ ck_status() {
 # single_postkillall: after all processes have been killed in rc.single
 # shutdown_poweroff: directly before powering off in rc.shutdown
 #
-# Make sure to never override the add_hook and run_hook functions via functions.d
+# Declare add_hook and run_hook as read-only to prevent overwriting them.
+# Too bad we cannot do the same thing with hook_funcs
 
-declare -A hook_funcs
+if [[ $RC_FUNCTIONS_HOOK_FUNCS_DEFINED -ne 1 ]]; then
+	declare -A hook_funcs
 
-add_hook() {
-	[ -z "$1" -o -z "$2" ] && return 1
-	hook_funcs["$1"]="${hook_funcs["$1"]} $2"
-}
+	add_hook() {
+		[[ $1 && $2 ]] || return 1
+		hook_funcs["$1"]+=" $2"
+	}
 
-run_hook() {
-	local func
+	run_hook() {
+		[[ $1 ]] || return 1
+		local func
+		for func in ${hook_funcs["$1"]}; do
+			"${func}"
+		done
+	}
 
-	[ -z "$1" ] && return 1
-	for func in ${hook_funcs["$1"]}; do
-		${func}
-	done
-}
+	declare -fr add_hook run_hook
+	declare -r RC_FUNCTIONS_HOOK_FUNCS_DEFINED=1
+fi
 
 # Function for setting console font if required
 set_consolefont() {
-    if [ -n "$CONSOLEFONT" ]; then
+	[[ $CONSOLEFONT ]] || return 0
 	stat_busy "Loading Console Font: $CONSOLEFONT"
 	#CONSOLEMAP in UTF-8 shouldn't be used
-	if [ -n "$CONSOLEMAP" ] && echo "$LOCALE" | /bin/grep -qi utf ; then
-		CONSOLEMAP=""
-	fi
+	[[ $CONSOLEMAP && ${LOCALE,,} =~ utf ]] && CONSOLEMAP=""
 	for i in /dev/tty[0-9]*; do
-		if [ -n "$CONSOLEMAP" ]; then
-			/usr/bin/setfont -m $CONSOLEMAP $CONSOLEFONT -C ${i} >/dev/null 2>&1
-		else
-			/usr/bin/setfont $CONSOLEFONT -C ${i} >/dev/null 2>&1
-		fi
+		/usr/bin/setfont ${CONSOLEMAP:+-m ${CONSOLEMAP}} \
+		$CONSOLEFONT -C ${i} >/dev/null 2>&1
 	done
-	if [ $? -ne 0 ]; then
+	if (($? != 0)); then
 		stat_fail
+	elif [[ $CONSOLEMAP ]]; then
+		cat <<"EOF" >>/etc/profile.d/locale.sh
+if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\033(K"; fi
+EOF
+		stat_done
 	else
-		if [ -n "$CONSOLEMAP" ]; then
-			echo 'if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\033(K"; fi' >>/etc/profile.d/locale.sh
-		fi
 		stat_done
 	fi
-    fi
 }
 
 # Source additional functions at the end to allow overrides
 for f in /etc/rc.d/functions.d/*; do
-  if [ -e $f ]; then
-    . $f
-  fi
+	[[ -e $f ]] && . "$f"
 done
 
 # End of file
-# vim: set ft=sh sw=2 ts=2 et:
+# vim: set ts=2 sw=2 noet:
