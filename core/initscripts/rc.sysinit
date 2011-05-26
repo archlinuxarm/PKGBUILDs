@@ -7,68 +7,67 @@
 . /etc/rc.d/functions
 
 echo " "
-printhl "PlugApps Linux\n"
-printhl "${C_H2}http://www.plugapps.com"
-printhl "Copyright 2009-2011 Mike Staszel"
-printhl "Distributed under the GNU General Public License (GPL)"
+printhl "Arch Linux ARM\n"
+printhl "${C_H2}http://www.archlinuxarm.org"
 printsep
 
 run_hook sysinit_start
 
-# mount /proc, /sys and our RAM /dev
-if ! /bin/mountpoint -q /proc; then
-  /bin/mount -n -t proc none /proc
-fi
-if ! /bin/mountpoint -q /sys; then
-  /bin/mount -n -t sysfs none /sys
-fi
-if ! /bin/mountpoint -q /dev; then
-  if grep -q devtmpfs /proc/filesystems 2>/dev/null; then
-    /bin/mount -n -t devtmpfs udev /dev -o mode=0755,size=10M,nosuid
-  else
-    /bin/mount -n -t tmpfs udev /dev -o mode=0755,size=10M,nosuid
-  fi
-fi
+# export standard PATH (will be overridden later when /etc/profile is sourced, but is usefull for UDev)
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-# Copy static device nodes to /dev
-/bin/cp -a /lib/udev/devices/* /dev/
+# mount /proc, /sys, /run, /dev, /run/lock, /dev/pts, /dev/shm (the api filesystems)
+/bin/mountpoint -q /proc    || /bin/mount -n -t proc proc /proc -o nosuid,noexec,nodev
+/bin/mountpoint -q /sys     || /bin/mount -n -t sysfs sysfs /sys -o nosuid,noexec,nodev
+/bin/mountpoint -q /run     || /bin/mount -n -t tmpfs tmpfs /run -o mode=755,size=10M,nosuid,noexec,nodev
+if ! /bin/mountpoint -q /dev; then
+	if /bin/grep -q devtmpfs /proc/filesystems &>/dev/null; then
+		/bin/mount -n -t devtmpfs udev /dev -o mode=0755,size=10M,nosuid
+	else
+		/bin/mount -n -t tmpfs udev /dev -o mode=0755,size=10M,nosuid
+	fi
+fi
+/bin/mkdir -p /run/lock /dev/{pts,shm}
+/bin/chmod 1777 /run/lock
+/bin/mountpoint -q /dev/pts || /bin/mount /dev/pts &> /dev/null \
+	|| /bin/mount -n -t devpts devpts /dev/pts -o mode=620,gid=5,nosuid,noexec
+/bin/mountpoint -q /dev/shm || /bin/mount /dev/shm &> /dev/null \
+	|| /bin/mount -n -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev
+
+# remount root ro to allow for fsck later on, we remount now to
+# make sure nothing can open files rw on root which would block a remount
+/bin/findmnt / --options ro &>/dev/null || \
+status "Mounting Root Read-Only" /bin/mount -n -o remount,ro /
 
 # start up our mini logger until syslog takes over
 /sbin/minilogd
+/sbin/bootlogd -p /run/bootlogd.pid
 
-# anything more serious than KERN_WARNING goes to the console
-# 'verbose' cmdline parameter enables more messages
-if /bin/grep -q " verbose" /proc/cmdline; then
-	/bin/dmesg -n 8
-else
-	/bin/dmesg -n 3
-fi
+# Set console verbosity
+for cmdarg in $(< /proc/cmdline); do
+        [[ "$cmdarg" == verbose ]] && VERBOSE=8 && break
+        [[ "$cmdarg" =~ verbose=[1-8] ]] && VERBOSE=${BASH_REMATCH[0]-8} && break
+done
+/bin/dmesg -n ${VERBOSE:-3}
 
 HWCLOCK_PARAMS="--hctosys"
-if [ "$HARDWARECLOCK" = "UTC" ]; then
-	HWCLOCK_PARAMS="$HWCLOCK_PARAMS --utc"
-elif [ "$HARDWARECLOCK" = "localtime" ]; then
-	HWCLOCK_PARAMS="$HWCLOCK_PARAMS --localtime"
-else
-	HWCLOCK_PARAMS=""
-fi
+case $HARDWARECLOCK in
+	UTC) HWCLOCK_PARAMS+=" --utc";;
+	localtime) HWCLOCK_PARAMS+=" --localtime";;
+	*) HWCLOCK_PARAMS="";;
+esac
 
-if [ -n "$HWCLOCK_PARAMS" ]; then
+if [[ $HWCLOCK_PARAMS ]]; then
 	# enable rtc access
-	/sbin/modprobe -q rtc-cmos
-	# some custom kernels use rtc/genrtc, try to load those too
-	/sbin/modprobe -q rtc
-	/sbin/modprobe -q genrtc
+	/sbin/modprobe -q -a rtc-cmos rtc genrtc
 	# If devtmpfs is used, the required RTC device already exists now
 	# Otherwise, create whatever device is available
-	if [ ! -c /dev/rtc -a ! -c /dev/rtc0 ]; then
-		if [ -f /sys/class/rtc/rtc0/dev ]; then
-			IFS=: read -r major minor < /sys/class/rtc/rtc0/dev
-			/bin/mknod /dev/rtc0 c $major $minor
-		elif [ -f /sys/class/misc/rtc/dev ]; then
-			IFS=: read -r major minor < /sys/class/misc/rtc/dev
+	if ! [[ -c /dev/rtc || -c /dev/rtc0 ]]; then
+		for dev in /sys/class/rtc/rtc0/dev /sys/class/misc/rtc/dev; do
+			[[ -e $dev ]] || continue
+			IFS=: read -r major minor < "$dev"
 			/bin/mknod /dev/rtc c $major $minor
-		fi
+		done
 	fi
 
 	# Do a clock set here for a few reasons:
@@ -78,194 +77,177 @@ if [ -n "$HWCLOCK_PARAMS" ]; then
 	#    configured timezone. Any new timezone put in rc.conf is copied over at
 	#    a later time.
 	# This does *NOT* take into account a time adjustment file as /var may not be
-	# mounted yet. A second set occurs later to match rc.conf.
-	if [ -f /etc/localtime ]; then
+	# mounted yet. A second set may occur in rc.d/hwclock to match rc.conf.
+	if [[ -f /etc/localtime ]]; then
 		/sbin/hwclock $HWCLOCK_PARAMS --noadjfile
 	fi
 fi
 
-echo > /proc/sys/kernel/hotplug
-
-stat_busy "Starting UDev Daemon"
-/sbin/udevd --daemon
-stat_done
+status "Starting UDev Daemon" /sbin/udevd --daemon
 
 run_hook sysinit_udevlaunched
 
 # Trigger udev uevents
-if /bin/pidof -o %PPID /sbin/udevd >/dev/null; then
-  stat_busy "Triggering UDev uevents"
-  /sbin/udevadm control --property=STARTUP=1
-  /sbin/udevadm trigger --action=add
-  stat_done
+if /bin/pidof /sbin/udevd &>/dev/null; then
+	stat_busy "Triggering UDev uevents"
+	/sbin/udevadm trigger --action=add --type=subsystems
+	/sbin/udevadm trigger --action=add --type=devices
+	stat_done
 fi
 
 # Load modules from the MODULES array defined in rc.conf
-if ! [ "$load_modules" = "off" ]; then
-	if [ -f /proc/modules ]; then
-		stat_busy "Loading Modules"
-		for mod in "${MODULES[@]}"; do
-			if [ "$mod" = "${mod#!}" ]; then
-				/sbin/modprobe $mod
-			fi
-		done
-		stat_done
-	fi
+mods=${MODULES[@]/!*/}
+if [[ $load_modules != off && -f /proc/modules && $mods ]]; then
+	status "Loading Modules" /sbin/modprobe --all $mods
 fi
+unset mods
 
 # Wait for udev uevents
-if /bin/pidof -o %PPID /sbin/udevd >/dev/null; then
-	stat_busy "Waiting for UDev uevents to be processed"
-	/sbin/udevadm settle
-	/sbin/udevadm control --property=STARTUP=
-	stat_done
+if /bin/pidof /sbin/udevd &>/dev/null; then
+	status "Waiting for UDev uevents to be processed" \
+		/sbin/udevadm settle --quiet --timeout=${UDEV_TIMEOUT:-30}
 fi
 
 run_hook sysinit_udevsettled
 
 # bring up the loopback interface
-if [ -d /sys/class/net/lo ]; then
-	stat_busy "Bringing up loopback interface"
-	/sbin/ifconfig lo 127.0.0.1 up
-	if [ $? -ne 0 ]; then
-		stat_fail
-	else
-		stat_done
-	fi
+[[ -d /sys/class/net/lo ]] && \
+    status "Bringing up loopback interface" /sbin/ifconfig lo 127.0.0.1 up
+
+# FakeRAID devices detection
+if [[ $USEDMRAID =~ yes|YES && -x /sbin/dmraid ]]; then
+	status "Activating FakeRAID arrays" /sbin/dmraid -i -ay
 fi
 
-# If necessary, find md devices and manually assemble RAID arrays
-if [ -f /etc/mdadm.conf -a "$(/bin/grep ^ARRAY /etc/mdadm.conf 2>/dev/null)" ]; then
-	status "Activating RAID arrays" /sbin/mdadm --assemble --scan
+# BTRFS devices detection
+if [[ $USEBTRFS =~ yes|YES && -x /sbin/btrfs ]]; then
+	status "Activating BTRFS volumes" /sbin/btrfs device scan
 fi
 
-if [ "$USELVM" = "yes" -o "$USELVM" = "YES" ]; then
-	if [ -x /sbin/lvm -a -d /sys/block ]; then
-		# Kernel 2.6.x, LVM2 groups
-		/sbin/modprobe -q dm-mod 2>/dev/null
-		stat_busy "Activating LVM2 groups"
-		/sbin/lvm vgchange --ignorelockingfailure -a y >/dev/null
-		if [ $? -ne 0 ]; then
-			stat_fail
-		else
-			stat_done
-		fi
-	fi
-fi
+activate_vgs
 
 # Set up non-root encrypted partition mappings
-if [ -f /etc/crypttab -a -n "$(/bin/grep -v ^# /etc/crypttab | /bin/grep -v ^$)" ]; then
-	/sbin/modprobe -q dm-mod 2>/dev/null
+if [[ -f /etc/crypttab && -n $CS ]] && /bin/grep -q ^[^#] /etc/crypttab; then
+	/sbin/modprobe -q dm-crypt 2>/dev/null
 	stat_busy "Unlocking encrypted volumes:"
-	csfailed=0
-	# Arch cryptsetup packages traditionally contained the binaries
-	#  /usr/sbin/cryptsetup
-	#  /sbin/cryptsetup.static
-	# By default, initscripts used the /sbin/cryptsetup.static.
-	# Newer packages will only have /sbin/cryptsetup and no static binary
-	# This ensures maximal compatibility with the old and new layout
-	if [ -x /sbin/cryptsetup ]; then
-		CS=/sbin/cryptsetup
-	elif [ -x /usr/sbin/cryptsetup ]; then
-		CS=/usr/sbin/cryptsetup
-	else
-		CS=/sbin/cryptsetup.static
-	fi
-	do_crypt() {
-		if [ $# -ge 3 ]; then
-			cname="$1"
-			csrc="$2"
-			cpass="$3"
-			shift 3
-			copts="$*"
-			stat_append "${cname}.."
-			# For some fun reason, the parameter ordering varies for
-			# LUKS and non-LUKS devices.  Joy.
-			if [ "${cpass}" = "SWAP" ]; then
-				# This is DANGEROUS! The only possible safety check
-				# is to not proceed in case we find a LUKS device
-				# This may cause dataloss if it is not used carefully
-				if $CS isLuks $csrc 2>/dev/null; then
-					false
-				else
-					$CS -d /dev/urandom $copts create $cname $csrc >/dev/null
-					if [ $? -eq 0 ]; then
-						stat_append "creating swapspace.."
-						/sbin/mkswap -f -L $cname /dev/mapper/$cname >/dev/null
-					fi
-				fi
-			elif [ "${cpass}" = "ASK" ]; then
-				printf "\nOpening '${cname}' volume:\n"
-
-				if $CS isLuks $csrc 2>/dev/null; then
-					$CS $copts luksOpen $csrc $cname < /dev/console
-				else
-					$CS $copts create $cname $csrc < /dev/console
-				fi
-			elif [ "${cpass:0:1}" != "/" ]; then
-				if $CS isLuks $csrc 2>/dev/null; then
-					echo "$cpass" | $CS $copts luksOpen $csrc $cname >/dev/null
-				else
-					echo "$cpass" | $CS $copts create $cname $csrc >/dev/null
-				fi
-			else
-				if $CS isLuks $csrc 2>/dev/null; then
-					$CS -d $cpass $copts luksOpen $csrc $cname >/dev/null
-				else
-					$CS -d $cpass $copts create $cname $csrc >/dev/null
-				fi
+		do_unlock() {
+			# $1 = requested name
+			# $2 = source device
+			# $3 = password
+			# $4 = options
+			stat_append "${1}.."
+			local open=create a="$1" b="$2" failed=0
+			# Ordering of options is different if you are using LUKS vs. not.
+			# Use ugly swizzling to deal with it.
+			# isLuks only gives an exit code but no output to stdout or stderr.
+			if $CS isLuks "$2" 2>/dev/null; then
+				open=luksOpen
+				a="$2"
+				b="$1"
 			fi
-			if [ $? -ne 0 ]; then
-				csfailed=1
+			case $3 in
+				SWAP)
+					local _overwriteokay=0
+					if [[ -b $2 && -r $2 ]]; then
+						# This is DANGEROUS! If there is any known file system,
+						# partition table, RAID or LVM volume on the device
+						# we don't overwrite it.
+						#
+						# 'blkid' returns 2 if no valid signature has been found.
+						# Only in this case we should allow overwriting the device.
+						#
+						# This sanity check _should_ be sufficient, but it might not.
+						# This may cause dataloss if it is not used carefully.
+						/sbin/blkid -p "$2" &>/dev/null
+						if [[ $? -eq 2 ]]; then
+							_overwriteokay=1
+						fi
+					fi
+					if [[ $_overwriteokay -eq 0 ]]; then
+						false
+					elif $CS -d /dev/urandom $4 $open "$a" "$b" >/dev/null; then
+						stat_append "creating swapspace.."
+						/sbin/mkswap -f -L $1 /dev/mapper/$1 >/dev/null
+					fi;;
+				ASK)
+					printf "\nOpening '$1' volume:\n"
+					$CS $4 $open "$a" "$b" < /dev/console;;
+				/dev*)
+					ckdev=${3%%:*}
+					cka=${3#*:}
+					ckb=${cka#*:}
+					cka=${cka%:*}
+					ckfile=/dev/ckfile
+					ckdir=/dev/ckdir
+					case ${cka} in
+						*[!0-9]*)
+							# Use a file on the device
+							# cka is not numeric: cka=filesystem, ckb=path
+							/bin/mkdir ${ckdir}
+							/bin/mount -r -t ${cka} ${ckdev} ${ckdir}
+							/bin/dd if=${ckdir}/${ckb} of=${ckfile} >/dev/null 2>&1
+							/bin/umount ${ckdir}
+							/bin/rmdir ${ckdir};;
+						*)
+							# Read raw data from the block device
+							# cka is numeric: cka=offset, ckb=length
+							/bin/dd if=${ckdev} of=${ckfile} bs=1 skip=${cka} count=${ckb} >/dev/null 2>&1;;
+					esac
+					$CS -d ${ckfile} $4 $open "$a" "$b" >/dev/null
+					/bin/dd if=/dev/urandom of=${ckfile} bs=1 count=`stat -c %s ${ckfile}` conv=notrunc >/dev/null 2>&1
+					rm ${ckfile};;
+				/*)
+					$CS -d "$3" $4 $open "$a" "$b" >/dev/null;;
+				*)
+					echo "$3" | $CS $4 $open "$a" "$b" >/dev/null;;
+			esac
+			if (($? != 0)); then
+				failed=1
 				stat_append "failed "
 			else
 				stat_append "ok "
 			fi
-		fi
-	}
-	while read line; do
-		eval do_crypt "$line"
-	done </etc/crypttab
-	if [ $csfailed -eq 0 ]; then
+			return $failed
+		}
+	crypto_unlocked=0
+	if read_crypttab do_unlock; then
 		stat_done
 	else
 		stat_fail
 	fi
-	# Maybe someone has LVM on an encrypted block device
-	if [ "$USELVM" = "yes" -o "$USELVM" = "YES" ]; then
-		if [ -x /sbin/lvm -a -d /sys/block ]; then
-			/sbin/lvm vgchange --ignorelockingfailure -a y >/dev/null
-		fi
+	if [[ ${crypto_unlocked} -eq 1 ]]; then
+		# Maybe someone has LVM on an encrypted block device
+		activate_vgs
 	fi
 fi
 
-status "Mounting Root Read-only" /bin/mount -n -o remount,ro /
+NETFS="nonfs,nonfs4,nosmbfs,nocifs,nocodafs,noncpfs,nosysfs,noshfs,nofuse,nofuseblk,noglusterfs,nodavfs"
 
-FORCEFSCK=
-[ -f /forcefsck ] && FORCEFSCK="-- -f"
-NETFS="nonfs,nonfs4,nosmbfs,nocifs,nocodafs,noncpfs,nosysfs,noshfs,nofuse,nofuseblk,noglusterfs"
-
-fsck_reboot() {
-	echo "Automatic reboot in progress..."
-	/bin/umount -a
-	/bin/mount -n -o remount,ro /
-	/sbin/reboot -f
-	exit 0
-}
-
-if [ -x /sbin/fsck ]; then
+if [[ -x /sbin/fsck ]]; then
 	stat_busy "Checking Filesystems"
+	fsck_reboot() {
+		echo "Automatic reboot in progress..."
+		/bin/umount -a
+		/bin/mount -n -o remount,ro /
+		/sbin/reboot -f
+		exit 0
+	}
 	FSCK_OUT=/dev/stdout
 	FSCK_ERR=/dev/stdout
 	FSCK_FD=
+	FORCEFSCK=
+	[[ -f /forcefsck ]] && FORCEFSCK="-- -f"
+	for cmdarg in $(< /proc/cmdline); do
+		[[ "$cmdarg" == forcefsck ]] && FORCEFSCK="-- -f" && break
+	done
 	run_hook sysinit_prefsck
 	/sbin/fsck -A -T -C$FSCK_FD -a -t "$NETFS,noopts=_netdev" $FORCEFSCK >$FSCK_OUT 2>$FSCK_ERR
 	fsckret=$?
-	if [ ${fsckret} -gt 1 ]; then
+	if ((fsckret > 1)); then
 		stat_fail
 	fi
 	run_hook sysinit_postfsck
-	if [ $((${fsckret}&2)) -eq 2 ]; then
+	if (( ( fsckret & 2) == 2)); then
 		echo
 		echo "********************** REBOOT REQUIRED *********************"
 		echo "*                                                          *"
@@ -275,8 +257,7 @@ if [ -x /sbin/fsck ]; then
 		echo
 		/bin/sleep 15
 		fsck_reboot
-	fi
-	if [ ${fsckret} -gt 1 -a ${fsckret} -ne 32 ]; then
+	elif ((fsckret > 1 && fsckret != 32)); then
 		echo
 		echo "*****************  FILESYSTEM CHECK FAILED  ****************"
 		echo "*                                                          *"
@@ -294,87 +275,78 @@ if [ -x /sbin/fsck ]; then
 	stat_done
 fi
 
-stat_busy "Mounting Local Filesystems"
-/bin/mount -n -o remount,rw /
-if [ -x /bin/findmnt -a -e /proc/self/mountinfo ]; then
+status "Mounting Local Filesystems" /bin/mount -n -o remount,rw /
+
+# don't touch /etc/mtab if it is a symlink to /proc/self/mounts
+if [[ -L /etc/mtab ]]; then
+	:
+elif [[ -x /bin/findmnt && -e /proc/self/mountinfo ]]; then
 	/bin/findmnt -rnu -o SOURCE,TARGET,FSTYPE,OPTIONS >| /etc/mtab
 else
 	cat /proc/mounts >| /etc/mtab
 fi
+
 run_hook sysinit_premount
 # now mount all the local filesystems
 /bin/mount -a -t $NETFS -O no_netdev
 stat_done
 
+# enable monitoring of lvm2 groups, now that the filesystems are mounted rw
+if [[ $USELVM =~ yes|YES && -x /sbin/lvm && -d /sys/block ]]; then
+	status "Activating monitoring of LVM2 groups" \
+		/sbin/vgchange --monitor y >/dev/null
+fi
+
 status "Activating Swap" /sbin/swapon -a
 
-stat_busy "Configuring System Clock"
-if [ "$TIMEZONE" != "" -a -e "/usr/share/zoneinfo/$TIMEZONE" ]; then
+if [[ $TIMEZONE && -e /usr/share/zoneinfo/$TIMEZONE ]]; then
 	/bin/rm -f /etc/localtime
-	/bin/cp "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+	status "Configuring Time Zone" \
+		/bin/cp "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
 fi
-
-clock_pid=""
-if [ -n "$HWCLOCK_PARAMS" ]; then
-	# This time, we set the clock for real. Use the adjustment file now that
-	# /var will definitely be available, and then set the system clock once
-	# the hardware clock has been adjusted accordingly. The backgrounding magic
-	# is due to the fact that the second call to hwclock will almost always
-	# take ~1 second because of the clock granularity, and we might as well
-	# stay busy.
-	(
-	/sbin/hwclock --adjust
-	/sbin/hwclock $HWCLOCK_PARAMS
-	) &
-	clock_pid=$!
-fi
-stat_done
 
 RANDOM_SEED=/var/lib/misc/random-seed
-if [ -f $RANDOM_SEED ]; then
-	stat_busy "Initializing Random Seed"
-	/bin/cat $RANDOM_SEED > /dev/urandom
-	stat_done
+if [[ -f $RANDOM_SEED ]]; then
+	status "Initializing Random Seed" \
+		/bin/cat $RANDOM_SEED > /dev/urandom
 fi
 
 stat_busy "Removing Leftover Files"
-/bin/rm -f /etc/nologin &>/dev/null
-/bin/rm -f /etc/shutdownpid &>/dev/null
-/bin/rm -f /var/lock/* &>/dev/null
-/bin/rm -rf /tmp/* /tmp/.* &>/dev/null
-/bin/rm -f /forcefsck &>/dev/null
-(cd /var/run && /usr/bin/find . ! -type d -exec /bin/rm -f -- {} \; )
+/bin/rm -rf /etc/{nologin,shutdownpid} /forcefsck &>/dev/null
+/bin/mountpoint -q /tmp || /bin/rm -rf /tmp/* /tmp/.* &>/dev/null
+[[ ! -L /var/lock ]] && /bin/rm -rf /var/lock/*
+[[ ! -L /var/run && -d /var/run ]] && /usr/bin/find /var/run/ \! -type d -delete
+[[ ! -L /var/run && ! -L /var/run/daemons ]] && /bin/rm -rf /var/run/daemons \
+                                             && /bin/ln -s /run/daemons /var/run/daemons
 : >| /var/run/utmp
 /bin/chmod 0664 /var/run/utmp
+/bin/chown root:utmp /var/run/utmp
 # Keep {x,k,g}dm happy with xorg
-/bin/mkdir /tmp/.ICE-unix && /bin/chmod 1777 /tmp/.ICE-unix
-/bin/mkdir /tmp/.X11-unix && /bin/chmod 1777 /tmp/.X11-unix
+/bin/mkdir -m1777 /tmp/.{X11,ICE}-unix
 stat_done
 
 #status "Updating Shared Library Links" /sbin/ldconfig
 
-if [ "$HOSTNAME" != "" ]; then
-	status "Setting Hostname: $HOSTNAME" /bin/hostname $HOSTNAME
+if [[ $HOSTNAME ]]; then
+	status "Setting Hostname: $HOSTNAME" /bin/hostname "$HOSTNAME"
 fi
 
 # Set the NIS domain name, if necessary
-[ -f /etc/conf.d/nisdomainname ] && . /etc/conf.d/nisdomainname
-if [ "$NISDOMAINNAME" != "" ]; then
-	status "Setting NIS Domain Name: $NISDOMAINNAME" /bin/nisdomainname $NISDOMAINNAME
+[[ -f /etc/conf.d/nisdomainname ]] && . /etc/conf.d/nisdomainname
+if [[ $NISDOMAINNAME ]]; then
+	status "Setting NIS Domain Name: $NISDOMAINNAME" \
+		/bin/nisdomainname "$NISDOMAINNAME"
 fi
 
-status "Updating Module Dependencies" /sbin/depmod -A
-
+stat_busy "Setting Locale: ${LOCALE:=en_US}"
 # Flush old locale settings
 : >| /etc/profile.d/locale.sh
 /bin/chmod 755 /etc/profile.d/locale.sh
 # Set user defined locale
-[ -z "$LOCALE" ] && LOCALE="en_US"
-stat_busy "Setting Locale: $LOCALE"
 echo "export LANG=$LOCALE" >>/etc/profile.d/locale.sh
 stat_done
 
-if echo "$LOCALE" | /bin/grep -qi utf ; then
+if [[ ${LOCALE,,} =~ utf ]]; then
 	stat_busy "Setting Consoles to UTF-8 mode"
 	# UTF-8 consoles are default since 2.6.24 kernel
 	# this code is needed not only for older kernels,
@@ -383,10 +355,9 @@ if echo "$LOCALE" | /bin/grep -qi utf ; then
 		/usr/bin/kbd_mode -u < ${i}
 		printf "\033%%G" > ${i}
 	done
-	# the $CONSOLE check helps us avoid this when running scripts from cron
-	echo 'if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\033%%G"; fi' >>/etc/profile.d/locale.sh
+	echo 1 > /sys/module/vt/parameters/default_utf8
 	stat_done
-	[ -n "$KEYMAP" ] && status "Loading Keyboard Map: $KEYMAP" /bin/loadkeys -q -u $KEYMAP
+	[[ $KEYMAP ]] && status "Loading Keyboard Map: $KEYMAP" /bin/loadkeys -q -u $KEYMAP
 else
 	stat_busy "Setting Consoles to legacy mode"
 	# make non-UTF-8 consoles work on 2.6.24 and newer kernels
@@ -394,33 +365,25 @@ else
 		/usr/bin/kbd_mode -a < ${i}
 		printf "\033%%@" > ${i}
 	done
-	# the $CONSOLE check helps us avoid this when running scripts from cron
-	echo 'if [ "$CONSOLE" = "" -a "$TERM" = "linux" -a -t 1 ]; then printf "\033%%@"; fi' >>/etc/profile.d/locale.sh
+	echo 0 > /sys/module/vt/parameters/default_utf8
 	stat_done
-	[ -n "$KEYMAP" ] && status "Loading Keyboard Map: $KEYMAP" /bin/loadkeys -q $KEYMAP
+	[[ $KEYMAP ]] && status "Loading Keyboard Map: $KEYMAP" /bin/loadkeys -q $KEYMAP
 fi
 
 # Set console font if required
 set_consolefont
 
 # Adding persistent network/cdrom generated rules
-if [ -f "/dev/.udev/tmp-rules--70-persistent-cd.rules" ]; then
-	stat_busy "Adding persistent cdrom udev rules"
-	/bin/cat /dev/.udev/tmp-rules--70-persistent-cd.rules >> /etc/udev/rules.d/70-persistent-cd.rules
-	stat_done
-fi
-if [ -f "/dev/.udev/tmp-rules--70-persistent-net.rules" ]; then
-	stat_busy "Adding persistent network udev rules"
-	/bin/cat /dev/.udev/tmp-rules--70-persistent-net.rules >> /etc/udev/rules.d/70-persistent-net.rules
-	stat_done
-fi
+# When the rules are generated before /etc is mounted rw they are saved to /run,
+# we therefore need to copy this from /run to /etc. This functionality is going away one day.
+for f in cd net; do
+    [[ -f /run/udev/tmp-rules--70-persistent-$f.rules ]] || continue
+    stat_busy "Adding persistent $f udev rules"
+    /bin/cat "/run/udev/tmp-rules--70-persistent-$f.rules" >> "/etc/udev/rules.d/70-persistent-$f.rules"
+    stat_done
+done
 
 /bin/dmesg >| /var/log/dmesg.log
-
-# final hwclock setting needs to be done at this point
-if [ -n "$clock_pid" ]; then
-	wait $clock_pid
-fi
 
 run_hook sysinit_end
 
