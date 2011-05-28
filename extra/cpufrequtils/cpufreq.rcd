@@ -1,0 +1,60 @@
+#!/bin/bash
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+
+# source application-specific settings
+[ -f /etc/conf.d/cpufreq ] && . /etc/conf.d/cpufreq
+
+case "$1" in
+  start)
+    stat_busy "Setting cpufreq governing rules"
+
+	params=""
+	if [ -n "$governor" ]; then
+		mod="cpufreq_$governor"
+		params="-g $governor"
+		grep -qw "$governor" /sys/devices/system/cpu/cpu*/cpufreq/scaling_available_governors || modprobe -q $mod
+		if [ $? -eq 0 ]; then
+			if [ "$min_freq" != "" ]; then
+				params="$params -d $min_freq"
+			fi
+			if [ "$max_freq" != "" ]; then
+				params="$params -u $max_freq"
+			fi
+		else
+			stat_busy "    Cannot load governor module '$governor'"
+			stat_fail
+			exit
+		fi
+	fi
+
+	if [ "$params" != "" ]; then
+		CPUS=$(sed -ne 's/^processor.* \([0-9]\+\)$/\1/p' /proc/cpuinfo)
+		stat_append ", cpu"
+		for cpu in $CPUS; do
+			stat_append " $cpu"
+			cpufreq-set -c $cpu $params
+			if [ "$freq" != "" ]; then
+				cpufreq-set -c $cpu -f $freq
+			fi
+		done
+		stat_done
+	else
+		stat_busy "    Invalid configuration in /etc/conf.d/cpufreq"
+		stat_fail
+	fi
+	;;
+  stop)
+	# nothing to do
+	;;
+  restart)
+	$0 start
+	;;
+  set)
+	# TODO: make callable... "cpufreq set 800MHz"
+	;;
+  *)
+	echo "usage: $0 {start|stop|restart}"  
+esac
+exit 0
