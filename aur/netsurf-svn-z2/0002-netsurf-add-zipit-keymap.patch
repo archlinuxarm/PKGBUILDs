@@ -1,0 +1,193 @@
+Index: netsurf/framebuffer/fbtk/event.c
+===================================================================
+--- netsurf/framebuffer/fbtk/event.c	(revision 12174)
++++ netsurf/framebuffer/fbtk/event.c	(working copy)
+@@ -250,7 +250,7 @@
+ 	-1,  -1,  -1,  13,  -1,  -1,  -1,  -1,  -1,  -1, /*  10 -  19 */
+ 	-1,  -1,  -1,  -1,  -1,  -1,  -1,  27,  -1,  -1, /*  20 -  29 */
+ 	-1,  -1, ' ', '!', '"', '~', '$',  -1, '&', '@', /*  30 -  39 */
+-	'(', ')', '*', '+', '<', '_', '>', '?', ')', '!', /*  40 -  49 */
++	'(', ')', '*', '+', '(', '_', ')', '?', ')', '!', /*  40 -  49 */
+ 	'"', 243, '$', '%', '^', '&', '*', '(', ';', ':', /*  50 -  59 */
+ 	'<', '+', '>', '?', '@',  -1,  -1,  -1,  -1,  -1, /*  60 -  69 */
+ 	-1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1, /*  70 -  79 */
+@@ -261,16 +261,34 @@
+ 	'X', 'Y', 'Z',  -1,  -1,  -1,  -1,  -1,  -1,  -1, /* 120 - 129 */
+ };
+ 
+-
++static int alt_keymap[] = {
++	/* 0    1    2    3    4    5    6    7    8    9               */
++	-1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,   8,   9, /*   0 -   9 */
++	-1,  -1,  -1,  13,  -1,  -1,  -1,  -1,  -1,  -1, /*  10 -  19 */
++	-1,  -1,  -1,  -1,  -1,  -1,  -1,  27,  -1,  -1, /*  20 -  29 */
++	-1,  -1, ' ', '!', '"', '#', '$',  -1, '&','\'', /*  30 -  39 */
++	'(', ')', '*', '+', '<', '-', '>', '/', '0', '1', /*  40 -  49 */
++	'2', '3', '4', '5', '6', '7', '8', '9', ':', ';', /*  50 -  59 */
++	'<', '=', '>', '?', '@',  -1,  -1,  -1,  -1,  -1, /*  60 -  69 */
++	-1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1, /*  70 -  79 */
++	-1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1, /*  80 -  89 */
++	-1, '[','\\', ']', '~', '_', '`', '$', '=', '+', /*  90 -  99 */
++	'&', '3', '@', '"', '\'', '8', '[', ']', '-', '?', /* 100 - 109 */
++	'_', '9', '0', '1', '4', '#', '5', '7', '*', '2', /* 110 - 119 */
++	'/', '6', '!',  -1,  -1,  -1,  -1,  -1,  -1,  -1, /* 120 - 129 */
++};
+ /* exported function documented in fbtk.h */
+ int
+ fbtk_keycode_to_ucs4(int code, uint8_t mods)
+ {
+ 	int ucs4 = -1;
+ 
+-	if (mods) {
++	if (mods & FBTK_MT_SHIFT) {
+ 		if ((code >= 0) && (code < (int) NOF_ELEMENTS(sh_keymap)))
+ 			ucs4 = sh_keymap[code];
++	} else if (mods & FBTK_MT_ALT) {
++		if ((code >= 0) && (code < (int) NOF_ELEMENTS(sh_keymap)))
++			ucs4 = alt_keymap[code];
+ 	} else {
+ 		if ((code >= 0) && (code < (int) NOF_ELEMENTS(keymap)))
+ 			ucs4 = keymap[code];
+Index: netsurf/framebuffer/fbtk/text.c
+===================================================================
+--- netsurf/framebuffer/fbtk/text.c	(revision 12174)
++++ netsurf/framebuffer/fbtk/text.c	(working copy)
+@@ -248,11 +248,18 @@
+ 	if (cbi->event->type != NSFB_EVENT_KEY_DOWN) {
+ 		switch (value) {
+ 		case NSFB_KEY_RSHIFT:
+-			modifier &= ~1;
++		case NSFB_KEY_LSHIFT:
++			modifier &= ~(FBTK_MT_SHIFT);
+ 			break;
++		
++		case NSFB_KEY_LALT:
++		case NSFB_KEY_RALT:
++			modifier &= ~(FBTK_MT_ALT);
++			break;
+ 
+-		case NSFB_KEY_LSHIFT:
+-			modifier &= ~(1<<1);
++		case NSFB_KEY_LCTRL:
++		case NSFB_KEY_RCTRL:
++			modifier &= ~(FBTK_MT_CTRL);
+ 			break;
+ 
+ 		default:
+@@ -284,22 +291,38 @@
+ 		break;
+ 
+ 	case NSFB_KEY_RSHIFT:
+-		modifier |= 1;
++	case NSFB_KEY_LSHIFT:
++		modifier |= FBTK_MT_SHIFT;
+ 		break;
+ 
+-	case NSFB_KEY_LSHIFT:
+-		modifier |= 1<<1;
++	case NSFB_KEY_LALT:
++	case NSFB_KEY_RALT:
++		modifier |= FBTK_MT_ALT;
+ 		break;
+ 
+-	default:
+-		/* allow for new character and null */
+-		temp = realloc(widget->u.text.text, widget->u.text.idx + 2);
++	case NSFB_KEY_LCTRL:
++	case NSFB_KEY_RCTRL:
++		modifier |= FBTK_MT_CTRL;
++		break;
++	case NSFB_KEY_ESCAPE:
++		temp = realloc(widget->u.text.text, 1);
+ 		if (temp != NULL) {
+ 			widget->u.text.text = temp;
+-			widget->u.text.text[widget->u.text.idx] = fbtk_keycode_to_ucs4(value, modifier);
+-			widget->u.text.text[widget->u.text.idx + 1] = '\0';
+-			widget->u.text.idx++;
++			widget->u.text.text[0] = '\0';
++			widget->u.text.idx = 0;
+ 		}
++		break;
++	default:
++		if (value >= 32 && value < 127) {
++			/* allow for new character and null */
++			temp = realloc(widget->u.text.text, widget->u.text.idx + 2);
++			if (temp != NULL) {
++				widget->u.text.text = temp;
++				widget->u.text.text[widget->u.text.idx] = fbtk_keycode_to_ucs4(value, modifier);
++				widget->u.text.text[widget->u.text.idx + 1] = '\0';
++				widget->u.text.idx++;
++			}
++		}
+ 
+ 		break;
+ 	}
+Index: netsurf/framebuffer/Makefile.target
+===================================================================
+Index: netsurf/framebuffer/gui.c
+===================================================================
+--- netsurf/framebuffer/gui.c	(revision 12174)
++++ netsurf/framebuffer/gui.c	(working copy)
+@@ -712,13 +712,20 @@
+ 			break;
+ 
+ 		case NSFB_KEY_RSHIFT:
+-			modifier |= 1;
++		case NSFB_KEY_LSHIFT:
++			modifier |= FBTK_MT_SHIFT;
+ 			break;
+ 
+-		case NSFB_KEY_LSHIFT:
+-			modifier |= 1<<1;
++		case NSFB_KEY_LALT:
++		case NSFB_KEY_RALT:
++			modifier |= FBTK_MT_ALT;
+ 			break;
+ 
++		case NSFB_KEY_LCTRL:
++		case NSFB_KEY_RCTRL:
++			modifier |= FBTK_MT_CTRL;
++			break;
++
+ 		default:
+ 			ucs4 = fbtk_keycode_to_ucs4(cbi->event->value.keycode,
+ 						    modifier);
+@@ -731,11 +738,18 @@
+ 	case NSFB_EVENT_KEY_UP:
+ 		switch (cbi->event->value.keycode) {
+ 		case NSFB_KEY_RSHIFT:
+-			modifier &= ~1;
++		case NSFB_KEY_LSHIFT:
++			modifier &= ~(FBTK_MT_SHIFT);
+ 			break;
++		
++		case NSFB_KEY_LALT:
++		case NSFB_KEY_RALT:
++			modifier &= ~(FBTK_MT_ALT);
++			break;
+ 
+-		case NSFB_KEY_LSHIFT:
+-			modifier &= ~(1<<1);
++		case NSFB_KEY_LCTRL:
++		case NSFB_KEY_RCTRL:
++			modifier &= ~(FBTK_MT_CTRL);
+ 			break;
+ 
+ 		default:
+Index: netsurf/framebuffer/fbtk.h
+===================================================================
+--- netsurf/framebuffer/fbtk.h	(revision 12174)
++++ netsurf/framebuffer/fbtk.h	(working copy)
+@@ -181,6 +181,12 @@
+  */
+ bool fbtk_tgrab_pointer(fbtk_widget_t *widget);
+ 
++enum fbtk_mod_type {
++	FBTK_MT_SHIFT = 1,
++	FBTK_MT_ALT = 2,
++	FBTK_MT_CTRL = 4,
++};
++
+ /** Convert a framebuffer keycode to ucs4.
+  *
+  * Character mapping between keycode with modifier state and ucs-4.
