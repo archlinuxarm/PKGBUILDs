@@ -7,6 +7,49 @@ for s in wireless bonding bridges dhcpcd; do
 	[[ -f /etc/conf.d/$s ]] && . "/etc/conf.d/$s"
 done
 
+# helper function to determine if legacy network support is needed
+need_legacy() {
+	if [[ -z $interface ]]; then
+		return 0 # need legacy
+	fi
+
+	return 1 # enough present for iproute2 support
+}
+
+deprecated() {
+	printf "${C_FAIL}Warning:${C_CLEAR} This functionality is deprecated.\n"
+	printf "  Please refer to /etc/rc.conf on how to define a single wired\n"
+	printf "  connection, or use a utility such as netcfg.\n"
+}
+
+network_up() {
+	/usr/sbin/ip link set dev $interface up || return 1
+
+	if [[ $address ]]; then
+		for var in netmask gateway; do
+			if [[ -z ${!var} ]]; then
+				printf "${C_FAIL}Error: static address defined without $var!\n"
+				return 1
+			fi
+		done
+		/usr/sbin/ip addr add $address/$netmask dev $interface || return 1
+		/usr/sbin/ip route add default via $gateway || return 1
+	else
+		/sbin/dhcpcd $DHCPCD_ARGS $interface || return 1
+	fi
+}
+
+network_down() {
+	if [[ -f /var/run/dhcpcd-$interface.pid ]]; then
+		/sbin/dhcpcd -k $interface || return 1
+	else
+		/usr/sbin/ip route del default || return 1
+		/usr/sbin/ip addr flush dev $interface || return 1
+	fi
+
+	/usr/sbin/ip link set dev $interface down || return 1
+}
+
 ifup() {
 	local ifcfg=${!1}
 
@@ -179,29 +222,34 @@ bridge_down() {
 
 case "$1" in
 	start)
+		# deprecation check
+		need_legacy && deprecated
 		if ! ck_daemon network; then
 			echo "Network is already running.  Try 'network restart'"
 			exit
 		fi
-
 		stat_busy "Starting Network"
 		error=0
-		# bring up bridge interfaces
-		bridge_up
-		# bring up ethernet interfaces
-		for ifline in ${INTERFACES[@]}; do
-			if [[ $ifline = ${ifline#!} ]]; then
-				ifup $ifline || error=1
-			fi
-		done
-		# bring up bond interfaces
-		bond_up
-		# bring up routes
-		for rtline in "${ROUTES[@]}"; do
-			if [ "$rtline" = "${rtline#!}" ]; then
-				rtup $rtline || error=1
-			fi
-		done
+		if need_legacy; then
+			# bring up bridge interfaces
+			bridge_up
+			# bring up ethernet interfaces
+			for ifline in ${INTERFACES[@]}; do
+				if [[ $ifline = ${ifline#!} ]]; then
+					ifup $ifline || error=1
+				fi
+			done
+			# bring up bond interfaces
+			bond_up
+			# bring up routes
+			for rtline in "${ROUTES[@]}"; do
+				if [ "$rtline" = "${rtline#!}" ]; then
+					rtup $rtline || error=1
+				fi
+			done
+		else
+			network_up
+		fi
 		if ((error == 0)); then
 			add_daemon network
 			stat_done
@@ -210,11 +258,8 @@ case "$1" in
 		fi
 		;;
 	stop)
-		#if ck_daemon network; then
-		#	echo "Network is not running.  Try 'network start'"
-		#	exit
-		#fi
-
+		# deprecation check
+		need_legacy && deprecated
 		if [[ $NETWORK_PERSIST =~ yes|YES && $RUNLEVEL == [06] ]]; then
 			status "Skipping Network Shutdown" true
 			exit 0
@@ -223,20 +268,24 @@ case "$1" in
 		stat_busy "Stopping Network"
 		rm_daemon network
 		error=0
-		for rtline in "${ROUTES[@]}"; do
-			if [[ $rtline = ${rtline#!} ]]; then
-				rtdown $rtline || error=1
-			fi
-		done
-		# bring down bond interfaces
-		bond_down
-		for ifline in ${INTERFACES[@]}; do
-			if [[ $ifline = ${ifline#!} ]]; then
-				ifdown $ifline || error=1
-			fi
-		done
-		# bring down bridge interfaces
-		bridge_down
+		if need_legacy; then
+			for rtline in "${ROUTES[@]}"; do
+				if [[ $rtline = ${rtline#!} ]]; then
+					rtdown $rtline || error=1
+				fi
+			done
+			# bring down bond interfaces
+			bond_down
+			for ifline in ${INTERFACES[@]}; do
+				if [[ $ifline = ${ifline#!} ]]; then
+					ifdown $ifline || error=1
+				fi
+			done
+			# bring down bridge interfaces
+			bridge_down
+		else
+			network_down
+		fi
 		if ((error == 0)); then
 			stat_done
 		else
@@ -249,6 +298,8 @@ case "$1" in
 		$0 start
 		;;
 	ifup|ifdown|iflist|rtup|rtdown|rtlist)
+		# deprecation check
+		need_legacy && deprecated
 		$1 $2
 		;;
 	*)

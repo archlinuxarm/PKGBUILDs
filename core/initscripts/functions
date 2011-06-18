@@ -49,32 +49,41 @@ else
 	export LANG=C
 fi
 
-# colors:
-if [[ $USECOLOR = YES || $USECOLOR = yes ]]; then
-	C_MAIN="\033[1;37;40m"      # main text
-
-	C_OTHER="\033[1;34;40m"     # prefix & brackets
-	C_SEPARATOR="\033[1;30;40m" # separator
-
-	C_BUSY="\033[0;36;40m"      # busy
-	C_FAIL="\033[1;31;40m"      # failed
-	C_DONE="\033[1;37;40m"      # completed
-	C_BKGD="\033[1;35;40m"      # backgrounded
-
-	C_H1="\033[1;37;40m"        # highlight text 1
-	C_H2="\033[1;36;40m"        # highlight text 2
-
-	C_CLEAR="\033[1;0m"
+# set colors
+if [[ $USECOLOR =~ yes|YES ]]; then
+        if /bin/tput setaf 0 &>/dev/null; then
+                C_CLEAR="$(tput sgr0)"                      # clear text
+                C_MAIN="${C_CLEAR}$(/bin/tput bold)"        # main text
+                C_OTHER="${C_MAIN}$(/bin/tput setaf 4)"     # prefix & brackets
+                C_SEPARATOR="${C_MAIN}$(/bin/tput setaf 0)" # separator
+                C_BUSY="${C_CLEAR}$(/bin/tput setaf 6)"     # busy
+                C_FAIL="${C_MAIN}$(/bin/tput setaf 1)"      # failed
+                C_DONE="${C_MAIN}"                          # completed
+                C_BKGD="${C_MAIN}$(/bin/tput setaf 5)"      # backgrounded
+                C_H1="${C_MAIN}"                            # highlight text 1
+                C_H2="${C_MAIN}$(/bin/tput setaf 6)"        # highlight text 2
+        else
+                C_CLEAR="\e[m"          # clear text
+                C_MAIN="\e[;1m"         # main text
+                C_OTHER="\e[1;34m"      # prefix & brackets
+                C_SEPARATOR="\e[1;30m"  # separator
+                C_BUSY="\e[;36m"        # busy
+                C_FAIL="\e[1;31m"       # failed
+                C_DONE="${C_MAIN}"      # completed
+                C_BKGD="\e[1;35m"       # backgrounded
+                C_H1="${C_MAIN}"        # highlight text 1
+                C_H2="\e[1;36m"         # highlight text 2
+        fi
 fi
 
 if [[ -t 1 ]]; then
-	SAVE_POSITION="\033[s"
-	RESTORE_POSITION="\033[u"
-	DEL_TEXT="\033[$(($STAT_COL+4))G"
+        SAVE_POSITION="\e[s"
+        RESTORE_POSITION="\e[u"
+        DEL_TEXT="\e[$(($STAT_COL+4))G"
 else
-	SAVE_POSITION=""
-	RESTORE_POSITION=""
-	DEL_TEXT=""
+        SAVE_POSITION=""
+        RESTORE_POSITION=""
+        DEL_TEXT=""
 fi
 
 # prefixes:
@@ -222,6 +231,14 @@ ck_status() {
 	fi
 }
 
+# PIDs to be omitted by killall5
+declare -a omit_pids
+
+add_omit_pids() {
+        omit_pids+=( $@ )
+}
+
+
 kill_everything() {
 	# $1 = where we are being called from.
 	# This is used to determine which hooks to run.
@@ -241,12 +258,16 @@ kill_everything() {
 	# Terminate all processes
 	stat_busy "Sending SIGTERM To Processes"
 	run_hook "$1_prekillall"
-	/sbin/killall5 -15 &> /dev/null
+        local pid k5args=""
+        for pid in ${omit_pids[@]}; do
+                k5args+=" -o $pid"
+        done
+	/sbin/killall5 -15 $k5args &> /dev/null
 	/bin/sleep 5
 	stat_done
 
 	stat_busy "Sending SIGKILL To Processes"
-	/sbin/killall5 -9 &> /dev/null
+	/sbin/killall5 -9 $k5args &> /dev/null
 	/bin/sleep 1
 	stat_done
 
