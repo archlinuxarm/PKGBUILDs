@@ -42,20 +42,28 @@ case $1 in
 		done
 		;;
 	*)
+		# check min args count
+		(( $# < 2 )) && usage
 		action=$1
 		shift
 		# set same environment variables as init
 		runlevel=$(/sbin/runlevel)
-		ENV="PATH='/bin:/usr/bin:/sbin:/usr/sbin'"
-		ENV+=" PREVLEVEL='${runlevel:0:1}'"
-		ENV+=" RUNLEVEL='${runlevel:2:1}'"
-		ENV+=" CONSOLE='${CONSOLE:-/dev/console}'"
+		ENV=("PATH=/bin:/usr/bin:/sbin:/usr/sbin"
+			"PREVLEVEL=${runlevel%% *}"
+			"RUNLEVEL=${runlevel##* }"
+			"CONSOLE=${CONSOLE:-/dev/console}"
+			"TERM=$TERM")
+		cd /
 		for i; do
-			[[ -x "/etc/rc.d/$i" ]] && cd / && eval /usr/bin/env -i $ENV "/etc/rc.d/$i" "$action"
+			if [[ -x "/etc/rc.d/$i" ]]; then
+					/usr/bin/env -i "${ENV[@]}" "/etc/rc.d/$i" "$action"
+			else
+			    printf "${C_OTHER}:: ${C_FAIL}Error: ${C_DONE}Daemon script $i does not exist.\n"
+			fi
 			(( ret += !! $? ))  # clamp exit value to 0/1
 		done
 esac
 
 exit $ret
 
-# vim: set ts=2 sw=2 noet:
+# vim: set ts=2 sw=2 ft=sh noet:

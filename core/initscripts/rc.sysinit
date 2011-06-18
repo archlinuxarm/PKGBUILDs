@@ -13,7 +13,7 @@ printsep
 
 run_hook sysinit_start
 
-# export standard PATH (will be overridden later when /etc/profile is sourced, but is usefull for UDev)
+# export standard PATH (will be overridden later when /etc/profile is sourced, but is useful for UDev)
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # mount /proc, /sys, /run, /dev, /run/lock, /dev/pts, /dev/shm (the api filesystems)
@@ -29,9 +29,9 @@ if ! /bin/mountpoint -q /dev; then
 fi
 /bin/mkdir -p /run/lock /dev/{pts,shm}
 /bin/chmod 1777 /run/lock
-/bin/mountpoint -q /dev/pts || /bin/mount /dev/pts &> /dev/null \
+/bin/mountpoint -q /dev/pts || /bin/mount -n /dev/pts &> /dev/null \
 	|| /bin/mount -n -t devpts devpts /dev/pts -o mode=620,gid=5,nosuid,noexec
-/bin/mountpoint -q /dev/shm || /bin/mount /dev/shm &> /dev/null \
+/bin/mountpoint -q /dev/shm || /bin/mount -n /dev/shm &> /dev/null \
 	|| /bin/mount -n -t tmpfs shm /dev/shm -o mode=1777,nosuid,nodev
 
 # remount root ro to allow for fsck later on, we remount now to
@@ -90,8 +90,8 @@ run_hook sysinit_udevlaunched
 # Trigger udev uevents
 if /bin/pidof /sbin/udevd &>/dev/null; then
 	stat_busy "Triggering UDev uevents"
-	/sbin/udevadm trigger --action=add --type=subsystems
-	/sbin/udevadm trigger --action=add --type=devices
+		/sbin/udevadm trigger --action=add --type=subsystems
+		/sbin/udevadm trigger --action=add --type=devices
 	stat_done
 fi
 
@@ -112,7 +112,7 @@ run_hook sysinit_udevsettled
 
 # bring up the loopback interface
 [[ -d /sys/class/net/lo ]] && \
-    status "Bringing up loopback interface" /sbin/ifconfig lo 127.0.0.1 up
+    status "Bringing up loopback interface" /sbin/ip link set up dev lo
 
 # FakeRAID devices detection
 if [[ $USEDMRAID =~ yes|YES && -x /sbin/dmraid ]]; then
@@ -275,20 +275,21 @@ if [[ -x /sbin/fsck ]]; then
 	stat_done
 fi
 
-status "Mounting Local Filesystems" /bin/mount -n -o remount,rw /
+stat_busy "Mounting Local Filesystems"
+	/bin/mount -n -o remount,rw /
 
-# don't touch /etc/mtab if it is a symlink to /proc/self/mounts
-if [[ -L /etc/mtab ]]; then
-	:
-elif [[ -x /bin/findmnt && -e /proc/self/mountinfo ]]; then
-	/bin/findmnt -rnu -o SOURCE,TARGET,FSTYPE,OPTIONS >| /etc/mtab
-else
-	cat /proc/mounts >| /etc/mtab
-fi
+        # don't touch /etc/mtab if it is a symlink to /proc/self/mounts
+        if [[ -L /etc/mtab ]]; then
+                :
+        elif [[ -x /bin/findmnt && -e /proc/self/mountinfo ]]; then
+                /bin/findmnt -rnu -o SOURCE,TARGET,FSTYPE,OPTIONS >| /etc/mtab
+        else
+                cat /proc/mounts >| /etc/mtab
+        fi
 
-run_hook sysinit_premount
-# now mount all the local filesystems
-/bin/mount -a -t $NETFS -O no_netdev
+        run_hook sysinit_premount
+        # now mount all the local filesystems
+        /bin/mount -a -t $NETFS -O no_netdev
 stat_done
 
 # enable monitoring of lvm2 groups, now that the filesystems are mounted rw
@@ -312,62 +313,55 @@ if [[ -f $RANDOM_SEED ]]; then
 fi
 
 stat_busy "Removing Leftover Files"
-/bin/rm -rf /etc/{nologin,shutdownpid} /forcefsck &>/dev/null
-/bin/mountpoint -q /tmp || /bin/rm -rf /tmp/* /tmp/.* &>/dev/null
-[[ ! -L /var/lock ]] && /bin/rm -rf /var/lock/*
-[[ ! -L /var/run && -d /var/run ]] && /usr/bin/find /var/run/ \! -type d -delete
-[[ ! -L /var/run && ! -L /var/run/daemons ]] && /bin/rm -rf /var/run/daemons \
+	/bin/rm -rf /etc/{nologin,shutdownpid} /forcefsck &>/dev/null
+	/bin/rm -rf /tmp/* /tmp/.* &>/dev/null
+	[[ ! -L /var/lock ]] && /bin/rm -rf /var/lock/*
+	[[ ! -L /var/run && -d /var/run ]] && /usr/bin/find /var/run/ \! -type d -delete
+	[[ ! -L /var/run && ! -L /var/run/daemons ]] && /bin/rm -rf /var/run/daemons \
                                              && /bin/ln -s /run/daemons /var/run/daemons
-: >| /var/run/utmp
-/bin/chmod 0664 /var/run/utmp
-/bin/chown root:utmp /var/run/utmp
-# Keep {x,k,g}dm happy with xorg
-/bin/mkdir -m1777 /tmp/.{X11,ICE}-unix
+	: >| /var/run/utmp
+	/bin/chmod 0664 /var/run/utmp
+	/bin/chown root:utmp /var/run/utmp
+	# Keep {x,k,g}dm happy with xorg
+	/bin/mkdir -m1777 /tmp/.{X11,ICE}-unix
 stat_done
 
-#status "Updating Shared Library Links" /sbin/ldconfig
-
 if [[ $HOSTNAME ]]; then
-	status "Setting Hostname: $HOSTNAME" /bin/hostname "$HOSTNAME"
-fi
-
-# Set the NIS domain name, if necessary
-[[ -f /etc/conf.d/nisdomainname ]] && . /etc/conf.d/nisdomainname
-if [[ $NISDOMAINNAME ]]; then
-	status "Setting NIS Domain Name: $NISDOMAINNAME" \
-		/bin/nisdomainname "$NISDOMAINNAME"
+        stat_busy "Setting Hostname: $HOSTNAME"
+                echo $HOSTNAME > /proc/sys/kernel/hostname
+        stat_done
 fi
 
 stat_busy "Setting Locale: ${LOCALE:=en_US}"
-# Flush old locale settings
-: >| /etc/profile.d/locale.sh
-/bin/chmod 755 /etc/profile.d/locale.sh
-# Set user defined locale
-echo "export LANG=$LOCALE" >>/etc/profile.d/locale.sh
+        # Flush old locale settings
+        : >| /etc/profile.d/locale.sh
+        /bin/chmod 755 /etc/profile.d/locale.sh
+        # Set user defined locale
+        echo "export LANG=$LOCALE" >>/etc/profile.d/locale.sh
 stat_done
 
 if [[ ${LOCALE,,} =~ utf ]]; then
-	stat_busy "Setting Consoles to UTF-8 mode"
-	# UTF-8 consoles are default since 2.6.24 kernel
-	# this code is needed not only for older kernels,
-	# but also when user has set vt.default_utf8=0 but LOCALE is *.UTF-8.
-	for i in /dev/tty[0-9]*; do
-		/usr/bin/kbd_mode -u < ${i}
-		printf "\033%%G" > ${i}
-	done
-	echo 1 > /sys/module/vt/parameters/default_utf8
-	stat_done
-	[[ $KEYMAP ]] && status "Loading Keyboard Map: $KEYMAP" /bin/loadkeys -q -u $KEYMAP
+        stat_busy "Setting Consoles to UTF-8 mode"
+                # UTF-8 consoles are default since 2.6.24 kernel
+                # this code is needed not only for older kernels,
+                # but also when user has set vt.default_utf8=0 but LOCALE is *.UTF-8.
+                for i in /dev/tty[0-9]*; do
+                        /usr/bin/kbd_mode -u < ${i}
+                        printf "\e%%G" > ${i}
+                done
+                echo 1 > /sys/module/vt/parameters/default_utf8
+        stat_done
+        [[ $KEYMAP ]] && status "Loading Keyboard Map: $KEYMAP" /bin/loadkeys -q -u $KEYMAP
 else
-	stat_busy "Setting Consoles to legacy mode"
-	# make non-UTF-8 consoles work on 2.6.24 and newer kernels
-	for i in /dev/tty[0-9]*; do
-		/usr/bin/kbd_mode -a < ${i}
-		printf "\033%%@" > ${i}
-	done
-	echo 0 > /sys/module/vt/parameters/default_utf8
-	stat_done
-	[[ $KEYMAP ]] && status "Loading Keyboard Map: $KEYMAP" /bin/loadkeys -q $KEYMAP
+        stat_busy "Setting Consoles to legacy mode"
+                # make non-UTF-8 consoles work on 2.6.24 and newer kernels
+                for i in /dev/tty[0-9]*; do
+                        /usr/bin/kbd_mode -a < ${i}
+                        printf "\e%%@" > ${i}
+                done
+                echo 0 > /sys/module/vt/parameters/default_utf8
+        stat_done
+        [[ $KEYMAP ]] && status "Loading Keyboard Map: $KEYMAP" /bin/loadkeys -q $KEYMAP
 fi
 
 # Set console font if required
@@ -378,9 +372,8 @@ set_consolefont
 # we therefore need to copy this from /run to /etc. This functionality is going away one day.
 for f in cd net; do
     [[ -f /run/udev/tmp-rules--70-persistent-$f.rules ]] || continue
-    stat_busy "Adding persistent $f udev rules"
-    /bin/cat "/run/udev/tmp-rules--70-persistent-$f.rules" >> "/etc/udev/rules.d/70-persistent-$f.rules"
-    stat_done
+    status "Adding persistent $f udev rules"
+    	/bin/cat "/run/udev/tmp-rules--70-persistent-$f.rules" >> "/etc/udev/rules.d/70-persistent-$f.rules"
 done
 
 /bin/dmesg >| /var/log/dmesg.log
