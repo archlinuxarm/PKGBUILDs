@@ -1,41 +1,36 @@
-# $Id: PKGBUILD 121304 2011-04-30 13:23:58Z allan $
+# $Id: PKGBUILD 129471 2011-06-28 04:17:45Z allan $
 # Maintainer: Allan McRae <allan@archlinux.org>
 
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
 # NOTE: libtool requires rebuilt with each new gcc version
 
 # ALARM: Kevin Mihelich <kevin@plugapps.com>
-#  - removed ada, go languages
+#  - removed ada, go packages
 #  - removed gnat (ada stuff) from gcc packaging
-#  - removed ada and go packages
 #  - disabled make check, too much stress, kills plugs :(
-#  - specifid build host, disabled distcc and ccache, make -j1
+#  - specifid build host, disabled distcc and ccache, make -j1 (v5), -j2 (v7)
 
 plugrel=1
 noautobuild=1
 
 pkgname=('gcc' 'gcc-libs' 'gcc-fortran' 'gcc-objc')
-pkgver=4.6.0
-pkgrel=4
-_snapshot=4.6-20110429
+pkgver=4.6.1
+pkgrel=1
+#_snapshot=4.6-20110603
 _libstdcppmanver=20110201		# Note: check source directory name when updating this
 pkgdesc="The GNU Compiler Collection"
 arch=('i686' 'x86_64')
 license=('GPL' 'LGPL' 'FDL' 'custom')
 url="http://gcc.gnu.org"
-makedepends=('binutils>=2.21' 'libmpc' 'cloog' 'ppl' 'dejagnu')
+makedepends=('binutils>=2.21-9' 'libmpc' 'cloog' 'ppl')
+checkdepends=('dejagnu')
 options=('!libtool' '!emptydirs' '!distcc' '!ccache')
-source=(#ftp://gcc.gnu.org/pub/gcc/releases/gcc-${pkgver}/gcc-{core,g++,fortran,objc,go,testsuite}-${pkgver}.tar.bz2
-	ftp://gcc.gnu.org/pub/gcc/snapshots/${_snapshot}/gcc-{core,g++,fortran,objc,go,testsuite}-${_snapshot}.tar.bz2
+source=(ftp://gcc.gnu.org/pub/gcc/releases/gcc-${pkgver}/gcc-${pkgver}.tar.bz2
+	#ftp://gcc.gnu.org/pub/gcc/snapshots/${_snapshot}/gcc-${_snapshot}.tar.bz2
 	ftp://gcc.gnu.org/pub/gcc/libstdc++/doxygen/libstdc++-api.${_libstdcppmanver}.man.tar.bz2
 	gcc_pure64.patch
 	gcc-hash-style-both.patch)
-md5sums=('fa586a5634ae3b462c5fb2d55160b14f'
-         '2591b1fad977f7bd6136c9ac1298ef04'
-         '366f93c1867f35c8860b42965efde955'
-         '21779792ef7e0ed7abef611160b0099c'
-         'f66ef8597b99961eda7573df505ea354'
-         '3d89dd233ceb6a837d14ee6b940a43ed'
+md5sums=('c57a9170c677bf795bdc04ed796ca491'
          '1e9fd2eaf0ee47ea64e82c48998f1999'
          '4030ee1c08dd1e843c0225b772360e76'
          '4df25b623799b148a0703eaeec8fdf3f')
@@ -62,12 +57,12 @@ build() {
 
   echo ${pkgver} > gcc/BASE-VER
 
+  # ALARM: Specify build host types
+  [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=arm-unknown-linux-gnueabi --build=arm-unknown-linux-gnueabi" && MAKEFLAG="-j1"
+  [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabi --build=armv7l-unknown-linux-gnueabi --with-arch=armv7-a --with-float=hard --with-fpu=vfpv3-d16" && MAKEFLAG="-j2"
+
   cd ${srcdir}
   mkdir gcc-build && cd gcc-build
-
-  # ALARM: Specify build host types
-  [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=arm-unknown-linux-gnueabi --build=arm-unknown-linux-gnueabi"
-  [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabi --build=armv7l-unknown-linux-gnueabi"
 
   ${_basedir}/configure --prefix=/usr \
       --libdir=/usr/lib --libexecdir=/usr/lib \
@@ -83,7 +78,7 @@ build() {
       --enable-plugin --with-plugin-ld=ld.gold \
       --disable-multilib --disable-libstdcxx-pch \
       --enable-checking=release $CONFIGFLAG
-  make -j1
+  make $MAKEFLAG
 }
 
 check() {
@@ -91,7 +86,7 @@ check() {
 
   # increase stack size to prevent test failures
   # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=31827
-  ulimit -s 32768
+  #ulimit -s 32768
 
   # do not abort on error as some are "expected"
   #make -k check || true
@@ -102,7 +97,7 @@ package_gcc-libs()
 {
   pkgdesc="Runtime libraries shipped by GCC"
   groups=('base')
-  depends=('glibc>=2.11.1-2')
+  depends=('glibc>=2.14')
   install=gcc-libs.install
 
   cd gcc-build
@@ -131,7 +126,7 @@ package_gcc-libs()
 package_gcc()
 {
   pkgdesc="The GNU Compiler Collection - C and C++ frontends"
-  depends=('binutils>=2.20.1' 'libmpc>=0.8.1-2' 'cloog' 'ppl')
+  depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.21.1' 'libmpc' 'cloog' 'ppl')
   groups=('base-devel')
   install=gcc.install
 
@@ -139,17 +134,16 @@ package_gcc()
   
   # unfortunately it is much, much easier to install the lot and clean-up the mess...
   make -j1 DESTDIR=${pkgdir} install
-  rm -f $pkgdir/usr/bin/{{$CHOST-,}gfortran,{$CHOST-,}gccgo}
+  rm -f $pkgdir/usr/bin/{$CHOST-,}gfortran
   rm -f $pkgdir/usr/lib/*.so*
-  rm -f $pkgdir/usr/lib/lib{ffi,gfortran,go{,begin},objc,quadmath}.a
+  rm -f $pkgdir/usr/lib/lib{ffi,gfortran,objc,quadmath}.a
   rm -f $pkgdir/usr/lib/libgfortran.spec
-  rm -rf $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{finclude,include/objc}
+  rm -f -r $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{finclude,include/objc}
   rm -f $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/include/{ffi{,target}.h,quadmath{,_weak}.h}
-  rm -f $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{cc1obj{,plus},f951,go1,libgfortranbegin.a}
-  rm -rf $pkgdir/usr/lib/go
-  rm -f $pkgdir/usr/share/info/{gccgo,gfortran,libgomp,libquadmath}.info
+  rm -f $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{cc1obj{,plus},f951,libgfortranbegin.a}
+  rm -f $pkgdir/usr/share/info/{gfortran,libgomp,libquadmath}.info
   rm -f $pkgdir/usr/share/locale/{de,fr}/LC_MESSAGES/libstdc++.mo
-  rm -f $pkgdir/usr/share/man/man1/{gccgo,gfortran}.1
+  rm -f $pkgdir/usr/share/man/man1/gfortran.1
   rm -f $pkgdir/usr/share/man/man3/ffi*
 
   # many packages require these symlinks
