@@ -1,118 +1,105 @@
-# $Id: PKGBUILD 127561 2011-06-16 15:23:47Z andyrtr $
+# $Id: PKGBUILD 134098 2011-08-01 12:57:59Z ibiru $
 # Maintainer: Jan de Groot <jgc@archlinux.org>
 # Maintainer: Andreas Radke <andyrtr@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@plugapps.com>
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in plugs (intel, radeon, etc).
-#  - Package for the swrast driver for those brave enough.
+#  - Added package for the swrast driver.
 
 plugrel=1
 
 pkgbase=mesa
-pkgname=('mesa' 'libgl' 'libgles' 'libegl' 'swrast-dri')
+pkgname=('mesa' 'libgl' 'libglapi' 'libgles' 'libegl' 'swrast-dri') # 'llvm-dri')
 
 #_git=true
 _git=false
 
 if [ "${_git}" = "true" ]; then
-    pkgver=7.10.99.git20110612
+    #pkgver=7.10.99.git20110709
+    pkgver=7.11
   else
-    pkgver=7.10.3
+    pkgver=7.11
 fi
 pkgrel=1
 arch=('i686' 'x86_64')
-makedepends=('glproto>=1.4.12' 'pkgconfig' 'libdrm>=2.4.25' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.3' 'libxt>=1.1.1' 
-             'gcc-libs>=4.5' 'dri2proto=2.3' 'python2' 'libxml2' 'imake' 'llvm')
+makedepends=('glproto>=1.4.14' 'libdrm>=2.4.26' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.3' 'libxt>=1.1.1' 
+             'gcc-libs>=4.6.1' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'udev')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
-source=(LICENSE gnome-shell-shader-fix.patch nouveau-fix-header.patch)
+source=(LICENSE)
 if [ "${_git}" = "true" ]; then
-	# mesa git shot from mastee (will become 7.11) branch - see for state: http://cgit.freedesktop.org/mesa/mesa/commit/?id=9a00dd974699e369b1eb292103fbde8bc6adfb87
-	source=(${source[@]} 'ftp://ftp.archlinux.org/other/mesa/mesa-9a00dd974699e369b1eb292103fbde8bc6adfb87.tar.bz2')
+	# mesa git shot from 7.11 branch - see for state: http://cgit.freedesktop.org/mesa/mesa/commit/?h=7.11&id=1ae00c5960af83bea9545a18a1754bad83d5cbd0
+	#source=(${source[@]} 'ftp://ftp.archlinux.org/other/mesa/mesa-1ae00c5960af83bea9545a18a1754bad83d5cbd0.tar.bz2')
+	source=(${source[@]} "MesaLib-${pkgver}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-ef9f16f6322a89fb699fbe3da868b10f9acaef98.tar.bz2")
   else
-	source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.zip"
+	source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2"
 )
 fi
 md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
-         '3ec78f340f9387abd7a37b195e764cbf'
-         '67c87b77cc2236b52a3b47dad3fbb5d4'
-         '614d063ecd170940d9ae7b355d365d59')
+         'ff03aca82d0560009a076a87c888cf13')
 
 build() {
+    cd ${srcdir}/?esa-*
+
 if [ "${_git}" = "true" ]; then
-    cd ${srcdir}/mesa-*   
     autoreconf -vfi
-  else
-    cd "${srcdir}/Mesa-${pkgver}" 
-fi
-
-if [ "${_git}" != "true" ]; then
-#backport from master to fix gnome-shell shader
-#https://bugs.freedesktop.org/show_bug.cgi?id=35714
-patch -Np1 -i "${srcdir}/gnome-shell-shader-fix.patch"
-patch -Np1 -i "${srcdir}/nouveau-fix-header.patch"
-fi
-
-if [ "${_git}" = "true" ]; then
     ./autogen.sh --prefix=/usr \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-dri-drivers="swrast" \
-    --enable-gallium-swrast \
+    --with-gallium-drivers=r300,r600,nouveau,swrast \
+    --enable-gallium-llvm \
+    --enable-gallium-egl --enable-shared-glapi\
     --enable-glx-tls \
     --with-driver=dri \
     --enable-xcb \
-    --with-state-trackers=dri,glx,egl \
     --disable-glut \
     --enable-gles1 \
     --enable-gles2 \
     --enable-egl \
-    --enable-texture-float
+    --enable-texture-float \
+    --enable-shared-dricore
+    
     #    --enable-gallium-svga \
-
-    # --enable-texture-float (enable floating-point textures and renderbuffers) - http://www.phoronix.com/scan.php?page=news_item&px=OTMzMg
-    #The source code to implement ARB_texture_float extension is included and can be toggled on at compile time only by those who purchased a license from SGI, or are in a country where the patent does not apply.
-
-    #--enable-shared-dricore - http://bugs.gentoo.org/show_bug.cgi?id=357177
     
   else
+     autoreconf -vfi
     ./configure --prefix=/usr \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
     --with-dri-drivers="swrast" \
-    --enable-gallium-swrast \
+    --with-gallium-drivers=swrast \
+    --enable-gallium-llvm \
+    --enable-gallium-egl --enable-shared-glapi\
     --enable-glx-tls \
     --with-driver=dri \
     --enable-xcb \
-    --with-state-trackers=dri,glx \
     --disable-glut \
     --enable-gles1 \
     --enable-gles2 \
     --enable-egl \
-    --disable-gallium-egl
+    --enable-texture-float \
+    --enable-shared-dricore
 fi
 
   make
 }
 
 package_libgl() {
-  depends=('libdrm>=2.4.25' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1')
+  depends=('libdrm>=2.4.26' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libglapi' 'gcc-libs')
   pkgdesc="Mesa 3-D graphics library and DRI software rasterizer"
 
-if [ "${_git}" = "true" ]; then
-    cd ${srcdir}/mesa-*   
-  else
-    cd "${srcdir}/Mesa-${pkgver}" 
-fi
+  cd ${srcdir}/?esa-*
   install -m755 -d "${pkgdir}/usr/lib"
   install -m755 -d "${pkgdir}/usr/lib/xorg/modules/extensions"
 
   bin/minstall lib/libGL.so* "${pkgdir}/usr/lib/"
+  bin/minstall lib/libdricore.so* "${pkgdir}/usr/lib/"
+  bin/minstall lib/libglsl.so* "${pkgdir}/usr/lib/"
 
   cd src/mesa/drivers/dri
   #make -C swrast DESTDIR="${pkgdir}" install
 if [ "${_git}" = "true" ]; then
     make -C ${srcdir}/mesa-*/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
   else
-    make -C ${srcdir}/Mesa-${pkgver}/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
+    make -C ${srcdir}/Mesa-${pkgver/rc/-rc}/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
 fi
   ln -s swrastg_dri.so "${pkgdir}/usr/lib/xorg/modules/dri/swrast_dri.so"
   ln -s libglx.xorg "${pkgdir}/usr/lib/xorg/modules/extensions/libglx.so"
@@ -121,15 +108,23 @@ fi
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libgl/"
 }
 
+package_libglapi() {
+  depends=('glibc')
+  pkgdesc="free implementation of the GL API -- shared library. The Mesa GL API module is responsible for dispatching all the gl* functions"
+
+  cd ${srcdir}/?esa-*   
+  install -m755 -d "${pkgdir}/usr/lib"
+  bin/minstall lib/libglapi.so* "${pkgdir}/usr/lib/"
+
+  install -m755 -d "${pkgdir}/usr/share/licenses/libglapi"
+  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libglapi/"
+}
+
 package_libgles() {
-  depends=('libgl')
+  depends=('libglapi')
   pkgdesc="Mesa GLES libraries and headers"
 
-if [ "${_git}" = "true" ]; then
-    cd ${srcdir}/mesa-*   
-  else
-    cd "${srcdir}/Mesa-${pkgver}" 
-fi
+  cd ${srcdir}/?esa-*   
   install -m755 -d "${pkgdir}/usr/lib"
   install -m755 -d "${pkgdir}/usr/lib/pkgconfig"
   install -m755 -d "${pkgdir}/usr/include"
@@ -147,15 +142,11 @@ fi
 }
 
 package_libegl() {
-  depends=('libgl')
-  pkgdesc="Mesa libEGL libraries and headers"
+  depends=('libglapi' 'libdrm' 'libxext' 'libxfixes' 'udev')
+  pkgdesc="Mesa EGL libraries and headers"
 
-if [ "${_git}" = "true" ]; then
-    cd ${srcdir}/mesa-*  
-    make -C src/gallium/targets/egl DESTDIR="${pkgdir}" install
-  else
-    cd "${srcdir}/Mesa-${pkgver}" 
-fi
+  cd ${srcdir}/?esa-*   
+  make -C src/gallium/targets/egl-static DESTDIR="${pkgdir}" install
   install -m755 -d "${pkgdir}/usr/lib"
   install -m755 -d "${pkgdir}/usr/lib/pkgconfig"
   install -m755 -d "${pkgdir}/usr/include"
@@ -166,10 +157,8 @@ fi
   install -m755 -d "${pkgdir}/usr/share/doc"
   install -m755 -d "${pkgdir}/usr/share/doc/libegl"
   bin/minstall lib/libEGL.so* "${pkgdir}/usr/lib/"
-if [ "${_git}" != "true" ]; then
   install -m755 -d "${pkgdir}/usr/lib/egl"
   bin/minstall lib/egl/* "${pkgdir}/usr/lib/egl/"
-fi
   bin/minstall src/egl/main/egl.pc "${pkgdir}/usr/lib/pkgconfig/"
   bin/minstall include/EGL/* "${pkgdir}/usr/include/EGL/"
   bin/minstall include/KHR/khrplatform.h "${pkgdir}/usr/include/KHR/"
@@ -180,18 +169,15 @@ fi
 }
 
 package_mesa() {
-  depends=('libgl' 'libx11>=1.4.3' 'libxt>=1.1.1' 'gcc-libs>=4.5' 'dri2proto=2.3' 'libdrm>=2.4.25' 'glproto>=1.4.12')
+  depends=('libgl' 'libx11>=1.4.3' 'libxt>=1.1.1' 'gcc-libs>=4.6') # 'dri2proto>=2.6' 'glproto>=1.4.14')
   optdepends=('opengl-man-pages: for the OpenGL API man pages')
   pkgdesc="Mesa 3-D graphics libraries and include files"
 
-if [ "${_git}" = "true" ]; then
-    cd ${srcdir}/mesa-*   
-  else
-    cd "${srcdir}/Mesa-${pkgver}" 
-fi
+  cd ${srcdir}/?esa-*   
   make DESTDIR="${pkgdir}" install
 
   rm -f "${pkgdir}/usr/lib/libGL.so"*
+  rm -f "${pkgdir}/usr/lib/libglapi.so"*
   rm -f "${pkgdir}/usr/lib/libGLESv"*
   rm -f "${pkgdir}/usr/lib/libEGL"*
   rm -rf "${pkgdir}/usr/lib/egl"
@@ -211,12 +197,26 @@ package_swrast-dri() {
   depends=("libgl=${pkgver}")
   pkgdesc="Mesa DRI + Gallium3D swrast drivers"
 
-if [ "${_git}" = "true" ]; then
-    cd ${srcdir}/mesa-*/src/mesa/drivers/dri
-  else
-    cd "${srcdir}/Mesa-${pkgver}/src/mesa/drivers/dri"
-fi
-  make -C swrast DESTDIR="${pkgdir}" install
+  make -C ${srcdir}/?esa-*/src/mesa/drivers/dri/swrast DESTDIR="${pkgdir}" install
   # gallium3D driver for swrast
-  make -C ${srcdir}/Mesa-${pkgver}/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
+  make -C ${srcdir}/?esa-*/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
 }
+
+#package_llvm-dri() {
+#  depends=("libgl=${pkgver}")
+#  pkgdesc="Mesa common LLVM support"
+
+#if [ "${_git}" = "true" ]; then
+#    cd ${srcdir}/mesa-*/src/gallium
+#  else
+#    cd "${srcdir}/Mesa-${pkgver}/src/gallium"
+#fi
+
+  # gallium llvmpipe
+#if [ "${_git}" = "true" ]; then
+#    make -C drivers/llvmpipe DESTDIR="${pkgdir}" install
+#    #make -C targets/dri-swrast DESTDIR="${pkgdir}" install
+#  else
+#    make -C ${srcdir}/Mesa-${pkgver}/src/gallium/targets/dri-nouveau DESTDIR="${pkgdir}" install
+#fi
+#}
