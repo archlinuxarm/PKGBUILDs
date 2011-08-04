@@ -3,13 +3,13 @@
 # Maintainer: Andreas Radke <andyrtr@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@plugapps.com>
-#  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in plugs (intel, radeon, etc).
-#  - Added package for the swrast driver.
+#  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, etc).
+#  - Build v7h with -O1 instead of -O2
 
 plugrel=1
 
 pkgbase=mesa
-pkgname=('mesa' 'libgl' 'libglapi' 'libgles' 'libegl' 'swrast-dri') # 'llvm-dri')
+pkgname=('mesa' 'libgl' 'libglapi' 'libgles' 'libegl') # 'llvm-dri')
 
 #_git=true
 _git=false
@@ -40,6 +40,7 @@ md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
 
 build() {
     cd ${srcdir}/?esa-*
+    [ $CARCH == "armv7h" ] && CFLAGS="-march=armv7-a -O1 -pipe -mfloat-abi=hard -mfpu=vfpv3-d16" && CXXFLAGS="$CFLAGS"
 
 if [ "${_git}" = "true" ]; then
     autoreconf -vfi
@@ -191,15 +192,6 @@ package_mesa() {
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa/"
-}
-
-package_swrast-dri() {
-  depends=("libgl=${pkgver}")
-  pkgdesc="Mesa DRI + Gallium3D swrast drivers"
-
-  make -C ${srcdir}/?esa-*/src/mesa/drivers/dri/swrast DESTDIR="${pkgdir}" install
-  # gallium3D driver for swrast
-  make -C ${srcdir}/?esa-*/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
 }
 
 #package_llvm-dri() {
