@@ -1,0 +1,88 @@
+From 413e83bf504fe9a9a177f27742220cfcb184b034 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Juan=20Jes=C3=BAs=20Garc=C3=ADa=20de=20Soria=20Lucena?= <skandalfo@gmail.com>
+Date: Wed, 30 Mar 2011 16:46:35 -0400
+Subject: [PATCH] Make lirc_wpc8769l functional again
+
+Signed-off-by: Jarod Wilson <jarod@redhat.com>
+---
+ drivers/lirc_wpc8769l/lirc_wpc8769l.c |   28 +++++++++++++++++-----------
+ 1 files changed, 17 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/lirc_wpc8769l/lirc_wpc8769l.c b/drivers/lirc_wpc8769l/lirc_wpc8769l.c
+index f820d11..4d04063 100644
+--- a/drivers/lirc_wpc8769l/lirc_wpc8769l.c
++++ b/drivers/lirc_wpc8769l/lirc_wpc8769l.c
+@@ -816,10 +816,6 @@ static int set_use_inc(void *data)
+ 	/* Reset last timeout value. */
+ 	lastus = 0;
+ 
+-	/* Init the read buffer. */
+-	if (lirc_buffer_init(&rbuf, sizeof(lirc_t), RBUF_LEN) < 0)
+-		return -ENOMEM;
+-
+ 	/* Acquire the IRQ. */
+ 	result = request_irq(irq, irq_handler,
+ 			   IRQF_DISABLED | IRQF_SHARED,
+@@ -863,9 +859,6 @@ static void set_use_dec(void *data)
+ 	/* Free the IRQ. */
+ 	free_irq(irq, THIS_MODULE);
+ 	dprintk("Freed IRQ %d\n", irq);
+-
+-	/* Free the RX buffer. */
+-	lirc_buffer_free(&rbuf);
+ }
+ 
+ static struct lirc_driver driver = {
+@@ -1065,19 +1058,29 @@ static int __init lirc_wpc8769l_module_init(void)
+ 	/* Do load-time checks. */
+ 	wpc8769l_power_up_and_check_if_we_woke_us_up();
+ 
++	/* Init the read buffer. */
++	if (lirc_buffer_init(&rbuf, sizeof(lirc_t), RBUF_LEN) < 0) {
++		rc = -ENOMEM;
++		goto exit_platform_exit;
++	}
++
+ 	/* Configure the driver hooks. */
+ 	driver.features = LIRC_CAN_REC_MODE2;
++	driver.dev = &lirc_wpc8769l_platform_dev->dev;
+ 	driver.minor = lirc_register_driver(&driver);
+ 	if (driver.minor < 0) {
+ 		eprintk("lirc_register_driver failed!\n");
+ 		rc = -EIO;
+-		goto exit_platform_exit;
++		goto exit_release_buffer;
+ 	}
+ 
+ 	iprintk("Driver loaded.\n");
+ 
+ 	return 0; /* Everything OK. */
+ 
++exit_release_buffer:
++	lirc_buffer_free(&rbuf);
++
+ exit_platform_exit:
+ 	lirc_wpc8769l_platform_exit();
+ 
+@@ -1095,12 +1098,15 @@ module_init(lirc_wpc8769l_module_init);
+ 
+ static void __exit lirc_wpc8769l_module_exit(void)
+ {
+-	/* Unregister the platform driver and device. */
+-	lirc_wpc8769l_platform_exit();
+-
+ 	/* Unregister the LIRC driver. */
+ 	lirc_unregister_driver(driver.minor);
+ 
++	/* Free the buffer. */
++	lirc_buffer_free(&rbuf);
++
++	/* Unregister the platform driver and device. */
++	lirc_wpc8769l_platform_exit();
++
+ 	/* Release the second range. */
+ 	if (baseport2)
+ 		release_region(baseport2, WPC8769L_IO_REGION_2_SIZE);
+-- 
+1.7.0.1
+
