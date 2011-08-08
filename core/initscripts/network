@@ -9,7 +9,8 @@ done
 
 # helper function to determine if legacy network support is needed
 need_legacy() {
-	if [[ -z $interface ]]; then
+	# complain when `interface' is unset and `INTERFACES' has profiles enabled
+	if [[ -z $interface && ${INTERFACES[@]##!*} ]]; then
 		return 0 # need legacy
 	fi
 
@@ -17,37 +18,30 @@ need_legacy() {
 }
 
 deprecated() {
-	printf "${C_FAIL}Warning:${C_CLEAR} This functionality is deprecated.\n"
+	printf "${C_FAIL}Warning:${C_CLEAR} Your network settings are deprecated.\n"
 	printf "  Please refer to /etc/rc.conf on how to define a single wired\n"
 	printf "  connection, or use a utility such as netcfg.\n"
 }
 
 network_up() {
-	/usr/sbin/ip link set dev $interface up || return 1
+	ip link set dev $interface up || return 1
 
 	if [[ $address ]]; then
-		for var in netmask gateway; do
-			if [[ -z ${!var} ]]; then
-				printf "${C_FAIL}Error: static address defined without $var!\n"
-				return 1
-			fi
-		done
-		/usr/sbin/ip addr add $address/$netmask dev $interface || return 1
-		/usr/sbin/ip route add default via $gateway || return 1
+		ip addr add $address/${netmask:-24} broadcast ${broadcast:-+} dev $interface || return 1
+		[[ $gateway ]] && { ip route add default via $gateway || return 1; }
 	else
-		/sbin/dhcpcd $DHCPCD_ARGS $interface || return 1
+		dhcpcd $DHCPCD_ARGS $interface || return 1
 	fi
 }
 
 network_down() {
 	if [[ -f /var/run/dhcpcd-$interface.pid ]]; then
-		/sbin/dhcpcd -k $interface || return 1
+		dhcpcd -k $interface || return 1
 	else
-		/usr/sbin/ip route del default || return 1
-		/usr/sbin/ip addr flush dev $interface || return 1
+		ip addr flush dev $interface || return 1
 	fi
 
-	/usr/sbin/ip link set dev $interface down || return 1
+	ip link set dev $interface down || return 1
 }
 
 ifup() {
@@ -65,17 +59,17 @@ ifup() {
 		ifname=${ifcfg%% *}
 	fi
 
-	/sbin/ifconfig $ifname up
+	ifconfig $ifname up
 
 	wi_up $1 || return 1
 
 	if [[ $ifcfg = dhcp ]]; then
 		# remove the .pid file if it exists
-		/bin/rm -f /var/run/dhcpcd-${1}.pid >/dev/null 2>&1
-		/bin/rm -f /var/run/dhcpcd-${1}.cache >/dev/null 2>&1
-		/sbin/dhcpcd $DHCPCD_ARGS ${1}
+		rm -f /var/run/dhcpcd-${1}.pid >/dev/null 2>&1
+		rm -f /var/run/dhcpcd-${1}.cache >/dev/null 2>&1
+		dhcpcd $DHCPCD_ARGS ${1}
 	else
-		/sbin/ifconfig $ifcfg
+		ifconfig $ifcfg
 	fi
 }
 
@@ -84,7 +78,7 @@ wi_up() {
 
 	[[ ${!iwcfg} ]] || return 0
 
-	/usr/sbin/iwconfig ${!iwcfg}
+	iwconfig ${!iwcfg}
 	[[ $WIRELESS_TIMEOUT ]] || WIRELESS_TIMEOUT=2
 	sleep $WIRELESS_TIMEOUT
 
@@ -105,10 +99,10 @@ ifdown() {
 	fi
 
 	if [[ $ifcfg = dhcp && -f /var/run/dhcpcd-${1}.pid ]]; then
-		/sbin/dhcpcd -k ${1} >/dev/null 2>&1 
+		dhcpcd -k ${1} >/dev/null 2>&1
 	fi
 	# Always bring the interface itself down
-	/sbin/ifconfig ${1} down >/dev/null 2>&1
+	ifconfig ${1} down >/dev/null 2>&1
 }
 
 iflist() {
@@ -131,9 +125,9 @@ rtup() {
 	fi
 
 	if [[ $routecfg =~ :: ]]; then
-		/sbin/route -A inet6 add $routecfg
+		route -A inet6 add $routecfg
 	else
-		/sbin/route add $routecfg
+		route add $routecfg
 	fi
 }
 
@@ -146,9 +140,9 @@ rtdown() {
 	fi
 
 	if [[ $routecfg =~ :: ]]; then
-		/sbin/route -A inet6 del $routecfg
+		route -A inet6 del $routecfg
 	else
-		/sbin/route del $routecfg
+		route del $routecfg
 	fi
 }
 
@@ -168,7 +162,7 @@ bond_up() {
 		if [[ $ifline = ${ifline#!} ]]; then
 			bondcfg="bond_$ifline"
 			if [[ ${!bondcfg} ]]; then
-				/sbin/ifenslave $ifline ${!bondcfg} || error=1
+				ifenslave $ifline ${!bondcfg} || error=1
 			fi
 		fi
 	done
@@ -178,7 +172,7 @@ bond_down() {
 	for ifline in ${BOND_INTERFACES[@]}; do
 		if [[ $ifline = ${ifline#!} ]]; then
 			bondcfg="bond_$ifline"
-			/sbin/ifenslave -d $ifline ${!bondcfg} || error=1
+			ifenslave -d $ifline ${!bondcfg} || error=1
 		fi
 	done
 }
@@ -187,11 +181,11 @@ bridge_up() {
 	for br in ${BRIDGE_INTERFACES[@]}; do
 		if [[ $br = ${br#!} ]]; then
 			# if the bridge already exists, remove it
-			if [[ $(/sbin/ifconfig $br 2>/dev/null) ]]; then
-				/sbin/ifconfig $br down
-				/usr/sbin/brctl delbr $br
+			if [[ $(ifconfig $br 2>/dev/null) ]]; then
+				ifconfig $br down
+				brctl delbr $br
 			fi
-			/usr/sbin/brctl addbr $br
+			brctl addbr $br
 			brifs="bridge_$br"
 			for brif in ${!brifs}; do
 				if [[ $brif = ${brif#!} ]]; then
@@ -199,12 +193,12 @@ bridge_up() {
 						if [[ $brif = $ifline && $ifline = ${ifline#!} ]]; then
 							ifup $ifline
 							bondcfg="bond_$ifline"
-							/sbin/ifenslave $ifline ${!bondcfg} || error=1
+							ifenslave $ifline ${!bondcfg} || error=1
 							unset bond_$ifline
 						fi
 					done
 
-					/usr/sbin/brctl addif $br $brif || error=1
+					brctl addif $br $brif || error=1
 				fi
 			done
 		fi
@@ -214,7 +208,7 @@ bridge_up() {
 bridge_down() {
 	for br in ${BRIDGE_INTERFACES[@]}; do
 		if [[ $br = ${br#!} ]]; then
-			/usr/sbin/brctl delbr $br
+			brctl delbr $br
 		fi
 	done
 }
@@ -294,12 +288,12 @@ case "$1" in
 		;;
 	restart)
 		$0 stop
-		/bin/sleep 2
+		sleep 2
 		$0 start
 		;;
 	ifup|ifdown|iflist|rtup|rtdown|rtlist)
 		# deprecation check
-		need_legacy && deprecated
+		deprecated
 		$1 $2
 		;;
 	*)
