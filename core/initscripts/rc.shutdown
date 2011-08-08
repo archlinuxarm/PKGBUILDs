@@ -6,88 +6,84 @@
 . /etc/rc.conf
 . /etc/rc.d/functions
 
-run_hook shutdown_start
-
 # avoid staircase effect
-/bin/stty onlcr
+stty onlcr
 
 echo " "
 printhl "Initiating Shutdown..."
 echo " "
 
+run_hook shutdown_start
+
 [[ -x /etc/rc.local.shutdown ]] && /etc/rc.local.shutdown
 
-kill_everything shutdown
+stop_all_daemons
+
+run_hook shutdown_prekillall
+
+kill_all
+
+run_hook shutdown_postkillall
 
 stat_busy "Saving Random Seed"
-RANDOM_SEED=/var/lib/misc/random-seed
-[[ -d ${RANDOM_SEED%/*} ]] || mkdir -p ${RANDOM_SEED%/*}
-: > $RANDOM_SEED
-/bin/chmod 0600 $RANDOM_SEED
-POOL_FILE=/proc/sys/kernel/random/poolsize
-if [[ -r $POOL_FILE ]]; then
-	read POOL_SIZE <$POOL_FILE
-else
-	POOL_SIZE=512
-fi
-/bin/dd if=/dev/urandom of=$RANDOM_SEED count=1 bs=$POOL_SIZE &> /dev/null
+	RANDOM_SEED=/var/lib/misc/random-seed
+	install -TDm 0600 <(:) $RANDOM_SEED
+	POOL_FILE=/proc/sys/kernel/random/poolsize
+	if [[ -r $POOL_FILE ]]; then
+		read POOL_SIZE < $POOL_FILE
+	else
+		POOL_SIZE=512
+	fi
+	dd if=/dev/urandom of=$RANDOM_SEED count=1 bs=$POOL_SIZE &>/dev/null
 stat_done
 
-if [[ $TIMEZONE && -e /usr/share/zoneinfo/$TIMEZONE ]]; then
-	/bin/rm -f /etc/localtime
+[[ $TIMEZONE ]] &&
 	status "Saving Time Zone" \
-		/bin/cp "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
-fi
+		cp --remove-destination "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
 
 # Write to wtmp file before unmounting
-/sbin/halt -w
+halt -w
 
-status "Deactivating Swap" /sbin/swapoff -a
+status "Deactivating Swap" swapoff -a
 
 # stop monitoring of lvm2 groups before unmounting filesystems
-if [[ $USELVM =~ yes|YES && -x /sbin/lvm && -d /sys/block ]]; then
+[[ $USELVM = [Yy][Ee][Ss] && -x $(type -P lvm) && -d /sys/block ]] &&
 	status "Deactivating monitoring of LVM2 groups" \
-		/sbin/vgchange --monitor n >/dev/null 2>&1
-fi
+		vgchange --monitor n &>/dev/null
 
-stat_busy "Unmounting Filesystems"
-if /bin/grep -q devtmpfs /proc/filesystems &>/dev/null; then
-	/bin/umount -a -r -t nosysfs,noproc,nodevtmpfs,nodevpts -O no_netdev
-else
-	# if we don't have devtmpfs support, /dev is mounted as tmpfs, so don't unmount it
-	/bin/umount -a -r -t notmpfs,nosysfs,noproc,nodevpts -O no_netdev
-fi
-stat_done
+# if we don't have devtmpfs support, /dev is mounted as tmpfs, so don't unmount it
+status "Unmounting Filesystems" \
+	umount -a -r -t nodevtmpfs,notmpfs,nosysfs,noproc,nodevpts -O no_netdev
+
+run_hook shutdown_postumount
 
 # Kill non-root encrypted partition mappings
-if [[ -f /etc/crypttab && -n $CS ]] && /bin/grep -q ^[^#] /etc/crypttab; then
+if [[ -f /etc/crypttab && $CS ]] && grep -q ^[^#] /etc/crypttab; then
 	stat_busy "Deactivating encrypted volumes:"
-	# Maybe someone has LVM on an encrypted block device
-	# executing an extra vgchange is errorless
-	if [[ $USELVM =~ yes|YES ]]; then
-		/sbin/vgchange --sysinit -a n >/dev/null 2>&1
-	fi
-	do_lock() {
-		stat_append "${1}.."
-		if $CS remove "$1" >/dev/null 2>&1; then
-			stat_append "ok "
-		else
-			stat_append "failed "
-		fi
-	}
-	read_crypttab do_lock
+		# Maybe someone has LVM on an encrypted block device
+		# executing an extra vgchange is errorless
+		[[ $USELVM = [Yy][Ee][Ss] ]] && vgchange --sysinit -a n &>/dev/null
+		do_lock() {
+			stat_append "${1}.."
+			if $CS remove "$1" &>/dev/null; then
+				stat_append "ok "
+			else
+				stat_append "failed "
+			fi
+		}
+		read_crypttab do_lock
 	stat_done
 fi
 
-if [[ $USELVM =~ yes|YES && -x /sbin/lvm && -d /sys/block ]]; then
-	status "Deactivating LVM2 groups" /sbin/vgchange --sysinit -a n >/dev/null 2>&1
-fi
+[[ $USELVM = [Yy][Ee][Ss] && -x $(type -P lvm) && -d /sys/block ]] &&
+	status "Deactivating LVM2 groups" vgchange --sysinit -a n &>/dev/null
 
-status "Remounting Root Filesystem Read-only" /bin/mount -n -o remount,ro /
+status "Remounting Root Filesystem Read-only" \
+	mount -n -o remount,ro /
 
 run_hook shutdown_poweroff
 
-# PlugApps: Turn LEDs off
+# ALARM: Turn LEDs off
 
 /usr/bin/find /sys/ -path *led* -name *trigger* -exec sh -c '/bin/echo none > {}' \;
 
@@ -95,12 +91,12 @@ run_hook shutdown_poweroff
 printsep
 if [[ $RUNLEVEL = 0 ]]; then
 	printhl "${C_H2}POWER OFF"
-	/sbin/poweroff -d -f -h -i
+	poweroff -d -f -h -i
 else
 	printhl "${C_H2}REBOOTING"
 	# if kexec is installed and a kernel is loaded, use it
-	[[ -x /sbin/kexec ]] && /sbin/kexec -e > /dev/null 2>&1
-	/sbin/reboot -d -f -i
+	[[ -x $(type -P kexec) ]] && kexec -e &>/dev/null
+	reboot -d -f -i
 fi
 
 # End of file
