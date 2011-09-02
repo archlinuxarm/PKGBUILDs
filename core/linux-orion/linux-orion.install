@@ -1,7 +1,10 @@
-KERNEL_NAME=-orion
-KERNEL_VERSION=2.6.39-orion
+# arg 1:  the new package version
+# arg 2:  the old package version
 
-post_install() {
+KERNEL_NAME=-orion
+KERNEL_VERSION=3.0-orion
+
+patch_kernel() {
   if [ -e "etc/machid.bin" ]; then
     echo "Saved machine type found. Patching Kernel"
     cp etc/machid.bin tmp/machid
@@ -70,19 +73,28 @@ post_install() {
   echo "Generating uImage"
   mkimage -A arm -O linux -T kernel -C none -a 0x00008000 -e 0x00008000 -d tmp/machid boot/uImage
   rm tmp/machid
+}
 
-  # Just making sure kernel modules still work after we moved to .gz
-  /sbin/depmod ${KERNEL_VERSION}
+post_install () {
+  patch_kernel
+
+  # updating module dependencies
+  echo ">>> Updating module dependencies. Please wait ..."
+  depmod ${KERNEL_VERSION}
 }
 
 post_upgrade() {
-  post_install
-}
+  patch_kernel
 
-post_remove() {
-  KERNEL_VERSION=2.6.39-orion
-}
+  if grep "^[^#]*[[:space:]]/boot" etc/fstab 2>&1 >/dev/null; then
+    if ! grep "[[:space:]]/boot" etc/mtab 2>&1 >/dev/null; then
+      echo "WARNING: /boot appears to be a seperate partition but is not mounted"
+      echo "         This is most likely not what you want.  Please mount your /boot"
+      echo "         partition and reinstall the kernel unless you are sure this is OK"
+    fi
+  fi
 
-op=$1
-shift
-$op $*
+  # updating module dependencies
+  echo ">>> Updating module dependencies. Please wait ..."
+  depmod ${KERNEL_VERSION}
+}
