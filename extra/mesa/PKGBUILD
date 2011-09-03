@@ -20,7 +20,7 @@ if [ "${_git}" = "true" ]; then
   else
     pkgver=7.11
 fi
-pkgrel=1
+pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('glproto>=1.4.14' 'libdrm>=2.4.26' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.3' 'libxt>=1.1.1' 
              'gcc-libs>=4.6.1' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'udev')
@@ -170,7 +170,7 @@ package_libegl() {
 }
 
 package_mesa() {
-  depends=('libgl' 'libx11>=1.4.3' 'libxt>=1.1.1' 'gcc-libs>=4.6') # 'dri2proto>=2.6' 'glproto>=1.4.14')
+  depends=('libgl' 'libx11>=1.4.3' 'libxt>=1.1.1' 'gcc-libs>=4.6' 'dri2proto>=2.6' 'glproto>=1.4.14') #dri2proto + glproto needed for gl.pc
   optdepends=('opengl-man-pages: for the OpenGL API man pages')
   pkgdesc="Mesa 3-D graphics libraries and include files"
 
