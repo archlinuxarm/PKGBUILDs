@@ -1,16 +1,16 @@
-# Maintainer: francois <francois.archlinux.org>
+# Maintainer: Rémy Oudompheng <remy@archlinux.org>
+# Contributor: francois <francois.archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@plugapps.com>
 #  - Removed clisp makedepend, removed xindy from build and packaging (only thing that used clisp)
-#  - Added arm.patch to fix broken ARM assembly, will be fixed in texlive 1.5.1
 #  - Use -fPIC with armv7
 
 plugrel=1
 
 pkgname=texlive-bin
-pkgver=2010.1
-_luatex_ver=0.66.0
-pkgrel=8
+pkgver=2011.1
+_luatex_ver=0.70.1
+pkgrel=1
 pkgdesc="TeX Live binaries"
 license=('GPL')
 arch=('i686' 'x86_64')
@@ -21,15 +21,15 @@ provides=('lcdf-typetools' 'kpathsea' 'pdfjam')
 conflicts=('pdfjam')
 options=('!libtool')
 url='http://tug.org/texlive/'
+install="texlive.install"
 source=('texmf.cnf'
         'fix-fontforge-encoding.patch'
         '09-texlive-fonts.conf'
-        'dvipng-fix-options.patch'
-        'http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-source-20100926.tar.xz'
-        'http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-texmf-20101105.tar.xz'
-        #"http://foundry.supelec.fr/gf/download/frsrelease/387/1715/luatex-beta-${_luatex_ver}-source.tar.bz2"
-        "ftp://ftp.archlinux.org/other/texlive/luatex-svn4193.tar.xz"
-        "arm.patch")
+        'archlinux-build.patch'
+        'http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-source-20110724.tar.xz'
+        'http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-texmf-20110724.tar.xz'
+        "http://foundry.supelec.fr/gf/download/frsrelease/392/1730/luatex-beta-${_luatex_ver}.tar.bz2"
+)
 backup=(etc/texmf/web2c/texmf.cnf \
   etc/texmf/chktex/chktexrc \
 	etc/texmf/web2c/mktex.cnf \
@@ -44,14 +44,13 @@ backup=(etc/texmf/web2c/texmf.cnf \
 	etc/texmf/dvipdfm/config/config \
 	etc/texmf/xdvi/XDvi)
 
-md5sums=('626f900fb59f036d6fea95f08c74b00b'
+md5sums=('ff30d6813babd2e41c414365eea9c147'
          'bfb9716aa00c86c08cd31e5b32edeb98'
          '393a4bf67adc7ca5df2b386759d1a637'
-         '60e405158f53519348d9783e8d420670'
-         '0b2c3a4a1b1e4befb90d7fbb5f08a6e9'
-         '7ae1400dafdb079dcd08d233de83ec44'
-         '523802a23bc174374403415d9cc87946'
-         '86c78e48013492e6b1c41373741d19fd')
+         '94ef5571a54262790ab64d6d044dd10c'
+         '58e8ab64188eaf15897b7acf472dca9f'
+         '9f7ae1aa24afd9e34289ac10a8f9e87b'
+         'c9348d4381170204b1a1b0440d8b6918')
 
 build() {
    if [ "${CARCH}" = "armv7h" ]; then
@@ -60,11 +59,10 @@ build() {
    fi
 
    cd $srcdir
-   patch -p0 -i arm.patch
    # Building LuaTeX
-   #cd luatex-beta-${_luatex_ver}
-   cd luatex
+   cd luatex-beta-${_luatex_ver}
    patch -p0 -i ../fix-fontforge-encoding.patch
+  (cd source && ./texk/web2c/luatexdir/getluatexsvnversion.sh)
    mkdir build
    cd build
    ../source/configure --prefix=/usr -C \
@@ -102,14 +100,14 @@ build() {
    cd "$srcdir"
    # this patch removes spurious error message with locale "xx_YY.utf8"
    patch -p0 -i fix-fontforge-encoding.patch
-   ## fix dvipng (bug #20157)
-   pushd "source/texk/dvipng/dvipng-1.13"
-   patch -p0 -i "$srcdir/dvipng-fix-options.patch"
-   popd
-
    #############################################################
    ### configure
    cd source
+   patch -Np1 -i ${srcdir}/archlinux-build.patch
+   for _dir in texk/tetex texk/texlive texk/tex4htk \
+       utils/ps2eps utils/chktex utils/psutils; do
+       (cd ${_dir} && automake) || true
+   done
    ## prevent compiling Xdvi with libXp
    sed -i~ 's|-lXp ||' texk/xdvik/configure
    test ! -d Work && mkdir Work
@@ -117,9 +115,9 @@ build() {
    echo "--> Initial configuration..."
    # we use temporary prefix to avoid messing the existing $pkgdir/usr/share/texmf tree
    ../configure --prefix=/usr -C \
-     --datarootdir=$srcdir/inst/usr/share \
-     --datadir=$srcdir/inst/usr/share \
-     --mandir=$srcdir/inst/usr/share/man \
+     --datarootdir=/usr/share \
+     --datadir=/usr/share \
+     --mandir=/usr/share/man \
      --disable-native-texlive-build \
      --with-banner-add="/Arch Linux" \
      --disable-multiplatform \
@@ -129,10 +127,12 @@ build() {
      --disable-bibtexu \
      --disable-xz \
      --with-system-zlib \
+     --with-system-zziplib \
      --with-system-pnglib \
      --with-system-ncurses \
      --with-system-t1lib \
      --with-system-gd \
+     --with-system-poppler \
      --with-system-xpdf \
      --with-system-freetype2 \
      --with-system-graphite \
@@ -142,8 +142,6 @@ build() {
      --disable-dump-share \
      --disable-aleph \
      --disable-luatex
-#     --with-clisp-runtime=default \
-#     --enable-xindy --disable-xindy-rules --disable-xindy-docs
    #############################################################
    ### make
    echo "-------------------------------------------------------"
@@ -224,45 +222,23 @@ package() {
    #############################################################
    ### install
    cd source
-   # fixes for xindy
-#   find utils/xindy -name Makefile -exec sed -i -e "s|^prefix =.\+$|prefix = $pkgdir/usr|" -e "s|^mandir =.\+$|mandir = \${prefix}/share/man|" -e "s|^datadir =.\+$|datadir = \${datarootdir}/texmf|" -e "s|^docdir =.\+$|docdir = \${datadir}/doc/xindy|" '{}' \;
 
    echo "-------------------------------------------------------"
    echo "--> Proceeding with make install ..."
    echo "-------------------------------------------------------"
    cd Work
-   make prefix=$srcdir/inst/usr texmf=$pkgdir/usr/share/texmf install
-
-   # restore install location of bin/lib/include
-   mv -f $srcdir/inst/usr/bin $pkgdir/usr/bin
-   mv -f $srcdir/inst/usr/lib $pkgdir/usr/lib
-   mv -f $srcdir/inst/usr/include $pkgdir/usr/include
-   # add symlinks to manpages since they are not included in the original texmf tree
-   for m in $srcdir/inst/usr/share/man/man1/*; do
-     bm=$(basename $m)
-     test -f $pkgdir/usr/share/man/man1/$bm || mv -f $m $pkgdir/usr/share/man/man1/
-   done
+   make DESTDIR=${pkgdir} texmf=$pkgdir/usr/share/texmf install
+   rm -rf ${pkgdir}/usr/{texmf,texmf-dist}
 
    ## install luatex binary
-   #install -m755 $srcdir/luatex-beta-${_luatex_ver}/build/texk/web2c/luatex $pkgdir/usr/bin/
-   install -m755 $srcdir/luatex/build/texk/web2c/luatex $pkgdir/usr/bin/
+   install -m755 $srcdir/luatex-beta-${_luatex_ver}/build/texk/web2c/luatex $pkgdir/usr/bin/
    cd $pkgdir/usr/bin
    /bin/ln -s luatex texlua
    /bin/ln -s luatex texluac
 
-   # symlinks in $pkgdir/usr/bin are incorrect
-   echo "--> Fixing symlinks for scripts ..."
-   for f in $pkgdir/usr/bin/* ; do
-	   if [ -L $f ]; then
-		   target=`ls -l "$f" | sed 's/^.\+ -> //'`
-		   if [[ "$target" == ..* ]]; then
-			   newtarget=`echo $target | sed -e 's#../#/usr/share/#'`
-			   rm -f $f
-			   ln -s $newtarget $f
-			   test -f $pkgdir/$newtarget && chmod a+x $pkgdir/$newtarget
-		   fi
-	   fi
-   done
+   ## install Perl libraries
+   mkdir -p $pkgdir/usr/share/tlpkg/TeXLive
+   install -m644 ${srcdir}/source/utils/biber/TeXLive/*.pm $pkgdir/usr/share/tlpkg/TeXLive
 
    # create symlinks for formats 
    echo "--> Create symlinks for TeX formats ..."
@@ -315,7 +291,9 @@ purifyeps
 repstopdf
 rpdfcrop
 showglyphs
+sty2dtx
 texcount
+texdef
 texdiff
 texdirflatten
 texloganalyser
@@ -336,16 +314,18 @@ ps4pdf \
 splitindex \
 svn-multi \
 vpe"
+   _music_scripts="musixtex musixflx"
    _pictures_scripts="cachepic epspdf epspdftk fig4latex mathspic"
    _pstricks_scripts="pst2pdf"
    _science_scripts="ulqda"
    for s in \
         ${_bibtexextra_scripts} \
-        ${_core_scripts} \
+        ${_core_scripts}       \
         ${_htmlxml_scripts}    \
         ${_langextra_scripts}  \
         ${_langgreek_scripts}  \
         ${_latexextra_scripts} \
+        ${_music_scripts}      \
         ${_pictures_scripts}   \
         ${_pstricks_scripts}   \
         ${_science_scripts}    \
