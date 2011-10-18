@@ -1,0 +1,80 @@
+# Contributor: Johannes Dewender  arch at JonnyJD dot net
+
+plugrel=1
+
+pkgname=lio-utils
+pkgver=4.1
+pkgrel=3
+epoch=
+pkgdesc="a simple low-level configuration tool set for LIO 3 (Target 3 and iSCSI 3)"
+arch=('any')
+url="http://linux-iscsi.org/wiki/Lio-utils"
+license=('AGPL3')
+depends=('python2')
+makedepends=()
+optdepends=(net-snmp)
+provides=()
+conflicts=()
+replaces=()
+backup=()
+options=()
+install=
+source=()
+md5sums=()
+
+
+build() {
+  if [ ! -e "$pkgname-$pkgver.tgz" ]; then
+    wget "http://www.risingtidesystems.com/git/?p=$pkgname.git;a=snapshot;h=e6d881a98210c99468b82daa5f8926bb079e4790;sf=tgz" -O "$pkgname-$pkgver.tgz"
+  fi
+  bsdtar -xf "$srcdir/$pkgname-$pkgver.tgz"
+  cd "$srcdir/$pkgname/"
+  make SNMP_FEATURE=1
+
+}
+
+package() {
+  cd "$srcdir/$pkgname/"
+
+  #make DESTDIR="$pkgdir/" initd_install)
+  install -d $pkgdir/etc/rc.d
+  install -m 0755 scripts/rc.target $pkgdir/etc/rc.d/target
+
+  make DESTDIR="$pkgdir/" conf_install
+
+
+  SITE_PACKAGES=`python2 ./get-py-modules-path.py`
+  install -d "$pkgdir/usr/sbin"
+
+  cd "$srcdir/$pkgname/tcm-py"
+  python2 setup.py install --skip-build --root="$pkgdir/" --optimize=1
+  for part in {node,dump,loop,fabric}; do
+    chmod a+x "$pkgdir$SITE_PACKAGES/tcm_$part.py"
+    sed -i '1s/python/python2/' "$pkgdir$SITE_PACKAGES/tcm_$part.py"
+    if [ ! -f "$pkgdir/usr/sbin/tcm_$part"  ]; then
+      ln -s "$SITE_PACKAGES/tcm_$part.py" "$pkgdir/usr/sbin/tcm_$part"
+    fi
+  done
+
+  cd "$srcdir/$pkgname/lio-py"
+  python2 setup.py install --skip-build --root="$pkgdir/" --optimize=1
+  for part in {dump,node}; do
+    chmod a+x "$pkgdir$SITE_PACKAGES/lio_$part.py"
+    sed -i '1s/python/python2/' "$pkgdir$SITE_PACKAGES/lio_$part.py"
+    if [ ! -f "$pkgdir/usr/sbin/lio_$part"  ]; then
+      ln -s "$SITE_PACKAGES/lio_$part.py" "$pkgdir/usr/sbin/lio_$part"
+    fi
+  done
+
+
+  if [ -d "$srcdir/$pkgname/tools" ]; then
+    cd "$srcdir/$pkgname/tools"
+    make DESTDIR="$pkgdir/" install
+  fi
+  if [ -d "$srcdir/$pkgname/mib-modules" ]; then
+    cd "$srcdir/$pkgname/mib-modules"
+    make DESTDIR="$pkgdir/" install
+  fi
+}
+
+# vim:set ts=2 sw=2 et:
