@@ -1,0 +1,69 @@
+# $Id: PKGBUILD 140778 2011-10-19 07:11:57Z daniel $
+# Maintainer: Daniel Isenmann <daniel@archlinux.org>
+# Contributor: Brice Carpentier <brice@dlfp.org>
+
+# ALARM: Kevin Mihelich <kevin@plugapps.com>
+#  - Added alarm.patch for armv7h to fix detection of VFP capability
+#    and using autogen.sh to rebuild for configure.in changes.
+#  - Remove noautobuild on next version bump.
+
+plugrel=1
+noautobuild=1
+
+pkgname=mono
+pkgver=2.10.6
+pkgrel=1
+pkgdesc="Free implementation of the .NET platform including runtime and compiler"
+arch=(i686 x86_64)
+license=('GPL' 'LGPL2' 'MPL' 'custom:MITX11')
+url="http://www.mono-project.com/"
+depends=('zlib' 'libgdiplus>=2.10' 'sh')
+makedepends=('pkgconfig')
+options=('!libtool' '!makeflags')
+provides=('monodoc')
+conflicts=('monodoc')
+source=(http://download.mono-project.com/sources/${pkgname}/${pkgname}-${pkgver}.tar.bz2
+        mono.rc.d
+        alarm.patch)
+md5sums=('c442cef4cd6668b0a1391a661f6815a9'
+         '8315e46c6a6e9625502521fc0ad1a322'
+         'db43f2824188e4d1583b676f2e62db24')
+
+build() {
+  cd ${srcdir}/${pkgname}-${pkgver}
+  # build mono
+  if [ "$CARCH" = "armv7h" ]; then
+    patch -Np1 -i ${srcdir}/alarm.patch
+    ./autogen.sh --prefix=/usr --sysconfdir=/etc \
+                --with-libgdiplus=installed --with-fpu=VFP
+  else
+    ./configure --prefix=/usr --sysconfdir=/etc \
+                --with-libgdiplus=installed
+  fi
+  make || return 1
+
+  # build jay
+  cd ${srcdir}/${pkgname}-${pkgver}/mcs/jay
+  make || return 1
+}
+
+package() {
+  cd ${srcdir}/${pkgname}-${pkgver}
+  make DESTDIR=${pkgdir} install || return 1
+
+  # install jay
+  cd ${srcdir}/${pkgname}-${pkgver}/mcs/jay
+  make DESTDIR=${pkgdir} prefix=/usr INSTALL=../../install-sh install
+  cd ${srcdir}/${pkgname}-${pkgver}
+
+  # install daemons and pathes
+  mkdir -p ${pkgdir}/etc/rc.d
+  install -m755 ${srcdir}/mono.rc.d ${pkgdir}/etc/rc.d/mono
+
+  #install license
+  mkdir -p ${pkgdir}/usr/share/licenses/${pkgname}
+  install -m644 mcs/MIT.X11 ${pkgdir}/usr/share/licenses/${pkgname}/
+  
+  #fix .pc file to be able to request mono on what it depends, fixes #go-oo build
+  sed -i -e "s:#Requires:Requires:" ${pkgdir}/usr/lib/pkgconfig/mono.pc
+}
