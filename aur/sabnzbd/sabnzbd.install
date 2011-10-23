@@ -1,25 +1,41 @@
 ## arg 1:  the new package version
-post_install() {    
+post_install() {
   # add x-nzb mimetype
   xdg-mime install --mode system /opt/sabnzbd/x-nzb.xml
   xdg-icon-resource install --context mimetypes --size 64  /opt/sabnzbd/nzb-2.png application-x-nzb
-      
+
   groupadd sabnzbd &> /dev/null
   useradd -g sabnzbd -d /opt/sabnzbd -s /bin/false sabnzbd &> /dev/null
   chown -R sabnzbd:sabnzbd /opt/sabnzbd
+
   echo "  >> Don't forget to edit /etc/conf.d/sabnzbd!"
   echo "  >> Add your Session key and if necessary your username and password to ensure a proper shutdown."
   echo "  >> "
   echo "  >> If you want to associate .nzb-files with SABnzbd, run 'xdg-mime default sabnzbd.desktop applications/x-nzb'"
-
 }
+
 ## arg 1:  the new package version
 ## arg 2:  the old package version
 post_upgrade() {
-  chown -R sabnzbd:sabnzbd /opt/sabnzbd 
+  . /etc/conf.d/sabnzbd
+
+  grep -q "SABNZBD_GROUP" /etc/conf.d/sabnzbd || echo 'SABNZBD_GROUP="sabnzbd"' >> /etc/conf.d/sabnzbd
+  grep -q "SABNZBD_ARGS" /etc/conf.d/sabnzbd || echo 'SABNZBD_ARGS="-f ${SABNZBD_CONF} -s ${SABNZBD_IP}:${SABNZBD_PORT} -d"' >> /etc/conf.d/sabnzbd
+
+  chown -R "${SABNZBD_USER}:${SABNZBD_GROUP}" /opt/sabnzbd
 }
 
 ## arg 1:  the old package version
 pre_remove() {
+  SABNZBD_PID="$(ps aux | grep "python2 /opt/sabnzbd/SABnzbd.py" | sort | uniq -c | tail -n 1 | awk '{ print $3 }')"
+  [ -f /run/daemons/sabnzbd ]; /etc/rc.d/sabnzbd stop # kill the daemon
+  [ -n ${SABNZBD_PID} ]; kill -9 "${SABNZBD_PID}" # kill the daemon finaly
+  xdg-mime uninstall --mode system /opt/sabnzbd/x-nzb.xml
+  xdg-icon-resource uninstall --context mimetypes --size 64 application-x-nzb
+}
+
+post_remove() {
   userdel sabnzbd &> /dev/null
-} 
+  groupdel sabnzbd &> /dev/null
+  echo "  >> There may be some files left in /opt/sabnzbd."
+}
