@@ -1,3 +1,4 @@
+# $Id: PKGBUILD 141113 2011-10-24 09:59:23Z dreisner $
 # Maintainer: Aaron Griffin <aaron@archlinux.org>
 # Maintainer: Tobias Powalowski <tpowa@archlinux.org>
 # Maintainer: Thomas Bächler <thomas@archlinux.org>
@@ -5,88 +6,71 @@
 
 # ALARM: Jason Plum <max@warheads.net>
 #  - Make this compatible with non-accept4 kernels.
+#  - noautobuild to keep from building on v7h
 
-plugrel=2
+plugrel=1
+noautobuild=1
 
-pkgbase="udev-oxnas"
-pkgbaseplate="udev"
-pkgname="udev-oxnas"
-pkgver=171
-pkgrel=2
+_pkgbase='udev'
+pkgname='udev-oxnas'
+pkgver=174
+pkgrel=1
 arch=(i686 x86_64)
 url="http://www.kernel.org/pub/linux/utils/kernel/hotplug/udev.html"
 license=('GPL')
 groups=('base')
-# older initscripts versions required start_udev
 options=(!makeflags !libtool)
-makedepends=('glibc' 'coreutils' 'util-linux' 'pciutils' 'libusb-compat' 'glib2' 'kernel26' 'gperf' 'libxslt' 'gobject-introspection')
-source=(http://www.kernel.org/pub/linux/utils/kernel/hotplug/$pkgbaseplate-$pkgver.tar.bz2
+makedepends=('gobject-introspection' 'gperf')
+#source=(http://www.kernel.org/pub/linux/utils/kernel/hotplug/$_pkgbase-$pkgver.tar.bz2
+source=(http://people.freedesktop.org/~kay/$_pkgbase-$pkgver.tar.bz2
         81-arch.rules
-	static-audio-nodes-group.patch
-	static-nodes-permissions.patch
-	pre-accept4-kernel.patch
-	)
+        pre-accept4-kernel.patch)
+md5sums=('3b84706046a33d7a7e00491a1136804d'
+         '3da2bb9891592f9438a07bd641465531'
+         'c6d2de68c7a30f3deb2cbb151bc6749f')
 
 build() {
-  cd $srcdir/$pkgbaseplate-$pkgver
-  # fix https://bugs.archlinux.org/task/24362 (will be in udev-172)
-  patch -Np1 -i ../static-audio-nodes-group.patch
-  patch -Np1 -i ../static-nodes-permissions.patch
-  patch -Np1 -i ../pre-accept4-kernel.patch
-  ./configure --sysconfdir=/etc --with-rootlibdir=/lib --libexecdir=/lib/udev\
-              --sbindir=/sbin --with-systemdsystemunitdir=/lib/systemd/system\
-              --disable-rule-generator
+  cd $srcdir/$_pkgbase-$pkgver
+
+  patch -Np1 -i ${srcdir}/pre-accept4-kernel.patch
+  ./configure --sysconfdir=/etc\
+              --with-rootlibdir=/lib\
+              --libexecdir=/lib/udev\
+              --sbindir=/sbin\
+              --with-systemdsystemunitdir=/lib/systemd/system\
+              --disable-rule-generator\
+              --enable-udev_acl
+
   make
 }
   
 package_udev-oxnas() {
   pkgdesc="The userspace dev tools (udev-oxnas)"
-  depends=('glibc' 'coreutils' 'util-linux' 'libusb-compat' 'glib2'
-           'module-init-tools>=3.11' 'pciutils')
+  depends=('util-linux' 'libusb-compat' 'glib2' 'module-init-tools' 'pciutils')
   install=udev.install
-  backup=(etc/udev/udev.conf
-          etc/modprobe.d/framebuffer_blacklist.conf)
+  backup=(etc/udev/udev.conf)
   conflicts=('pcmcia-cs' 'hotplug' 'initscripts<2009.07' 'udev')
   replaces=('devfsd')
-  provides=('udev=171')
+  provides=('udev=174')
   
-  cd $srcdir/$pkgbaseplate-$pkgver
+  cd $srcdir/$_pkgbase-$pkgver
   make DESTDIR=${pkgdir} install
   # Install our rule for permissions and symlinks
   install -D -m644 $srcdir/81-arch.rules $pkgdir/lib/udev/rules.d/81-arch.rules
 
   # create framebuffer blacklist
-  mkdir -p $pkgdir/etc/modprobe.d/
+  mkdir -p $pkgdir/lib/modprobe.d/
   for mod in $(find /lib/modules/*/kernel/drivers/video -name '*fb.ko.gz' -exec basename {} .ko.gz \;); do 
   	echo "blacklist $mod" 
-  done | sort -u > $pkgdir/etc/modprobe.d/framebuffer_blacklist.conf
+  done | sort -u > $pkgdir/lib/modprobe.d/framebuffer_blacklist.conf
 
-  # create static devices in /lib/udev/devices/
-  mkdir ${pkgdir}/lib/udev/devices/pts
-  mkdir ${pkgdir}/lib/udev/devices/shm
-
-  mknod -m 0600 ${pkgdir}/lib/udev/devices/console c 5 1
-  mknod -m 0666 ${pkgdir}/lib/udev/devices/null c 1 3
-  mknod -m 0660 ${pkgdir}/lib/udev/devices/zero c 1 5
-  mknod -m 0666 ${pkgdir}/lib/udev/devices/kmsg c 1 11
-
-  ln -snf /proc/self/fd ${pkgdir}/lib/udev/devices/fd
-  ln -snf /proc/self/fd/0 ${pkgdir}/lib/udev/devices/stdin
-  ln -snf /proc/self/fd/1 ${pkgdir}/lib/udev/devices/stdout
-  ln -snf /proc/self/fd/2 ${pkgdir}/lib/udev/devices/stderr
-  ln -snf /proc/kcore ${pkgdir}/lib/udev/devices/core
-
-  # these static devices are created for convenience, to autoload the modules if necessary
-  # /dev/loop0
+  # /dev/loop0 is created for convenience, to autoload the module if necessary
+  # may be obsoleted by https://lkml.org/lkml/2011/7/30/111
   mknod -m 0660 ${pkgdir}/lib/udev/devices/loop0 b 7 0
   chgrp disk ${pkgdir}/lib/udev/devices/loop0
-  # /dev/net/tun
-  mkdir ${pkgdir}/lib/udev/devices/net
-  mknod -m 0666 ${pkgdir}/lib/udev/devices/net/tun c 10 200
-  # /dev/fuse
-  mknod -m 0666 ${pkgdir}/lib/udev/devices/fuse c 10 229 
-  # /dev/ppp
-  mknod -m 0600 ${pkgdir}/lib/udev/devices/ppp c 108 0
+
+  # udevd moved, symlink to make life easy for restarting udevd manually
+  ln -s /lib/udev/udevd ${pkgdir}/sbin/udevd
 
   # Replace dialout/tape/cdrom group in rules with uucp/storage/optical group
   for i in $pkgdir/lib/udev/rules.d/*.rules; do
@@ -95,9 +79,6 @@ package_udev-oxnas() {
                s#GROUP="cdrom"#GROUP="optical"#g' $i
   done
 }
-
-md5sums=('bdf4617284be2ecac11767437417e209'
-         '6ee44e3feb8e0f037947e7d4ca273f12'
-         '4f625aea95a5597afd8cdf189421f193'
-         'f9e50b8dfcd2215f5423ff9bc04ecf68'
-	 'c6d2de68c7a30f3deb2cbb151bc6749f')
+md5sums=('3b84706046a33d7a7e00491a1136804d'
+         '3da2bb9891592f9438a07bd641465531'
+         '8b28d85b2158be1b5a190135c9cc8851')
