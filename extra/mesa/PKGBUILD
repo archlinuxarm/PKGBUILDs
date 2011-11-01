@@ -20,7 +20,7 @@ if [ "${_git}" = "true" ]; then
   else
     pkgver=7.11
 fi
-pkgrel=2
+pkgrel=4
 arch=('i686' 'x86_64')
 makedepends=('glproto>=1.4.14' 'libdrm>=2.4.26' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.3' 'libxt>=1.1.1' 
              'gcc-libs>=4.6.1' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'udev')
@@ -30,17 +30,17 @@ source=(LICENSE)
 if [ "${_git}" = "true" ]; then
 	# mesa git shot from 7.11 branch - see for state: http://cgit.freedesktop.org/mesa/mesa/commit/?h=7.11&id=1ae00c5960af83bea9545a18a1754bad83d5cbd0
 	#source=(${source[@]} 'ftp://ftp.archlinux.org/other/mesa/mesa-1ae00c5960af83bea9545a18a1754bad83d5cbd0.tar.bz2')
-	source=(${source[@]} "MesaLib-${pkgver}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-ef9f16f6322a89fb699fbe3da868b10f9acaef98.tar.bz2")
+    source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-ef9f16f6322a89fb699fbe3da868b10f9acaef98.tar.bz2")
   else
-	source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2"
-)
+    #source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2"
+    source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-4464ee1a9aa3745109cee23531e3fb2323234d07.tar.bz2"
 fi
 md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
-         'ff03aca82d0560009a076a87c888cf13')
+         '774eb6f30b31fa08c04e16e00ca070e1')
 
 build() {
     cd ${srcdir}/?esa-*
-    [ $CARCH == "armv7h" ] && CFLAGS="-march=armv7-a -O1 -pipe -mfloat-abi=hard -mfpu=vfpv3-d16" && CXXFLAGS="$CFLAGS"
+    [ $CARCH == "armv7h" ] && CFLAGS=`echo $CFLAGS | sed -e 's/-O2/-O1/'` && CXXFLAGS="$CFLAGS"
 
 if [ "${_git}" = "true" ]; then
     autoreconf -vfi
@@ -96,12 +96,7 @@ package_libgl() {
   bin/minstall lib/libglsl.so* "${pkgdir}/usr/lib/"
 
   cd src/mesa/drivers/dri
-  #make -C swrast DESTDIR="${pkgdir}" install
-if [ "${_git}" = "true" ]; then
-    make -C ${srcdir}/mesa-*/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
-  else
-    make -C ${srcdir}/Mesa-${pkgver/rc/-rc}/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
-fi
+  make -C ${srcdir}/?esa-*/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
   ln -s swrastg_dri.so "${pkgdir}/usr/lib/xorg/modules/dri/swrast_dri.so"
   ln -s libglx.xorg "${pkgdir}/usr/lib/xorg/modules/extensions/libglx.so"
 
