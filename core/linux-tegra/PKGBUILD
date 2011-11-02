@@ -11,28 +11,26 @@ pkgbase=linux-tegra
 pkgname=('linux-tegra' 'linux-headers-tegra')
 # pkgname=linux-custom       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel=3.1-rc9
-pkgver=3.0.99
-pkgrel=9
+_basekernel=3.1
+pkgver=${_basekernel}
+pkgrel=1
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage')
 options=('!strip')
-source=("torvalds-linux-v3.1-rc9.tar.gz::https://github.com/torvalds/linux/tarball/v3.1-rc9"
-        'archlinuxarm.patch'
+source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${_basekernel}.tar.bz2"
+        #"ftp://ftp.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.bz2"
         'armdma.patch'
         'config'
         'change-default-console-loglevel.patch')
-md5sums=('31bf119ff2c0d48a795da1b84f57ae8e'
-         'bc631a5c97e2b6c871cdbbfa6c75ae38'
+md5sums=('8d43453f8159b2332ad410b19d86a931'
          '6e7667c6c6348bfeca22eaaa05462d62'
          '9da7aaa320d49d3de3bed3327e6d1d5f'
          '9d3c56a4b999c8bfbd4018089a62f662')
 
 build() {
-  #cd "${srcdir}/linux-${_basekernel}"
-  cd "${srcdir}/torvalds-linux-38a181c"
+  cd "${srcdir}/linux-${_basekernel}"
 
   # add latest fixes from stable queue, if needed
   # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
@@ -42,19 +40,13 @@ build() {
   # (relevant patch sent upstream: https://lkml.org/lkml/2011/7/26/227)
   patch -Np1 -i "${srcdir}/change-default-console-loglevel.patch"
 
-  # ALARM: remove deprecated mach/hardware.h include in cpu-tegra.c
-  patch -Np1 -i "${srcdir}/archlinuxarm.patch"
-
   # ALARM: add dma_coherent_write_sync calls to USB EHCI driver
   patch -Np1 -i "${srcdir}/armdma.patch"
 
   cat "${srcdir}/config" > ./.config
 
-  # remove the sublevel from Makefile
-  # this ensures our kernel version is always 3.X-ARCH
-  # this way, minor kernel updates will not break external modules
-  # we need to change this soon, see FS#16702
-  sed -ri 's|^(SUBLEVEL =).*|\1|' Makefile
+  # set extraversion to pkgrel
+  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
 
   # get kernel version
   make prepare
@@ -94,8 +86,7 @@ package_linux-tegra() {
   backup=("etc/mkinitcpio.d/${pkgname}.preset")
   install=${pkgname}.install
 
-  #cd "${srcdir}/linux-${_basekernel}"
-  cd "${srcdir}/torvalds-linux-38a181c"
+  cd "${srcdir}/linux-${_basekernel}"
 
   KARCH=arm
 
@@ -118,6 +109,11 @@ package_linux-tegra() {
   rm -rf "${pkgdir}/lib/firmware"
   # gzip -9 all modules to safe 100MB of space
   find "${pkgdir}" -name '*.ko' -exec gzip -9 {} \;
+  # make room for external modules
+  #ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
+  # add real version for building modules and running depmod from post_install/upgrade
+  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
+  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
 }
 
 package_linux-headers-tegra() {
@@ -131,8 +127,7 @@ package_linux-headers-tegra() {
   cd "${pkgdir}/lib/modules/${_kernver}"
   ln -sf ../../../usr/src/linux-${_kernver} build
 
-  #cd "${srcdir}/linux-${_basekernel}"
-  cd "${srcdir}/torvalds-linux-38a181c"
+  cd "${srcdir}/linux-${_basekernel}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
