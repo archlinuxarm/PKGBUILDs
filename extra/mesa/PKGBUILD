@@ -33,7 +33,7 @@ if [ "${_git}" = "true" ]; then
     source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-ef9f16f6322a89fb699fbe3da868b10f9acaef98.tar.bz2")
   else
     #source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2"
-    source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-4464ee1a9aa3745109cee23531e3fb2323234d07.tar.bz2"
+    source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-4464ee1a9aa3745109cee23531e3fb2323234d07.tar.bz2")
 fi
 md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
          '774eb6f30b31fa08c04e16e00ca070e1')
