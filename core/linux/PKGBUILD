@@ -8,40 +8,66 @@ pkgbase=linux
 pkgname=('linux' 'linux-headers')
 # pkgname=linux-custom       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel=3.0
-pkgver=${_basekernel}.6
-pkgrel=2
+_basekernel=3.1
+pkgver=${_basekernel}
+pkgrel=4
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage')
 options=('!strip')
-source=(#"ftp://ftp.kernel.org/pub/linux/kernel/v3.0/linux-${_basekernel}.tar.bz2"
-        #"ftp://ftp.kernel.org/pub/linux/kernel/v3.0/patch-${pkgver}.bz2"
-	"linux-3.0.6.tar.gz"
+source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${_basekernel}.tar.bz2"
+        #"ftp://ftp.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.bz2"
         'archlinuxarm.patch'
+        'aufs3-kbuild.patch'
         'aufs3-base.patch'
         'aufs3-standalone.patch'
+        'aufs3-git-extras.patch'
         'config'
-        'change-default-console-loglevel.patch')
-md5sums=('6d0affbfe07192a2f323d41bb707ba68'
+        'change-default-console-loglevel.patch'
+        'dib0700-fix.patch'
+        'usb-add-reset-resume-quirk-for-several-webcams.patch'
+        'md-raid10-fix-bug-when-activating-a-hot-spare.patch')
+md5sums=('8d43453f8159b2332ad410b19d86a931'
          '2b2b459c34e55e68fc53ac30766ed139'
-         'b9248a75a3fe415a18d4730887daa339'
-         'd961e5dc52b4e4f98a6268b6dc4340fa'
-         'f9e6664ddda72f2bb4932267780d1959'
-         '9d3c56a4b999c8bfbd4018089a62f662')
+         '3f64ed9d71499fe9293dc671f4e4087e'
+         '29628745258df910abfb8cb24ca3ccd9'
+         'c9e6e8bb0774a89f7f9bd30a13be7532'
+         '55b04499a4578e586cf5a4d0b69fc5aa'
+         '409d6fcfe3636ed63d50dcc055343f3e'
+         '9d3c56a4b999c8bfbd4018089a62f662'
+         'abcd7b4b5676deed0114684e555f7c0f'
+         'd00814b57448895e65fbbc800e8a58ba'
+         '5967b6e2c3bc61b9718716d95ccfdc22')
 
 build() {
   cd "${srcdir}/linux-${_basekernel}"
 
+  # add upstream patch
   #patch -p1 -i "${srcdir}/patch-${pkgver}"
+
+  # Fix dib0700 driver
+  # http://git.linuxtv.org/pb/media_tree.git/shortlog/refs/heads/for_v3.0
+  # FS#25939
+  patch -Np1 -i "${srcdir}/dib0700-fix.patch"
+
+  # Add the USB_QUIRK_RESET_RESUME for several webcams
+  # FS#26528
+  patch -Np1 -i "${srcdir}/usb-add-reset-resume-quirk-for-several-webcams.patch"
+
+  # Fix RAID10 hot spare activation (critical)
+  # https://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git;a=blob_plain;f=queue-3.1/md-raid10-fix-bug-when-activating-a-hot-spare.patch;h=880849db5b7089b523f72c4d67a473e5330037fc;hb=HEAD
+  # FS#26767
+  patch -Np1 -i "${srcdir}/md-raid10-fix-bug-when-activating-a-hot-spare.patch"
 
   # Add Arch Linux ARM patch for ARMv5te plug computers
   patch -Np1 -i ${srcdir}/archlinuxarm.patch
 
   # Add AUFS3 patches
+  patch -Np1 -i ${srcdir}/aufs3-kbuild.patch
   patch -Np1 -i ${srcdir}/aufs3-base.patch
   patch -Np1 -i ${srcdir}/aufs3-standalone.patch
+  patch -Np1 -i ${srcdir}/aufs3-git-extras.patch
 
   # add latest fixes from stable queue, if needed
   # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
@@ -53,11 +79,8 @@ build() {
 
   cat "${srcdir}/config" > ./.config
 
-  # remove the sublevel from Makefile
-  # this ensures our kernel version is always 3.X-ARCH
-  # this way, minor kernel updates will not break external modules
-  # we need to change this soon, see FS#16702
-  sed -ri 's|^(SUBLEVEL =).*|\1|' Makefile
+  # set extraversion to pkgrel
+  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
 
   # get kernel version
   make prepare
@@ -118,8 +141,13 @@ package_linux() {
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
   # remove the firmware
   rm -rf "${pkgdir}/lib/firmware"
-  # gzip -9 all modules to safe 100MB of space
+  # gzip -9 all modules to save 100MB of space
   find "${pkgdir}" -name '*.ko' -exec gzip -9 {} \;
+  # make room for external modules
+  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
+  # add real version for building modules and running depmod from post_install/upgrade
+  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
+  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
 }
 
 package_linux-headers() {
