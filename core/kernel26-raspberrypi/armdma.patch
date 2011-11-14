@@ -1,0 +1,122 @@
+diff -urN linux-3.1-rc4-a/arch/arm/include/asm/dma-mapping.h linux-3.1-rc4-b/arch/arm/include/asm/dma-mapping.h
+--- linux-3.1-rc4-a/arch/arm/include/asm/dma-mapping.h	2011-08-29 05:16:01.000000000 +0100
++++ linux-3.1-rc4-b/arch/arm/include/asm/dma-mapping.h	2011-09-02 12:09:00.000000000 +0100
+@@ -205,6 +205,15 @@
+ int dma_mmap_writecombine(struct device *, struct vm_area_struct *,
+ 		void *, dma_addr_t, size_t);
+ 
++#ifdef CONFIG_ARM_DMA_MEM_BUFFERABLE
++#define ARCH_HAS_DMA_COHERENT_WRITE_SYNC
++
++static inline void dma_coherent_write_sync(void)
++{
++	dsb();
++	outer_sync();
++}
++#endif
+ 
+ #ifdef CONFIG_DMABOUNCE
+ /*
+diff -urN linux-3.1-rc4-a/Documentation/DMA-API-HOWTO.txt linux-3.1-rc4-b/Documentation/DMA-API-HOWTO.txt
+--- linux-3.1-rc4-a/Documentation/DMA-API-HOWTO.txt	2011-08-29 05:16:01.000000000 +0100
++++ linux-3.1-rc4-b/Documentation/DMA-API-HOWTO.txt	2011-09-02 12:01:09.000000000 +0100
+@@ -400,6 +400,22 @@
+ from a pool before you destroy the pool. This function may not
+ be called in interrupt context.
+ 
++Some architectures which supporting DMA coherent memory may still have write
++buffering between the CPU and DMA memory. This buffering may delay CPU writes
++from reaching coherent memory in a timely manner. These delays in turn can
++lead lead to dramatic performance issues in certain cases. An architecture
++may mitigate this problem to a large degree by having a write buffer flush
++implicit in the MMIO functions used to write to device registers. This works
++for the most common cases where a driver needs to write to a register to tell
++a device that something was written to the shared coherent memory. There are
++other cases where the device polls the dma-coherent memory for data written
++by the driver. In such cases, the driver needs to explicity force write buffer
++data to memory by calling:
++
++	dma_coherent_write_sync();
++
++
++
+ 			DMA Direction
+ 
+ The interfaces described in subsequent portions of this document
+diff -urN linux-3.1-rc4-a/Documentation/DMA-API.txt linux-3.1-rc4-b/Documentation/DMA-API.txt
+--- linux-3.1-rc4-a/Documentation/DMA-API.txt	2011-08-29 05:16:01.000000000 +0100
++++ linux-3.1-rc4-b/Documentation/DMA-API.txt	2011-09-02 12:03:06.000000000 +0100
+@@ -418,6 +418,18 @@
+ 	....
+ 
+ 
++Part Ie - Write buffering to dma-coherent memory
++------------------------------------------------
++
++Some architectures supporting DMA coherent memory may have write
++buffering between the CPU and DMA memory. This buffering may delay
++CPU writes from reaching coherent memory in a timely manner.
++
++    void
++    dma_coherent_write_sync()
++
++Force any outstanding coherent writes to memory.
++
+ Part II - Advanced dma_ usage
+ -----------------------------
+ 
+diff -urN linux-3.1-rc4-a/drivers/usb/host/ehci-q.c linux-3.1-rc4-b/drivers/usb/host/ehci-q.c
+--- linux-3.1-rc4-a/drivers/usb/host/ehci-q.c	2011-08-29 05:16:01.000000000 +0100
++++ linux-3.1-rc4-b/drivers/usb/host/ehci-q.c	2011-09-02 12:17:20.000000000 +0100
+@@ -114,6 +114,7 @@
+ 	/* HC must see latest qtd and qh data before we clear ACTIVE+HALT */
+ 	wmb ();
+ 	hw->hw_token &= cpu_to_hc32(ehci, QTD_TOGGLE | QTD_STS_PING);
++	dma_coherent_write_sync();
+ }
+ 
+ /* if it weren't for a common silicon quirk (writing the dummy into the qh
+@@ -404,6 +405,7 @@
+ 					wmb();
+ 					hw->hw_token = cpu_to_hc32(ehci,
+ 							token);
++					dma_coherent_write_sync();
+ 					goto retry_xacterr;
+ 				}
+ 				stopped = 1;
+@@ -753,8 +755,10 @@
+ 	}
+ 
+ 	/* by default, enable interrupt on urb completion */
+-	if (likely (!(urb->transfer_flags & URB_NO_INTERRUPT)))
++	if (likely(!(urb->transfer_flags & URB_NO_INTERRUPT))) {
+ 		qtd->hw_token |= cpu_to_hc32(ehci, QTD_IOC);
++		dma_coherent_write_sync();
++	}
+ 	return head;
+ 
+ cleanup:
+@@ -1081,6 +1085,7 @@
+ 			/* let the hc process these next qtds */
+ 			wmb ();
+ 			dummy->hw_token = token;
++			dma_coherent_write_sync();
+ 
+ 			urb->hcpriv = qh_get (qh);
+ 		}
+diff -urN linux-3.1-rc4-a/include/linux/dma-mapping.h linux-3.1-rc4-b/include/linux/dma-mapping.h
+--- linux-3.1-rc4-a/include/linux/dma-mapping.h	2011-08-29 05:16:01.000000000 +0100
++++ linux-3.1-rc4-b/include/linux/dma-mapping.h	2011-09-02 12:06:06.000000000 +0100
+@@ -154,6 +154,12 @@
+ }
+ #endif
+ 
++#ifndef ARCH_HAS_DMA_COHERENT_WRITE_SYNC
++static inline void dma_coherent_write_sync(void)
++{
++}
++#endif
++
+ /*
+  * Managed DMA API
+  */
