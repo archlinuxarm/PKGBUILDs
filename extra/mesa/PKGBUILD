@@ -9,7 +9,7 @@
 plugrel=1
 
 pkgbase=mesa
-pkgname=('mesa' 'libgl' 'libglapi' 'libgles' 'libegl') # 'llvm-dri')
+pkgname=('mesa' 'libgl' 'libglapi' 'libgles' 'libegl' 'khrplatform-devel') # 'llvm-dri')
 
 #_git=true
 _git=false
@@ -18,9 +18,9 @@ if [ "${_git}" = "true" ]; then
     #pkgver=7.10.99.git20110709
     pkgver=7.11
   else
-    pkgver=7.11
+    pkgver=7.11.1
 fi
-pkgrel=4
+pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('glproto>=1.4.14' 'libdrm>=2.4.26' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.3' 'libxt>=1.1.1' 
              'gcc-libs>=4.6.1' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'udev')
@@ -32,11 +32,11 @@ if [ "${_git}" = "true" ]; then
 	#source=(${source[@]} 'ftp://ftp.archlinux.org/other/mesa/mesa-1ae00c5960af83bea9545a18a1754bad83d5cbd0.tar.bz2')
     source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-ef9f16f6322a89fb699fbe3da868b10f9acaef98.tar.bz2")
   else
-    #source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2"
-    source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-4464ee1a9aa3745109cee23531e3fb2323234d07.tar.bz2")
+	source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2"
+	#source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-4464ee1a9aa3745109cee23531e3fb2323234d07.tar.bz2"
 fi
 md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
-         '774eb6f30b31fa08c04e16e00ca070e1')
+         'a77307102cee844ff6544ffa8fafeac1')
 
 build() {
     cd ${srcdir}/?esa-*
@@ -46,7 +46,7 @@ if [ "${_git}" = "true" ]; then
     autoreconf -vfi
     ./autogen.sh --prefix=/usr \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-gallium-drivers=r300,r600,nouveau,swrast \
+    --with-gallium-drivers=swrast \
     --enable-gallium-llvm \
     --enable-gallium-egl --enable-shared-glapi\
     --enable-glx-tls \
@@ -117,7 +117,7 @@ package_libglapi() {
 }
 
 package_libgles() {
-  depends=('libglapi')
+  depends=('libglapi' 'khrplatform-devel')
   pkgdesc="Mesa GLES libraries and headers"
 
   cd ${srcdir}/?esa-*   
@@ -138,7 +138,7 @@ package_libgles() {
 }
 
 package_libegl() {
-  depends=('libglapi' 'libdrm' 'libxext' 'libxfixes' 'udev')
+  depends=('libglapi' 'libdrm' 'libxext' 'libxfixes' 'udev' 'khrplatform-devel')
   pkgdesc="Mesa EGL libraries and headers"
 
   cd ${srcdir}/?esa-*   
@@ -148,7 +148,6 @@ package_libegl() {
   install -m755 -d "${pkgdir}/usr/include"
   install -m755 -d "${pkgdir}/usr/include/"
   install -m755 -d "${pkgdir}/usr/include/EGL"
-  install -m755 -d "${pkgdir}/usr/include/KHR"
   install -m755 -d "${pkgdir}/usr/share"
   install -m755 -d "${pkgdir}/usr/share/doc"
   install -m755 -d "${pkgdir}/usr/share/doc/libegl"
@@ -157,11 +156,22 @@ package_libegl() {
   bin/minstall lib/egl/* "${pkgdir}/usr/lib/egl/"
   bin/minstall src/egl/main/egl.pc "${pkgdir}/usr/lib/pkgconfig/"
   bin/minstall include/EGL/* "${pkgdir}/usr/include/EGL/"
-  bin/minstall include/KHR/khrplatform.h "${pkgdir}/usr/include/KHR/"
   bin/minstall docs/egl.html "${pkgdir}/usr/share/doc/libegl/"
 
   install -m755 -d "${pkgdir}/usr/share/licenses/libegl"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libegl/"
+}
+
+package_khrplatform-devel() {
+  depends=('')
+  pkgdesc="Khronos platform development package"
+
+  cd ${srcdir}/?esa-*
+  install -m755 -d "${pkgdir}/usr/include/KHR"
+  bin/minstall include/KHR/khrplatform.h "${pkgdir}/usr/include/KHR/"
+
+  install -m755 -d "${pkgdir}/usr/share/licenses/khrplatform-devel"
+  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/khrplatform-devel/"
 }
 
 package_mesa() {
