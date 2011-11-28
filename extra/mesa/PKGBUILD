@@ -18,7 +18,7 @@ if [ "${_git}" = "true" ]; then
     #pkgver=7.10.99.git20110709
     pkgver=7.11
   else
-    pkgver=7.11.1
+    pkgver=7.11.2
 fi
 pkgrel=1
 arch=('i686' 'x86_64')
@@ -37,7 +37,7 @@ if [ "${_git}" = "true" ]; then
 )
 fi
 md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
-         'a77307102cee844ff6544ffa8fafeac1')
+         '0837c52698fe3252369c3fdb5195afcc')
 
 build() {
     cd ${srcdir}/?esa-*
