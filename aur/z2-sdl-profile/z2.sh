@@ -1,4 +1,0 @@
-#!/bin/sh
-export SDL_AUDIODRIVER=alsa
-export SDL_NOMOUSE=1
-export SDL_VIDEO_FBCON_ROTATION="CCW"
