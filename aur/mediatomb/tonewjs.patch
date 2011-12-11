@@ -1,0 +1,564 @@
+diff -up mediatomb-0.12.1-back/build/Makefile.in.tonewjs mediatomb-0.12.1-back/build/Makefile.in
+--- mediatomb-0.12.1-back/build/Makefile.in.tonewjs	2010-04-08 00:40:15.000000000 +0200
++++ mediatomb-0.12.1-back/build/Makefile.in	2011-04-19 17:17:01.343509944 +0200
+@@ -257,7 +257,7 @@ CURL_LIBS = @CURL_LIBS@
+ CXX = @CXX@
+ CXXCPP = @CXXCPP@
+ CXXDEPMODE = @CXXDEPMODE@
+-CXXFLAGS = @CXXFLAGS@
++CXXFLAGS = -fpermissive @CXXFLAGS@
+ CYGPATH_W = @CYGPATH_W@
+ DB_AUTOCREATE_OPTION_ENABLED = @DB_AUTOCREATE_OPTION_ENABLED@
+ DB_AUTOCREATE_OPTION_REQUESTED = @DB_AUTOCREATE_OPTION_REQUESTED@
+diff -up mediatomb-0.12.1-back/src/scripting/import_script.cc.tonewjs mediatomb-0.12.1-back/src/scripting/import_script.cc
+--- mediatomb-0.12.1-back/src/scripting/import_script.cc.tonewjs	2011-04-18 13:10:48.000000000 +0200
++++ mediatomb-0.12.1-back/src/scripting/import_script.cc	2011-04-18 13:29:36.000000000 +0200
+@@ -53,8 +53,8 @@ ImportScript::ImportScript(Ref<Runtime> 
+     try 
+     {
+         load(scriptPath);
+-        root = JS_NewScriptObject(cx, script);
+-        JS_AddNamedRoot(cx, &root, "ImportScript");
++        root = JS_NewObject(cx, NULL, script, NULL);
++        JS_AddNamedObjectRoot(cx, &root, "ImportScript");
+     }
+     catch (Exception ex)
+     {
+@@ -117,7 +117,7 @@ ImportScript::~ImportScript()
+ #endif
+     
+     if (root)
+-        JS_RemoveRoot(cx, &root);
++        JS_RemoveObjectRoot(cx, &root);
+ 
+ #ifdef JS_THREADSAFE
+     JS_EndRequest(cx);
+diff -up mediatomb-0.12.1-back/src/scripting/js_functions.cc.tonewjs mediatomb-0.12.1-back/src/scripting/js_functions.cc
+--- mediatomb-0.12.1-back/src/scripting/js_functions.cc.tonewjs	2011-04-18 13:29:55.000000000 +0200
++++ mediatomb-0.12.1-back/src/scripting/js_functions.cc	2011-04-19 16:48:04.009229611 +0200
+@@ -49,7 +49,7 @@ using namespace zmm;
+ extern "C" {
+ 
+ JSBool 
+-js_print(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
++js_print(JSContext *cx, uintN argc, jsval *argv)
+ {
+     uintN i;
+     JSString *str;
+@@ -60,19 +60,21 @@ js_print(JSContext *cx, JSObject *obj, u
+         if (!str)
+             return JS_TRUE;
+         argv[i] = STRING_TO_JSVAL(str);
+-        log_js("%s\n", JS_GetStringBytes(str));
++        char * log_str = JS_EncodeString(cx, str);
++        log_js("%s\n", log_str);
++        JS_free(cx, log_str);
+     }
+     return JS_TRUE;
+ }
+ 
+ JSBool
+-js_copyObject(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
++js_copyObject(JSContext *cx, uintN argc, jsval *argv)
+ {
+     jsval arg;
+     JSObject *js_cds_obj;
+     JSObject *js_cds_clone_obj;
+ 
+-    Script *self = (Script *)JS_GetPrivate(cx, obj);
++    Script *self = (Script *)JS_GetPrivate(cx, JS_THIS_OBJECT(cx, argv));
+ 
+     try
+     {
+@@ -91,7 +93,7 @@ js_copyObject(JSContext *cx, JSObject *o
+ 
+         self->cdsObject2jsObject(cds_obj, js_cds_clone_obj);
+ 
+-        *rval = OBJECT_TO_JSVAL(js_cds_clone_obj);
++        JS_SET_RVAL(cx, argv, OBJECT_TO_JSVAL(js_cds_clone_obj));
+ 
+         return JS_TRUE;
+ 
+@@ -110,7 +112,7 @@ js_copyObject(JSContext *cx, JSObject *o
+ }
+ 
+ JSBool
+-js_addCdsObject(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
++js_addCdsObject(JSContext *cx, uintN argc, jsval *argv)
+ {
+     try
+     {
+@@ -126,7 +128,7 @@ js_addCdsObject(JSContext *cx, JSObject 
+         Ref<StringConverter> p2i;
+         Ref<StringConverter> i2i;
+ 
+-        Script *self = (Script *)JS_GetPrivate(cx, obj);
++        Script *self = (Script *)JS_GetPrivate(cx, JS_THIS_OBJECT(cx, argv));
+ 
+         if (self == NULL)
+         {
+@@ -156,20 +158,20 @@ js_addCdsObject(JSContext *cx, JSObject 
+         if (!str)
+             path = _("/");
+         else
+-            path = JS_GetStringBytes(str);
++            path = JS_EncodeString(cx, str);
+ 
+         JSString *cont = JS_ValueToString(cx, argv[2]);
+         if (cont)
+         {
+-            containerclass = JS_GetStringBytes(cont);
++            containerclass = JS_EncodeString(cx, cont);
+             if (!string_ok(containerclass) || containerclass == "undefined")
+                 containerclass = nil;
+         }
+ 
+         if (self->whoami() == S_PLAYLIST)
+-            js_orig_obj = self->getObjectProperty(obj, _("playlist"));
++            js_orig_obj = self->getObjectProperty(JS_THIS_OBJECT(cx, argv), _("playlist"));
+         else if (self->whoami() == S_IMPORT)
+-            js_orig_obj = self->getObjectProperty(obj, _("orig"));
++            js_orig_obj = self->getObjectProperty(JS_THIS_OBJECT(cx, argv), _("orig"));
+         
+         if (js_orig_obj == NULL)
+         {
+@@ -285,8 +287,7 @@ js_addCdsObject(JSContext *cx, JSObject 
+         JSString *str2 = JS_NewStringCopyN(cx, tmp.c_str(), tmp.length());
+         if (!str2)
+             return JS_TRUE;
+-        *rval = STRING_TO_JSVAL(str2);
+-
++        JS_SET_RVAL(cx, argv, STRING_TO_JSVAL(str2)); 
+         return JS_TRUE;
+     }
+     catch (ServerShutdownException se)
+@@ -302,7 +303,7 @@ js_addCdsObject(JSContext *cx, JSObject 
+     return JS_TRUE;
+ }
+ 
+-static JSBool convert_charset_generic(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval, charset_convert_t chr)
++static JSBool convert_charset_generic(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, charset_convert_t chr)
+ {
+     try
+     {
+@@ -321,7 +322,7 @@ static JSBool convert_charset_generic(JS
+         {
+             str = JS_ValueToString(cx, argv[0]);
+             if (str)
+-                result = JS_GetStringBytes(str);
++                result = JS_EncodeString(cx, str);
+         }
+ 
+         if (result != nil)
+@@ -330,7 +331,7 @@ static JSBool convert_charset_generic(JS
+             JSString *str2 = JS_NewStringCopyN(cx, result.c_str(), result.length());
+             if (!str2)
+                 return JS_TRUE;
+-            *rval = STRING_TO_JSVAL(str2);
++            JS_SET_RVAL(cx, argv, STRING_TO_JSVAL(str2));
+         }
+     }
+     catch (ServerShutdownException se)
+@@ -347,24 +348,23 @@ static JSBool convert_charset_generic(JS
+ }
+ 
+ 
+-JSBool js_f2i(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
++JSBool js_f2i(JSContext *cx, uintN argc, jsval *argv)
+ {
+-     return convert_charset_generic(cx, obj, argc, argv, rval, F2I);
++     return convert_charset_generic(cx, JS_THIS_OBJECT(cx, argv), argc, argv, F2I);
+ }
+ 
+-JSBool js_m2i(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
++JSBool js_m2i(JSContext *cx, uintN argc, jsval *argv)
+ {
+-     return convert_charset_generic(cx, obj, argc, argv, rval, M2I);
+-}
++     return convert_charset_generic(cx, JS_THIS_OBJECT(cx, argv), argc, argv, M2I); }
+ 
+-JSBool js_p2i(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
++JSBool js_p2i(JSContext *cx, uintN argc, jsval *argv)
+ {
+-     return convert_charset_generic(cx, obj, argc, argv, rval, P2I);
++     return convert_charset_generic(cx, JS_THIS_OBJECT(cx, argv), argc, argv, P2I);
+ }
+ 
+-JSBool js_j2i(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
++JSBool js_j2i(JSContext *cx, uintN argc, jsval *argv)
+ {
+-     return convert_charset_generic(cx, obj, argc, argv, rval, J2I);
++     return convert_charset_generic(cx, JS_THIS_OBJECT(cx, argv), argc, argv, J2I);
+ }
+ 
+ } // extern "C"
+diff -up mediatomb-0.12.1-back/src/scripting/js_functions.h.tonewjs mediatomb-0.12.1-back/src/scripting/js_functions.h
+--- mediatomb-0.12.1-back/src/scripting/js_functions.h.tonewjs	2010-03-25 15:58:05.000000000 +0100
++++ mediatomb-0.12.1-back/src/scripting/js_functions.h	2011-04-18 13:59:29.000000000 +0200
+@@ -40,18 +40,18 @@
+ extern "C" {
+ 
+ /// \brief Log output.
+-JSBool js_print(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval);
++JSBool js_print(JSContext *cx, uintN argc, jsval *argv);
+ 
+ /// \brief Adds an object to the database.
+-JSBool js_addCdsObject(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval);
++JSBool js_addCdsObject(JSContext *cx, uintN argc, jsval *argv);
+ 
+ /// \brief Makes a copy of an CDS object.
+-JSBool js_copyObject(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval);
++JSBool js_copyObject(JSContext *cx, uintN argc, jsval *argv);
+ 
+-JSBool js_f2i(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval);
+-JSBool js_m2i(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval);
+-JSBool js_p2i(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval);
+-JSBool js_j2i(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval);
++JSBool js_f2i(JSContext *cx, uintN argc, jsval *argv);
++JSBool js_m2i(JSContext *cx, uintN argc, jsval *argv);
++JSBool js_p2i(JSContext *cx, uintN argc, jsval *argv);
++JSBool js_j2i(JSContext *cx, uintN argc, jsval *argv);
+ 
+ } // extern "C"
+ 
+diff -up mediatomb-0.12.1-back/src/scripting/playlist_parser_script.cc.tonewjs mediatomb-0.12.1-back/src/scripting/playlist_parser_script.cc
+--- mediatomb-0.12.1-back/src/scripting/playlist_parser_script.cc.tonewjs	2011-04-18 13:34:14.000000000 +0200
++++ mediatomb-0.12.1-back/src/scripting/playlist_parser_script.cc	2011-04-18 13:51:59.000000000 +0200
+@@ -46,9 +46,9 @@ using namespace zmm;
+ extern "C" {
+ 
+ static JSBool
+-js_readln(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
++js_readln(JSContext *cx, uintN argc, jsval *argv)
+ {
+-    PlaylistParserScript *self = (PlaylistParserScript *)JS_GetPrivate(cx, obj);
++    PlaylistParserScript *self = (PlaylistParserScript *)JS_GetPrivate(cx, JS_THIS_OBJECT(cx, argv));
+ 
+     String line;
+     
+@@ -69,7 +69,7 @@ js_readln(JSContext *cx, JSObject *obj, 
+ 
+     JSString *jsline = JS_NewStringCopyZ(cx, line.c_str());
+ 
+-    *rval = STRING_TO_JSVAL(jsline);
++    JS_SET_RVAL(cx, argv, STRING_TO_JSVAL(jsline));
+   
+     return JS_TRUE;
+ }
+@@ -93,8 +93,8 @@ PlaylistParserScript::PlaylistParserScri
+ 
+         String scriptPath = ConfigManager::getInstance()->getOption(CFG_IMPORT_SCRIPTING_PLAYLIST_SCRIPT); 
+         load(scriptPath);
+-        root = JS_NewScriptObject(cx, script);
+-        JS_AddNamedRoot(cx, &root, "PlaylistScript");
++        root = JS_NewObject(cx, NULL, script, NULL);
++        JS_AddNamedObjectRoot(cx, &root, "PlaylistScript");
+     }
+     catch (Exception ex)
+     {
+@@ -245,7 +245,7 @@ PlaylistParserScript::~PlaylistParserScr
+ #endif
+ 
+     if (root)
+-        JS_RemoveRoot(cx, &root);
++        JS_RemoveObjectRoot(cx, &root);
+ 
+ #ifdef JS_THREADSAFE
+     JS_EndRequest(cx);
+diff -up mediatomb-0.12.1-back/src/scripting/script.cc.tonewjs mediatomb-0.12.1-back/src/scripting/script.cc
+--- mediatomb-0.12.1-back/src/scripting/script.cc.tonewjs	2011-04-18 13:53:07.000000000 +0200
++++ mediatomb-0.12.1-back/src/scripting/script.cc	2011-04-19 18:26:34.460338804 +0200
+@@ -87,7 +87,7 @@ String Script::getProperty(JSObject *obj
+     str = JS_ValueToString(cx, val);
+     if (! str)
+         return nil;
+-    return JS_GetStringBytes(str);
++    return JS_EncodeString(cx, str);
+ }
+ 
+ int Script::getBoolProperty(JSObject *obj, String name)
+@@ -427,14 +427,14 @@ static JSFunctionSpec js_global_function
+         try
+         {
+             common_script = _load(common_scr_path);
+-            common_root = JS_NewScriptObject(cx, common_script);
+-            JS_AddNamedRoot(cx, &common_root, "common-script");
++            common_root = JS_NewObject(cx, NULL, common_script, NULL);
++            JS_AddNamedObjectRoot(cx, &common_root, "common-script");
+             _execute(common_script);
+         }
+         catch (Exception e)
+         {
+             if (common_root)
+-                JS_RemoveRoot(cx, &common_root);
++                JS_RemoveObjectRoot(cx, &common_root);
+ 
+             log_js("Unable to load %s: %s\n", common_scr_path.c_str(), 
+                     e.getMessage().c_str());
+@@ -460,7 +460,7 @@ Script::~Script()
+     JS_BeginRequest(cx);
+ #endif
+     if (common_root)
+-        JS_RemoveRoot(cx, &common_root);
++        JS_RemoveObjectRoot(cx, &common_root);
+ 
+ /*
+  * scripts are unrooted and will be cleaned up by GC
+@@ -504,11 +504,11 @@ void Script::initGlobalObject()
+     static JSClass global_class =
+     {
+         "global",                                   /* name */
+-        JSCLASS_HAS_PRIVATE,                        /* flags */
++        JSCLASS_HAS_PRIVATE | JSCLASS_GLOBAL_FLAGS,/* flags */
+         JS_PropertyStub,                            /* add property */
+         JS_PropertyStub,                            /* del property */
+         JS_PropertyStub,                            /* get property */
+-        JS_PropertyStub,                            /* set property */
++        JS_StrictPropertyStub,                      /* set property */
+         JS_EnumerateStandardClasses,                /* enumerate */
+         JS_ResolveStub,                             /* resolve */
+         JS_ConvertStub,                             /* convert */
+@@ -517,7 +517,7 @@ void Script::initGlobalObject()
+     };
+ 
+     /* create the global object here */
+-    glob = JS_NewObject(cx, &global_class, NULL, NULL);
++    glob = JS_NewCompartmentAndGlobalObject(cx, &global_class, NULL);
+     if (! glob)
+         throw _Exception(_("Scripting: could not initialize glboal class"));
+ 
+@@ -539,12 +539,12 @@ void Script::defineFunctions(JSFunctionS
+         throw _Exception(_("Scripting: JS_DefineFunctions failed"));
+ }
+ 
+-JSScript *Script::_load(zmm::String scriptPath)
++JSObject *Script::_load(zmm::String scriptPath)
+ {
+     if (glob == NULL)
+         initGlobalObject();
+ 
+-    JSScript *scr;
++    JSObject *scr;
+ 
+     String scriptText = read_text_file(scriptPath);
+ 
+@@ -571,14 +571,11 @@ JSScript *Script::_load(zmm::String scri
+ 
+ void Script::load(zmm::String scriptPath)
+ {
+-    if (script)
+-        JS_DestroyScript(cx, script);
+-
+     script = _load((scriptPath));
+ }
+ 
+ 
+-void Script::_execute(JSScript *scr)
++void Script::_execute(JSObject *scr)
+ {
+     jsval ret_val;
+ 
+@@ -662,7 +659,7 @@ Ref<CdsObject> Script::jsObject2cdsObjec
+     JSObject *js_meta = getObjectProperty(js, _("meta"));
+     if (js_meta)
+     {
+-        JS_AddNamedRoot(cx, &js_meta, "meta");
++        JS_AddNamedObjectRoot(cx, &js_meta, "meta");
+         /// \todo: only metadata enumerated in MT_KEYS is taken
+         for (int i = 0; i < M_MAX; i++)
+         {
+@@ -687,7 +684,7 @@ Ref<CdsObject> Script::jsObject2cdsObjec
+                 }
+             }
+         }
+-        JS_RemoveRoot(cx, &js_meta);
++        JS_RemoveObjectRoot(cx, &js_meta);
+     }
+     
+     // stuff that has not been exported to js
+diff -up mediatomb-0.12.1-back/src/scripting/script.h.tonewjs mediatomb-0.12.1-back/src/scripting/script.h
+--- mediatomb-0.12.1-back/src/scripting/script.h.tonewjs	2011-04-18 12:56:14.000000000 +0200
++++ mediatomb-0.12.1-back/src/scripting/script.h	2011-04-18 12:56:51.000000000 +0200
+@@ -66,8 +66,8 @@ public:
+     JSRuntime *rt;
+     JSContext *cx;
+     JSObject  *glob;
+-    JSScript *script;
+-    JSScript *common_script;
++    JSObject  *script;
++    JSObject  *common_script;
+     
+ public:
+     Script(zmm::Ref<Runtime> runtime);
+@@ -115,8 +115,8 @@ private:
+     JSObject *common_root;
+ 
+     void initGlobalObject();
+-    JSScript *_load(zmm::String scriptPath);
+-    void _execute(JSScript *scr);
++    JSObject *_load(zmm::String scriptPath);
++    void _execute(JSObject *scr);
+     zmm::Ref<StringConverter> _p2i;
+     zmm::Ref<StringConverter> _j2i;
+     zmm::Ref<StringConverter> _f2i;
+--- mediatomb-0.12.1/configure.tonewjs	2011-07-04 20:20:00.290227110 +1200
++++ mediatomb-0.12.1/configure	2011-07-04 20:20:28.186894644 +1200
+@@ -23784,14 +23784,14 @@ if test "x$ac_cv_lib_smjs_JS_NewObject"
+ 
+ else
+ 
+-                            LDFLAGS="-L$JS_SEARCH_LIBS $LDFLAGS_SAVE -lmozjs $ADD_PTHREAD_CFLAGS"
+-                            { $as_echo "$as_me:$LINENO: checking for JS_NewObject in -lmozjs" >&5
+-$as_echo_n "checking for JS_NewObject in -lmozjs... " >&6; }
+-if test "${ac_cv_lib_mozjs_JS_NewObject+set}" = set; then
++                            LDFLAGS="-L$JS_SEARCH_LIBS $LDFLAGS_SAVE -lmozjs185 $ADD_PTHREAD_CFLAGS"
++                            { $as_echo "$as_me:$LINENO: checking for JS_NewObject in -lmozjs185" >&5
++$as_echo_n "checking for JS_NewObject in -lmozjs185... " >&6; }
++if test "${ac_cv_lib_mozjs185_JS_NewObject+set}" = set; then
+   $as_echo_n "(cached) " >&6
+ else
+   ac_check_lib_save_LIBS=$LIBS
+-LIBS="-lmozjs  $LIBS"
++LIBS="-lmozjs185  $LIBS"
+ cat >conftest.$ac_ext <<_ACEOF
+ /* confdefs.h.  */
+ _ACEOF
+@@ -23835,12 +23835,12 @@ $as_echo "$ac_try_echo") >&5
+ 	 test "$cross_compiling" = yes ||
+ 	 $as_test_x conftest$ac_exeext
+        }; then
+-  ac_cv_lib_mozjs_JS_NewObject=yes
++  ac_cv_lib_mozjs185_JS_NewObject=yes
+ else
+   $as_echo "$as_me: failed program was:" >&5
+ sed 's/^/| /' conftest.$ac_ext >&5
+ 
+-	ac_cv_lib_mozjs_JS_NewObject=no
++	ac_cv_lib_mozjs185_JS_NewObject=no
+ fi
+ 
+ rm -rf conftest.dSYM
+@@ -23848,12 +23848,12 @@ rm -f core conftest.err conftest.$ac_obj
+       conftest$ac_exeext conftest.$ac_ext
+ LIBS=$ac_check_lib_save_LIBS
+ fi
+-{ $as_echo "$as_me:$LINENO: result: $ac_cv_lib_mozjs_JS_NewObject" >&5
+-$as_echo "$ac_cv_lib_mozjs_JS_NewObject" >&6; }
+-if test "x$ac_cv_lib_mozjs_JS_NewObject" = x""yes; then
++{ $as_echo "$as_me:$LINENO: result: $ac_cv_lib_mozjs185_JS_NewObject" >&5
++$as_echo "$ac_cv_lib_mozjs185_JS_NewObject" >&6; }
++if test "x$ac_cv_lib_mozjs185_JS_NewObject" = x""yes; then
+ 
+-                                    JS_LIBS="-L$JS_SEARCH_LIBS -lmozjs"
+-                                    MOZLIB=mozjs
++                                    JS_LIBS="-L$JS_SEARCH_LIBS -lmozjs185"
++                                    MOZLIB=mozjs185
+ 
+ else
+ 
+@@ -24020,13 +24020,13 @@ if test "x$ac_cv_lib_smjs_JS_NewObject"
+ else
+ 
+                     unset ac_cv_lib_smjs_JS_NewObject
+-                    { $as_echo "$as_me:$LINENO: checking for JS_NewObject in -lmozjs" >&5
+-$as_echo_n "checking for JS_NewObject in -lmozjs... " >&6; }
+-if test "${ac_cv_lib_mozjs_JS_NewObject+set}" = set; then
++                    { $as_echo "$as_me:$LINENO: checking for JS_NewObject in -lmozjs185" >&5
++$as_echo_n "checking for JS_NewObject in -lmozjs185... " >&6; }
++if test "${ac_cv_lib_mozjs185_JS_NewObject+set}" = set; then
+   $as_echo_n "(cached) " >&6
+ else
+   ac_check_lib_save_LIBS=$LIBS
+-LIBS="-lmozjs  $LIBS"
++LIBS="-lmozjs185  $LIBS"
+ cat >conftest.$ac_ext <<_ACEOF
+ /* confdefs.h.  */
+ _ACEOF
+@@ -24070,12 +24070,12 @@ $as_echo "$ac_try_echo") >&5
+ 	 test "$cross_compiling" = yes ||
+ 	 $as_test_x conftest$ac_exeext
+        }; then
+-  ac_cv_lib_mozjs_JS_NewObject=yes
++  ac_cv_lib_mozjs185_JS_NewObject=yes
+ else
+   $as_echo "$as_me: failed program was:" >&5
+ sed 's/^/| /' conftest.$ac_ext >&5
+ 
+-	ac_cv_lib_mozjs_JS_NewObject=no
++	ac_cv_lib_mozjs185_JS_NewObject=no
+ fi
+ 
+ rm -rf conftest.dSYM
+@@ -24083,12 +24083,12 @@ rm -f core conftest.err conftest.$ac_obj
+       conftest$ac_exeext conftest.$ac_ext
+ LIBS=$ac_check_lib_save_LIBS
+ fi
+-{ $as_echo "$as_me:$LINENO: result: $ac_cv_lib_mozjs_JS_NewObject" >&5
+-$as_echo "$ac_cv_lib_mozjs_JS_NewObject" >&6; }
+-if test "x$ac_cv_lib_mozjs_JS_NewObject" = x""yes; then
++{ $as_echo "$as_me:$LINENO: result: $ac_cv_lib_mozjs185_JS_NewObject" >&5
++$as_echo "$ac_cv_lib_mozjs185_JS_NewObject" >&6; }
++if test "x$ac_cv_lib_mozjs185_JS_NewObject" = x""yes; then
+ 
+-                            MOZLIB=mozjs
+-                            JS_LIBS="-lmozjs"
++                            MOZLIB=mozjs185
++                            JS_LIBS="-lmozjs185"
+ 
+ else
+ 
+@@ -24239,15 +24239,15 @@ if test "x$ac_cv_lib_smjs_JS_NewObject"
+ 
+ else
+ 
+-                                            LDFLAGS="-L$SEARCH_DIR_LIBS $LDFLAGS_SAVE -lmozjs"
+-                                            unset ac_cv_lib_mozjs_JS_NewObject
+-                                            { $as_echo "$as_me:$LINENO: checking for JS_NewObject in -lmozjs" >&5
+-$as_echo_n "checking for JS_NewObject in -lmozjs... " >&6; }
+-if test "${ac_cv_lib_mozjs_JS_NewObject+set}" = set; then
++                                            LDFLAGS="-L$SEARCH_DIR_LIBS $LDFLAGS_SAVE -lmozjs185"
++                                            unset ac_cv_lib_mozjs185_JS_NewObject
++                                            { $as_echo "$as_me:$LINENO: checking for JS_NewObject in -lmozjs185" >&5
++$as_echo_n "checking for JS_NewObject in -lmozjs185... " >&6; }
++if test "${ac_cv_lib_mozjs185_JS_NewObject+set}" = set; then
+   $as_echo_n "(cached) " >&6
+ else
+   ac_check_lib_save_LIBS=$LIBS
+-LIBS="-lmozjs  $LIBS"
++LIBS="-lmozjs185  $LIBS"
+ cat >conftest.$ac_ext <<_ACEOF
+ /* confdefs.h.  */
+ _ACEOF
+@@ -24291,12 +24291,12 @@ $as_echo "$ac_try_echo") >&5
+ 	 test "$cross_compiling" = yes ||
+ 	 $as_test_x conftest$ac_exeext
+        }; then
+-  ac_cv_lib_mozjs_JS_NewObject=yes
++  ac_cv_lib_mozjs185_JS_NewObject=yes
+ else
+   $as_echo "$as_me: failed program was:" >&5
+ sed 's/^/| /' conftest.$ac_ext >&5
+ 
+-	ac_cv_lib_mozjs_JS_NewObject=no
++	ac_cv_lib_mozjs185_JS_NewObject=no
+ fi
+ 
+ rm -rf conftest.dSYM
+@@ -24304,12 +24304,12 @@ rm -f core conftest.err conftest.$ac_obj
+       conftest$ac_exeext conftest.$ac_ext
+ LIBS=$ac_check_lib_save_LIBS
+ fi
+-{ $as_echo "$as_me:$LINENO: result: $ac_cv_lib_mozjs_JS_NewObject" >&5
+-$as_echo "$ac_cv_lib_mozjs_JS_NewObject" >&6; }
+-if test "x$ac_cv_lib_mozjs_JS_NewObject" = x""yes; then
++{ $as_echo "$as_me:$LINENO: result: $ac_cv_lib_mozjs185_JS_NewObject" >&5
++$as_echo "$ac_cv_lib_mozjs185_JS_NewObject" >&6; }
++if test "x$ac_cv_lib_mozjs185_JS_NewObject" = x""yes; then
+ 
+-                                                    JS_LIBS="-L$SEARCH_DIR_LIBS -lmozjs"
+-                                                    MOZLIB=mozjs
++                                                    JS_LIBS="-L$SEARCH_DIR_LIBS -lmozjs185"
++                                                    MOZLIB=mozjs185
+ 
+ else
+ 
