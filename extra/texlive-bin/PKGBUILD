@@ -1,16 +1,16 @@
 # Maintainer: Rémy Oudompheng <remy@archlinux.org>
 # Contributor: francois <francois.archlinux.org>
 
-# ALARM: Kevin Mihelich <kevin@plugapps.com>
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Removed clisp makedepend, removed xindy from build and packaging (only thing that used clisp)
 #  - Use -fPIC with armv7
 
 plugrel=1
 
 pkgname=texlive-bin
-pkgver=2011.1
+pkgver=2011.3
 _luatex_ver=0.70.1
-pkgrel=5
+pkgrel=1
 pkgdesc="TeX Live binaries"
 license=('GPL')
 arch=('i686' 'x86_64')
@@ -19,17 +19,16 @@ makedepends=('perl' 'ffcall')
 optdepends=('ed: for texconfig')
 provides=('lcdf-typetools' 'kpathsea' 'pdfjam')
 conflicts=('pdfjam')
-options=('!libtool')
+options=('!libtool' '!strip')
 url='http://tug.org/texlive/'
 install="texlive.install"
 source=('texmf.cnf'
         'fix-fontforge-encoding.patch'
         '09-texlive-fonts.conf'
-        'archlinux-build.patch'
-        'http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-source-20110724.tar.xz'
-        'http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-texmf-20110724.tar.xz'
+        'http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-source-20111210.tar.xz'
+        'http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-texmf-20111210.tar.xz'
         # "http://foundry.supelec.fr/gf/download/frsrelease/392/1730/luatex-beta-${_luatex_ver}.tar.bz2"
-        'http://mirrors.kernel.org/archlinux/other/texlive/luatex-svn4356.tar.xz'
+        'http://ftp.archlinux.org/other/texlive/luatex-svn4356.tar.xz'
 )
 backup=(etc/texmf/web2c/texmf.cnf \
   etc/texmf/chktex/chktexrc \
@@ -45,12 +44,11 @@ backup=(etc/texmf/web2c/texmf.cnf \
 	etc/texmf/dvipdfm/config/config \
 	etc/texmf/xdvi/XDvi)
 
-md5sums=('ff30d6813babd2e41c414365eea9c147'
+md5sums=('220a4f4cc0d915bf8fcbcb553dcee1ae'
          'bfb9716aa00c86c08cd31e5b32edeb98'
          '393a4bf67adc7ca5df2b386759d1a637'
-         '94ef5571a54262790ab64d6d044dd10c'
-         '58e8ab64188eaf15897b7acf472dca9f'
-         '9f7ae1aa24afd9e34289ac10a8f9e87b'
+         'c7bb38c0ab30c2b64cf4cf83a736b35c'
+         '5d8f06a3683ce88a3c33e15f5ba6a858'
          'e7f0197559ef865d8c01683dab3b8526')
 
 build() {
@@ -107,11 +105,6 @@ build() {
    #############################################################
    ### configure
    cd source
-   patch -Np1 -i ${srcdir}/archlinux-build.patch
-   for _dir in texk/tetex texk/texlive texk/tex4htk \
-       utils/ps2eps utils/chktex utils/psutils; do
-       (cd ${_dir} && automake) || true
-   done
    ## prevent compiling Xdvi with libXp
    sed -i~ 's|-lXp ||' texk/xdvik/configure
    test ! -d Work && mkdir Work
@@ -119,6 +112,7 @@ build() {
    echo "--> Initial configuration..."
    # we use temporary prefix to avoid messing the existing $pkgdir/usr/share/texmf tree
    ../configure --prefix=/usr -C \
+     --sysconfdir=/etc \
      --datarootdir=/usr/share \
      --datadir=/usr/share \
      --mandir=/usr/share/man \
@@ -173,16 +167,6 @@ package() {
    install -d -m755 $pkgdir/etc/texmf/xdvi
    install -d -m755 $pkgdir/etc/fonts/conf.avail
    install -m644 $srcdir/09-texlive-fonts.conf $pkgdir/etc/fonts/conf.avail/
-   # replace upstream texmf.cnf with ours
-   rm -f $pkgdir/usr/share/texmf/web2c/texmf.cnf
-   install -m644 $srcdir/texmf.cnf $pkgdir/etc/texmf/web2c/texmf.cnf
-   # since the location of texmf.cnf is hard-wired to be under /usr/share/texmf/web2c
-   # we make a symlink from /etc/texmf/web2c/texmf.cnf to the latter
-   ln -s /etc/texmf/web2c/texmf.cnf $pkgdir/usr/share/texmf/web2c/texmf.cnf
-   # fix location of TEXMFCACHE for luatools
-   sed -i 's#texlive2010#texlive#' $pkgdir/usr/share/texmf/web2c/texmfcnf.lua
-   ## remove aleph from fmtutil.cnf
-   sed -i -e '/aleph/d' $pkgdir/usr/share/texmf/web2c/fmtutil.cnf
    # move man files to /usr/share/man
    for i in 1 5; do
      install -d -m755 $pkgdir/usr/share/man/man$i
@@ -232,7 +216,18 @@ package() {
    echo "-------------------------------------------------------"
    cd Work
    make DESTDIR=${pkgdir} texmf=$pkgdir/usr/share/texmf install
-   rm -rf ${pkgdir}/usr/{texmf,texmf-dist}
+   rm -rf ${pkgdir}/usr/{texmf,share/texmf-dist}
+
+   # replace upstream texmf.cnf with ours
+   rm -f $pkgdir/usr/share/texmf/web2c/texmf.cnf
+   install -m644 $srcdir/texmf.cnf $pkgdir/etc/texmf/web2c/texmf.cnf
+   # since the location of texmf.cnf is hard-wired to be under /usr/share/texmf/web2c
+   # we make a symlink from /etc/texmf/web2c/texmf.cnf to the latter
+   ln -sf /etc/texmf/web2c/texmf.cnf $pkgdir/usr/share/texmf/web2c/texmf.cnf
+   # fix location of TEXMFCACHE for luatools
+   sed -i 's#texlive2010#texlive#' $pkgdir/usr/share/texmf/web2c/texmfcnf.lua
+   ## remove aleph from fmtutil.cnf
+   sed -i -e '/aleph/d' $pkgdir/usr/share/texmf/web2c/fmtutil.cnf
 
    ## install luatex binary
    #install -m755 $srcdir/luatex-beta-${_luatex_ver}/build/texk/web2c/luatex $pkgdir/usr/bin/
@@ -250,14 +245,20 @@ package() {
    PATH="$PATH:${pkgdir}/usr/bin" texlinks -f $pkgdir/usr/share/texmf/web2c/fmtutil.cnf $pkgdir/usr/bin/
    #############################################################
    # remove dangling symlinks
-   _bibtexextra_scripts="bibexport"
+   _bibtexextra_scripts="
+bibexport
+urlbst
+"
    _core_scripts="
 afm2afm
 arlatex
 autoinst
 bundledoc
 cmap2enc
+ctanify
+ctanupload
 de-macro
+dosepsbin
 dviasm
 epstopdf
 findhyph
@@ -270,6 +271,8 @@ latexdiff-vc
 latexmk
 latexrevise
 listings-ext.sh
+match_parens
+mf2pt1
 mkjobtexmf
 mkluatexfontdb
 mkt1font
@@ -301,6 +304,7 @@ texcount
 texdef
 texdiff
 texdirflatten
+texliveonfly
 texloganalyser
 thumbpdf
 vpl2ovp
