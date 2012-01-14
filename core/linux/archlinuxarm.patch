@@ -1,6 +1,399 @@
+diff -urN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/dockstar-setup.c
+--- a/arch/arm/mach-kirkwood/dockstar-setup.c	2011-10-24 01:10:05.000000000 -0600
++++ b/arch/arm/mach-kirkwood/dockstar-setup.c	2012-01-14 03:32:44.000000000 -0700
+@@ -19,7 +19,6 @@
+ #include <asm/mach-types.h>
+ #include <asm/mach/arch.h>
+ #include <mach/kirkwood.h>
+-#include <plat/mvsdio.h>
+ #include "common.h"
+ #include "mpp.h"
+ 
+@@ -33,6 +32,10 @@
+ 		.offset = MTDPART_OFS_NXTBLK,
+ 		.size = SZ_4M
+ 	}, {
++		.name = "pogoplug",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_32M
++	}, {
+ 		.name = "root",
+ 		.offset = MTDPART_OFS_NXTBLK,
+ 		.size = MTDPART_SIZ_FULL
+@@ -45,17 +48,17 @@
+ 
+ static struct gpio_led dockstar_led_pins[] = {
+ 	{
+-		.name			= "dockstar:green:health",
++		.name			= "status:green:health",
+ 		.default_trigger	= "default-on",
+ 		.gpio			= 46,
+ 		.active_low		= 1,
+ 	},
+ 	{
+-		.name			= "dockstar:orange:misc",
++		.name			= "status:orange:fault",
+ 		.default_trigger	= "none",
+ 		.gpio			= 47,
+ 		.active_low		= 1,
+-	},
++	}
+ };
+ 
+ static struct gpio_led_platform_data dockstar_led_data = {
+@@ -73,8 +76,8 @@
+ 
+ static unsigned int dockstar_mpp_config[] __initdata = {
+ 	MPP29_GPIO,	/* USB Power Enable */
+-	MPP46_GPIO,	/* LED green */
+-	MPP47_GPIO,	/* LED orange */
++	MPP47_GPIO,	/* LED Orange */
++	MPP46_GPIO,	/* LED Green */
+ 	0
+ };
+ 
+diff -urN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/goflexhome-setup.c
+--- a/arch/arm/mach-kirkwood/goflexhome-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/goflexhome-setup.c	2012-01-14 03:32:44.000000000 -0700
+@@ -0,0 +1,123 @@
++/*
++ * arch/arm/mach-kirkwood/goflexhome-setup.c
++ *
++ * Seagate GoFlex Home Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/ata_platform.h>
++#include <linux/mtd/partitions.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition goflexhome_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_2M + SZ_4M
++	}, {
++		.name = "root",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data goflexhome_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct mv_sata_platform_data goflexhome_sata_data = {
++	.n_ports	= 1,
++};
++
++static struct gpio_led goflexhome_led_pins[] = {
++	{
++		.name			= "status:green:health",
++		.default_trigger	= "default-on",
++		.gpio			= 46,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:orange:fault",
++		.default_trigger	= "none",
++		.gpio			= 47,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:white:misc",
++		.default_trigger	= "none",
++		.gpio			= 40,
++		.active_low		= 0,
++	}
++};
++
++static struct gpio_led_platform_data goflexhome_led_data = {
++	.leds		= goflexhome_led_pins,
++	.num_leds	= ARRAY_SIZE(goflexhome_led_pins),
++};
++
++static struct platform_device goflexhome_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &goflexhome_led_data,
++	}
++};
++
++static unsigned int goflexhome_mpp_config[] __initdata = {
++	MPP29_GPIO,	/* USB Power Enable */
++	MPP47_GPIO,	/* LED Orange */
++	MPP46_GPIO,	/* LED Green */
++	MPP40_GPIO,	/* LED White */
++	0
++};
++
++static void __init goflexhome_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	/* setup gpio pin select */
++	kirkwood_mpp_conf(goflexhome_mpp_config);
++
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(goflexhome_nand_parts), 25);
++
++	if (gpio_request(29, "USB Power Enable") != 0 ||
++	    gpio_direction_output(29, 1) != 0)
++		printk(KERN_ERR "can't set up GPIO 29 (USB Power Enable)\n");
++	kirkwood_ehci_init();
++	kirkwood_ge00_init(&goflexhome_ge00_data);
++	kirkwood_sata_init(&goflexhome_sata_data);
++
++	platform_device_register(&goflexhome_leds);
++}
++
++MACHINE_START(GOFLEXHOME, "Seagate GoFlex Home")
++	/* Maintainer: Peter Carmichael <peterjncarm@ovi.com> */
++	.boot_params	= 0x00000100,
++	.init_machine	= goflexhome_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.timer		= &kirkwood_timer,
++MACHINE_END
++
+diff -urN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/goflexnet-setup.c
+--- a/arch/arm/mach-kirkwood/goflexnet-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/goflexnet-setup.c	2012-01-14 03:32:44.000000000 -0700
+@@ -0,0 +1,176 @@
++/*
++ * arch/arm/mach-kirkwood/goflexnet-setup.c
++ *
++ * Seagate GoFlex Net Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/ata_platform.h>
++#include <linux/mtd/partitions.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition goflexnet_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_4M
++	}, {
++		.name = "pogoplug",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_32M
++	}, {
++		.name = "root",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data goflexnet_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct mv_sata_platform_data goflexnet_sata_data = {
++	.n_ports	= 2,
++};
++
++static struct gpio_led goflexnet_led_pins[] = {
++	{
++		.name			= "status:green:health",
++		.default_trigger	= "default-on",
++		.gpio			= 46, // 0x4000
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:orange:fault",
++		.default_trigger	= "none",
++		.gpio			= 47, // 0x8000
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:white:left0",
++		.default_trigger	= "none",
++		.gpio			= 42, // 0x0400
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:left1",
++		.default_trigger	= "none",
++		.gpio			= 43, // 0x0800
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:left2",
++		.default_trigger	= "none",
++		.gpio			= 44, // 0x1000
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:left3",
++		.default_trigger	= "none",
++		.gpio			= 45, // 0x2000
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:right0",
++		.default_trigger	= "none",
++		.gpio			= 38, // 0x0040
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:right1",
++		.default_trigger	= "none",
++		.gpio			= 39, // 0x0080
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:right2",
++		.default_trigger	= "none",
++		.gpio			= 40, // 0x0100
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:right3",
++		.default_trigger	= "none",
++		.gpio			= 41, // 0x0200
++		.active_low		= 0,
++	}
++};
++
++static struct gpio_led_platform_data goflexnet_led_data = {
++	.leds		= goflexnet_led_pins,
++	.num_leds	= ARRAY_SIZE(goflexnet_led_pins),
++};
++
++static struct platform_device goflexnet_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &goflexnet_led_data,
++	}
++};
++
++static unsigned int goflexnet_mpp_config[] __initdata = {
++	MPP29_GPIO,	/* USB Power Enable */
++	MPP47_GPIO,	/* LED Orange */
++	MPP46_GPIO,	/* LED Green */
++	MPP45_GPIO,	/* LED Left Capacity 3 */
++	MPP44_GPIO,	/* LED Left Capacity 2 */
++	MPP43_GPIO,	/* LED Left Capacity 1 */
++	MPP42_GPIO,	/* LED Left Capacity 0 */
++	MPP41_GPIO,	/* LED Right Capacity 3 */
++	MPP40_GPIO,	/* LED Right Capacity 2 */
++	MPP39_GPIO,	/* LED Right Capacity 1 */
++	MPP38_GPIO,	/* LED Right Capacity 0 */
++	0
++};
++
++static void __init goflexnet_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	/* setup gpio pin select */
++	kirkwood_mpp_conf(goflexnet_mpp_config);
++
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(goflexnet_nand_parts), 25);
++
++	if (gpio_request(29, "USB Power Enable") != 0 ||
++	    gpio_direction_output(29, 1) != 0)
++		printk(KERN_ERR "can't set up GPIO 29 (USB Power Enable)\n");
++	kirkwood_ehci_init();
++	kirkwood_ge00_init(&goflexnet_ge00_data);
++	kirkwood_sata_init(&goflexnet_sata_data);
++
++	platform_device_register(&goflexnet_leds);
++}
++
++MACHINE_START(GOFLEXNET, "Seagate GoFlex Net")
++	/* Maintainer: Peter Carmichael <peterjncarm@ovi.com> */
++	.boot_params	= 0x00000100,
++	.init_machine	= goflexnet_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.timer		= &kirkwood_timer,
++MACHINE_END
++
+diff -urN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/guruplug-setup.c
+--- a/arch/arm/mach-kirkwood/guruplug-setup.c	2011-10-24 01:10:05.000000000 -0600
++++ b/arch/arm/mach-kirkwood/guruplug-setup.c	2012-01-14 03:32:44.000000000 -0700
+@@ -57,22 +57,24 @@
+ 
+ static struct gpio_led guruplug_led_pins[] = {
+ 	{
+-		.name			= "guruplug:red:health",
++		.name			= "status:red:fault",
++		.default_trigger	= "none",
+ 		.gpio			= 46,
+ 		.active_low		= 1,
+ 	},
+ 	{
+-		.name			= "guruplug:green:health",
++		.name			= "status:green:health",
++		.default_trigger	= "default-on",
+ 		.gpio			= 47,
+ 		.active_low		= 1,
+ 	},
+ 	{
+-		.name			= "guruplug:red:wmode",
++		.name			= "status:red:wmode",
+ 		.gpio			= 48,
+ 		.active_low		= 1,
+ 	},
+ 	{
+-		.name			= "guruplug:green:wmode",
++		.name			= "status:green:wmode",
+ 		.gpio			= 49,
+ 		.active_low		= 1,
+ 	},
 diff -urN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/iconnect-setup.c
---- a/arch/arm/mach-kirkwood/iconnect-setup.c	1970-01-01 01:00:00.000000000 +0100
-+++ b/arch/arm/mach-kirkwood/iconnect-setup.c	2011-11-20 13:09:53.497632586 +0100
+--- a/arch/arm/mach-kirkwood/iconnect-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/iconnect-setup.c	2012-01-14 03:32:44.000000000 -0700
 @@ -0,0 +1,203 @@
 +/*
 + * arch/arm/mach-kirkwood/iconnect-setup.c
@@ -205,403 +598,10 @@ diff -urN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/ico
 +	.init_irq	= kirkwood_init_irq,
 +	.timer		= &kirkwood_timer,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/dockstar-setup.c
---- a/arch/arm/mach-kirkwood/dockstar-setup.c	2011-10-03 14:25:23.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/dockstar-setup.c	2011-10-17 15:00:50.000000000 -0600
-@@ -19,7 +19,6 @@
- #include <asm/mach-types.h>
- #include <asm/mach/arch.h>
- #include <mach/kirkwood.h>
--#include <plat/mvsdio.h>
- #include "common.h"
- #include "mpp.h"
- 
-@@ -33,6 +32,10 @@
- 		.offset = MTDPART_OFS_NXTBLK,
- 		.size = SZ_4M
- 	}, {
-+		.name = "pogoplug",
-+		.offset = MTDPART_OFS_NXTBLK,
-+		.size = SZ_32M
-+	}, {
- 		.name = "root",
- 		.offset = MTDPART_OFS_NXTBLK,
- 		.size = MTDPART_SIZ_FULL
-@@ -45,17 +48,17 @@
- 
- static struct gpio_led dockstar_led_pins[] = {
- 	{
--		.name			= "dockstar:green:health",
-+		.name			= "status:green:health",
- 		.default_trigger	= "default-on",
- 		.gpio			= 46,
- 		.active_low		= 1,
- 	},
- 	{
--		.name			= "dockstar:orange:misc",
-+		.name			= "status:orange:fault",
- 		.default_trigger	= "none",
- 		.gpio			= 47,
- 		.active_low		= 1,
--	},
-+	}
- };
- 
- static struct gpio_led_platform_data dockstar_led_data = {
-@@ -73,8 +76,8 @@
- 
- static unsigned int dockstar_mpp_config[] __initdata = {
- 	MPP29_GPIO,	/* USB Power Enable */
--	MPP46_GPIO,	/* LED green */
--	MPP47_GPIO,	/* LED orange */
-+	MPP47_GPIO,	/* LED Orange */
-+	MPP46_GPIO,	/* LED Green */
- 	0
- };
- 
-diff -urN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/goflexhome-setup.c
---- a/arch/arm/mach-kirkwood/goflexhome-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/goflexhome-setup.c	2011-10-17 15:00:50.000000000 -0600
-@@ -0,0 +1,123 @@
-+/*
-+ * arch/arm/mach-kirkwood/goflexhome-setup.c
-+ *
-+ * Seagate GoFlex Home Setup
-+ *
-+ * This file is licensed under the terms of the GNU General Public
-+ * License version 2.  This program is licensed "as is" without any
-+ * warranty of any kind, whether express or implied.
-+ */
-+
-+#include <linux/kernel.h>
-+#include <linux/init.h>
-+#include <linux/platform_device.h>
-+#include <linux/ata_platform.h>
-+#include <linux/mtd/partitions.h>
-+#include <linux/mv643xx_eth.h>
-+#include <linux/gpio.h>
-+#include <linux/leds.h>
-+#include <asm/mach-types.h>
-+#include <asm/mach/arch.h>
-+#include <mach/kirkwood.h>
-+#include "common.h"
-+#include "mpp.h"
-+
-+static struct mtd_partition goflexhome_nand_parts[] = {
-+	{
-+		.name = "u-boot",
-+		.offset = 0,
-+		.size = SZ_1M
-+	}, {
-+		.name = "uImage",
-+		.offset = MTDPART_OFS_NXTBLK,
-+		.size = SZ_2M + SZ_4M
-+	}, {
-+		.name = "root",
-+		.offset = MTDPART_OFS_NXTBLK,
-+		.size = MTDPART_SIZ_FULL
-+	},
-+};
-+
-+static struct mv643xx_eth_platform_data goflexhome_ge00_data = {
-+	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
-+};
-+
-+static struct mv_sata_platform_data goflexhome_sata_data = {
-+	.n_ports	= 1,
-+};
-+
-+static struct gpio_led goflexhome_led_pins[] = {
-+	{
-+		.name			= "status:green:health",
-+		.default_trigger	= "default-on",
-+		.gpio			= 46,
-+		.active_low		= 1,
-+	},
-+	{
-+		.name			= "status:orange:fault",
-+		.default_trigger	= "none",
-+		.gpio			= 47,
-+		.active_low		= 1,
-+	},
-+	{
-+		.name			= "status:white:misc",
-+		.default_trigger	= "none",
-+		.gpio			= 40,
-+		.active_low		= 0,
-+	}
-+};
-+
-+static struct gpio_led_platform_data goflexhome_led_data = {
-+	.leds		= goflexhome_led_pins,
-+	.num_leds	= ARRAY_SIZE(goflexhome_led_pins),
-+};
-+
-+static struct platform_device goflexhome_leds = {
-+	.name	= "leds-gpio",
-+	.id	= -1,
-+	.dev	= {
-+		.platform_data	= &goflexhome_led_data,
-+	}
-+};
-+
-+static unsigned int goflexhome_mpp_config[] __initdata = {
-+	MPP29_GPIO,	/* USB Power Enable */
-+	MPP47_GPIO,	/* LED Orange */
-+	MPP46_GPIO,	/* LED Green */
-+	MPP40_GPIO,	/* LED White */
-+	0
-+};
-+
-+static void __init goflexhome_init(void)
-+{
-+	/*
-+	 * Basic setup. Needs to be called early.
-+	 */
-+	kirkwood_init();
-+
-+	/* setup gpio pin select */
-+	kirkwood_mpp_conf(goflexhome_mpp_config);
-+
-+	kirkwood_uart0_init();
-+	kirkwood_nand_init(ARRAY_AND_SIZE(goflexhome_nand_parts), 25);
-+
-+	if (gpio_request(29, "USB Power Enable") != 0 ||
-+	    gpio_direction_output(29, 1) != 0)
-+		printk(KERN_ERR "can't set up GPIO 29 (USB Power Enable)\n");
-+	kirkwood_ehci_init();
-+	kirkwood_ge00_init(&goflexhome_ge00_data);
-+	kirkwood_sata_init(&goflexhome_sata_data);
-+
-+	platform_device_register(&goflexhome_leds);
-+}
-+
-+MACHINE_START(GOFLEXHOME, "Seagate GoFlex Home")
-+	/* Maintainer: Peter Carmichael <peterjncarm@ovi.com> */
-+	.boot_params	= 0x00000100,
-+	.init_machine	= goflexhome_init,
-+	.map_io		= kirkwood_map_io,
-+	.init_early	= kirkwood_init_early,
-+	.init_irq	= kirkwood_init_irq,
-+	.timer		= &kirkwood_timer,
-+MACHINE_END
-+
-diff -urN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/goflexnet-setup.c
---- a/arch/arm/mach-kirkwood/goflexnet-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/goflexnet-setup.c	2011-10-17 15:00:50.000000000 -0600
-@@ -0,0 +1,176 @@
-+/*
-+ * arch/arm/mach-kirkwood/goflexnet-setup.c
-+ *
-+ * Seagate GoFlex Net Setup
-+ *
-+ * This file is licensed under the terms of the GNU General Public
-+ * License version 2.  This program is licensed "as is" without any
-+ * warranty of any kind, whether express or implied.
-+ */
-+
-+#include <linux/kernel.h>
-+#include <linux/init.h>
-+#include <linux/platform_device.h>
-+#include <linux/ata_platform.h>
-+#include <linux/mtd/partitions.h>
-+#include <linux/mv643xx_eth.h>
-+#include <linux/gpio.h>
-+#include <linux/leds.h>
-+#include <asm/mach-types.h>
-+#include <asm/mach/arch.h>
-+#include <mach/kirkwood.h>
-+#include "common.h"
-+#include "mpp.h"
-+
-+static struct mtd_partition goflexnet_nand_parts[] = {
-+	{
-+		.name = "u-boot",
-+		.offset = 0,
-+		.size = SZ_1M
-+	}, {
-+		.name = "uImage",
-+		.offset = MTDPART_OFS_NXTBLK,
-+		.size = SZ_4M
-+	}, {
-+		.name = "pogoplug",
-+		.offset = MTDPART_OFS_NXTBLK,
-+		.size = SZ_32M
-+	}, {
-+		.name = "root",
-+		.offset = MTDPART_OFS_NXTBLK,
-+		.size = MTDPART_SIZ_FULL
-+	},
-+};
-+
-+static struct mv643xx_eth_platform_data goflexnet_ge00_data = {
-+	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
-+};
-+
-+static struct mv_sata_platform_data goflexnet_sata_data = {
-+	.n_ports	= 2,
-+};
-+
-+static struct gpio_led goflexnet_led_pins[] = {
-+	{
-+		.name			= "status:green:health",
-+		.default_trigger	= "default-on",
-+		.gpio			= 46, // 0x4000
-+		.active_low		= 1,
-+	},
-+	{
-+		.name			= "status:orange:fault",
-+		.default_trigger	= "none",
-+		.gpio			= 47, // 0x8000
-+		.active_low		= 1,
-+	},
-+	{
-+		.name			= "status:white:left0",
-+		.default_trigger	= "none",
-+		.gpio			= 42, // 0x0400
-+		.active_low		= 0,
-+	},
-+	{
-+		.name			= "status:white:left1",
-+		.default_trigger	= "none",
-+		.gpio			= 43, // 0x0800
-+		.active_low		= 0,
-+	},
-+	{
-+		.name			= "status:white:left2",
-+		.default_trigger	= "none",
-+		.gpio			= 44, // 0x1000
-+		.active_low		= 0,
-+	},
-+	{
-+		.name			= "status:white:left3",
-+		.default_trigger	= "none",
-+		.gpio			= 45, // 0x2000
-+		.active_low		= 0,
-+	},
-+	{
-+		.name			= "status:white:right0",
-+		.default_trigger	= "none",
-+		.gpio			= 38, // 0x0040
-+		.active_low		= 0,
-+	},
-+	{
-+		.name			= "status:white:right1",
-+		.default_trigger	= "none",
-+		.gpio			= 39, // 0x0080
-+		.active_low		= 0,
-+	},
-+	{
-+		.name			= "status:white:right2",
-+		.default_trigger	= "none",
-+		.gpio			= 40, // 0x0100
-+		.active_low		= 0,
-+	},
-+	{
-+		.name			= "status:white:right3",
-+		.default_trigger	= "none",
-+		.gpio			= 41, // 0x0200
-+		.active_low		= 0,
-+	}
-+};
-+
-+static struct gpio_led_platform_data goflexnet_led_data = {
-+	.leds		= goflexnet_led_pins,
-+	.num_leds	= ARRAY_SIZE(goflexnet_led_pins),
-+};
-+
-+static struct platform_device goflexnet_leds = {
-+	.name	= "leds-gpio",
-+	.id	= -1,
-+	.dev	= {
-+		.platform_data	= &goflexnet_led_data,
-+	}
-+};
-+
-+static unsigned int goflexnet_mpp_config[] __initdata = {
-+	MPP29_GPIO,	/* USB Power Enable */
-+	MPP47_GPIO,	/* LED Orange */
-+	MPP46_GPIO,	/* LED Green */
-+	MPP45_GPIO,	/* LED Left Capacity 3 */
-+	MPP44_GPIO,	/* LED Left Capacity 2 */
-+	MPP43_GPIO,	/* LED Left Capacity 1 */
-+	MPP42_GPIO,	/* LED Left Capacity 0 */
-+	MPP41_GPIO,	/* LED Right Capacity 3 */
-+	MPP40_GPIO,	/* LED Right Capacity 2 */
-+	MPP39_GPIO,	/* LED Right Capacity 1 */
-+	MPP38_GPIO,	/* LED Right Capacity 0 */
-+	0
-+};
-+
-+static void __init goflexnet_init(void)
-+{
-+	/*
-+	 * Basic setup. Needs to be called early.
-+	 */
-+	kirkwood_init();
-+
-+	/* setup gpio pin select */
-+	kirkwood_mpp_conf(goflexnet_mpp_config);
-+
-+	kirkwood_uart0_init();
-+	kirkwood_nand_init(ARRAY_AND_SIZE(goflexnet_nand_parts), 25);
-+
-+	if (gpio_request(29, "USB Power Enable") != 0 ||
-+	    gpio_direction_output(29, 1) != 0)
-+		printk(KERN_ERR "can't set up GPIO 29 (USB Power Enable)\n");
-+	kirkwood_ehci_init();
-+	kirkwood_ge00_init(&goflexnet_ge00_data);
-+	kirkwood_sata_init(&goflexnet_sata_data);
-+
-+	platform_device_register(&goflexnet_leds);
-+}
-+
-+MACHINE_START(GOFLEXNET, "Seagate GoFlex Net")
-+	/* Maintainer: Peter Carmichael <peterjncarm@ovi.com> */
-+	.boot_params	= 0x00000100,
-+	.init_machine	= goflexnet_init,
-+	.map_io		= kirkwood_map_io,
-+	.init_early	= kirkwood_init_early,
-+	.init_irq	= kirkwood_init_irq,
-+	.timer		= &kirkwood_timer,
-+MACHINE_END
-+
-diff -urN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/guruplug-setup.c
---- a/arch/arm/mach-kirkwood/guruplug-setup.c	2011-10-03 14:25:23.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/guruplug-setup.c	2011-10-17 15:00:50.000000000 -0600
-@@ -57,22 +57,24 @@
- 
- static struct gpio_led guruplug_led_pins[] = {
- 	{
--		.name			= "guruplug:red:health",
-+		.name			= "status:red:fault",
-+		.default_trigger	= "none",
- 		.gpio			= 46,
- 		.active_low		= 1,
- 	},
- 	{
--		.name			= "guruplug:green:health",
-+		.name			= "status:green:health",
-+		.default_trigger	= "default-on",
- 		.gpio			= 47,
- 		.active_low		= 1,
- 	},
- 	{
--		.name			= "guruplug:red:wmode",
-+		.name			= "status:red:wmode",
- 		.gpio			= 48,
- 		.active_low		= 1,
- 	},
- 	{
--		.name			= "guruplug:green:wmode",
-+		.name			= "status:green:wmode",
- 		.gpio			= 49,
- 		.active_low		= 1,
- 	},
 diff -urN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
---- a/arch/arm/mach-kirkwood/Kconfig	2011-10-03 14:25:23.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/Kconfig	2011-10-17 15:00:50.000000000 -0600
-@@ -64,6 +64,25 @@
+--- a/arch/arm/mach-kirkwood/Kconfig	2011-10-24 01:10:05.000000000 -0600
++++ b/arch/arm/mach-kirkwood/Kconfig	2012-01-14 04:04:19.000000000 -0700
+@@ -64,6 +64,31 @@
  	  Say 'Y' here if you want your kernel to support the
  	  Seagate FreeAgent DockStar.
  
@@ -624,26 +624,241 @@ diff -urN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
 +	  Iomega iConnect Wireless. Overrides Marvell RD-88F6281
 +	  Reference Board.
 +
++config MACH_POGOPLUGV4
++	bool "Pogoplug Series 4"
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Pogoplug Series 4.
++
  config MACH_OPENRD
          bool
-
+ 
 diff -urN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
---- a/arch/arm/mach-kirkwood/Makefile	2011-10-03 14:25:23.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/Makefile	2011-10-17 15:00:50.000000000 -0600
-@@ -8,6 +8,9 @@
+--- a/arch/arm/mach-kirkwood/Makefile	2011-10-24 01:10:05.000000000 -0600
++++ b/arch/arm/mach-kirkwood/Makefile	2012-01-14 03:36:39.000000000 -0700
+@@ -8,6 +8,10 @@
  obj-$(CONFIG_MACH_ESATA_SHEEVAPLUG)	+= sheevaplug-setup.o
  obj-$(CONFIG_MACH_GURUPLUG)		+= guruplug-setup.o
  obj-$(CONFIG_MACH_DOCKSTAR)		+= dockstar-setup.o
 +obj-$(CONFIG_MACH_GOFLEXNET)		+= goflexnet-setup.o
 +obj-$(CONFIG_MACH_GOFLEXHOME)		+= goflexhome-setup.o
 +obj-$(CONFIG_MACH_ICONNECT)		+= iconnect-setup.o
++obj-$(CONFIG_MACH_POGOPLUGV4)		+= pogoplugv4-setup.o
  obj-$(CONFIG_MACH_TS219)		+= ts219-setup.o tsx1x-common.o
  obj-$(CONFIG_MACH_TS41X)		+= ts41x-setup.o tsx1x-common.o
  obj-$(CONFIG_MACH_OPENRD)		+= openrd-setup.o
-
+diff -urN a/arch/arm/mach-kirkwood/mpp.h b/arch/arm/mach-kirkwood/mpp.h
+--- a/arch/arm/mach-kirkwood/mpp.h	2011-10-24 01:10:05.000000000 -0600
++++ b/arch/arm/mach-kirkwood/mpp.h	2012-01-14 03:32:44.000000000 -0700
+@@ -102,6 +102,7 @@
+ #define MPP11_SATA0_ACTn	MPP( 11, 0x5, 0, 1, 0,   1,   1,   1,   1 )
+ 
+ #define MPP12_GPO		MPP( 12, 0x0, 0, 1, 1,   1,   1,   1,   1 )
++#define MPP12_GPIO		MPP( 12, 0x0, 1, 1, 1,   1,   1,   1,   1 )
+ #define MPP12_SD_CLK		MPP( 12, 0x1, 0, 1, 1,   1,   1,   1,   1 )
+ #define MPP12_AU_SPDIF0		MPP( 12, 0xa, 0, 1, 0,   0,   0,   0,   1 )
+ #define MPP12_SPI_MOSI		MPP( 12, 0xb, 0, 1, 0,   0,   0,   0,   1 )
+diff -urN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/pogoplugv4-setup.c
+--- a/arch/arm/mach-kirkwood/pogoplugv4-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/pogoplugv4-setup.c	2012-01-14 04:34:06.000000000 -0700
+@@ -0,0 +1,194 @@
++/*
++ * arch/arm/mach-kirkwood/pogoplugv4-setup.c
++ *
++ * Pogoplug Series 4 Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/mtd/partitions.h>
++#include <linux/ata_platform.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/gpio_keys.h>
++#include <linux/leds.h>
++#include <linux/pci.h>
++#include <linux/irq.h>
++#include <linux/spi/flash.h>
++#include <linux/spi/spi.h>
++#include <linux/spi/orion_spi.h>
++#include <linux/input.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include <plat/mvsdio.h>
++#include "common.h"
++#include "mpp.h"
++
++#define POGOPLUGV4_GPIO_USB_VBUS		10
++
++static struct mtd_partition ppv4_nand_parts[] = {
++	{
++		.name	= "u-boot",
++		.offset	= 0,
++		.size	= 2 * SZ_1M
++	}, {
++		.name	= "uImage",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= 3 * SZ_1M
++	}, {
++		.name	= "uImage2",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= 3 * SZ_1M
++	}, {
++		.name	= "failsafe",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= SZ_8M
++	}, {
++		.name	= "root",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data pogoplugv4_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct mv_sata_platform_data pogoplugv4_sata_data = {
++	.n_ports	= 1,
++};
++
++static struct gpio_keys_button pogoplugv4_button_pins[] = {
++	{
++		.code		= KEY_EJECTCD,
++		.gpio		= 29,
++		.desc		= "Eject Button",
++		.active_low	= 1,
++	},
++};
++
++static struct gpio_keys_platform_data pogoplugv4_button_data = {
++	.buttons	= pogoplugv4_button_pins,
++	.nbuttons	= ARRAY_SIZE(pogoplugv4_button_pins),
++};
++
++static struct platform_device pogoplugv4_buttons = {
++	.name		= "gpio-keys",
++	.id		= -1,   
++	.num_resources  = 0,
++	.dev		= {
++		.platform_data  = &pogoplugv4_button_data,
++	},
++};
++
++static struct gpio_led pogoplugv4_led_pins[] = {
++	{
++		.name			= "status:green:health",
++		.default_trigger	= "default-on",
++		.gpio			= 22,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:red:fault",
++		.default_trigger	= "none",
++		.gpio			= 24,
++		.active_low		= 1,
++	},
++};
++
++static struct gpio_led_platform_data pogoplugv4_led_data = {
++	.leds		= pogoplugv4_led_pins,
++	.num_leds	= ARRAY_SIZE(pogoplugv4_led_pins),
++};
++
++static struct platform_device pogoplugv4_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &pogoplugv4_led_data,
++	}
++};
++
++static struct mvsdio_platform_data ppv4_mvsdio_data = {
++	.gpio_card_detect = 27,
++};
++
++static unsigned int ppv4_mpp_config[] __initdata = {
++	MPP27_GPIO,	/* SD card detect */
++	MPP29_GPIO,	/* Eject button */
++	MPP22_GPIO,	/* Green LED */
++	MPP24_GPIO,	/* Red LED */
++	MPP12_SD_CLK,
++	MPP13_SD_CMD,
++	MPP14_SD_D0,
++	MPP15_SD_D1,
++	MPP16_SD_D2,
++	MPP17_SD_D3,
++	0
++};
++
++static const struct flash_platform_data pogoplugv4_spi_slave_data = {
++	.type		= "m25p05-nonjedec",
++};
++
++static struct spi_board_info __initdata pogoplugv4_spi_slave_info[] = {
++	{
++		.modalias	= "m25p05-nonjedec",
++		.platform_data	= &pogoplugv4_spi_slave_data,
++		.irq		= -1,
++		.max_speed_hz	= 20000000,
++		.bus_num	= 0,
++		.chip_select	= 0,
++	},
++};
++
++static void __init pogoplugv4_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++	kirkwood_mpp_conf(ppv4_mpp_config);
++
++	orion_gpio_set_valid(POGOPLUGV4_GPIO_USB_VBUS, 1);
++	if (gpio_request(POGOPLUGV4_GPIO_USB_VBUS, "USB VBUS") != 0 ||
++	    gpio_direction_output(POGOPLUGV4_GPIO_USB_VBUS, 1) != 0)
++		pr_err("POGOPLUGV4: failed to setup USB VBUS GPIO\n");
++
++	kirkwood_ehci_init();
++	kirkwood_ge00_init(&pogoplugv4_ge00_data);
++	kirkwood_sata_init(&pogoplugv4_sata_data);
++	spi_register_board_info(pogoplugv4_spi_slave_info,
++				ARRAY_SIZE(pogoplugv4_spi_slave_info));
++	kirkwood_spi_init();
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(ppv4_nand_parts), 25);
++	kirkwood_sdio_init(&ppv4_mvsdio_data);
++	platform_device_register(&pogoplugv4_leds);
++	platform_device_register(&pogoplugv4_buttons);
++}
++
++static int __init pogoplugv4_pci_init(void)
++{
++	if (machine_is_pogoplugv4())
++		kirkwood_pcie_init(KW_PCIE0);
++
++	return 0;
++}
++subsys_initcall(pogoplugv4_pci_init);
++
++MACHINE_START(POGOPLUGV4, "Pogoplug V4")
++	/* Maintainer: Kevin Mihelich <kevin@archlinuxarm.org> */
++	.boot_params	= 0x00000100,
++	.init_machine	= pogoplugv4_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.timer		= &kirkwood_timer,
++MACHINE_END
 diff -urN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/sheevaplug-setup.c
---- a/arch/arm/mach-kirkwood/sheevaplug-setup.c	2011-10-03 14:25:23.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/sheevaplug-setup.c	2011-10-17 15:00:50.000000000 -0600
+--- a/arch/arm/mach-kirkwood/sheevaplug-setup.c	2011-10-24 01:10:05.000000000 -0600
++++ b/arch/arm/mach-kirkwood/sheevaplug-setup.c	2012-01-14 03:32:44.000000000 -0700
 @@ -64,7 +64,13 @@
  		.active_low		= 1,
  	},
@@ -679,15 +894,12 @@ diff -urN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/s
 +	MPP49_GPIO,	/* LED Blue */
  	0
  };
-
-diff -urN a/arch/arm/mach-kirkwood/mpp.h b/arch/arm/mach-kirkwood/mpp.h
---- a/arch/arm/mach-kirkwood/mpp.h	2011-11-11 21:19:27.000000000 +0100
-+++ b/arch/arm/mach-kirkwood/mpp.h	2011-11-19 16:22:10.023909984 +0100
-@@ -102,6 +102,7 @@
- #define MPP11_SATA0_ACTn	MPP( 11, 0x5, 0, 1, 0,   1,   1,   1,   1 )
  
- #define MPP12_GPO		MPP( 12, 0x0, 0, 1, 1,   1,   1,   1,   1 )
-+#define MPP12_GPIO		MPP( 12, 0x0, 1, 1, 1,   1,   1,   1,   1 )
- #define MPP12_SD_CLK		MPP( 12, 0x1, 0, 1, 1,   1,   1,   1,   1 )
- #define MPP12_AU_SPDIF0		MPP( 12, 0xa, 0, 1, 0,   0,   0,   0,   1 )
- #define MPP12_SPI_MOSI		MPP( 12, 0xb, 0, 1, 0,   0,   0,   0,   1 )
+diff -urN a/arch/arm/tools/mach-types b/arch/arm/tools/mach-types
+--- a/arch/arm/tools/mach-types	2011-10-24 01:10:05.000000000 -0600
++++ b/arch/arm/tools/mach-types	2012-01-14 03:41:57.000000000 -0700
+@@ -1113,3 +1113,4 @@
+ thales_adc		MACH_THALES_ADC		THALES_ADC		3492
+ ubisys_p9d_evp		MACH_UBISYS_P9D_EVP	UBISYS_P9D_EVP		3493
+ atdgp318		MACH_ATDGP318		ATDGP318		3494
++pogoplugv4		MACH_POGOPLUGV4		POGOPLUGV4		3960
