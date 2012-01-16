@@ -1,0 +1,503 @@
+--- xmms-1.2.11/Output/OSS/OSS.h.3dse	2003-06-11 20:44:17.000000000 +0200
++++ xmms-1.2.11/Output/OSS/OSS.h	2007-11-18 20:51:57.000000000 +0100
+@@ -48,6 +48,11 @@
+ # define IS_BIG_ENDIAN FALSE
+ #endif
+ 
++#define AWE_3DSE		0x90
++#define MIXER_BASE_DEFAULT	0x220
++#define MIXER_REG_OFFSET	4
++#define MIXER_DATA_OFFSET	5
++
+ extern OutputPlugin op;
+ 
+ typedef struct
+@@ -59,6 +64,8 @@ typedef struct
+ 	gboolean use_master;
+ 	gboolean use_alt_audio_device, use_alt_mixer_device;
+ 	gchar *alt_audio_device, *alt_mixer_device;
++	gint stereo;
++	gboolean hardware_access;
+ }
+ OSSConfig;
+ 
+@@ -82,6 +89,12 @@ int oss_get_output_time(void);
+ int oss_get_written_time(void);
+ void oss_set_audio_params(void);
+ 
++int oss_set_3dse(int stat);
++int oss_get_3dse(void);
++void oss_hw_set_3dse(int stat);
++int oss_hw_get_3dse(void);  
++int initHardwareAccess ();
++
+ void oss_free_convert_buffer(void);
+ int (*oss_get_convert_func(int output, int input))(void **, int);
+ int (*oss_get_stereo_convert_func(int output, int input))(void **, int, int);
+--- xmms-1.2.11/Output/OSS/configure.c.3dse	2005-05-15 02:01:20.000000000 +0200
++++ xmms-1.2.11/Output/OSS/configure.c	2007-11-18 20:51:57.000000000 +0100
+@@ -24,6 +24,10 @@ static GtkWidget *mixer_usemaster_check,
+ static GtkWidget *adevice_use_alt_check, *audio_alt_device_entry;
+ static GtkWidget *mdevice_use_alt_check, *mixer_alt_device_entry;
+ static gint audio_device, mixer_device;
++static GtkWidget *stereo_check_button, *stereo_frame, *stereo_box;
++static GtkWidget *stereo_label, *stereo_align_button, *stereo_align_label;
++static GtkWidget *save3dse_check_button, *stereo_table, *hw_check_button; 
++
+ 
+ static void configure_win_ok_cb(GtkWidget * w, gpointer data)
+ {
+@@ -69,6 +73,8 @@ static void configure_win_ok_cb(GtkWidge
+ 	xmms_cfg_write_string(cfgfile, "OSS", "alt_audio_device", oss_cfg.alt_audio_device);
+ 	xmms_cfg_write_boolean(cfgfile, "OSS", "use_alt_mixer_device", oss_cfg.use_alt_mixer_device);
+ 	xmms_cfg_write_string(cfgfile, "OSS", "alt_mixer_device", oss_cfg.alt_mixer_device);
++	xmms_cfg_write_int(cfgfile, "OSS", "stereo", oss_cfg.stereo);
++	xmms_cfg_write_boolean(cfgfile, "OSS", "hardware", oss_cfg.hardware_access);
+ 	xmms_cfg_write_default_file(cfgfile);
+ 	xmms_cfg_free(cfgfile);
+ 
+@@ -85,6 +91,98 @@ static void configure_win_mixer_dev_cb(G
+ 	mixer_device = device;
+ }
+ 
++static void stereo_check_button_cb(GtkWidget * widget, gpointer data) 
++{
++	if (GTK_TOGGLE_BUTTON(widget)->active)
++	{
++		if (oss_cfg.stereo != -1)
++			oss_cfg.stereo = 1;
++		if (oss_cfg.hardware_access)
++			oss_hw_set_3dse(1);
++		else
++			oss_set_3dse(1);
++	}
++	else
++	{
++		if (oss_cfg.stereo != -1)
++			oss_cfg.stereo = 0;
++		if (oss_cfg.hardware_access)
++			oss_hw_set_3dse(0);
++		else
++			oss_set_3dse(0);
++	}	
++}
++
++static void save3dse_check_button_cb(GtkWidget * widget, gpointer data) 
++{
++	if (GTK_TOGGLE_BUTTON(widget)->active)
++	{
++		if (GTK_TOGGLE_BUTTON(data)->active)
++			oss_cfg.stereo = 1;
++		else
++			oss_cfg.stereo = 0;	
++	}
++	else
++	{
++		oss_cfg.stereo = -1;
++	}	
++}
++
++void warning_dialog(void)
++{
++	GtkWidget *dialog_window, *button, *label;
++  	dialog_window = gtk_dialog_new();
++  	gtk_window_set_title(GTK_WINDOW(dialog_window), 
++		"WARNING: DIRECT ACCESS");
++  	gtk_window_set_policy(GTK_WINDOW(dialog_window), FALSE, FALSE, TRUE);
++  	gtk_window_set_position(GTK_WINDOW(dialog_window), GTK_WIN_POS_MOUSE);
++  	button = gtk_button_new_with_label("Dismiss");
++  	gtk_signal_connect_object(GTK_OBJECT(button), "clicked",
++		GTK_SIGNAL_FUNC(gtk_widget_destroy), (gpointer)dialog_window);
++  	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog_window)->action_area),
++		button, TRUE, FALSE, 0);
++  	gtk_widget_show(button);
++  	label = gtk_label_new(
++		"Direct hardware access can cause damage to your sound card.\n"
++		"Only use this option when you are using OSS drivers that\n"
++		"doesn't support the SND_MIXER_3DSE ioctl.\n"
++		"USE THIS OPTION AT YOUR OWN RISK !!!\n"
++		"You can use the environment variable \"BLASTER\" to manual\n"
++		"set the port of the mixer of your sound card. Only use this\n"
++		"option when you really know the mixer address. The default\n"
++		"value is 0x220. Example:\n"
++		"    BLASTER=M230 ; export BLASTER\n"
++		"SETTING THE WRONG BLASTER ENVIRONMENT CAN\n"
++		"CAUSE YOUR SYSTEM TO CRASH AND CAN CAUSE\n"
++		"PERMANENT DAMAGE !!!");
++	gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_LEFT);
++  	gtk_misc_set_padding(GTK_MISC(label), 10, 10);
++  	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(dialog_window)->vbox),
++		label, TRUE, TRUE, 0);
++  	gtk_widget_show(label);
++  	gtk_grab_add(dialog_window);
++  	GTK_WIDGET_SET_FLAGS(button, GTK_CAN_DEFAULT);
++  	gtk_widget_grab_default(button);
++  	gtk_widget_show(dialog_window);
++}
++
++static void hw_check_button_cb(GtkWidget * widget, gpointer data)
++{
++	if (GTK_TOGGLE_BUTTON(widget)->active)
++		{
++			if (oss_cfg.hardware_access == 0)
++				warning_dialog();
++			oss_cfg.hardware_access = 1;
++			initHardwareAccess ();
++			gtk_widget_set_sensitive(stereo_check_button, TRUE);
++			gtk_widget_set_sensitive(save3dse_check_button, TRUE);
++		}
++	else
++		{
++			oss_cfg.hardware_access = 0;
++		}
++}
++
+ static void audio_device_toggled(GtkToggleButton * widget, gpointer data)
+ {
+ 	gboolean use_alt_audio_device = gtk_toggle_button_get_active(widget);
+@@ -148,10 +246,38 @@ static void scan_devices(gchar * type, G
+ 	}
+ 	else
+ 	{
+-		item = gtk_menu_item_new_with_label(_("Default"));
+-		gtk_signal_connect(GTK_OBJECT(item), "activate", sigfunc, (gpointer) 0);
+-		gtk_widget_show(item);
+-		gtk_menu_append(GTK_MENU(menu), item);
++#ifdef SOUND_MIXER_INFO
++		int i, fd;
++		gchar *dev_name;
++		mixer_info info;
++		for (i = 0; i < 10; i++) {
++			if (i)
++				dev_name = g_strdup_printf ("/dev/mixer%d", i);
++			else
++				dev_name = g_strdup_printf ("/dev/mixer");
++			if ((fd = open (dev_name, O_RDONLY)) != -1) {
++				if (ioctl (fd, SOUND_MIXER_INFO, &info) != -1) {
++					if (!index) 
++						temp = g_strdup_printf ("Default (%s)", info.name);
++					else 
++						temp = g_strdup_printf ("%s", info.name);
++					item = gtk_menu_item_new_with_label (temp);
++					g_free (temp);
++					gtk_signal_connect(GTK_OBJECT(item), "activate", sigfunc, (gpointer) index++);
++					gtk_widget_show(item);
++					gtk_menu_append(GTK_MENU(menu), item);
++				}
++				close(fd);
++			}
++			g_free(dev_name);
++		}
++#endif
++		if (!index) {
++			item = gtk_menu_item_new_with_label(_("Default"));
++			gtk_signal_connect(GTK_OBJECT(item), "activate", sigfunc, (gpointer) 0);
++			gtk_widget_show(item);
++			gtk_menu_append(GTK_MENU(menu), item);
++		}
+ 	}
+ 	gtk_option_menu_set_menu(GTK_OPTION_MENU(option_menu), menu);
+ }
+@@ -300,6 +426,69 @@ void oss_configure(void)
+ 	gtk_table_attach_defaults(GTK_TABLE(mixer_table), mixer_usemaster_check, 0, 1, 0, 1);
+ 	gtk_notebook_append_page(GTK_NOTEBOOK(notebook), mixer_frame, gtk_label_new(_("Mixer")));
+ 
++	stereo_frame = gtk_frame_new("3D Stereo Enhancement:");
++	gtk_container_set_border_width(GTK_CONTAINER(stereo_frame), 5);
++	gtk_widget_show(stereo_frame);
++	stereo_box = gtk_vbox_new(FALSE, 0);
++	gtk_widget_show(stereo_box);
++	stereo_table = gtk_table_new(3, 1, FALSE);
++	gtk_widget_show(stereo_table);
++	stereo_check_button = gtk_check_button_new_with_label("3D Stereo Enhancement");
++	gtk_signal_connect(GTK_OBJECT(stereo_check_button), "toggled",
++	GTK_SIGNAL_FUNC(stereo_check_button_cb), NULL);
++	save3dse_check_button = gtk_check_button_new_with_label("Save 3DSE setting");
++	gtk_signal_connect(GTK_OBJECT(save3dse_check_button), "toggled",
++	GTK_SIGNAL_FUNC(save3dse_check_button_cb), stereo_check_button);
++	hw_check_button = gtk_check_button_new_with_label("Direct hardware access");
++	gtk_signal_connect(GTK_OBJECT(hw_check_button), "toggled",
++	GTK_SIGNAL_FUNC(hw_check_button_cb), hw_check_button);
++	if (oss_cfg.stereo != -1) 
++		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(save3dse_check_button), TRUE);
++	if (oss_cfg.hardware_access) 
++		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(hw_check_button), TRUE);
++	if (getuid () != 0 || geteuid () != 0)
++		gtk_widget_set_sensitive(hw_check_button, FALSE);
++	switch(oss_get_3dse())
++	{
++	case 1:
++		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(stereo_check_button), TRUE);
++	case 0:
++		gtk_widget_set_sensitive(hw_check_button, FALSE);
++		oss_cfg.hardware_access = FALSE;
++		break;
++	case -1:
++		if (!oss_cfg.hardware_access) 
++			{
++				gtk_widget_set_sensitive(stereo_check_button, FALSE);
++				gtk_widget_set_sensitive(save3dse_check_button, FALSE);
++			}
++		else
++			if(oss_hw_get_3dse())
++				gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(stereo_check_button), TRUE);
++		break;
++	}
++	gtk_table_attach_defaults(GTK_TABLE(stereo_table), stereo_check_button, 0, 1, 0, 1);
++	gtk_widget_show(stereo_check_button);
++	gtk_table_attach_defaults(GTK_TABLE(stereo_table), save3dse_check_button, 0, 1, 1, 2);
++	gtk_widget_show(save3dse_check_button);
++	gtk_table_attach_defaults(GTK_TABLE(stereo_table), hw_check_button, 0, 1, 2, 3);
++	gtk_widget_show(hw_check_button);
++	stereo_align_button = gtk_alignment_new(0.2, 0.5, 0, 0);
++	gtk_container_add(GTK_CONTAINER(stereo_align_button), stereo_table);
++	gtk_widget_show(stereo_align_button);
++	stereo_label = gtk_label_new("Please note that not all sound cards support this feature.\n"
++		"Supported: SoundBlaster 16, ViBRA, AWE32/64.");
++	gtk_label_set_justify(GTK_LABEL(stereo_label), GTK_JUSTIFY_LEFT);
++	gtk_misc_set_padding(GTK_MISC(stereo_label), 5, 5);
++	gtk_widget_show(stereo_label);
++	stereo_align_label = gtk_alignment_new(0, 0, 0, 0);
++	gtk_container_add(GTK_CONTAINER(stereo_align_label), stereo_label);
++	gtk_widget_show(stereo_align_label);
++	gtk_box_pack_end(GTK_BOX(stereo_box), stereo_align_label, FALSE, FALSE, 0);
++	gtk_box_pack_end(GTK_BOX(stereo_box), stereo_align_button, TRUE, FALSE, 0);
++	gtk_container_add(GTK_CONTAINER(stereo_frame), stereo_box);
++	gtk_notebook_append_page(GTK_NOTEBOOK(notebook), stereo_frame, gtk_label_new("3DSE"));
++
+ 	bbox = gtk_hbutton_box_new();
+ 	gtk_button_box_set_layout(GTK_BUTTON_BOX(bbox), GTK_BUTTONBOX_END);
+ 	gtk_button_box_set_spacing(GTK_BUTTON_BOX(bbox), 5);
+@@ -317,4 +506,5 @@ void oss_configure(void)
+ 	gtk_box_pack_start(GTK_BOX(bbox), cancel, TRUE, TRUE, 0);
+ 
+ 	gtk_widget_show_all(configure_win);
++	gtk_notebook_set_page(GTK_NOTEBOOK(notebook), 0);
+ }
+--- xmms-1.2.11/Output/OSS/init.c.3dse	2001-03-08 06:49:47.000000000 +0100
++++ xmms-1.2.11/Output/OSS/init.c	2007-11-18 20:51:57.000000000 +0100
+@@ -33,6 +33,8 @@ void oss_init(void)
+ 	oss_cfg.use_alt_audio_device = FALSE;
+ 	oss_cfg.alt_audio_device = NULL;
+ 	oss_cfg.use_master=0;
++	oss_cfg.stereo = -1; /* = 3dse setting not saved */
++	oss_cfg.hardware_access = FALSE;
+ 	
+ 	if ((cfgfile = xmms_cfg_open_default_file()))
+ 	{
+@@ -45,6 +47,32 @@ void oss_init(void)
+ 		xmms_cfg_read_string(cfgfile, "OSS", "alt_audio_device", &oss_cfg.alt_audio_device);
+ 		xmms_cfg_read_boolean(cfgfile, "OSS", "use_alt_mixer_device", &oss_cfg.use_alt_mixer_device);
+ 		xmms_cfg_read_string(cfgfile, "OSS", "alt_mixer_device", &oss_cfg.alt_mixer_device);
++		xmms_cfg_read_int(cfgfile, "OSS", "stereo", &oss_cfg.stereo);
++		xmms_cfg_read_boolean(cfgfile, "OSS", "hardware", &oss_cfg.hardware_access);
+ 		xmms_cfg_free(cfgfile);
+ 	}
++	if (oss_cfg.hardware_access)
++		if (initHardwareAccess() == -1)
++			oss_cfg.hardware_access = FALSE;
++
++	if (oss_cfg.hardware_access)
++		switch(oss_cfg.stereo)
++		{
++		case 0:
++			oss_hw_set_3dse(0);
++			break;
++		case 1:
++			oss_hw_set_3dse(1);
++			break;
++		}
++	else
++		switch(oss_cfg.stereo)
++		{
++		case 0:
++			oss_set_3dse(0);
++			break;
++		case 1:
++			oss_set_3dse(1);
++			break;
++		}
+ }
+--- xmms-1.2.11/Output/OSS/mixer.c.3dse	2001-06-16 15:30:35.000000000 +0200
++++ xmms-1.2.11/Output/OSS/mixer.c	2007-11-18 20:51:57.000000000 +0100
+@@ -32,6 +32,10 @@ static char* get_mixer_device(void)
+ 	return name;
+ }
+ 
++#include <sys/io.h>
++
++static int mixer_reg = 0, mixer_data = 0;
++
+ void oss_get_volume(int *l, int *r)
+ {
+ 	int fd, v, cmd, devs;
+@@ -64,6 +68,156 @@ void oss_get_volume(int *l, int *r)
+ 	}
+ }
+ 
++int oss_set_3dse(int stat)
++{
++	int fd;
++	gchar *devname;
++
++	if ((stat != 0) && (stat != 1))
++		return -1;
++
++	if (oss_cfg.mixer_device > 0)
++		devname = g_strdup_printf("/dev/mixer%d", oss_cfg.mixer_device);
++	else
++		devname = g_strdup("/dev/mixer");
++	fd = open(devname, O_RDONLY);
++	g_free(devname);
++
++	if (fd != -1)
++	{
++		if (ioctl(fd, SOUND_MIXER_3DSE, &stat) < 0)
++		{
++			close(fd);
++			return -1;
++		}
++		else
++		{
++			close(fd);
++			return stat;
++		}
++	}
++	return -1;
++}
++
++int oss_get_3dse(void) 
++{
++	int fd, test_stat;
++	gchar *devname;
++
++	if (oss_cfg.mixer_device > 0)
++		devname = g_strdup_printf("/dev/mixer%d", oss_cfg.mixer_device);
++	else
++		devname = g_strdup("/dev/mixer");
++	fd = open(devname, O_RDONLY);
++	g_free(devname);
++
++	if (fd != -1)
++	{
++		test_stat = 2; /* code 2 will request status */
++		if (ioctl(fd, SOUND_MIXER_3DSE, &test_stat) < 0)
++		{
++			close(fd);
++			return -1;
++		}
++		else
++		{
++			close(fd);
++			return test_stat;
++		}
++	}
++	return -1;	
++}
++
++static void check_legal_mixer ()
++{
++	if (!mixer_reg || !mixer_data)
++	{
++		fprintf(stderr, "Illegal mixer settings...\n");
++		exit(1);
++	}
++}
++
++void oss_hw_set_3dse(int stat)
++{
++	unsigned char b;
++	check_legal_mixer ();
++	switch(stat)
++	{
++	case 1:
++		outb(AWE_3DSE, mixer_reg);
++		b = inb(mixer_data);
++		b |= 1;
++		outb(b, mixer_data);
++		break;
++	case 0:
++		outb(AWE_3DSE, mixer_reg);
++		b = inb(mixer_data);
++		b &= 0xff - 1;
++		outb(b, mixer_data);
++		break;
++	}
++}
++
++int oss_hw_get_3dse(void) 
++{
++	unsigned char b;
++	check_legal_mixer ();
++	outb(AWE_3DSE, mixer_reg);
++	b = inb(mixer_data);
++	return (b & 1);
++}
++
++int initHardwareAccess () 
++{
++	char *blasterEnv, *Aptr, *Mptr;
++	int tmp, mixer_base = 0;
++
++	if ((blasterEnv = getenv ("BLASTER"))) 
++	{
++		Aptr = blasterEnv;
++		while ((Aptr = strchr(Aptr, 'A')))
++			if ((tmp = strtol(++Aptr, &Aptr, 16)))
++				mixer_base = tmp;
++		Mptr = blasterEnv;
++		while ((Mptr = strchr(Mptr, 'M')))
++			if ((tmp = strtol(++Mptr, &Mptr, 16)))
++				mixer_base = tmp;
++	}
++	if (!mixer_base) 
++	{
++		mixer_base = MIXER_BASE_DEFAULT;
++	}
++	else 
++	{
++		switch (mixer_base)
++		{
++		case 0x210:
++		case 0x220:
++		case 0x230:
++		case 0x240:
++		case 0x250:
++		case 0x260:
++		case 0x280:
++			break;
++		default:
++			fprintf (stderr, "Illegal mixer base.\n");
++			exit (1);
++		}
++	}
++	mixer_reg = mixer_base + MIXER_REG_OFFSET;
++	mixer_data = mixer_base + MIXER_DATA_OFFSET;
++	if (getuid () == 0 && geteuid () == 0)
++	{
++		ioperm (mixer_reg, 1, 1);
++		ioperm (mixer_data, 1, 1);
++		return 0;
++	}
++	else
++	{
++		return -1;
++ 	}
++}
++
+ void oss_set_volume(int l, int r)
+ {
+ 	int fd, v, cmd, devs;
+--- xmms-1.2.11/Output/OSS/soundcard.h.3dse	2003-06-11 23:01:12.000000000 +0200
++++ xmms-1.2.11/Output/OSS/soundcard.h	2007-11-18 20:51:57.000000000 +0100
+@@ -1151,8 +1151,8 @@ typedef unsigned char mixer_record[128];
+ /*
+  * Two ioctls for special souncard function (OSS/Free only)
+  */
+-#define SOUND_MIXER_AGC  _SIOWR('M', 103, int)
+-#define SOUND_MIXER_3DSE  _SIOWR('M', 104, int)
++#define SOUND_MIXER_AGC  __SIOWR('M', 103, int)
++#define SOUND_MIXER_3DSE  __SIOWR('M', 104, int)
+ /*
+  * The SOUND_MIXER_PRIVATE# commands can be redefined by low level drivers.
+  * These features can be used when accessing device specific features.
