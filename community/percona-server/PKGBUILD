@@ -1,0 +1,111 @@
+# Maintainer: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - added alarm.patch
+
+plugrel=1
+
+pkgname=percona-server
+pkgver=5.5.19_rel24.0
+pkgrel=1
+pkgdesc="A backwards-compatible drop-in replacement for MySQL that provides improved performance, diagnostics and instrumentation, and manageability of the server"
+arch=('i686' 'x86_64')
+
+depends=('mysql-clients' 'libaio')
+conflicts=('mysql')
+provides=('mysql')
+optdepends=('perl-dbi' 'perl-dbd-mysql')
+makedepends=('cmake' 'openssl' 'zlib')
+
+license=('GPL')
+url="http://www.percona.com/software/percona-server/"
+options=('!libtool' 'emptydirs')
+backup=('etc/mysql/my.cnf')
+install=percona.install
+source=("http://www.percona.com/downloads/Percona-Server-${pkgver%.*_*}/Percona-Server-${pkgver/_rel/-}/source/Percona-Server-${pkgver/_/-}.tar.gz"
+        'mysqld'
+        'my.cnf'
+        'alarm.patch')
+
+build() {
+	cd "${srcdir}/Percona-Server-${pkgver/_/-}"
+	sed -i 's|ADD_SUBDIRECTORY(libmysqld/examples)|# ADD_SUBDIRECTORY(libmysqld/examples)|' CMakeLists.txt
+    patch -p1 -i "${srcdir}/alarm.patch"
+
+	cd "${srcdir}"
+	rm -rf build
+	mkdir build
+	cd build
+
+	# CFLAGS/CXXFLAGS as suggested upstream
+	CFLAGS="-fPIC ${CFLAGS} -fno-strict-aliasing -DBIG_JOINS=1 -fomit-frame-pointer" \
+	CXXFLAGS="-fPIC ${CXXFLAGS} -fno-strict-aliasing -DBIG_JOINS=1 -felide-constructors -fno-rtti" \
+
+	cmake "${srcdir}/Percona-Server-${pkgver/_/-}" \
+		-DMANUFACTURER=Arch \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DSYSCONFDIR=/etc/mysql \
+		-DMYSQL_DATADIR=/var/lib/mysql \
+		-DMYSQL_UNIX_ADDR=/var/run/mysqld/mysqld.sock \
+		-DDEFAULT_CHARSET=utf8 \
+		-DDEFAULT_COLLATION=utf8_general_ci \
+		-DENABLED_LOCAL_INFILE=ON \
+		-DINSTALL_INFODIR=share/mysql/docs \
+		-DINSTALL_MANDIR=share/man \
+		-DINSTALL_PLUGINDIR=/usr/lib/mysql/plugin \
+		-DINSTALL_SCRIPTDIR=bin \
+		-DINSTALL_INCLUDEDIR=include/mysql \
+		-DINSTALL_DOCREADMEDIR=share/mysql \
+		-DINSTALL_SUPPORTFILESDIR=share/mysql \
+		-DINSTALL_MYSQLSHAREDIR=share/mysql \
+		-DINSTALL_DOCDIR=share/mysql/docs \
+		-DINSTALL_SHAREDIR=share/mysql \
+		-DWITH_READLINE=OFF \
+		-DWITH_ZLIB=system \
+		-DWITH_SSL=system \
+		-DWITH_LIBWRAP=OFF \
+		-DWITH_LIBEDIT=OFF \
+		-DWITH_UNIT_TESTS=OFF \
+		-DWITH_MYSQLD_LDFLAGS="${LDFLAGS}" \
+		-DWITH_EXTRA_CHARSETS=complex \
+		-DWITH_EMBEDDED_SERVER=ON \
+		-DWITH_INNOBASE_STORAGE_ENGINE=ON \
+		-DWITH_PARTITION_STORAGE_ENGINE=ON \
+		-DWITH_PERFSCHEMA_STORAGE_ENGINE=ON \
+		-DWITH_ARCHIVE_STORAGE_ENGINE=ON \
+		-DWITH_BLACKHOLE_STORAGE_ENGINE=ON \
+		-DWITH_FEDERATED_STORAGE_ENGINE=OFF \
+		-DWITH_EXAMPLE_STORAGE_ENGINE=OFF
+
+	make
+}
+
+package() {
+	cd "${srcdir}"/build
+	make DESTDIR=${pkgdir} install
+
+	install -Dm644 ${srcdir}/my.cnf ${pkgdir}/etc/mysql/my.cnf
+	install -Dm755 ${srcdir}/mysqld ${pkgdir}/etc/rc.d/mysqld
+
+	# provided by libmysqlclient
+	rm ${pkgdir}/usr/bin/mysql_config
+	rm ${pkgdir}/usr/lib/libmysql*
+	rm -r ${pkgdir}/usr/include/
+	rm ${pkgdir}/usr/share/man/man1/{mysql_config,mysql_client_test_embedded,mysqltest_embedded}.1
+
+	# provided by mysql-clients
+	rm ${pkgdir}/usr/bin/{mysql,mysqladmin,mysqlcheck,mysqldump,mysqlimport,mysqlshow,mysqlslap}
+	rm ${pkgdir}/usr/share/man/man1/{mysql,mysqladmin,mysqlcheck,mysqldump,mysqlimport,mysqlshow,mysqlslap}.1
+
+	# not needed
+	rm -r ${pkgdir}/usr/{data,mysql-test,sql-bench}
+	rm "${pkgdir}"/usr/share/man/man1/mysql-test-run.pl.1
+
+	install -dm700 "${pkgdir}"/var/lib/mysql
+}
+
+md5sums=('eb8c21bbb8179e0a4709d51c037e682c'
+         '243864805611764a7e5883c1dba7afd8'
+         '1c949c0dbea5206af0db14942d9927b6'
+         '9eb0ad531d162e031a2bcc08a5ab3bc5')
