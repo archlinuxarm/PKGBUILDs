@@ -7,32 +7,56 @@ pkgbase=linux-orion
 pkgname=('linux-orion' 'linux-headers-orion')
 # pkgname=linux-custom       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel=3.0
-pkgver=${_basekernel}.3
-pkgrel=1
+_basekernel=3.1
+pkgver=${_basekernel}.7
+pkgrel=2
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage')
 options=('!strip')
-source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.0/linux-${_basekernel}.tar.bz2"
-        "ftp://ftp.kernel.org/pub/linux/kernel/v3.0/patch-${pkgver}.bz2"
+source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${_basekernel}.tar.bz2"
+        "ftp://ftp.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.bz2"
         'archlinuxarm.patch'
+        'support.patch'
+        'aufs3-kbuild.patch'
+        'aufs3-base.patch'
+        'aufs3-standalone.patch'
+        'aufs3-git-extras.patch'
         'config'
-        'change-default-console-loglevel.patch')
-md5sums=('398e95866794def22b12dfbc15ce89c0'
-         '1757786b9a9ffbd48ad9642199ff5bd7'
-         '77e8e011485c2061616214d07356132e'
-         '1d5e11e7d81c314f8c9bde5d5b63da3e'
-         '9d3c56a4b999c8bfbd4018089a62f662')
+        'change-default-console-loglevel.patch'
+        'usb-add-reset-resume-quirk-for-several-webcams.patch')
+md5sums=('8d43453f8159b2332ad410b19d86a931'
+         '13ea1e611a0a580138b8203e6f1353ed'
+         '18f59dbd0df3dd7b36e8c4714e2c6725'
+         'f5d3635da03cb45904bedd69b47133de'
+         '3f64ed9d71499fe9293dc671f4e4087e'
+         '29628745258df910abfb8cb24ca3ccd9'
+         'c9e6e8bb0774a89f7f9bd30a13be7532'
+         '55b04499a4578e586cf5a4d0b69fc5aa'
+         '6022a2440b7c671b6e55dad3a71e1f2b'
+         '9d3c56a4b999c8bfbd4018089a62f662'
+         'd00814b57448895e65fbbc800e8a58ba')
 
 build() {
   cd "${srcdir}/linux-${_basekernel}"
 
+  # add upstream patch
   patch -p1 -i "${srcdir}/patch-${pkgver}"
 
-  # Add Arch Linux ARM patch for ARMv5te plug computers
-  patch -Np1 -i ${srcdir}/archlinuxarm.patch
+  # Add the USB_QUIRK_RESET_RESUME for several webcams
+  # FS#26528
+  patch -Np1 -i "${srcdir}/usb-add-reset-resume-quirk-for-several-webcams.patch"
+
+  # Add Arch Linux ARM patch for ARMv5te plug computers and requested additional support
+  patch -Np1 -i "${srcdir}/archlinuxarm.patch"
+  patch -Np1 -i "${srcdir}/support.patch"
+
+  # Add AUFS3 patches
+  patch -Np1 -i "${srcdir}/aufs3-kbuild.patch"
+  patch -Np1 -i "${srcdir}/aufs3-base.patch"
+  patch -Np1 -i "${srcdir}/aufs3-standalone.patch"
+  patch -Np1 -i "${srcdir}/aufs3-git-extras.patch"
 
   # add latest fixes from stable queue, if needed
   # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
@@ -44,14 +68,11 @@ build() {
 
   cat "${srcdir}/config" > ./.config
 
-  # remove the sublevel from Makefile
-  # this ensures our kernel version is always 3.X-ARCH
-  # this way, minor kernel updates will not break external modules
-  # we need to change this soon, see FS#16702
-  sed -ri 's|^(SUBLEVEL =).*|\1|' Makefile
+  # set extraversion to pkgrel
+  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
 
   # get kernel version
-  #make prepare
+  make prepare
 
   # load configuration
   # Configure the kernel. Replace the line below with one of your choice.
@@ -82,7 +103,7 @@ package_linux-orion() {
   groups=('base')
   depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7' 'devio')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' 'kernel26-orion' 'linux=${pkgver}')
+  provides=('kernel26' 'aufs_friendly' 'kernel26-orion' 'linux=${pkgver}')
   conflicts=('kernel26' 'kernel26-orion')
   replaces=('kernel26-orion')
   backup=("etc/mkinitcpio.d/${pkgname}.preset")
@@ -109,8 +130,13 @@ package_linux-orion() {
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
   # remove the firmware
   rm -rf "${pkgdir}/lib/firmware"
-  # gzip -9 all modules to safe 100MB of space
+  # gzip -9 all modules to save 100MB of space
   find "${pkgdir}" -name '*.ko' -exec gzip -9 {} \;
+  # make room for external modules
+  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
+  # add real version for building modules and running depmod from post_install/upgrade
+  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
+  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
 }
 
 package_linux-headers-orion() {
