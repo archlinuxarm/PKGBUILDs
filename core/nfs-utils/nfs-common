@@ -1,0 +1,315 @@
+#!/bin/bash
+
+daemon_name=nfs-common
+
+NEED_STATD=
+STATD_OPTS=
+NEED_IDMAPD=
+IDMAPD_OPTS=
+NEED_GSSD=
+GSSD_OPTS=
+PIPEFS_MOUNTPOINT=
+PIPEFS_MOUNTOPTS=
+
+# rpc.statd daemon & binary location
+STATD_DAEMON_NAME=rpc.statd
+STATD="/usr/sbin/rpc.statd"
+
+# rpc.idmapd daemon & binary location
+IDMAPD_DAEMON_NAME=rpc.idmapd
+IDMAPD="/usr/sbin/rpc.idmapd"
+
+# rpc.gssd daemon & binary location
+GSSD_DAEMON_NAME=rpc.gssd
+GSSD="/usr/sbin/rpc.gssd"
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+. /etc/conf.d/$daemon_name.conf
+
+# Default mountpoint and options for rpc_pipefs filesystem
+[ -z "$PIPEFS_MOUNTPOINT" ] && PIPEFS_MOUNTPOINT="/var/lib/nfs/rpc_pipefs"
+[ -z "$PIPEFS_MOUNTOPTS" ] && PIPEFS_MOUNTOPTS="defaults"
+
+# Parse the fstab file, and determine whether we need idmapd and gssd. (The
+# /etc/conf.d/nfs-common settings, if any, will override our autodetection.) 
+AUTO_NEED_IDMAPD=no
+AUTO_NEED_GSSD=no
+
+if [ -f /etc/fstab ]; then
+  exec 9<&0 </etc/fstab
+  
+  while read DEV MTPT FSTYPE OPTS REST; do
+    if [ "$FSTYPE" = "nfs4" ]; then
+      AUTO_NEED_IDMAPD=yes
+    fi
+    case "$OPTS" in
+      sec=krb5|*,sec=krb5|sec=krb5,*|*,sec=krb5i,*|sec=krb5i|*,sec=krb5i|sec=krb5i,*|*,sec=krb5i,*|sec=krb5p|*,sec=krb5p|sec=krb5p,*|*,sec=krb5p,*)
+	AUTO_NEED_GSSD=yes
+      ;;
+    esac
+  done
+
+  exec 0<&9 9<&-
+fi
+
+# We also need idmapd if we run an NFSv4 server. It's fairly difficult
+# to autodetect whether there are NFSv4 exports or not, and idmapd is not a
+# particularily heavy daemon, so we auto-enable it if we find an /etc/exports
+# file. This does not mean that there are NFSv4 or other mounts active (or
+# even that nfs-kernel-server is installed), but it matches what the "start"
+# condition in nfs-kernel-server's init script does, which has a value in
+# itself.
+if [ -f /etc/exports ] && grep -q '^[[:space:]]*[^#]*/' /etc/exports; then
+  AUTO_NEED_IDMAPD=yes
+fi
+
+case "$NEED_STATD" in
+  yes|no)
+    ;;
+  *)
+    NEED_STATD=yes
+    ;;
+esac
+
+case "$NEED_IDMAPD" in
+  yes|no)	
+    ;;
+  *)
+    NEED_IDMAPD=$AUTO_NEED_IDMAPD
+    ;;
+esac
+
+case "$NEED_GSSD" in
+  yes|no)	
+    ;;
+  *)
+    NEED_GSSD=$AUTO_NEED_GSSD
+    ;;
+esac
+
+do_modprobe() {
+    if [ -x /sbin/modprobe -a -f /proc/modules ]; then
+      modprobe -q "$1" || true
+    fi
+}
+
+do_mount() {
+    if ! grep -E "$1\$" /proc/filesystems &> /dev/null ; then
+      return 1
+    fi
+    
+    if grep -vw "$1" /proc/mounts &> /dev/null ; then
+      if ! mountpoint -q "$2" ; then
+	mount -t "$1" "$1" "$2" -o "$3"
+	return
+      fi
+    fi
+    return 0
+}
+
+do_umount() {
+    if mountpoint -q "$1" ; then
+      umount "$1"
+    fi
+    return 0
+}
+
+get_pid() {
+	pidof -o %PPID "$1"
+}
+
+case "$1" in
+  start)
+    ck_daemon rpcbind && { echo -n "Start rpcbind first." >&2; stat_die; }
+    rc=0
+    if [ "$NEED_STATD" = yes ]; then
+      stat_busy "Starting $STATD_DAEMON_NAME daemon"
+      PID=$(get_pid $STATD)
+      if [ -z "$PID" ]; then
+	[ -f /var/run/$STATD_DAEMON_NAME.pid ] && rm -f /var/run/$STATD_DAEMON_NAME.pid
+	# RUN
+	$STATD $STATD_OPTS
+	#
+	rc=$(($rc+$?))
+	if [ $rc -gt 0 ]; then
+	  stat_fail
+	  exit $rc
+	else
+	  echo $(get_pid $STATD) > /var/run/$STATD_DAEMON_NAME.pid
+	  stat_done
+	fi
+      else
+	stat_fail
+	exit 1
+      fi
+      # Run sm-notify
+      /usr/sbin/sm-notify $SMNOTIFY_OPTS
+    fi
+
+    if [ "$NEED_IDMAPD" = yes ] || [ "$NEED_GSSD" = yes ]; then
+      stat_busy "Mounting pipefs filesystem"
+      do_modprobe sunrpc
+      do_modprobe nfs
+      do_modprobe nfsd
+      do_mount rpc_pipefs "$PIPEFS_MOUNTPOINT" "$PIPEFS_MOUNTOPTS" 
+      rc=$(($rc+$?))
+      if [ $rc -gt 0 ]; then
+	stat_fail
+	exit $rc
+      else
+        stat_done
+      fi
+
+      if [ "$NEED_IDMAPD" = yes ]; then
+	stat_busy "Starting $IDMAPD_DAEMON_NAME daemon"
+	PID=$(get_pid $IDMAPD)
+	if [ -z "$PID" ]; then
+	  [ -f /var/run/$IDMAPD_DAEMON_NAME.pid ] && rm -f /var/run/$IDMAPD_DAEMON_NAME.pid
+	  # RUN
+	  $IDMAPD $IDMAPD_OPTS
+	  #
+	  rc=$(($rc+$?))
+	  if [ $rc -gt 0 ]; then
+	    stat_fail
+	    exit $rc
+	  else
+	    echo $(get_pid $IDMAPD) > /var/run/$IDMAPD_DAEMON_NAME.pid
+	    stat_done
+	  fi
+	else
+	  stat_fail
+	  exit 1
+        fi
+      fi
+
+      if [ "$NEED_GSSD" = yes ]; then
+	do_modprobe rpcsec_gss_krb5
+	stat_busy "Starting $GSSD_DAEMON_NAME daemon"
+	PID=$(get_pid $GSSD)
+	if [ -z "$PID" ]; then
+	  [ -f /var/run/$GSSD_DAEMON_NAME.pid ] && rm -f /var/run/$GSSD_DAEMON_NAME.pid
+	  # RUN
+	  $GSSD $GSSD_OPTS
+	  #
+	  rc=$(($rc+$?))
+	  if [ $rc -gt 0 ]; then
+	    stat_fail
+	    exit $rc
+	  else
+	    echo $(get_pid $GSSD) > /var/run/$GSSD_DAEMON_NAME.pid
+	    stat_done
+	  fi
+	else
+	  stat_fail
+	  exit 1
+        fi
+      fi
+    fi
+
+    add_daemon $daemon_name
+    ;;
+
+  stop)
+    rc=0
+    if [ "$NEED_IDMAPD" = yes ] || [ "$NEED_GSSD" = yes ]; then
+
+      if [ "$NEED_GSSD" = yes ]; then
+	stat_busy "Stopping $GSSD_DAEMON_NAME daemon"
+	PID=$(get_pid $GSSD)
+	# KILL
+	[ ! -z "$PID" ] && kill $PID &> /dev/null
+	#
+	rc=$(($rc+$?))
+	if [ $rc -gt 0 ]; then
+	  stat_fail
+	  exit $rc
+	else
+	  rm -f /var/run/$GSSD_DAEMON_NAME.pid &> /dev/null
+	  stat_done
+	fi
+      fi
+
+      if [ "$NEED_IDMAPD" = yes ]; then
+	stat_busy "Stopping $IDMAPD_DAEMON_NAME daemon"
+	PID=$(get_pid $IDMAPD)
+	# KILL
+	[ ! -z "$PID" ] && kill $PID &> /dev/null
+	#
+	rc=$(($rc+$?))
+	if [ $rc -gt 0 ]; then
+	  stat_fail
+	  exit $rc
+	else
+	  rm -f /var/run/$IDMAPD_DAEMON_NAME.pid &> /dev/null
+	  stat_done
+	fi
+      fi
+      do_umount "$PIPEFS_MOUNTPOINT" 2>/dev/null || true
+    fi
+
+    if [ "$NEED_STATD" = yes ]; then
+      stat_busy "Stopping $STATD_DAEMON_NAME daemon"
+      PID=$(get_pid $STATD)
+      # KILL
+      [ ! -z "$PID" ] && kill $PID &> /dev/null
+      #
+      rc=$(($rc+$?))
+      if [ $rc -gt 0 ]; then
+	stat_fail
+	exit $rc
+      else
+	rm -f /var/run/$STATD_DAEMON_NAME.pid &> /dev/null
+	stat_done
+      fi
+    fi
+
+    rm_daemon $daemon_name
+    ;;
+
+  status)
+    stat_busy "Checking $daemon_name status";
+    ck_status $daemon_name
+
+    if [ "$NEED_STATD" = yes ]; then
+      stat_busy "Daemon $STATD_DAEMON_NAME running"
+      PID=$(get_pid $STATD)
+      if [ -z "$PID" ]; then
+	stat_fail
+      else
+	stat_done
+      fi
+    fi
+
+    if [ "$NEED_GSSD" = yes ]; then
+      stat_busy "Daemon $GSSD_DAEMON_NAME running"
+      PID=$(get_pid $GSSD)
+      if [ -z "$PID" ]; then
+	stat_fail
+      else
+	stat_done
+      fi
+    fi
+      
+    if [ "$NEED_IDMAPD" = yes ]; then
+      stat_busy "Daemon $IDMAPD_DAEMON_NAME running"
+      PID=$(get_pid $IDMAPD)
+      if [ -z "$PID" ]; then
+	stat_fail
+      else
+	stat_done
+      fi
+    fi
+    echo
+    ;;
+
+  restart)
+    $0 stop
+    sleep 3
+    $0 start
+    ;;
+  *)
+    echo "usage: $0 {start|stop|status|restart}"  
+esac
+exit 0
+	    
