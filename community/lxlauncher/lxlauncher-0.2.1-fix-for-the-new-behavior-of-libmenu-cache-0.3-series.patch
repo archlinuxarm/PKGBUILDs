@@ -1,0 +1,125 @@
+From a7dad81b883a783bc1ac4f8092a1571b7f843914 Mon Sep 17 00:00:00 2001
+From: Hong Jen Yee (PCMan) <pcman.tw@gmail.com>
+Date: Wed, 17 Feb 2010 22:42:01 +0800
+Subject: [PATCH 50/50] Fix for the new behavior of libmenu-cache 0.3 series.
+
+---
+ src/lxlauncher.c |   67 +++++++++++++++++++++++++++++++++++++----------------
+ 1 files changed, 47 insertions(+), 20 deletions(-)
+
+diff --git a/src/lxlauncher.c b/src/lxlauncher.c
+index 6dfbbc9..3a39bc6 100644
+--- a/src/lxlauncher.c
++++ b/src/lxlauncher.c
+@@ -663,21 +663,40 @@ gchar* get_xdg_config_file(const char *name) {
+     gchar *file;
+ 
+     file = g_build_filename(user_dir, name, NULL);
+-    if (g_file_test(file, G_FILE_TEST_EXISTS) == TRUE) {
+-	return file;
+-    }
++    if (g_file_test(file, G_FILE_TEST_EXISTS) == TRUE)
++    	return file;
+     free(file);
+ 
+     for (dir = system_dirs; *dir; ++dir ) {
+-	file = g_build_filename(*dir, name, NULL);
+-	if (g_file_test(file, G_FILE_TEST_EXISTS) == TRUE) {
+-	    return file;
+-	}
+-	free(file);
++        file = g_build_filename(*dir, name, NULL);
++        if (g_file_test(file, G_FILE_TEST_EXISTS) == TRUE)
++            return file;
++	    free(file);
+     }
+     return NULL;
+ }
+ 
++static void on_menu_cache_reload(MenuCache* mc, gpointer user_data)
++{
++    GMainLoop* mainloop = (GMainLoop*)user_data;
++    g_main_loop_quit(mainloop);
++}
++
++MenuCache* _menu_cache_lookup_sync( const char* menu_name )
++{
++    MenuCache* mc = menu_cache_lookup(menu_name);
++    /* ensure that the menu cache is loaded */
++    if(! menu_cache_get_root_dir(mc)) /* if it's not yet loaded */
++    {
++        GMainLoop* mainloop = g_main_loop_new(NULL, FALSE);
++        gpointer notify_id = menu_cache_add_reload_notify(mc, on_menu_cache_reload, mainloop);
++        g_main_loop_run(mainloop);
++        g_main_loop_unref(mainloop);
++        menu_cache_remove_reload_notify(mc, notify_id);
++    }
++    return mc;
++}
++
+ int main(int argc, char** argv)
+ {
+     int i;
+@@ -697,13 +716,14 @@ int main(int argc, char** argv)
+     GError *error = NULL;
+     gchar *config_file = get_xdg_config_file(CONFIG_FILE);
+     if (config_file &&
+-	g_key_file_load_from_file(key_file,
+-				  config_file,
+-				  G_KEY_FILE_NONE,
+-				  &error)) {
+-	printf("Loaded %s\n", config_file);
+-    } else {
+-	perror("Error loading " CONFIG_FILE);
++        g_key_file_load_from_file(key_file,
++                      config_file,
++                      G_KEY_FILE_NONE,
++                      &error)) {
++    	printf("Loaded %s\n", config_file);
++    }
++    else {
++    	perror("Error loading " CONFIG_FILE);
+     }
+     if (config_file)
+ 	free(config_file);
+@@ -719,15 +739,17 @@ int main(int argc, char** argv)
+     gchar* gtkrc_file = get_xdg_config_file("lxlauncher/gtkrc");
+     gtk_rc_parse(gtkrc_file);
+     if (gtkrc_file) {
+-	free(gtkrc_file);
++    	free(gtkrc_file);
+     }
+ 
+     button_size = g_key_file_get_integer(key_file, "Main", "BUTTON_SIZE", NULL);
+     img_size = g_key_file_get_integer(key_file, "Main", "IMG_SIZE", NULL);
+ 
+     // to prevent from going without configure file
+-    if(!button_size) button_size = BUTTON_SIZE_FALLBACK;
+-    if(!img_size) img_size = IMG_SIZE_FALLBACK;
++    if(!button_size)
++        button_size = BUTTON_SIZE_FALLBACK;
++    if(!img_size)
++        img_size = IMG_SIZE_FALLBACK;
+ 
+     icon_size = gtk_icon_size_register( "ALIcon", img_size, img_size );
+ 
+@@ -758,9 +780,14 @@ int main(int argc, char** argv)
+     gtk_container_add( (GtkContainer*)main_window, notebook );
+ 
+     g_setenv("XDG_MENU_PREFIX", "lxlauncher-", TRUE);
+-    menu_tree = menu_cache_lookup( "applications.menu" );
++    menu_tree = _menu_cache_lookup_sync( "applications.menu" );
++    if(!menu_tree)
++    {
++        g_print("Unable to load application menu\n");
++        return 1;
++    }
++    root_dir = menu_cache_item_ref(menu_cache_get_root_dir( menu_tree ));
+     reload_notify_id = menu_cache_add_reload_notify( menu_tree, on_menu_tree_changed, NULL );
+-    root_dir = menu_cache_ref(menu_cache_get_root_dir( menu_tree ));
+ 
+     create_notebook_pages();
+ 
+-- 
+1.6.6
+
