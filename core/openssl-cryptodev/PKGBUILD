@@ -5,8 +5,10 @@
 #  - use linux-armv4 target for our architectures
 
 plugrel=1
+noautobuild=1
 
-pkgname=openssl
+pkgname=openssl-cryptodev
+_pkgname=openssl
 _ver=1.0.0g
 # use a pacman compatible version scheme
 pkgver=${_ver/[a-z]/.${_ver//[0-9.]/}}
@@ -19,22 +21,26 @@ depends=('perl')
 optdepends=('ca-certificates')
 options=('!makeflags')
 backup=('etc/ssl/openssl.cnf')
-source=("https://www.openssl.org/source/${pkgname}-${_ver}.tar.gz"
-        "https://www.openssl.org/source/${pkgname}-${_ver}.tar.gz.asc"
+conflicts=('openssl')
+provides=("openssl=${pkgver}")
+source=("https://www.openssl.org/source/${_pkgname}-${_ver}.tar.gz"
+        "https://www.openssl.org/source/${_pkgname}-${_ver}.tar.gz.asc"
         'fix-manpages.patch'
         'no-rpath.patch'
-        'ca-dir.patch')
+        'ca-dir.patch'
+        'openssl-digests.patch')
 md5sums=('07ecbe4324f140d157478637d6beccf1'
          '34315cf0fbbd1d18435948eb9712fcdf'
          '5bbc0655bda2af95bc8eb568963ce8ba'
          'dc78d3d06baffc16217519242ce92478'
-         '3bf51be3a1bbd262be46dc619f92aa90')
+         '3bf51be3a1bbd262be46dc619f92aa90'
+         '8c36b135ec9c2573ca987f252df41e5d')
 
 # keep an upgrade path for older installations
 PKGEXT='.pkg.tar.gz'
 
 build() {
-	cd $srcdir/$pkgname-$_ver
+	cd $srcdir/$_pkgname-$_ver
 
 	if [ "${CARCH}" == 'x86_64' ]; then
 		openssltarget='linux-x86_64'
@@ -51,9 +57,12 @@ build() {
 	patch -p0 -i $srcdir/no-rpath.patch
 	# set ca dir to /etc/ssl by default
 	patch -p0 -i $srcdir/ca-dir.patch
+    # fix cryptodev digest support
+    patch -p0 -i $srcdir/openssl-digests.patch
 	# mark stack as non-executable: http://bugs.archlinux.org/task/12434
 	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib \
-		shared zlib enable-md2 \
+		-DHAVE_CRYPTODEV -DUSE_CRYPTODEV_DIGESTS -DHASH_MAX_LEN=64 \
+		shared threads zlib enable-md2 \
 		"${openssltarget}" \
 		-Wa,--noexecstack "${CFLAGS}"
 
@@ -62,7 +71,7 @@ build() {
 }
 
 check() {
-	cd $srcdir/$pkgname-$_ver
+	cd $srcdir/$_pkgname-$_ver
 	# the test fails due to missing write permissions in /etc/ssl
 	# revert this patch for make test
 	patch -p0 -R -i $srcdir/ca-dir.patch
@@ -71,7 +80,7 @@ check() {
 }
 
 package() {
-	cd $srcdir/$pkgname-$_ver
+	cd $srcdir/$_pkgname-$_ver
 	make INSTALL_PREFIX=$pkgdir MANDIR=/usr/share/man install
-	install -D -m644 LICENSE $pkgdir/usr/share/licenses/$pkgname/LICENSE
+	install -D -m644 LICENSE $pkgdir/usr/share/licenses/$_pkgname/LICENSE
 }
