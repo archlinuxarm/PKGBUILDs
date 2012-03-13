@@ -1,28 +1,29 @@
-# $Id: PKGBUILD 134098 2011-08-01 12:57:59Z ibiru $
+# $Id: PKGBUILD 153287 2012-03-12 20:52:14Z andyrtr $
 # Maintainer: Jan de Groot <jgc@archlinux.org>
 # Maintainer: Andreas Radke <andyrtr@archlinux.org>
 
-# ALARM: Kevin Mihelich <kevin@plugapps.com>
-#  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, etc).
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
 #  - Build v7h with -O1 instead of -O2
 
 plugrel=1
 
 pkgbase=mesa
-pkgname=('mesa' 'libgl' 'libglapi' 'libgles' 'libegl' 'khrplatform-devel') # 'llvm-dri')
+pkgname=('mesa' 'libgl' 'osmesa' 'libglapi' 'libgles' 'libegl' 'khrplatform-devel')
 
 #_git=true
+_gitdate=20111031
 _git=false
 
 if [ "${_git}" = "true" ]; then
-    #pkgver=7.10.99.git20110709
-    pkgver=7.11
+    pkgver=7.10.99.git20110709
+    #pkgver=7.11
   else
-    pkgver=7.11.2
+    pkgver=8.0.1
 fi
-pkgrel=1
+pkgrel=2
 arch=('i686' 'x86_64')
-makedepends=('glproto>=1.4.14' 'libdrm>=2.4.26' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.3' 'libxt>=1.1.1' 
+makedepends=('glproto>=1.4.15' 'libdrm>=2.4.30' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.99.1' 'libxt>=1.1.1' 
              'gcc-libs>=4.6.1' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'udev')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
@@ -30,18 +31,19 @@ source=(LICENSE)
 if [ "${_git}" = "true" ]; then
 	# mesa git shot from 7.11 branch - see for state: http://cgit.freedesktop.org/mesa/mesa/commit/?h=7.11&id=1ae00c5960af83bea9545a18a1754bad83d5cbd0
 	#source=(${source[@]} 'ftp://ftp.archlinux.org/other/mesa/mesa-1ae00c5960af83bea9545a18a1754bad83d5cbd0.tar.bz2')
-    source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-ef9f16f6322a89fb699fbe3da868b10f9acaef98.tar.bz2")
+	source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-ef9f16f6322a89fb699fbe3da868b10f9acaef98.tar.bz2")
   else
 	source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2"
+	#source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/8.0/MesaLib-8.0-rc2.tar.bz2"
 	#source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-4464ee1a9aa3745109cee23531e3fb2323234d07.tar.bz2"
 )
 fi
 md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
-         '0837c52698fe3252369c3fdb5195afcc')
+         '24eeebf66971809d8f40775a379b36c9')
 
 build() {
     cd ${srcdir}/?esa-*
-    [ $CARCH == "armv7h" ] && CFLAGS=`echo $CFLAGS | sed -e 's/-O2/-O1/'` && CXXFLAGS="$CFLAGS"
+    [ "${CARCH}" = "armv7h" ] && CFLAGS=`echo $CFLAGS | sed -e 's/-O2/-O1/'` && CXXFLAGS="$CFLAGS"
 
 if [ "${_git}" = "true" ]; then
     autoreconf -vfi
@@ -51,13 +53,14 @@ if [ "${_git}" = "true" ]; then
     --enable-gallium-llvm \
     --enable-gallium-egl --enable-shared-glapi\
     --enable-glx-tls \
-    --with-driver=dri \
-    --enable-xcb \
-    --disable-glut \
+    --enable-dri \
+    --enable-glx \
+    --enable-osmesa \
     --enable-gles1 \
     --enable-gles2 \
     --enable-egl \
     --enable-texture-float \
+    --enable-xa \
     --enable-shared-dricore
     
     #    --enable-gallium-svga \
@@ -66,18 +69,18 @@ if [ "${_git}" = "true" ]; then
      autoreconf -vfi
     ./configure --prefix=/usr \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-dri-drivers="swrast" \
     --with-gallium-drivers=swrast \
     --enable-gallium-llvm \
     --enable-gallium-egl --enable-shared-glapi\
     --enable-glx-tls \
-    --with-driver=dri \
-    --enable-xcb \
-    --disable-glut \
+    --enable-dri \
+    --enable-glx \
+    --enable-osmesa \
     --enable-gles1 \
     --enable-gles2 \
     --enable-egl \
     --enable-texture-float \
+    --enable-xa \
     --enable-shared-dricore
 fi
 
@@ -85,8 +88,9 @@ fi
 }
 
 package_libgl() {
-  depends=('libdrm>=2.4.26' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libglapi' 'gcc-libs')
+  depends=('libdrm>=2.4.31' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libglapi' 'gcc-libs')
   pkgdesc="Mesa 3-D graphics library and DRI software rasterizer"
+  replaces=('unichrome-dri' 'mach64-dri' 'mga-dri' 'r128-dri' 'savage-dri' 'sis-dri' 'tdfx-dri')
 
   cd ${srcdir}/?esa-*
   install -m755 -d "${pkgdir}/usr/lib"
@@ -98,11 +102,19 @@ package_libgl() {
 
   cd src/mesa/drivers/dri
   make -C ${srcdir}/?esa-*/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
-  ln -s swrastg_dri.so "${pkgdir}/usr/lib/xorg/modules/dri/swrast_dri.so"
+
   ln -s libglx.xorg "${pkgdir}/usr/lib/xorg/modules/extensions/libglx.so"
 
   install -m755 -d "${pkgdir}/usr/share/licenses/libgl"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libgl/"
+}
+
+package_osmesa() {
+  depends=('mesa')
+  optdepends=('opengl-man-pages: for the OpenGL API man pages')
+  pkgdesc="Mesa 3D off-screen rendering library"
+  
+  make -C ${srcdir}/?esa-*/src/mesa DESTDIR="${pkgdir}" install-osmesa
 }
 
 package_libglapi() {
@@ -164,12 +176,12 @@ package_libegl() {
 }
 
 package_khrplatform-devel() {
-  depends=('')
+  #depends=('')
   pkgdesc="Khronos platform development package"
 
   cd ${srcdir}/?esa-*
   install -m755 -d "${pkgdir}/usr/include/KHR"
-  bin/minstall include/KHR/khrplatform.h "${pkgdir}/usr/include/KHR/"
+  bin/minstall include/KHR/khrplatform.h "${pkgdir}/usr/include/KHR/" 
 
   install -m755 -d "${pkgdir}/usr/share/licenses/khrplatform-devel"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/khrplatform-devel/"
@@ -188,7 +200,8 @@ package_mesa() {
   rm -f "${pkgdir}/usr/lib/libGLESv"*
   rm -f "${pkgdir}/usr/lib/libEGL"*
   rm -rf "${pkgdir}/usr/lib/egl"
-  rm -f ${pkgdir}/usr/lib/pkgconfig/{glesv1_cm.pc,glesv2.pc,egl.pc}
+  rm -f "${pkgdir}/usr/lib/libOSMesa"*
+  rm -f ${pkgdir}/usr/lib/pkgconfig/{glesv1_cm.pc,glesv2.pc,egl.pc,osmesa.pc}
   rm -rf "${pkgdir}/usr/lib/xorg"
   rm -f "${pkgdir}/usr/include/GL/glew.h"
   rm -f "${pkgdir}/usr/include/GL/glxew.h"
@@ -199,22 +212,3 @@ package_mesa() {
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa/"
 }
-
-#package_llvm-dri() {
-#  depends=("libgl=${pkgver}")
-#  pkgdesc="Mesa common LLVM support"
-
-#if [ "${_git}" = "true" ]; then
-#    cd ${srcdir}/mesa-*/src/gallium
-#  else
-#    cd "${srcdir}/Mesa-${pkgver}/src/gallium"
-#fi
-
-  # gallium llvmpipe
-#if [ "${_git}" = "true" ]; then
-#    make -C drivers/llvmpipe DESTDIR="${pkgdir}" install
-#    #make -C targets/dri-swrast DESTDIR="${pkgdir}" install
-#  else
-#    make -C ${srcdir}/Mesa-${pkgver}/src/gallium/targets/dri-nouveau DESTDIR="${pkgdir}" install
-#fi
-#}
