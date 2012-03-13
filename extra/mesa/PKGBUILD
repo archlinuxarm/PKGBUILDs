@@ -69,6 +69,7 @@ if [ "${_git}" = "true" ]; then
      autoreconf -vfi
     ./configure --prefix=/usr \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
+    --with-dri-drivers=swrast \
     --with-gallium-drivers=swrast \
     --enable-gallium-llvm \
     --enable-gallium-egl --enable-shared-glapi\
