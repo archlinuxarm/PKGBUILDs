@@ -1,8 +1,8 @@
 # the TCP port that Dropbear listens on
-DROPBEAR_PORT="0.0.0.0:22" # Default to local-only.
+DROPBEAR_PORT="127.0.0.1:22" # Default to local-only.
 
 # any additional arguments for Dropbear
-DROPBEAR_EXTRA_ARGS="" # Default to no-root logins.
+DROPBEAR_EXTRA_ARGS="-w" # Default to no-root logins.
 
 # specify an optional banner file containing a message to be
 # sent to clients before they connect, such as "/etc/issue.net"
