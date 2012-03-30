@@ -19,9 +19,9 @@ if [ "${_git}" = "true" ]; then
     pkgver=7.10.99.git20110709
     #pkgver=7.11
   else
-    pkgver=8.0.1
+    pkgver=8.0.2
 fi
-pkgrel=2
+pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('glproto>=1.4.15' 'libdrm>=2.4.30' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.99.1' 'libxt>=1.1.1' 
              'gcc-libs>=4.6.1' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'udev')
@@ -39,7 +39,7 @@ if [ "${_git}" = "true" ]; then
 )
 fi
 md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
-         '24eeebf66971809d8f40775a379b36c9')
+         'a368104e5700707048dc3e8691a9a7a1')
 
 build() {
     cd ${srcdir}/?esa-*
@@ -91,7 +91,7 @@ fi
 package_libgl() {
   depends=('libdrm>=2.4.31' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libglapi' 'gcc-libs')
   pkgdesc="Mesa 3-D graphics library and DRI software rasterizer"
-  replaces=('unichrome-dri' 'mach64-dri' 'mga-dri' 'r128-dri' 'savage-dri' 'sis-dri' 'tdfx-dri')
+  #replaces=('unichrome-dri' 'mach64-dri' 'mga-dri' 'r128-dri' 'savage-dri' 'sis-dri' 'tdfx-dri')
 
   cd ${srcdir}/?esa-*
   install -m755 -d "${pkgdir}/usr/lib"
