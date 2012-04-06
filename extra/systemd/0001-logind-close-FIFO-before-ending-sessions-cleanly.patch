@@ -1,0 +1,156 @@
+From 75c8e3cffd7da8eede614cf61384957af2c82a29 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 22 Mar 2012 02:06:40 +0100
+Subject: [PATCH] logind: close FIFO before ending sessions cleanly
+
+For clean session endings ask logind explicitly to get rid of the FIFO
+before closing it so that the FIFO logic doesn't result in su/sudo to be
+terminated immediately.
+---
+ src/login/logind-dbus.c |   30 ++++++++++++++++++++
+ src/login/pam-module.c  |   71 +++++++++++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 98 insertions(+), 3 deletions(-)
+
+diff --git a/src/login/logind-dbus.c b/src/login/logind-dbus.c
+index d8f4d89..ea6b89f 100644
+--- a/src/login/logind-dbus.c
++++ b/src/login/logind-dbus.c
+@@ -80,6 +80,9 @@
+         "   <arg name=\"seat\" type=\"s\" direction=\"out\"/>\n"        \
+         "   <arg name=\"vtnr\" type=\"u\" direction=\"out\"/>\n"        \
+         "  </method>\n"                                                 \
++        "  <method name=\"ReleaseSession\">\n"                          \
++        "   <arg name=\"id\" type=\"s\" direction=\"in\"/>\n"           \
++        "  </method>\n"                                                 \
+         "  <method name=\"ActivateSession\">\n"                         \
+         "   <arg name=\"id\" type=\"s\" direction=\"in\"/>\n"           \
+         "  </method>\n"                                                 \
+@@ -1075,6 +1078,33 @@ static DBusHandlerResult manager_message_handler(
+                 if (r < 0)
+                         return bus_send_error_reply(connection, message, &error, r);
+ 
++        } else if (dbus_message_is_method_call(message, "org.freedesktop.login1.Manager", "ReleaseSession")) {
++                const char *name;
++                Session *session;
++
++                if (!dbus_message_get_args(
++                                    message,
++                                    &error,
++                                    DBUS_TYPE_STRING, &name,
++                                    DBUS_TYPE_INVALID))
++                        return bus_send_error_reply(connection, message, &error, -EINVAL);
++
++                session = hashmap_get(m->sessions, name);
++                if (!session)
++                        return bus_send_error_reply(connection, message, &error, -ENOENT);
++
++                /* We use the FIFO to detect stray sessions where the
++                process invoking PAM dies abnormally. We need to make
++                sure that that process is not killed if at the clean
++                end of the session it closes the FIFO. Hence, with
++                this call explicitly turn off the FIFO logic, so that
++                the PAM code can finish clean up on its own */
++                session_remove_fifo(session);
++
++                reply = dbus_message_new_method_return(message);
++                if (!reply)
++                        goto oom;
++
+         } else if (dbus_message_is_method_call(message, "org.freedesktop.login1.Manager", "ActivateSession")) {
+                 const char *name;
+                 Session *session;
+diff --git a/src/login/pam-module.c b/src/login/pam-module.c
+index 8544413..4106d2b 100644
+--- a/src/login/pam-module.c
++++ b/src/login/pam-module.c
+@@ -414,7 +414,6 @@ _public_ PAM_EXTERN int pam_sm_open_session(
+                         "/org/freedesktop/login1",
+                         "org.freedesktop.login1.Manager",
+                         "CreateSession");
+-
+         if (!m) {
+                 pam_syslog(handle, LOG_ERR, "Could not allocate create session message.");
+                 r = PAM_BUF_ERR;
+@@ -620,11 +619,77 @@ _public_ PAM_EXTERN int pam_sm_close_session(
+                 int argc, const char **argv) {
+ 
+         const void *p = NULL;
++        const char *id;
++        DBusConnection *bus = NULL;
++        DBusMessage *m = NULL, *reply = NULL;
++        DBusError error;
++        int r;
+ 
+-        pam_get_data(handle, "systemd.session-fd", &p);
++        assert(handle);
++
++        dbus_error_init(&error);
++
++        id = pam_getenv(handle, "XDG_SESSION_ID");
++        if (id) {
++
++                /* Before we go and close the FIFO we need to tell
++                 * logind that this is a clean session shutdown, so
++                 * that it doesn't just go and slaughter us
++                 * immediately after closing the fd */
++
++                bus = dbus_bus_get_private(DBUS_BUS_SYSTEM, &error);
++                if (!bus) {
++                        pam_syslog(handle, LOG_ERR, "Failed to connect to system bus: %s", bus_error_message(&error));
++                        r = PAM_SESSION_ERR;
++                        goto finish;
++                }
++
++                m = dbus_message_new_method_call(
++                                "org.freedesktop.login1",
++                                "/org/freedesktop/login1",
++                                "org.freedesktop.login1.Manager",
++                                "ReleaseSession");
++                if (!m) {
++                        pam_syslog(handle, LOG_ERR, "Could not allocate release session message.");
++                        r = PAM_BUF_ERR;
++                        goto finish;
++                }
++
++                if (!dbus_message_append_args(m,
++                                              DBUS_TYPE_STRING, &id,
++                                              DBUS_TYPE_INVALID)) {
++                        pam_syslog(handle, LOG_ERR, "Could not attach parameters to message.");
++                        r = PAM_BUF_ERR;
++                        goto finish;
++                }
+ 
++                reply = dbus_connection_send_with_reply_and_block(bus, m, -1, &error);
++                if (!reply) {
++                        pam_syslog(handle, LOG_ERR, "Failed to release session: %s", bus_error_message(&error));
++                        r = PAM_SESSION_ERR;
++                        goto finish;
++                }
++        }
++
++        r = PAM_SUCCESS;
++
++finish:
++        pam_get_data(handle, "systemd.session-fd", &p);
+         if (p)
+                 close_nointr(PTR_TO_INT(p) - 1);
+ 
+-        return PAM_SUCCESS;
++        dbus_error_free(&error);
++
++        if (bus) {
++                dbus_connection_close(bus);
++                dbus_connection_unref(bus);
++        }
++
++        if (m)
++                dbus_message_unref(m);
++
++        if (reply)
++                dbus_message_unref(reply);
++
++        return r;
+ }
+-- 
+1.7.9.5
+
