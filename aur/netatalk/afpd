@@ -3,36 +3,51 @@
 . /etc/rc.conf
 . /etc/rc.d/functions
 
-PID=$(pidof -o %PPID /usr/sbin/afpd)
-case $1 in
-  start)
-    stat_busy "Starting afpd Daemon"
-    [ -z "$PID" ] && /usr/sbin/afpd
-    if [ $? -gt 0 ]; then
-      stat_fail
-    else
-      PID=$(pidof -o %PPID /usr/sbin/afpd)
-      echo "$PID" > /var/run/afpd.pid
-      add_daemon afpd
-      stat_done
-    fi
-    ;;
-  stop)
-    stat_busy "Stopping afpd Daemon"
-    [ ! -z "$PID" ]  && kill "$PID" &> /dev/null
-    if [ $? -gt 0 ]; then
-      stat_fail
-    else
-      rm_daemon afpd
-      stat_done
-    fi
-    ;;
-  restart)
-    $0 stop
-    sleep 1
-    $0 start
-    ;;
-  *)
-    echo "usage: $0 {start|stop|restart}"  
+NAME="Apple Filing Protocol Daemon"
+ARGS=
+DEPENDS=cnid_metad
+REQUIRED=
+DAEMON=`basename "$0"`
+
+[ -r /etc/conf.d/$DAEMON ] && . /etc/conf.d/$DAEMON
+
+PID=`get_pid $DAEMON`
+
+get_pid_r() {
+	local pid=()
+	for i in $@
+	do j=`get_pid $i` || return 1;pid+=($j);done
+	echo ${pid[@]};
+}
+
+case "$1" in
+ start)
+   stat_busy "Starting $NAME"
+   [ `get_pid_r $DEPENDS` ] && [ -z "$PID" ] && $DAEMON $ARGS &>/dev/null
+   if [ $? = 0 ]; then
+     stat_done
+   else
+     stat_fail
+     if [ ! `get_pid_r $DEPENDS` ];then echo "Error: \"$DAEMON\" refusing to start, dependency \"$DEPENDS\" not met" >&2;fi
+     exit 1
+   fi
+   ;;
+ stop)
+   stat_busy "Stopping $NAME"
+   [ ! `get_pid_r $REQUIRED` ] && [ -n "$PID" ] && kill $PID &>/dev/null
+   if [ $? = 0 ]; then
+     stat_done
+   else
+     stat_fail
+	 if [ `get_pid_r $REQUIRED` ];then echo "Error: Dependency \"$REQUIRED\" requires \"$DAEMON\", stop it first" >&2;fi
+     exit 1
+   fi
+   ;;
+ restart)
+   $0 stop
+   sleep 1
+   $0 start
+   ;;
+ *)
+   echo "usage: $0 {start|stop|restart}"  
 esac
-exit 0
