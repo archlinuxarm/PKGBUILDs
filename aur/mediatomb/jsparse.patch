@@ -1,0 +1,144 @@
+diff -rup mediatomb-0.12.1/src/scripting/js_functions.cc ../mediatomb-0.12.1/src/scripting/js_functions.cc
+--- mediatomb-0.12.1/src/scripting/js_functions.cc	2011-06-29 21:51:13.641025479 -0400
++++ ../mediatomb-0.12.1/src/scripting/js_functions.cc	2011-06-29 21:49:21.071800273 -0400
+@@ -51,15 +51,28 @@ extern "C" {
+ JSBool 
+ js_print(JSContext *cx, uintN argc, jsval *argv)
+ {
+-    uintN i;
++    uintN i, j;
+     JSString *str;
+ 
+     for (i = 0; i < argc; i++) 
+     {
+-        str = JS_ValueToString(cx, argv[i]);
++    	String fmtStr;
++    	for (j = 0; j < argc; j++)
++    	{
++    		if (j == i)
++    			fmtStr = fmtStr + "S";
++    		else
++    			fmtStr = fmtStr + "*";
++    	}
++    	if(!JS_ConvertArguments(cx, 1, JS_ARGV(cx, argv), fmtStr.c_str(), &str))
++		{
++			log_debug("Could not parse input arguments\n");
++			return JS_TRUE;
++		}
++
+         if (!str)
+             return JS_TRUE;
+-        argv[i] = STRING_TO_JSVAL(str);
++
+         char * log_str = JS_EncodeString(cx, str);
+         log_js("%s\n", log_str);
+         JS_free(cx, log_str);
+@@ -116,24 +129,54 @@ js_addCdsObject(JSContext *cx, uintN arg
+ {
+     try
+     {
+-        jsval arg;
+-        JSString *str;
+-        String path;
+-        String containerclass;
++    	// Inputs from native code
++        JSObject *js_cds_obj = NULL;
++        JSString *str =  NULL;
++        JSString *cont = NULL;
+ 
+-        JSObject *js_cds_obj;
++        String path = nil;
++        String containerclass = nil;
++
++        JSObject *obj = JS_THIS_OBJECT(cx, argv);
+         JSObject *js_orig_obj = NULL;
+         Ref<CdsObject> orig_object;
+ 
+         Ref<StringConverter> p2i;
+         Ref<StringConverter> i2i;
++        switch (argc)
++        {
++        case 0:
++        	log_debug("No input arguments given\n");
++        	return JS_FALSE;
++        case 1:
++			if(!JS_ConvertArguments(cx, 1, JS_ARGV(cx, argv), "o", &js_cds_obj))
++			{
++				log_debug("Could not parse input arguments\n");
++				return JS_TRUE;
++			}
++			break;
++        case 2:
++        	if(!JS_ConvertArguments(cx, 2, JS_ARGV(cx, argv), "oS", &js_cds_obj, &str))
++			{
++				log_debug("Could not parse input arguments\n");
++				return JS_TRUE;
++			}
++			break;
++        default:
++        	if(!JS_ConvertArguments(cx, 3, JS_ARGV(cx, argv), "oSS", &js_cds_obj, &str, &cont))
++			{
++				log_debug("Could not parse input arguments\n");
++				return JS_TRUE;
++			}
++			break;
++        }
+ 
+-        Script *self = (Script *)JS_GetPrivate(cx, JS_THIS_OBJECT(cx, argv));
++        Script *self = (Script *)JS_GetPrivate(cx, obj);
+ 
+         if (self == NULL)
+         {
+             log_debug("Could not retrieve class instance from global object\n");
+-            return JS_FALSE;
++            return JS_TRUE;
+         }
+ 
+         if (self->whoami() == S_PLAYLIST)
+@@ -144,23 +187,14 @@ js_addCdsObject(JSContext *cx, uintN arg
+         {
+             i2i = StringConverter::i2i();
+         }
+- 
+-        arg = argv[0];
+-        if (!JSVAL_IS_OBJECT(arg))
+-            return JS_TRUE;
+-        if (!JS_ValueToObject(cx, arg, &js_cds_obj))
+-            return JS_TRUE;
+ 
+-        // root it
+-        argv[0] = OBJECT_TO_JSVAL(js_cds_obj);
+ 
+-        str = JS_ValueToString(cx, argv[1]);
+         if (!str)
+             path = _("/");
+         else
+             path = JS_EncodeString(cx, str);
+ 
+-        JSString *cont = JS_ValueToString(cx, argv[2]);
++
+         if (cont)
+         {
+             containerclass = JS_EncodeString(cx, cont);
+@@ -169,9 +203,9 @@ js_addCdsObject(JSContext *cx, uintN arg
+         }
+ 
+         if (self->whoami() == S_PLAYLIST)
+-            js_orig_obj = self->getObjectProperty(JS_THIS_OBJECT(cx, argv), _("playlist"));
++            js_orig_obj = self->getObjectProperty(obj, _("playlist"));
+         else if (self->whoami() == S_IMPORT)
+-            js_orig_obj = self->getObjectProperty(JS_THIS_OBJECT(cx, argv), _("orig"));
++            js_orig_obj = self->getObjectProperty(obj, _("orig"));
+         
+         if (js_orig_obj == NULL)
+         {
+@@ -179,9 +213,6 @@ js_addCdsObject(JSContext *cx, uintN arg
+             return JS_TRUE;
+         }
+ 
+-        // root it
+-        argv[1] = OBJECT_TO_JSVAL(js_orig_obj);
+-
+         orig_object = self->jsObject2cdsObject(js_orig_obj, self->getProcessedObject());
+         if (orig_object == nil)
+             return JS_TRUE;

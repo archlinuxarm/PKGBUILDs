@@ -1,46 +1,63 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
-# Contributor: Kevin Mihelich <kevin@plugapps.com>
 
 plugrel=1
 
 pkgname=lio-utils
 pkgver=4.1
-pkgrel=3
-pkgdesc="A simple low-level configuration tool set for LIO 3 (Target 3 and iSCSI 3)"
-arch=('any')
+pkgrel=7
+epoch=
+pkgdesc="a simple low-level configuration tool set for LIO (Target and iSCSI)"
+arch=('i686' 'x86_64')
 url="http://linux-iscsi.org/wiki/Lio-utils"
-license=('AGPL3')
+license=('GPL2')
 depends=('python2')
-makedepends=('net-snmp')
-optdepends=('net-snmp')
-source=("http://archlinuxarm.org/builder/src/$pkgname-$pkgver.tgz")
-md5sums=('25bca4a70abe7041b3eef80f8fbdcad4')
+# for binary packages including lio-snmp in this package might be fine
+#makedepends=('net-snmp')
+#optdepends=("net-snmp: monitor lio with snmp")
+provides=()
+conflicts=('targetcli-fb')
+replaces=()
+backup=('etc/target/tcm_start.sh' 'etc/target/lio_start.sh')
+options=()
+install=
+source=(rc-arch.patch)
+md5sums=('1afad3e324d0bdde01d0383b482fac5f')
+
 
 build() {
-  cd "$srcdir/$pkgname"
-  find -type f -a -name '*.py' -exec sed -i -e 's|#![ ]*/usr/bin/python$|#!/usr/bin/python2|' {} \;
-  sed -i 's|python setup.py|python2 setup.py|' Makefile
-  make SNMP_FEATURE=1
+  if [ ! -e "$pkgname-$pkgver.tgz" ]; then
+    wget "http://www.risingtidesystems.com/git/?p=$pkgname.git;a=snapshot;h=595cd43e38ebd19813b91a3db35f3a707d2ba475;sf=tgz" -O "$pkgname-$pkgver.tgz"
+  fi
+  bsdtar -xf "$srcdir/$pkgname-$pkgver.tgz"
+
+  cd "$srcdir/$pkgname/"
+  patch -p1 < "$srcdir/rc-arch.patch"
+
+  cd "$srcdir/$pkgname/"
+	cd tcm-py ; python2 setup.py build
+  cd "$srcdir/$pkgname/"
+	cd lio-py ; python2 setup.py build
+  cd "$srcdir/$pkgname/tools"; make
 }
 
 package() {
-  cd "$srcdir/$pkgname"
+  cd "$srcdir/$pkgname/"
 
-  #make DESTDIR="$pkgdir/" initd_install)
   install -d $pkgdir/etc/rc.d
   install -m 0755 scripts/rc.target $pkgdir/etc/rc.d/target
 
   make DESTDIR="$pkgdir/" conf_install
-
 
   SITE_PACKAGES=`python2 ./get-py-modules-path.py`
   install -d "$pkgdir/usr/sbin"
 
   cd "$srcdir/$pkgname/tcm-py"
   python2 setup.py install --skip-build --root="$pkgdir/" --optimize=1
+  for file in "$pkgdir$SITE_PACKAGES"/tcm_*.py; do
+    sed -i '1s/python/python2/' "$file"
+  done
   for part in {node,dump,loop,fabric}; do
     chmod a+x "$pkgdir$SITE_PACKAGES/tcm_$part.py"
-    sed -i '1s/python/python2/' "$pkgdir$SITE_PACKAGES/tcm_$part.py"
     if [ ! -f "$pkgdir/usr/sbin/tcm_$part"  ]; then
       ln -s "$SITE_PACKAGES/tcm_$part.py" "$pkgdir/usr/sbin/tcm_$part"
     fi
@@ -48,9 +65,11 @@ package() {
 
   cd "$srcdir/$pkgname/lio-py"
   python2 setup.py install --skip-build --root="$pkgdir/" --optimize=1
+  for file in "$pkgdir$SITE_PACKAGES"/lio_*.py; do
+    sed -i '1s/python/python2/' "$file"
+  done
   for part in {dump,node}; do
     chmod a+x "$pkgdir$SITE_PACKAGES/lio_$part.py"
-    sed -i '1s/python/python2/' "$pkgdir$SITE_PACKAGES/lio_$part.py"
     if [ ! -f "$pkgdir/usr/sbin/lio_$part"  ]; then
       ln -s "$SITE_PACKAGES/lio_$part.py" "$pkgdir/usr/sbin/lio_$part"
     fi
@@ -59,10 +78,6 @@ package() {
 
   if [ -d "$srcdir/$pkgname/tools" ]; then
     cd "$srcdir/$pkgname/tools"
-    make DESTDIR="$pkgdir/" install
-  fi
-  if [ -d "$srcdir/$pkgname/mib-modules" ]; then
-    cd "$srcdir/$pkgname/mib-modules"
     make DESTDIR="$pkgdir/" install
   fi
 }
