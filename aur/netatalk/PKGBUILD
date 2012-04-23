@@ -6,18 +6,18 @@
 
 plugrel=1
 
-pkgbase=netatalk
-pkgname=('netatalk' 'netatalk-ddp')
+pkgname=netatalk
+true && pkgname=('netatalk' 'netatalk-ddp')
 pkgver=2.2.2
-pkgrel=3
+pkgrel=4
 pkgdesc='A kernel-level implementation of AppleTalk, AFP, and PAP services'
 arch=('i686' 'x86_64')
 url='http://netatalk.sourceforge.net'
 license=('GPL')
 depends=('avahi>=0.6' 'libldap' 'libgcrypt>=1.2.3')
-conflicts=('netatalk-ddp')
 replaces=('netatalk-git' 'netatalk2')
 backup=('etc/netatalk/afpd.conf'
+	'etc/netatalk/afp_ldap.conf'
 	'etc/netatalk/netatalk.conf'
 	'etc/netatalk/AppleVolumes.default'
 	'etc/netatalk/AppleVolumes.system')
@@ -35,9 +35,11 @@ md5sums=('747f0f3870fc0472fff5d502acd83fda'
 	'80299f81b0413329479073fe02e85de5'
 	'bd42b686ec7209d9ab47bd8e2e2431c4')
 _options='--disable-ddp --disable-srvloc --disable-timelord --disable-cups --disable-a2boot'
+_depddp=('openslp' 'libcups' 'libgcrypt>=1.2.3')
 
 build() {
-	if [ "$pkgname" = "netatalk-ddp" ];then build_netatalk-ddp;fi
+	if [ "$pkgname" = "netatalk-ddp" ];then	resolve_deps ${_depddp[@]}
+	_options=`echo $_options | sed s/disable/enable/g`;fi
 	cd "$srcdir"/$pkgbase-$pkgver
 	msg2 'Configuring...'
 	CFLAGS="-Wno-unused-result" ./configure --prefix=/usr --localstatedir=/var --libexecdir='${libdir}' \
@@ -46,19 +48,7 @@ build() {
 	make >/dev/null
 	echo $pkgname >made
 }
-build_netatalk-ddp() {
-	depends=('openslp' 'libcups' 'libgcrypt>=1.2.3')
-	resolve_deps ${depends[@]}
-	optdepends+=('cups: required for PAP support')
-	conflicts=('netatalk')
-	_options=`echo $_options | sed s/disable/enable/g`
-}
-package_netatalk() {
-	package_netatalk-ddp
-	rm "$pkgdir"/usr/share/man/man8/timelord.8 "$pkgdir"/etc/rc.d/{a2boot,atalkd,papd,timelord}
-	rmdir "$pkgdir"/usr/share/man/man3 "$pkgdir"/usr/share/man/man4
-}
-package_netatalk-ddp() {
+package() {
 	cd "$srcdir"/$pkgbase-$pkgver
 	if [ -f made ];then rm made;else continue;fi
 	msg2 'Building...'
@@ -68,4 +58,15 @@ package_netatalk-ddp() {
 	install -m755 "$srcdir"/{a2boot,atalkd,afpd,cnid_metad,netatalk,papd,timelord} "$pkgdir"/etc/rc.d
 	msg2 'Removing extraneous files...'
 	rm -r "$pkgdir"/usr/include "$pkgdir"/usr/share/aclocal
+}
+package_netatalk() {
+	package
+	rm "$pkgdir"/usr/share/man/man8/timelord.8 "$pkgdir"/etc/rc.d/{a2boot,atalkd,papd,timelord}
+	rmdir "$pkgdir"/usr/share/man/man3 "$pkgdir"/usr/share/man/man4
+}
+package_netatalk-ddp() {
+	package
+	optdepends=('cups: required for PAP support')
+	backup+=('etc/netatalk/atalkd.conf' 'etc/netatalk/papd.conf' 'etc/pam.d/netatalk')
+	conflicts=('netatalk');provides=(${conflicts[@]});depends=(${_depddp[@]})
 }
