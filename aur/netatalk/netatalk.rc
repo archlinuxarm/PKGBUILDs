@@ -1,0 +1,63 @@
+#!/bin/bash
+
+. /etc/rc.conf
+. /etc/rc.d/functions
+
+NAME="NetATalk Meta-Daemon"
+DAEMON=netatalk
+RUNNING=()
+STOPPED=()
+
+daemons() {
+	for i in atalkd papd timelord a2boot cnid_metad afpd; do
+	if [ `type -p $i` ]; then if [ "`get_pid $i`" ]; then RUNNING+=($i); else STOPPED+=($i); fi; fi
+	done
+}
+get_pid_r() {
+	local pid=0;for i in $@
+	do get_pid $i >/dev/null || continue;: $[ pid++ ];done
+	return $pid
+}
+get_pid_rd(){
+	get_pid_r $*
+	if [ "$?" -ne "$#" ];then return 1;fi
+}
+get_pid_rr(){
+	get_pid_r $*
+	if [ "$?" -ne "0" ];then return 1;fi
+}
+
+case "$1" in
+ start|stop)
+	[ -r /etc/conf.d/$DAEMON ] && . /etc/conf.d/$DAEMON
+	daemons
+	;;
+esac
+
+case "$1" in
+ start)
+	STARTING=''; rc.d start ${STOPPED[@]}
+	if [ $? = 0 ]; then
+	add_daemon $DAEMON
+	else
+	exit 1
+	fi
+	;;
+ stop)
+	for ((i=${#RUNNING[@]}-1; i>=0; i--));do rc.d stop ${RUNNING[$i]}; done
+	if [ $? = 0 ]; then
+	rm_daemon $DAEMON
+	else
+	exit 1
+	fi
+	;;
+ restart)
+	$0 stop
+	sleep 1
+	$0 start
+	;;
+ common)
+	;;
+ *)
+	echo "usage: $0 {start|stop|restart}"	
+esac
