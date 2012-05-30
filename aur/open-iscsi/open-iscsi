@@ -11,17 +11,14 @@
 [ -z "$SEC_BEFORE_MOUNT" ] && SEC_BEFORE_MOUNT=2
 [ -z "$ISCSIADM_EXTRAARGS" ] && ISCSIADM_EXTRAARGS=""
 DAEMON_NAME="open-iscsi"
+ISCSIADM=/sbin/iscsiadm
+PIDFILE=/var/run/iscsid.pid
 
 case "$1" in
     start)
-    	if [ "$SERVER" == "" ]; then
-            echo "Please configure \$SERVER in /etc/conf.d/open-iscsi!"
-            stat_fail
-            exit 1
-        fi
-
         modprobe -q iscsi_tcp &>/dev/null
         modprobe -q ib_iser &>/dev/null
+
         stat_busy "Starting Open-iSCSI daemon"
         /sbin/iscsid ${ISCSID_ARGS}
         if [ $? -ne 0 ]; then
@@ -32,40 +29,42 @@ case "$1" in
             stat_done
         fi
 
-        stat_busy "Discovering targets"
-        /sbin/iscsiadm -m discovery -t sendtargets -p $SERVER $ISCSIADM_EXTRAARGS > /dev/null
-        if [ $? -ne 0 ]; then
-            stat_fail
-            exit 3
-        else
-            stat_done
-        fi
+        if [ -n "$SERVER" ]; then
+            stat_busy "Discovering targets"
+            $ISCSIADM -m discovery -t sendtargets -p $SERVER $ISCSIADM_EXTRAARGS > /dev/null
+            if [ $? -ne 0 ]; then
+                stat_fail
+                exit 3
+            else
+                stat_done
+            fi
 
-        stat_busy "Login to all portals"
-        /sbin/iscsiadm -m node -L all > /dev/null
-        if [ $? -ne 0 ]; then
-            stat_fail
-            exit 4
-        else
-            stat_done
-        fi
+            stat_busy "Login to all portals"
+            $ISCSIADM -m node -L all > /dev/null
+            if [ $? -ne 0 ]; then
+                stat_fail
+                exit 4
+            else
+                stat_done
+            fi
 
-        if [[ "$MOUNT" != "" ]]; then
-            # wait n seconds to settle
-            sleep $SEC_BEFORE_MOUNT
-            status "Mounting devices"
-            for MTPT in ${MOUNT[@]}; do
-                stat_busy "mounting $MTPT"
-                mount $MTPT
-                sleep 1
-                if [ $? -eq 0 ]; then
-                    stat_done
-                else
-                    stat_fail
-                fi
-            done
-        else
-            status "No devices to mount defined"
+            if [[ "$MOUNT" != "" ]]; then
+                # wait n seconds to settle
+                sleep $SEC_BEFORE_MOUNT
+                status "Mounting devices"
+                for MTPT in ${MOUNT[@]}; do
+                    stat_busy "mounting $MTPT"
+                    mount $MTPT
+                    sleep 1
+                    if [ $? -eq 0 ]; then
+                        stat_done
+                    else
+                        stat_fail
+                    fi
+                done
+            else
+                status "No devices to mount defined"
+            fi
         fi
         ;;
     stop)
@@ -78,7 +77,7 @@ case "$1" in
                 UMOUNT="$UMOUNT ${MOUNT[$LEN]}";
             done
             for MTPT in $UMOUNT; do
-                MOUNTED=$(mount|grep -c `/bin/readlink -mns $MTPT`)
+                MOUNTED=$(mount|grep -c `/usr/bin/readlink -mns $MTPT`)
                 if [ $MOUNTED -ne 0 ]; then
                     stat_busy "unmounting $MTPT"
                     umount $MTPT
@@ -98,21 +97,24 @@ case "$1" in
             status "No devices to unmount defined"
         fi
 
-        stat_busy "Logout to all portals"
-        /sbin/iscsiadm -m node -U all > /dev/null
-        if [ $? -ne 0 ]; then
-            stat_fail
-            exit 6
-        else
-            stat_done
+        $ISCSIADM -m session $> /dev/null
+        if [ $? -eq 0 ]; then
+            stat_busy "Logout to all portals"
+            $ISCSIADM -m node -U all > /dev/null
+            if [ $? -ne 0 ]; then
+                stat_fail
+                exit 6
+            else
+                stat_done
+            fi
         fi
 
         stat_busy "Stopping Open-iSCSI daemon"
-        [ -f /var/run/iscsid.pid ] && kill -9 `cat /var/run/iscsid.pid` &> /dev/null
+        [ -f $PIDFILE ] && kill -9 `cat $PIDFILE` &> /dev/null
         if [ $? -ne 0 ]; then
             stat_fail
         else
-            rm -f /var/run/iscsid.pid
+            rm -f $PIDFILE
             killall iscsid > /dev/null
             rm_daemon $DAEMON_NAME
             stat_done
@@ -137,7 +139,7 @@ case "$1" in
         ck_daemon $DAEMON_NAME
         status "Detailed session info"
         echo
-        /sbin/iscsiadm -m session -P 2
+        $ISCSIADM -m session -P 2
         echo
         ;;
     restart)
