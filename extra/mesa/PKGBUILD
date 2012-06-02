@@ -27,7 +27,8 @@ makedepends=('glproto>=1.4.15' 'libdrm>=2.4.30' 'libxxf86vm>=1.1.1' 'libxdamage>
              'gcc-libs>=4.6.1' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'udev')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
-source=(LICENSE)
+source=(LICENSE
+        mesa-8.0.3-llvm-3.1-fixes.patch)
 if [ "${_git}" = "true" ]; then
 	# mesa git shot from 7.11 branch - see for state: http://cgit.freedesktop.org/mesa/mesa/commit/?h=7.11&id=1ae00c5960af83bea9545a18a1754bad83d5cbd0
 	#source=(${source[@]} 'ftp://ftp.archlinux.org/other/mesa/mesa-1ae00c5960af83bea9545a18a1754bad83d5cbd0.tar.bz2')
@@ -39,10 +40,14 @@ if [ "${_git}" = "true" ]; then
 )
 fi
 md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
+         'c452ed3392468170726c004c2f4e02ca'
          'cc5ee15e306b8c15da6a478923797171')
 
 build() {
     cd ${srcdir}/?esa-*
+
+    patch -Np1 -i "${srcdir}/mesa-8.0.3-llvm-3.1-fixes.patch"
+
     [ "${CARCH}" = "armv7h" ] && CFLAGS=`echo $CFLAGS | sed -e 's/-O2/-O1/'` && CXXFLAGS="$CFLAGS"
 
 if [ "${_git}" = "true" ]; then
