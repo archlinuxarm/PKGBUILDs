@@ -1,0 +1,115 @@
+# $Id: PKGBUILD 71695 2012-06-01 13:05:36Z dreisner $
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Brad Fanella <bradfanella@archlinux.us>
+# Contributor: [vEX] <niechift.dot.vex.at.gmail.dot.com>
+# Contributor: Zeqadious <zeqadious.at.gmail.dot.com>
+# Contributor: BlackIkeEagle < ike DOT devolder AT gmail DOT com >
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - --disable-vdpau, remove from makedepends
+#  - specify our C/CXXFLAGS in configure
+#  - patch to remove very wrong XBMC code trying to assert its own ARM CFLAGS, MathUtils.h ARM fix
+#  - commented TexturePacker install, doesn't appear to want to build
+
+buildarch=4
+
+_prefix=/usr
+
+pkgname=xbmc
+pkgver=11.0
+pkgrel=4
+pkgdesc="A software media player and entertainment hub for digital media"
+arch=('i686' 'x86_64')
+url="http://xbmc.org"
+license=('GPL' 'custom')
+depends=('libpulse' 'hicolor-icon-theme' 'fribidi' 'lzo2' 'smbclient' 'libtiff' 'libva' 'libpng' 'libcdio' 'yajl' 'libmysqlclient' 'libjpeg-turbo' 'libsamplerate' 'glew' 'libssh' 'libmicrohttpd' 'libxrandr' 'sdl_mixer' 'sdl_image' 'python2' 'libass' 'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 'mesa-demos' 'xorg-xdpyinfo' 'libbluray' 'libnfs' 'afpfs-ng' 'libshairport' 'avahi' 'bluez')
+makedepends=('boost' 'cmake' 'gperf' 'nasm' 'libxinerama' 'zip' 'libcec' 'udisks' 'upower' 'bluez')
+optdepends=(
+  'libcec: support for Pulse-Eight USB-CEC adapter'
+  'xvba-video: accelerated video playback for amd cards'
+  'pulseaudio: pulseaudio support'
+  'lirc: remote controller support'
+  'udisks: automount external drives'
+  'upower: used to trigger suspend functionality'
+  'unrar: access compressed files without unpacking them'
+)
+install="${pkgname}.install"
+source=("http://mirrors.xbmc.org/releases/source/xbmc-$pkgver.tar.gz"
+        "alarm.patch")
+sha256sums=('1fe5d310c16138f26e2b13bc545604e95f48ace6c8636f23e77da402cd7b0b19'
+            '6e4934e8d1bf82890679eca2fa78b3bc5942feedd9c012728a8d04c59be1651d')
+
+build() {
+  cd "${srcdir}/xbmc-$pkgver"
+
+  # fix retard code
+  patch -p1 -i "${srcdir}/alarm.patch"
+
+  # fix lsb_release dependency
+  sed -i -e 's:/usr/bin/lsb_release -d:cat /etc/arch-release:' xbmc/utils/SystemInfo.cpp
+
+  # Bootstrapping XBMC
+  ./bootstrap
+
+  # Configuring XBMC
+  export PYTHON_VERSION=2  # external python v2
+  ./configure --prefix=$_prefix --exec-prefix=$_prefix \
+    --disable-debug \
+    --enable-optimizations \
+    --enable-gl \
+    --enable-sdl \
+    --enable-vaapi \
+    --disable-vdpau \
+    --enable-xvba \
+    --enable-joystick \
+    --enable-xrandr \
+    --enable-rsxs \
+    --enable-projectm \
+    --enable-x11 \
+    --enable-pulse \
+    --enable-rtmp \
+    --enable-samba \
+    --enable-nfs \
+    --enable-afpclient \
+    --enable-airplay \
+    --enable-airtunes \
+    --enable-ffmpeg-libvorbis \
+    --enable-dvdcss \
+    --disable-hal \
+    --enable-avahi \
+    --enable-webserver \
+    --enable-optical-drive \
+    --enable-libbluray \
+    --enable-texturepacker \
+    --enable-udev \
+    --enable-libusb \
+    --enable-libcec \
+    --enable-external-libraries \
+    --disable-external-ffmpeg \
+    CFLAGS="${CFLAGS}" CXXFLAGS="${CXXFLAGS}"
+  # Now (finally) build
+  make
+}
+
+package() {
+  cd "${srcdir}/xbmc-$pkgver"
+  # Running make install
+  make DESTDIR="${pkgdir}" install
+
+  # run feh with python2
+  sed -i -e 's/python/python2/g' ${pkgdir}${_prefix}/bin/xbmc
+
+  # lsb_release fix
+  sed -i -e 's/which lsb_release &> \/dev\/null/\[ -f \/etc\/arch-release ]/g' "${pkgdir}${_prefix}/bin/xbmc"
+  sed -i -e "s/lsb_release -a 2> \/dev\/null | sed -e 's\/\^\/    \/'/cat \/etc\/arch-release/g" "${pkgdir}${_prefix}/bin/xbmc"
+
+  # Tools
+  install -D -m 0755 "${srcdir}/xbmc-$pkgver/xbmc-xrandr" "${pkgdir}${_prefix}/share/xbmc/xbmc-xrandr"
+  #install -D -m 0755 "${srcdir}/xbmc-$pkgver/tools/TexturePacker/TexturePacker" "${pkgdir}${_prefix}/share/xbmc/"
+
+  # Licenses
+  install -d -m 0755 "${pkgdir}${_prefix}/share/licenses/${pkgname}"
+  for licensef in LICENSE.GPL copying.txt; do
+    mv "${pkgdir}${_prefix}/share/doc/xbmc/${licensef}" "${pkgdir}${_prefix}/share/licenses/${pkgname}"
+  done
+}
