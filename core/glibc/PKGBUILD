@@ -16,7 +16,7 @@ noautobuild=1
 
 pkgname=glibc
 pkgver=2.15
-pkgrel=10
+pkgrel=12
 _glibcdate=20111227
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
@@ -36,7 +36,6 @@ source=(ftp://ftp.archlinux.org/other/glibc/${pkgname}-${pkgver}_${_glibcdate}.t
         glibc-2.15-do-not-install-timezone-files.patch
         glibc-2.15-do-not-install-timezone-files-2.patch
         glibc-__i686.patch
-        glibc-2.12.2-ignore-origin-of-privileged-program.patch
         glibc-2.14-libdl-crash.patch
         glibc-2.14-reexport-rpc-interface.patch
         glibc-2.14-reinstall-nis-rpc-headers.patch
@@ -48,7 +47,7 @@ source=(ftp://ftp.archlinux.org/other/glibc/${pkgname}-${pkgver}_${_glibcdate}.t
         glibc-2.15-ifunc.patch
         glibc-2.15-avx.patch
         glibc-2.15-strcasecmp-disable-avx.patch
-        glibc-2.15-gb18030.patch
+        glibc-2.15-gb18030.patch.gz
         glibc-2.15-revert-netlink-cache.patch
         glibc-2.15-arena.patch
         glibc-2.15-negative-result-cache.patch
@@ -62,7 +61,10 @@ source=(ftp://ftp.archlinux.org/other/glibc/${pkgname}-${pkgver}_${_glibcdate}.t
         glibc-2.15-rintf-rounding.patch
         glibc-2.15-nearbyintf-rounding.patch
         glibc-2.15-confstr-local-buffer-extent.patch
-        nscd
+        glibc-2.15-testsuite.patch
+        nscd.rcd
+        nscd.service
+        nscd.tmpfiles
         locale.gen.txt
         locale-gen)
 md5sums=('6ffdf5832192b92f98bdd125317c0dfc'
@@ -71,7 +73,6 @@ md5sums=('6ffdf5832192b92f98bdd125317c0dfc'
          '349227bcedb19cea008fbcb2c7e1a582'
          '880439de2c608177ed1d749722d26820'
          '40cd342e21f71f5e49e32622b25acc52'
-         'e60e33591c9ec1447e4cddadcbb9cf3a'
          '6970bcfeb3bf88913436d5112d16f588'
          'c5de2a946215d647c8af5432ec4b0da0'
          '55febbb72139ac7b65757df085024b83'
@@ -83,7 +84,7 @@ md5sums=('6ffdf5832192b92f98bdd125317c0dfc'
          '3d844b53b2dbb7c996e39c7ad932f55d'
          '41ae047ac88e8f6f547c70b0a0bc3b72'
          'fccb89f6628f59752278e125c35941f8'
-         'c4cd34f20ccd37817f6c1374bd4ee68e'
+         '001a4044ac3d59aca6ee144eaca57ab2'
          '94b61302a7ca6c5764d013dc7738fcfe'
          'a9ffadcfd2d357f91fee0b861fd4a7c6'
          '2c46b8e294de24c531f2253ff69aeef3'
@@ -97,7 +98,10 @@ md5sums=('6ffdf5832192b92f98bdd125317c0dfc'
          '1419d61fd1dbc6cdc48bb59da86fa66f'
          '7ff501435078b1a2622124fbeaafc921'
          '4ed0bb09c3851cd9cb5e39c946a8a334'
-         'b587ee3a70c9b3713099295609afde49'
+         '6962c3fa29306bfbf6f0d22b19cb825d'
+         '589d79041aa767a5179eaa4e2737dd3f'
+         'ad8a9af15ab7eeaa23dc7ee85024af9f'
+         'bccbe5619e75cf1d97312ec3681c605c'
          '07ac979b6ab5eeb778d55f041529d623'
          '476e9113489f93b348b21e144b6a8fcf')
 
@@ -126,10 +130,6 @@ build() {
   # undefine __i686
   # http://sourceware.org/glibc/wiki/Release/2.15#Build_Failures
   patch -p1 -i ${srcdir}/glibc-__i686.patch
-
-  # http://www.exploit-db.com/exploits/15274/
-  # http://sourceware.org/git/?p=glibc.git;a=patch;h=d14e6b09  (fedora branch)
-  patch -p1 -i ${srcdir}/glibc-2.12.2-ignore-origin-of-privileged-program.patch
 
   # http://sourceware.org/git/?p=glibc.git;a=commitdiff;h=675155e9  (fedora branch)
   # http://sourceware.org/ml/libc-alpha/2011-06/msg00006.html
@@ -181,7 +181,7 @@ build() {
   patch -p1 -i ${srcdir}/glibc-2.15-gb18030.patch
 
   # fix crash in __nscd_get_mapping if nscd not running
-  # http://sourceware.org/bugzilla/show_bug.cgi?id=13594 (potential "fix" in comment)
+  # http://sourceware.org/bugzilla/show_bug.cgi?id=13594 (potential fix in comment)
   # reverts commit 3a2c0242 and other necessary following changes...
   patch -p1 -i ${srcdir}/glibc-2.15-revert-netlink-cache.patch
 
@@ -234,6 +234,10 @@ build() {
   # http://sourceware.org/git/?p=glibc.git;a=commit;h=d6a403f9
   patch -p1 -i ${srcdir}/glibc-2.15-confstr-local-buffer-extent.patch
 
+  # fix testsuite failures with --as-needed
+  # http://sourceware.org/git/?p=glibc.git;a=commit;h=d4c2917f
+  patch -p1 -i ${srcdir}/glibc-2.15-testsuite.patch
+
   install -dm755 ${pkgdir}/etc
   touch ${pkgdir}/etc/ld.so.conf
 
@@ -261,9 +265,7 @@ build() {
       --with-headers=/usr/include \
       --enable-add-ons=nptl,libidn,ports \
       --enable-kernel=2.6.27 \
-      --with-tls --with-__thread \
-      --enable-bind-now --without-gd \
-      --without-cvs --disable-profile \
+      --enable-bind-now --disable-profile \
       --disable-multi-arch $CONFIGFLAG
 
   # build libraries with hardening disabled
@@ -271,7 +273,7 @@ build() {
   make $MAKEFLAG
   
   # re-enable hardening for programs
-  sed -i "s#=no#=yes#" configparms
+  sed -i "/build-programs=/s#no#yes#" configparms
   echo "CC += -fstack-protector -D_FORTIFY_SOURCE=2" >> configparms
   echo "CXX += -fstack-protector -D_FORTIFY_SOURCE=2" >> configparms
   make $MAKEFLAG
@@ -293,15 +295,17 @@ package() {
 
   rm -f ${pkgdir}/etc/ld.so.{cache,conf}
 
-  install -dm755 ${pkgdir}/etc/rc.d
-  install -dm755 ${pkgdir}/usr/sbin
-  install -dm755 ${pkgdir}/usr/lib/locale
+  install -dm755 ${pkgdir}/{etc/rc.d,usr/{sbin,lib/{,locale,systemd/system,tmpfiles.d}}}
+
   install -m644 ${srcdir}/glibc/nscd/nscd.conf ${pkgdir}/etc/nscd.conf
-  install -m755 ${srcdir}/nscd ${pkgdir}/etc/rc.d/nscd
-  install -m755 ${srcdir}/locale-gen ${pkgdir}/usr/sbin
+  sed -i -e 's/^\tserver-user/#\tserver-user/' ${pkgdir}/etc/nscd.conf
+  install -m755 ${srcdir}/nscd.rcd ${pkgdir}/etc/rc.d/nscd
+  install -m644 ${srcdir}/nscd.service ${pkgdir}/usr/lib/systemd/system
+  install -m644 ${srcdir}/nscd.tmpfiles ${pkgdir}/usr/lib/tmpfiles.d/nscd.conf
+
   install -m644 ${srcdir}/glibc/posix/gai.conf ${pkgdir}/etc/gai.conf
 
-  sed -i -e 's/^\tserver-user/#\tserver-user/' ${pkgdir}/etc/nscd.conf
+  install -m755 ${srcdir}/locale-gen ${pkgdir}/usr/sbin
 
   # create /etc/locale.gen
   install -m644 ${srcdir}/locale.gen.txt ${pkgdir}/etc/locale.gen
