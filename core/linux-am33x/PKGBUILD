@@ -1,47 +1,83 @@
 # Maintainer: Stephen Oliver <mrsteveman1@gmail.com>
+# Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
 
 # am33x kernel and headers
 #  - note: any other kernel packages should include headers for that march
 #  - there will be no v7 kernel26 package, each march will be tagged individually
 
-noautobuild=1
-plugrel=1
+buildarch=4
 
 pkgbase=linux-am33x
 pkgname=('linux-am33x' 'linux-headers-am33x')
+# pkgname=linux-custom       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel="am33x"
-pkgver=3.2.14
-pkgrel=alarm11
-arch=('armv7h')
+_basekernel=3.2
+pkgver=${_basekernel}.18
+pkgrel=1
+arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'git')
+makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage')
 options=('!strip')
-source=("config"
-	"https://github.com/koenkooi/linux/zipball/linux-ti33x-psp-3.2-r10b+gitre8004dad869568692ca2a45c04e8464ce48cc4d7"
-	"ARM-omap-am33x-BeagleBone-userspace-SPI-support.patch"
-	"0002-beaglebone-hack-in-support-for-the-WIP-st7735fb-driv.patch"
-	"0003-st7735fb-Make-FB-native-endian-on-little-endian-plat.patch")
+source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${_basekernel}.tar.xz"
+        #"ftp://ftp.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.bz2"
+        "rcn-ee.diff.gz::http://rcn-ee.net/deb/sid-armhf/v3.2.18-psp14/patch-3.2-psp14.diff.gz"
+        'config'
+        'change-default-console-loglevel.patch'
+        'aufs3-3.2.patch.gz')
+md5sums=('364066fa18767ec0ae5f4e4abcf9dc51'
+         'f91b0144e8b0d4e5cbe1f2de2a2299f3'
+         'e71a80e5a2f948e66a6452047a6c8eee'
+         '9d3c56a4b999c8bfbd4018089a62f662'
+         '6ea7b005a74be27abb072c934ef15a2c')
 
 build() {
+  cd "${srcdir}/linux-${_basekernel}"
 
-	cd $srcdir
+  #patch -p1 -i "${srcdir}/patch-${pkgver}"
 
-	mv koenkooi-linux-* linux
+  # add latest fixes from stable queue, if needed
+  # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
 
-  	ln -s "${srcdir}/config" "${srcdir}/linux/.config"
+  # set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)
+  # remove this when a Kconfig knob is made available by upstream
+  # (relevant patch sent upstream: https://lkml.org/lkml/2011/7/26/227)
+  patch -Np1 -i "${srcdir}/change-default-console-loglevel.patch"
 
-	cd $srcdir/linux  
-	
-	patch -Np0 -i "${srcdir}/ARM-omap-am33x-BeagleBone-userspace-SPI-support.patch"
-	
-	# these are crude patches that hack in support for an SPI framebuffer, probably conflicts with spidev and cape configuration so they're disabled.
-	#patch -Np0 -i "${srcdir}/0002-beaglebone-hack-in-support-for-the-WIP-st7735fb-driv.patch"
-	#patch -Np0 -i "${srcdir}/0003-st7735fb-Make-FB-native-endian-on-little-endian-plat.patch"
-	make prepare
+  # ALARM patches
+  patch -Np1 -i "${srcdir}/rcn-ee.diff"
+  patch -Np1 -i "${srcdir}/aufs3-3.2.patch"
 
-	make ${MAKEFLAGS} uImage modules
+  cat "${srcdir}/config" > ./.config
+
+  # set extraversion to pkgrel
+  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
+
+  # get kernel version
+  make prepare
+
+  # load configuration
+  # Configure the kernel. Replace the line below with one of your choice.
+  #make menuconfig # CLI menu for configuration
+  #make nconfig # new CLI menu for configuration
+  #make xconfig # X-based configuration
+  #make oldconfig # using old config from previous kernel version
+  # ... or manually edit .config
+
+  # Copy back our configuration (use with new kernel version)
+  #cp ./.config ../${_basekernel}.config
+
+  ####################
+  # stop here
+  # this is useful to configure the kernel
+  #msg "Stopping build"
+  #return 1
+  ####################
+
+  #yes "" | make config
+
+  # build!
+  make ${MAKEFLAGS} uImage modules
 }
 
 package_linux-am33x() {
@@ -55,7 +91,7 @@ package_linux-am33x() {
   backup=("etc/mkinitcpio.d/${pkgname}.preset")
   install=${pkgname}.install
 
-  cd "${srcdir}/linux"
+  cd "${srcdir}/linux-${_basekernel}"
 
   KARCH=arm
 
@@ -96,7 +132,7 @@ package_linux-headers-am33x() {
   cd "${pkgdir}/lib/modules/${_kernver}"
   ln -sf ../../../usr/src/linux-${_kernver} build
 
-  cd "${srcdir}/linux"
+  cd "${srcdir}/linux-${_basekernel}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
