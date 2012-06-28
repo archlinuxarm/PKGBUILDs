@@ -21,7 +21,7 @@ if [ "${_git}" = "true" ]; then
   else
     pkgver=8.0.3
 fi
-pkgrel=2
+pkgrel=3
 arch=('i686' 'x86_64')
 makedepends=('glproto>=1.4.15' 'libdrm>=2.4.30' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.99.1' 'libxt>=1.1.1' 
              'gcc-libs>=4.6.1' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'udev')
