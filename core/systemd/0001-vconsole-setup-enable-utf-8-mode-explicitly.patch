@@ -1,0 +1,79 @@
+From d305a67b46644d6360ef557109384c831ee8e018 Mon Sep 17 00:00:00 2001
+From: Tom Gundersen <teg@jklm.no>
+Date: Sun, 10 Jun 2012 20:37:14 +0200
+Subject: [PATCH] vconsole-setup: enable utf-8 mode explicitly
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Rather than assuming the console is in utf-8 mode if nothing else is
+specified, be a bit more robust and enable it explicitly.
+
+This fixes a regression compared with Arch's initscripts when not
+using a framebuffer as the old VGA console would not be in utf-8
+mode by default.
+
+Furthermore, this would allow vconsole-setup to be used after boot
+to change the vconsole into utf-8 mode in case it has been set to
+non-utf-8 mode for whatever reason. I.e, the following would leave
+the console in utf-8 mode as expected:
+
+ # export LANG=en_US.ISO-8859-1
+ # /usr/lib/systemd/systemd-vconsole-setup
+ # export LANG=en_US.UTF-8
+ # /usr/lib/systemd/systemd-vconsole-setup
+
+Reported-by: Xyne <xyne@archlinx.ca>
+Reported-by: Thomas Bächler <thomas@archlinux.org>
+Cc: Dave Reisner <dreisner@archlinux.org>
+---
+ src/vconsole/vconsole-setup.c | 24 +++++++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/src/vconsole/vconsole-setup.c b/src/vconsole/vconsole-setup.c
+index d04fab4..aa5fa18 100644
+--- a/src/vconsole/vconsole-setup.c
++++ b/src/vconsole/vconsole-setup.c
+@@ -80,6 +80,25 @@ static int disable_utf8(int fd) {
+         return r;
+ }
+ 
++static int enable_utf8(int fd) {
++        int r = 0, k;
++
++        if (ioctl(fd, KDSKBMODE, K_UNICODE) < 0)
++                r = -errno;
++
++        if (loop_write(fd, "\033%G", 3, false) < 0)
++                r = -errno;
++
++        k = write_one_line_file("/sys/module/vt/parameters/default_utf8", "1");
++        if (k < 0)
++                r = k;
++
++        if (r < 0)
++                log_warning("Failed to enable UTF-8: %s", strerror(-r));
++
++        return r;
++}
++
+ static int load_keymap(const char *vc, const char *map, const char *map_toggle, bool utf8, pid_t *_pid) {
+         const char *args[8];
+         int i = 0;
+@@ -418,9 +437,12 @@ int main(int argc, char **argv) {
+ 
+         r = EXIT_FAILURE;
+ 
+-        if (!utf8)
++        if (utf8)
++                enable_utf8(fd);
++        else
+                 disable_utf8(fd);
+ 
++
+         if (load_keymap(vc, vc_keymap, vc_keymap_toggle, utf8, &keymap_pid) >= 0 &&
+             load_font(vc, vc_font, vc_font_map, vc_font_unimap, &font_pid) >= 0)
+                 r = EXIT_SUCCESS;
+-- 
+1.7.11
+

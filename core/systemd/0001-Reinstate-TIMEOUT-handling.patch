@@ -1,0 +1,124 @@
+From 2127f99fb43d2ef950e95329ce40bdd5da8b015c Mon Sep 17 00:00:00 2001
+From: Dave Reisner <dreisner@archlinux.org>
+Date: Fri, 25 May 2012 19:43:24 -0400
+Subject: [PATCH] Reinstate TIMEOUT= handling
+
+This is mostly to deal with ipw2?00 drivers which have yet to be fixed
+in the kernel.
+---
+ src/libudev/libudev-device.c  |   19 +++++++++++++++++++
+ src/libudev/libudev-private.h |    1 +
+ src/udev/udevd.c              |   13 ++++++++++---
+ 3 files changed, 30 insertions(+), 3 deletions(-)
+
+diff --git a/src/libudev/libudev-device.c b/src/libudev/libudev-device.c
+index a8277d1..5966189 100644
+--- a/src/libudev/libudev-device.c
++++ b/src/libudev/libudev-device.c
+@@ -68,6 +68,7 @@ struct udev_device {
+         struct udev_list tags_list;
+         unsigned long long int seqnum;
+         unsigned long long int usec_initialized;
++        int timeout;
+         int devlink_priority;
+         int refcount;
+         dev_t devnum;
+@@ -89,6 +90,21 @@ struct udev_device {
+         bool db_persist;
+ };
+ 
++int udev_device_get_timeout(struct udev_device *udev_device)
++{
++        return udev_device->timeout;
++}
++
++static int udev_device_set_timeout(struct udev_device *udev_device, int timeout)
++{
++        char num[32];
++
++        udev_device->timeout = timeout;
++        snprintf(num, sizeof(num), "%u", timeout);
++        udev_device_add_property(udev_device, "TIMEOUT", num);
++        return 0;
++}
++
+ /**
+  * udev_device_get_seqnum:
+  * @udev_device: udev device
+@@ -362,6 +378,8 @@ void udev_device_add_property_from_string_parse(struct udev_device *udev_device,
+ 
+                 util_strscpyl(path, sizeof(path), TEST_PREFIX "/sys", &property[8], NULL);
+                 udev_device_set_syspath(udev_device, path);
++        } else if (strncmp(property, "TIMEOUT=", 8) == 0) {
++                udev_device_set_timeout(udev_device, strtoull(&property[8], NULL, 10));
+         } else if (startswith(property, "SUBSYSTEM=")) {
+                 udev_device_set_subsystem(udev_device, &property[10]);
+         } else if (startswith(property, "DEVTYPE=")) {
+@@ -605,6 +623,7 @@ struct udev_device *udev_device_new(struct udev *udev)
+         udev_list_init(udev, &udev_device->sysattr_value_list, true);
+         udev_list_init(udev, &udev_device->sysattr_list, false);
+         udev_list_init(udev, &udev_device->tags_list, true);
++        udev_device->timeout = -1;
+         udev_device->watch_handle = -1;
+         /* copy global properties */
+         udev_list_entry_foreach(list_entry, udev_get_properties_list_entry(udev))
+diff --git a/src/libudev/libudev-private.h b/src/libudev/libudev-private.h
+index 4eb4a59..99aefeb 100644
+--- a/src/libudev/libudev-private.h
++++ b/src/libudev/libudev-private.h
+@@ -70,6 +70,7 @@ const char *udev_device_get_id_filename(struct udev_device *udev_device);
+ void udev_device_set_is_initialized(struct udev_device *udev_device);
+ int udev_device_add_tag(struct udev_device *udev_device, const char *tag);
+ void udev_device_cleanup_tags_list(struct udev_device *udev_device);
++int udev_device_get_timeout(struct udev_device *udev_device);
+ unsigned long long udev_device_get_usec_initialized(struct udev_device *udev_device);
+ void udev_device_set_usec_initialized(struct udev_device *udev_device, unsigned long long usec_initialized);
+ int udev_device_get_devlink_priority(struct udev_device *udev_device);
+diff --git a/src/udev/udevd.c b/src/udev/udevd.c
+index 0d85960..cd24462 100644
+--- a/src/udev/udevd.c
++++ b/src/udev/udevd.c
+@@ -384,7 +384,7 @@ out:
+         }
+ }
+ 
+-static void event_run(struct event *event)
++static void event_run(struct event *event, bool force)
+ {
+         struct udev_list_node *loop;
+ 
+@@ -410,7 +410,7 @@ static void event_run(struct event *event)
+                 return;
+         }
+ 
+-        if (children >= children_max) {
++        if (!force && children >= children_max) {
+                 if (children_max > 1)
+                         log_debug("maximum number (%i) of children reached\n", children);
+                 return;
+@@ -444,6 +444,13 @@ static int event_queue_insert(struct udev_device *dev)
+ 
+         event->state = EVENT_QUEUED;
+         udev_list_node_append(&event->node, &event_list);
++
++        /* run all events with a timeout set immediately */
++        if (udev_device_get_timeout(dev) > 0) {
++                event_run(event, true);
++                return 0;
++        }
++
+         return 0;
+ }
+ 
+@@ -549,7 +556,7 @@ static void event_queue_start(struct udev *udev)
+                 if (is_devpath_busy(event))
+                         continue;
+ 
+-                event_run(event);
++                event_run(event, false);
+         }
+ }
+ 
+-- 
+1.7.10.2
+

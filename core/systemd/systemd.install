@@ -1,0 +1,37 @@
+#!/bin/sh
+
+sd_booted() {
+  [ -e sys/fs/cgroup/systemd ]
+}
+
+post_install() {
+  # enable getty@tty1 by default, but don't track the file
+  systemctl enable getty@.service
+
+  echo ":: Append 'init=/bin/systemd' to your kernel command line in your"
+  echo "   bootloader to replace sysvinit with systemd"
+}
+
+post_upgrade() {
+  if sd_booted; then
+    # we moved the binary in 44-2 to /usr, so a reexec leads to a
+    # coredump. refuse this reexec and warn the user that they should
+    # reboot instead.
+    if [ "$(vercmp 44-2 "$2")" -eq 1 ]; then
+      echo "warning: refusing to reexec systemd. the system should be rebooted."
+    else
+      systemctl daemon-reload
+      systemctl daemon-reexec
+    fi
+  fi
+
+  # getty@tty1.service is no longer enabled by default, but we don't want to break
+  # existing setups.
+  if [ "$(vercmp 183 "$2")" -eq 1 ]; then
+    # systemctl seems to be whiny on sysvinit. this will succeed unless something
+    # horrific happens, so just mask the error.
+    systemctl -q enable getty@.service || true
+  fi
+}
+
+# vim:set ts=2 sw=2 et:
