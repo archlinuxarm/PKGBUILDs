@@ -1,0 +1,86 @@
+From 3bc50cddbc5bc8c20c3bac50794a7ec80602ab16 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Mon, 21 Nov 2011 15:06:54 +0800
+Subject: [PATCH] ENGR00162708 MX5: Add I2C dummy write and mask nONKEY event for i2c operation
+
+MX5: Add I2C dummy write when acessing DA9053 registers and mask nONKEY event
+for i2c operation before suspend
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+(cherry picked from commit 0cc56da7dc91bbd5b6e9a51c1576daedce36093c)
+---
+ arch/arm/mach-mx5/pm_da9053.c |   22 +++++++++++++++++++---
+ 1 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/pm_da9053.c b/arch/arm/mach-mx5/pm_da9053.c
+index 63eda3a..7bb8915 100644
+--- a/arch/arm/mach-mx5/pm_da9053.c
++++ b/arch/arm/mach-mx5/pm_da9053.c
+@@ -60,6 +60,7 @@ as the normal setting on Da9053 */
+ #define DA9052_GPIO0809_SMD_SET 0x18
+ #define DA9052_ID1415_SMD_SET   0x1
+ #define DA9052_GPI9_IRQ_MASK    0x2
++#define DA9052_IRQ_MASKB_ONKEY   0x1
+ 
+ static u8 volt_settings[DA9052_LDO10_REG - DA9052_BUCKCORE_REG + 1];
+ extern int pm_i2c_imx_xfer(struct i2c_msg *msgs, int num);
+@@ -67,7 +68,8 @@ extern int pm_i2c_imx_xfer(struct i2c_msg *msgs, int num);
+ static void pm_da9053_read_reg(u8 reg, u8 *value)
+ {
+ 	unsigned char buf[2] = {0, 0};
+-	struct i2c_msg i2cmsg[2];
++	unsigned char dummy[2] = {0xff, 0xff};
++	struct i2c_msg i2cmsg[3];
+ 	buf[0] = reg;
+ 	i2cmsg[0].addr  = 0x48 ;
+ 	i2cmsg[0].len   = 1;
+@@ -83,16 +85,22 @@ static void pm_da9053_read_reg(u8 reg, u8 *value)
+ 
+ 	pm_i2c_imx_xfer(i2cmsg, 2);
+ 	*value = buf[1];
++
++	i2cmsg[2].addr  = 0x48 ;
++	i2cmsg[2].len   = 2;
++	i2cmsg[2].buf   = &dummy[0];
++	i2cmsg[2].flags = 0;
++	pm_i2c_imx_xfer(i2cmsg, 1);
+ }
+ 
+ static void pm_da9053_write_reg(u8 reg, u8 value)
+ {
+-	unsigned char buf[2] = {0, 0};
++	unsigned char buf[4] = {0, 0, 0xff, 0xff};
+ 	struct i2c_msg i2cmsg[2];
+ 	buf[0] = reg;
+ 	buf[1] = value;
+ 	i2cmsg[0].addr  = 0x48 ;
+-	i2cmsg[0].len   = 2;
++	i2cmsg[0].len   = 4;
+ 	i2cmsg[0].buf   = &buf[0];
+ 	i2cmsg[0].flags = 0;
+ 	pm_i2c_imx_xfer(i2cmsg, 1);
+@@ -172,6 +180,10 @@ int da9053_suspend_cmd_hw(void)
+ 	}
+ 	clk_enable(i2c_clk);
+ 
++	pm_da9053_read_reg(DA9052_IRQMASKB_REG, &data);
++	data |= DA9052_IRQ_MASKB_ONKEY;
++	pm_da9053_write_reg(DA9052_IRQMASKB_REG, data);
++
+ 	pm_da9053_preset_voltage();
+ 	pm_da9053_write_reg(DA9052_CONTROLC_REG,
+ 				DA9052_CONTROLC_SMD_SET);
+@@ -194,6 +206,10 @@ int da9053_suspend_cmd_hw(void)
+ 	pm_da9053_write_reg(DA9052_SEQTIMER_REG, 0);
+ 	/* pm_da9053_write_reg(DA9052_SEQB_REG, 0x1f); */
+ 
++	pm_da9053_read_reg(DA9052_IRQMASKB_REG, &data);
++	data &= ~DA9052_IRQ_MASKB_ONKEY;
++	pm_da9053_write_reg(DA9052_IRQMASKB_REG, data);
++
+ 	clk_disable(i2c_clk);
+ 	clk_put(i2c_clk);
+ 	return 0;
+-- 
+1.5.4.4
+
