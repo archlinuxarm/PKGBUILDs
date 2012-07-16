@@ -1,11 +1,10 @@
-# Maintainer: Kevin Mihelich <kevin@plugapps.com>
+# Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
 
-# OMAP 3/4 kernel and headers
+# i.MX5 kernel and headers
 #  - note: any other kernel packages should include headers for that march
 #  - there will be no v7 kernel26 package, each march will be tagged individually
 
-noautobuild=1
-plugrel=1
+buildarch=4
 
 pkgbase=linux-imx5
 pkgname=('linux-imx5' 'linux-headers-imx5')
@@ -51,6 +50,9 @@ build() {
 
   # set extraversion to pkgrel
   sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
+
+  # don't run depmod on 'make install'. We'll do this ourselves in packaging
+  sed -i '2iexit 0' scripts/depmod.sh
 
   # get kernel version
   make prepare
@@ -117,6 +119,12 @@ package_linux-imx5() {
   # add real version for building modules and running depmod from post_install/upgrade
   mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
   echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
+
+  # move module tree /lib -> /usr/lib
+  mv "$pkgdir/lib" "$pkgdir/usr"
+
+  # Now we call depmod...
+  depmod -b "$pkgdir" -F System.map "$_kernver"
 }
 
 package_linux-headers-imx5() {
@@ -124,10 +132,10 @@ package_linux-headers-imx5() {
   provides=('linux-headers=${pkgver}')
   conflicts=('linux-headers-omap' 'linux-headers-tegra')
 
-  mkdir -p "${pkgdir}/lib/modules/${_kernver}"
+  install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
-  cd "${pkgdir}/lib/modules/${_kernver}"
-  ln -sf ../../../usr/src/linux-${_kernver} build
+  cd "${pkgdir}/usr/lib/modules/${_kernver}"
+  ln -sf ../../../src/linux-${_kernver} build
 
   cd "${srcdir}/linux-${_basekernel}"
   install -D -m644 Makefile \
