@@ -1,35 +1,42 @@
-# Maintainer: Kevin Mihelich <kevin@plugapps.com>
+# Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
 
 # i.MX5 kernel and headers
 #  - note: any other kernel packages should include headers for that march
 #  - there will be no v7 kernel26 package, each march will be tagged individually
 
-noautobuild=1
-plugrel=1
+buildarch=4
 
 pkgbase=linux-imx5
 pkgname=('linux-imx5' 'linux-headers-imx5')
 # pkgname=linux-custom       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel=3.0
-pkgver=${_basekernel}.99
+_basekernel=3.2
+pkgver=${_basekernel}.1
 pkgrel=1
-arch=('arm')
+arch=('arm' 'armv7h')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage')
 options=('!strip')
-source=("https://launchpad.net/~linaro-landing-team-freescale/+archive/public/+files/linux-linaro-lt-mx5-3.1_3.1.0-1001.4.tar.gz"
+source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${_basekernel}.tar.xz"
+        "ftp://ftp.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.bz2"
         'config'
-        'change-default-console-loglevel.patch')
-md5sums=('398e95866794def22b12dfbc15ce89c0'
-         '1757786b9a9ffbd48ad9642199ff5bd7'
-         '0d0b9974c713be07b64af0647036b6c1'
-         '4acb93760d1873d21691b8a4b6b82e19'
-         '9d3c56a4b999c8bfbd4018089a62f662')
+        'change-default-console-loglevel.patch'
+        'sdma-imx51-to3.bin')
+md5sums=('364066fa18767ec0ae5f4e4abcf9dc51'
+         '31fc34340f11118873463a1d59d47b7f'
+         'd70cc0b13fc3d2fd083fc2d3757643a5'
+         '9d3c56a4b999c8bfbd4018089a62f662'
+         'f34a8d1e78a0327a243d9bb0405044a7')
 
 build() {
-  cd "${srcdir}/linux-linaro"
+  cd "${srcdir}/linux-${_basekernel}"
+
+  # copy imx51 sdma firmware into kernel dir
+  # (found firmware here: http://git.pengutronix.de/?p=imx/sdma-firmware.git)
+  cp ../sdma-imx51-to3.bin ./firmware/
+
+  patch -p1 -i "${srcdir}/patch-${pkgver}"
 
   # add latest fixes from stable queue, if needed
   # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
@@ -41,11 +48,11 @@ build() {
 
   cat "${srcdir}/config" > ./.config
 
-  # remove the sublevel from Makefile
-  # this ensures our kernel version is always 3.X-ARCH
-  # this way, minor kernel updates will not break external modules
-  # we need to change this soon, see FS#16702
-  sed -ri 's|^(SUBLEVEL =).*|\1|' Makefile
+  # set extraversion to pkgrel
+  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
+
+  # don't run depmod on 'make install'. We'll do this ourselves in packaging
+  sed -i '2iexit 0' scripts/depmod.sh
 
   # get kernel version
   make prepare
@@ -84,7 +91,7 @@ package_linux-imx5() {
   backup=("etc/mkinitcpio.d/${pkgname}.preset")
   install=${pkgname}.install
 
-  cd "${srcdir}/linux-linaro"
+  cd "${srcdir}/linux-${_basekernel}"
 
   KARCH=arm
 
@@ -105,8 +112,19 @@ package_linux-imx5() {
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
   # remove the firmware
   rm -rf "${pkgdir}/lib/firmware"
-  # gzip -9 all modules to safe 100MB of space
+  # gzip -9 all modules to save 100MB of space
   find "${pkgdir}" -name '*.ko' -exec gzip -9 {} \;
+  # make room for external modules FIXME
+  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
+  # add real version for building modules and running depmod from post_install/upgrade
+  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
+  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
+
+  # move module tree /lib -> /usr/lib
+  mv "$pkgdir/lib" "$pkgdir/usr"
+
+  # Now we call depmod...
+  depmod -b "$pkgdir" -F System.map "$_kernver"
 }
 
 package_linux-headers-imx5() {
@@ -114,12 +132,12 @@ package_linux-headers-imx5() {
   provides=('linux-headers=${pkgver}')
   conflicts=('linux-headers-omap' 'linux-headers-tegra')
 
-  mkdir -p "${pkgdir}/lib/modules/${_kernver}"
+  install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
-  cd "${pkgdir}/lib/modules/${_kernver}"
-  ln -sf ../../../usr/src/linux-${_kernver} build
+  cd "${pkgdir}/usr/lib/modules/${_kernver}"
+  ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/linux-linaro"
+  cd "${srcdir}/linux-${_basekernel}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -137,6 +155,10 @@ package_linux-headers-imx5() {
   # copy arch includes for external modules
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH
   cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-mxc
+  cp -a arch/$KARCH/plat-mxc/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-mxc/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-imx
+  cp -a arch/$KARCH/mach-imx/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-imx/
 
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
@@ -238,12 +260,3 @@ package_linux-headers-imx5() {
   # remove unneeded architectures
   rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
 }
-md5sums=('3c6150c5c0fa6ef223c819ec7bf72f40'
-         '4acb93760d1873d21691b8a4b6b82e19'
-         '9d3c56a4b999c8bfbd4018089a62f662')
-md5sums=('3c6150c5c0fa6ef223c819ec7bf72f40'
-         '1a2fb96f28752fa3fc1fc29a5da31a4e'
-         '9d3c56a4b999c8bfbd4018089a62f662')
-md5sums=('3c6150c5c0fa6ef223c819ec7bf72f40'
-         'f8b6704bf644ad42abf0c0b4d9616756'
-         '9d3c56a4b999c8bfbd4018089a62f662')
