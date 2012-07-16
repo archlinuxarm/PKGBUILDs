@@ -1,7 +1,6 @@
 # Maintainer: Bill Durr <billyburly@gmail.com>
 
-noautobuild=1
-plugrel=1
+buildarch=2
 
 pkgbase=linux-orion
 pkgname=('linux-orion' 'linux-headers-orion')
@@ -42,14 +41,14 @@ build() {
   cd "${srcdir}/linux-${_basekernel}"
 
   # add upstream patch
-  ##patch -p1 -i "${srcdir}/patch-${pkgver}"
+  patch -p1 -i "${srcdir}/patch-${pkgver}"
 
   # Add Arch Linux ARM patch for ARMv5te plug computers and requested additional support
   ##patch -Np1 -i "${srcdir}/archlinuxarm.patch"
   ##patch -Np1 -i "${srcdir}/support.patch"
 
   # Add AUFS3 patches
- ## patch -Np1 -i "${srcdir}/aufs3-kbuild.patch"
+  ##patch -Np1 -i "${srcdir}/aufs3-kbuild.patch"
   ##patch -Np1 -i "${srcdir}/aufs3-base.patch"
   ##patch -Np1 -i "${srcdir}/aufs3-standalone.patch"
   ##patch -Np1 -i "${srcdir}/aufs3-git-extras.patch"
@@ -70,8 +69,11 @@ build() {
   # set extraversion to pkgrel
   sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
 
+  # don't run depmod on 'make install'. We'll do this ourselves in packaging
+  sed -i '2iexit 0' scripts/depmod.sh
+
   # get kernel version
-  #make prepare
+  make prepare
 
   # load configuration
   # Configure the kernel. Replace the line below with one of your choice.
@@ -98,7 +100,7 @@ build() {
 }
 
 package_linux-orion() {
-  pkgdesc="The Linux Kernel and modules"
+  pkgdesc="The Linux Kernel and modules - Marvell Orion"
   groups=('base')
   depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7' 'uboot-mkimage')
   optdepends=('crda: to set the correct wireless channels of your country')
@@ -136,18 +138,24 @@ package_linux-orion() {
   # add real version for building modules and running depmod from post_install/upgrade
   mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
   echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
+
+  # move module tree /lib -> /usr/lib
+  mv "$pkgdir/lib" "$pkgdir/usr"
+
+  # Now we call depmod...
+  depmod -b "$pkgdir" -F System.map "$_kernver"
 }
 
 package_linux-headers-orion() {
-  pkgdesc="Header files and scripts for building modules for linux kernel"
+  pkgdesc="Header files and scripts for building modules for linux kernel - Marvell Orion"
   provides=('kernel26-headers' 'kernel26-headers-orion' 'linux-headers=${pkgver}')
   conflicts=('kernel26-headers' 'kernel26-headers-orion')
   replaces=('kernel26-headers-orion')
 
-  mkdir -p "${pkgdir}/lib/modules/${_kernver}"
+  install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
-  cd "${pkgdir}/lib/modules/${_kernver}"
-  ln -sf ../../../usr/src/linux-${_kernver} build
+  cd "${pkgdir}/usr/lib/modules/${_kernver}"
+  ln -sf ../../../src/linux-${_kernver} build
 
   cd "${srcdir}/linux-${_basekernel}"
   install -D -m644 Makefile \
@@ -167,8 +175,8 @@ package_linux-headers-orion() {
    # copy arch includes for external modules
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH
   cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-kirkwood   
-  cp -a arch/$KARCH/mach-kirkwood/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-kirkwood/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-orion
+  cp -a arch/$KARCH/mach-orion/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-orion/
 
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
