@@ -7,7 +7,7 @@
 
 buildarch=2
 
-pkgbase="kernel26"
+pkgbase="kernel26-olinuxino"
 pkgname=('kernel26-olinuxino' 'kernel26-headers-olinuxino')
 _kernelname=${pkgname#kernel26}
 _basekernel=2.6
@@ -52,8 +52,7 @@ source=(config
         002_Return_ERESTARTSYS_from_IPU_GET_EVENT.patch
         003_Sanitise_ipu_interrupt_return_value.patch
         imx233-olinuxino.patch)
-
-md5sums=('59294a70a3d05931144faed5c885e0ba'
+md5sums=('1caef2fa228ba049616735d308a3f674'
          'bde087470cb0715ca709bd5bcd3803d0'
          'ef8a1cf2d129de1a0a476a0b40e6f291'
          'e086ab0b162d292549f9bf453e07ad2e'
@@ -148,6 +147,9 @@ build() {
   # set extraversion to pkgrel
   sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
 
+  # don't run depmod on 'make install'. We'll do this ourselves in packaging
+  sed -i '2iexit 0' scripts/depmod.sh
+
   # Configure the kernel. Replace the line below with one of your choice.
   #make menuconfig # CLI menu for configuration
   #make nconfig # new CLI menu for configuration
@@ -197,6 +199,12 @@ package_kernel26-olinuxino() {
 
   # remove build and source links
   rm -f ${pkgdir}/usr/lib/modules/${_kernver}/{source,build}
+
+  # move module tree /lib -> /usr/lib
+  mv "$pkgdir/lib" "$pkgdir/usr"
+
+  # Now we call depmod...
+  depmod -b "$pkgdir" -F System.map "$_kernver"
 }
 
 package_kernel26-headers-olinuxino() {
@@ -209,9 +217,10 @@ package_kernel26-headers-olinuxino() {
   # get kernel version
   _kernver="$(make kernelrelease)"
   
-  mkdir -p ${pkgdir}/lib/modules/${_kernver}
-  cd ${pkgdir}/lib/modules/${_kernver}
-  ln -sf ../../../usr/src/linux-${_kernver} build
+  install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
+
+  cd "${pkgdir}/usr/lib/modules/${_kernver}"
+  ln -sf ../../../src/linux-${_kernver} build
   
   cd ${srcdir}/${__gitname}
   install -D -m644 Makefile \
@@ -317,4 +326,3 @@ package_kernel26-headers-olinuxino() {
   # remove unneeded architectures
   rm -rf ${pkgdir}/usr/src/linux-${_kernver}/arch/{alpha,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,xtensa,x86}
 }
-
