@@ -1,13 +1,6 @@
-# HG changeset patch
-# User Phil Thompson <phil at riverbankcomputing.com>
-# Date 2012-07-13 13:39:28 +0100
-# Node ID 29b668ada14c1428a3bbfe8f0324c6626bd5ac9a
-# Parent  fd0f3da9d79ca9858d10a20c15fb85456cb832d7
-Fixed a regression in pyuic's handling of custom widgets.
-
-diff --git a/pyuic/uic/Compiler/qobjectcreator.py b/pyuic/uic/Compiler/qobjectcreator.py
---- a/pyuic/uic/Compiler/qobjectcreator.py
-+++ b/pyuic/uic/Compiler/qobjectcreator.py
+diff -urN a/pyuic/uic/Compiler/qobjectcreator.py b/pyuic/uic/Compiler/qobjectcreator.py
+--- a/pyuic/uic/Compiler/qobjectcreator.py	2012-06-26 07:09:46.000000000 -0600
++++ b/pyuic/uic/Compiler/qobjectcreator.py	2012-07-18 09:41:19.483732249 -0600
 @@ -1,6 +1,6 @@
  #############################################################################
  ##
@@ -17,9 +10,9 @@ diff --git a/pyuic/uic/Compiler/qobjectcreator.py b/pyuic/uic/Compiler/qobjectcr
  ## All right reserved.
  ##
 @@ -100,7 +100,6 @@
-         assert widgetClass not in self._widgets
+         assert widgetClass not in self._widgets 
          self._widgets[widgetClass] = (baseClass, module)
-
+ 
 -
      def _resolveBaseclass(self, baseClass):
          try:
@@ -27,20 +20,20 @@ diff --git a/pyuic/uic/Compiler/qobjectcreator.py b/pyuic/uic/Compiler/qobjectcr
 @@ -114,19 +113,17 @@
          except KeyError:
              raise ValueError("unknown baseclass %s" % baseClass)
-
+         
 -
      def search(self, cls):
          try:
 -            self._usedWidgets.add(cls)
              baseClass = self._resolveBaseclass(self._widgets[cls][0])
              DEBUG("resolved baseclass of %s: %s" % (cls, baseClass))
--
+-            
 -            return type(cls, (baseClass,),
 -                        {"module" : ""})
--
+-        
          except KeyError:
              return None
-
+ 
 +        self._usedWidgets.add(cls)
 +
 +        return type(cls, (baseClass, ), {"module" : ""})
@@ -48,19 +41,17 @@ diff --git a/pyuic/uic/Compiler/qobjectcreator.py b/pyuic/uic/Compiler/qobjectcr
      def _writeImportCode(self):
          imports = {}
          for widget in self._usedWidgets:
-diff --git a/pyuic/uic/objcreator.py b/pyuic/uic/objcreator.py
---- a/pyuic/uic/objcreator.py
-+++ b/pyuic/uic/objcreator.py
+diff -urN a/pyuic/uic/objcreator.py b/pyuic/uic/objcreator.py
+--- a/pyuic/uic/objcreator.py	2012-06-26 07:09:46.000000000 -0600
++++ b/pyuic/uic/objcreator.py	2012-07-18 09:39:01.227387101 -0600
 @@ -102,19 +102,26 @@
          self._modules.append(self._customWidgets)
-
+ 
      def createQObject(self, classname, *args, **kwargs):
 -        # Handle scoped names, typically static factory methods.
 -        parts = classname.split('.')
 -        factory = self.findQObjectType(parts[0])
-+        # Handle regular and custom widgets.
-+        factory = self.findQObjectType(classname)
-
+-
 -        if factory is not None:
 -            for part in parts[1:]:
 -                factory = getattr(factory, part, None)
@@ -68,11 +59,14 @@ diff --git a/pyuic/uic/objcreator.py b/pyuic/uic/objcreator.py
 -                    break
 -            else:
 -                return self._cpolicy.instantiate(factory, *args, **kwargs)
++        # Handle regular and custom widgets.
++        factory = self.findQObjectType(classname)
+ 
+-        raise NoSuchWidgetError(classname)
 +        if factory is None:
 +            # Handle scoped names, typically static factory methods.
 +            parts = classname.split('.')
-
--        raise NoSuchWidgetError(classname)
++
 +            if len(parts) > 1:
 +                factory = self.findQObjectType(parts[0])
 +
@@ -86,6 +80,6 @@ diff --git a/pyuic/uic/objcreator.py b/pyuic/uic/objcreator.py
 +                raise NoSuchWidgetError(classname)
 +
 +        return self._cpolicy.instantiate(factory, *args, **kwargs)
-
+ 
      def invoke(self, rname, method, args=()):
          return self._cpolicy.invoke(rname, method, args)
