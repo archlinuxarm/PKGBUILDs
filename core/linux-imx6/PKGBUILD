@@ -1,52 +1,51 @@
-# Maintainer: Stephen Oliver <mrsteveman1@gmail.com>
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
 
-# am33x kernel and headers
+# i.MX6 kernel and headers
 #  - note: any other kernel packages should include headers for that march
 #  - there will be no v7 kernel26 package, each march will be tagged individually
 
 buildarch=4
 
-pkgbase=linux-am33x
-pkgname=('linux-am33x' 'linux-headers-am33x')
+pkgbase=linux-imx6
+pkgname=('linux-imx6' 'linux-headers-imx6')
 # pkgname=linux-custom       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel=3.2
-pkgver=${_basekernel}.21
-pkgrel=3
+_basekernel=3.0
+pkgver=${_basekernel}.15
+pkgrel=1
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage')
+makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'git')
 options=('!strip')
-source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${_basekernel}.tar.xz"
-        #"ftp://ftp.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.bz2"
-        "rcn-ee.diff.gz::http://rcn-ee.net/deb/sid-armhf/v3.2.21-psp17/patch-3.2-psp17.diff.gz"
-        'config'
-        'change-default-console-loglevel.patch'
-        'aufs3-3.2.patch.gz')
-md5sums=('364066fa18767ec0ae5f4e4abcf9dc51'
-         '25647d166c0616abc5bd2618ef4abe9b'
-         '9597e523b495d417009d4b8703634f04'
-         '9d3c56a4b999c8bfbd4018089a62f662'
-         '6ea7b005a74be27abb072c934ef15a2c')
+source=('config'
+        'change-default-console-loglevel.patch')
+md5sums=('d0f8fb314156343a53db7aa75eda5e7f'
+         '9d3c56a4b999c8bfbd4018089a62f662')
+
+__gitroot="git://github.com/boundarydevices/linux-imx6.git"
+__gitname="linux-imx6"
+__gitbranch="boundary-L3.0.15_12.04.01"
 
 build() {
-  cd "${srcdir}/linux-${_basekernel}"
+  cd "${srcdir}"
+  msg "Connecting to GIT server...."
 
-  #patch -p1 -i "${srcdir}/patch-${pkgver}"
+  if [ -d $__gitname ] ; then
+    cd $__gitname && git pull origin
+    msg "The local files are updated."
+  else
+    git clone --depth 1 --branch=${__gitbranch} $__gitroot
+  fi
 
-  # add latest fixes from stable queue, if needed
-  # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
+  msg "GIT checkout done or server timeout"
+
+  cd "${srcdir}/${__gitname}"
 
   # set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)
   # remove this when a Kconfig knob is made available by upstream
   # (relevant patch sent upstream: https://lkml.org/lkml/2011/7/26/227)
   patch -Np1 -i "${srcdir}/change-default-console-loglevel.patch"
-
-  # ALARM patches
-  patch -Np1 -i "${srcdir}/rcn-ee.diff"
-  patch -Np1 -i "${srcdir}/aufs3-3.2.patch"
 
   cat "${srcdir}/config" > ./.config
 
@@ -83,18 +82,17 @@ build() {
   make ${MAKEFLAGS} uImage modules
 }
 
-package_linux-am33x() {
-  pkgdesc="The Linux Kernel and modules - am33x processors"
+package_linux-imx6() {
+  pkgdesc="The Linux Kernel and modules - i.MX6 processors"
   groups=('base')
   depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' 'kernel26-am33x' 'linux=${pkgver}')
-  conflicts=('kernel26-am33x' 'linux-tegra')
-  replaces=('kernel26-am33x')
+  provides=('kernel26' "linux=${pkgver}")
+  conflicts=('linux-trimslice' 'linux-omap')
   backup=("etc/mkinitcpio.d/${pkgname}.preset")
   install=${pkgname}.install
 
-  cd "${srcdir}/linux-${_basekernel}"
+  cd "${srcdir}/${__gitname}"
 
   KARCH=arm
 
@@ -131,18 +129,17 @@ package_linux-am33x() {
   depmod -b "$pkgdir" -F System.map "$_kernver"
 }
 
-package_linux-headers-am33x() {
-  pkgdesc="Header files and scripts for building modules for linux kernel - am33x processors"
-  provides=('kernel26-headers-am33x' 'linux-headers=${pkgver}')
-  conflicts=('kernel26-headers-am33x' 'linux-headers-tegra')
-  replaces=('kernel26-headers-am33x')
+package_linux-headers-imx6() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - i.MX6 processors"
+  provides=("linux-headers=${pkgver}")
+  conflicts=('linux-headers-omap' 'linux-headers-trimslice')
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/linux-${_basekernel}"
+  cd "${srcdir}/${__gitname}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -160,10 +157,10 @@ package_linux-headers-am33x() {
   # copy arch includes for external modules
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH
   cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-omap2
-  cp -a arch/$KARCH/mach-omap2/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-omap2/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-omap
-  cp -a arch/$KARCH/plat-omap/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-omap/
+#  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-mx6
+#  cp -a arch/$KARCH/mach-mx6/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-mx6/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-mxc
+  cp -a arch/$KARCH/plat-mxc/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-mxc/
 
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
@@ -208,6 +205,33 @@ package_linux-headers-am33x() {
   # add wireless headers
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
   cp net/mac80211/*.h "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
+
+  # add dvb headers for external modules
+  # in reference to:
+  # http://bugs.archlinux.org/task/9912
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-core"
+  cp drivers/media/dvb/dvb-core/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-core/"
+  # and...
+  # http://bugs.archlinux.org/task/11194
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
+  cp include/config/dvb/*.h "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
+
+  # add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
+  # in reference to:
+  # http://bugs.archlinux.org/task/13146
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+  cp drivers/media/dvb/frontends/lgdt330x.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+  cp drivers/media/video/msp3400-driver.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+
+  # add dvb headers
+  # in reference to:
+  # http://bugs.archlinux.org/task/20402
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-usb"
+  cp drivers/media/dvb/dvb-usb/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-usb/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends"
+  cp drivers/media/dvb/frontends/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners"
+  cp drivers/media/common/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners/"
 
   # add xfs and shmem for aufs building
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs"

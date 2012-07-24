@@ -3,65 +3,42 @@
 . /etc/rc.conf
 . /etc/rc.d/functions
 
-NAME="NetATalk Meta-Daemon"
+NAME="Appletalk Services Daemon"
+ARGS=
 DAEMON=netatalk
-RUNNING=()
-STOPPED=()
 
-daemons() {
-	for i in atalkd papd timelord a2boot cnid_metad afpd; do
-	if [ `type -p $i` ]; then if [ "`get_pid $i`" ]; then RUNNING+=($i); else STOPPED+=($i); fi; fi
-	done
-}
-get_pid_r() {
-	local pid=0;for i in $@
-	do get_pid $i >/dev/null || continue;: $[ pid++ ];done
-	return $pid
-}
-get_pid_rd(){
-	get_pid_r $*
-	if [ "$?" -ne "$#" ];then return 1;fi
-}
-get_pid_rr(){
-	get_pid_r $*
-	if [ "$?" -ne "0" ];then return 1;fi
-}
-wait_pid(){
-	kill $1 &>/dev/null
-	while kill -0 $1 &>/dev/null;do sleep 0.5;done
-}
+[ -r /etc/conf.d/$DAEMON ] && . /etc/conf.d/$DAEMON
 
-case "$1" in
- start|stop)
-	[ -r /etc/conf.d/$DAEMON ] && . /etc/conf.d/$DAEMON
-	daemons
-	;;
-esac
+PID=`get_pid $DAEMON`
 
 case "$1" in
  start)
-	STARTING=''; rc.d start ${STOPPED[@]}
-	if [ $? = 0 ]; then
-	add_daemon $DAEMON
-	else
-	exit 1
-	fi
-	;;
+   stat_busy "Starting $NAME"
+   [ -z "$PID" ] && $DAEMON $ARGS &>/dev/null
+   if [ $? = 0 ]; then
+     add_daemon $DAEMON
+     stat_done
+   else
+     stat_fail
+     exit 1
+   fi
+   ;;
  stop)
-	for ((i=${#RUNNING[@]}-1; i>=0; i--));do rc.d stop ${RUNNING[$i]}; done
-	if [ $? = 0 ]; then
-	rm_daemon $DAEMON
-	else
-	exit 1
-	fi
-	;;
+   stat_busy "Stopping $NAME"
+   [ -n "$PID" ] && kill $PID &>/dev/null
+   if [ $? = 0 ]; then
+     rm_daemon $DAEMON
+     stat_done
+   else
+     stat_fail
+     exit 1
+   fi
+   ;;
  restart)
-	$0 stop
-	sleep 1
-	$0 start
-	;;
- common)
-	;;
+   $0 stop
+   sleep 1
+   $0 start
+   ;;
  *)
-	echo "usage: $0 {start|stop|restart}"	
+   echo "usage: $0 {start|stop|restart}"  
 esac
