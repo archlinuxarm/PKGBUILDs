@@ -5,73 +5,38 @@
 # Contributor: Farhan Yousaf <farhany at xaviya dot com>
 
 pkgname=netatalk
-true && pkgname=('netatalk' 'netatalk-ddp')
-pkgver=2.2.3
-pkgrel=4
-pkgdesc='A kernel-level implementation of AppleTalk, AFP, and PAP services'
+pkgver=3.0
+pkgrel=3
+pkgdesc='A kernel-level implementation of AFP services'
 arch=('i686' 'x86_64')
 url='http://netatalk.sourceforge.net'
 license=('GPL')
-depends=('avahi>=0.6' 'libldap' 'libgcrypt>=1.2.3')
+depends=('avahi>=0.6' 'libldap' 'libgcrypt>=1.2.3' 'libevent')
 replaces=('netatalk-git' 'netatalk2')
-backup=('etc/netatalk/afpd.conf'
-	'etc/netatalk/afp_ldap.conf'
-	'etc/netatalk/netatalk.conf'
-	'etc/netatalk/AppleVolumes.default'
-	'etc/netatalk/AppleVolumes.system')
+backup=('etc/afp.conf')
 options=('!libtool')
 install=$pkgname.install
 changelog=$pkgname.changelog
-source=(a2boot.rc afpd.rc atalkd.rc cnid_metad.rc netatalk.rc papd.rc timelord.rc \
-	http://hivelocity.dl.sourceforge.net/project/$pkgname/$pkgname/$pkgver/$pkgname-$pkgver.tar.bz2)
-md5sums=('26d1f602c5de87495b6c69021202d929'
-	'dcbce48475b038c0966d81dc8d61fbee'
-	'244fc26daba9c95e31f839c5c6f27c89'
-	'c227dc51d94f3e541daf478bd3d0be03'
-	'56cc073c625abdc26553ecf1998d40cb'
-	'e32f1df98f95a2a977d9a513deaf5aae'
-	'425a3dead19a20f4433fc2bffedb32bc'
-	'0b5a0645836183b0e548ccfbd5c022f8')
-_options='--disable-ddp --disable-srvloc --disable-timelord --disable-cups --disable-a2boot'
-_depddp=('openslp' 'libcups' 'libgcrypt>=1.2.3')
+source=(netatalk.rc http://iweb.dl.sourceforge.net/project/$pkgname/$pkgname/$pkgver/$pkgname-$pkgver.tar.bz2)
+md5sums=('5e92015b0d9ac77af4b598cca6cb435c'
+	'62eb034011bb60b0bfd95072af3693dc')
 
 build() {
-	if [ "$pkgname" = "netatalk-ddp" ];then	resolve_deps ${_depddp[@]}
-	_options=`echo $_options | sed s/disable/enable/g`;fi
-	cd $pkgbase-$pkgver
+	cd $pkgname-$pkgver
 	msg2 'Fixing...'
-	sed -i 's/install-exec-hook/install-data-hook/' etc/uams/Makefile.am
-	autoreconf
+	sed -i 's/x"linux/x"generic/' macros/netatalk.m4
+	autoreconf &>/dev/null
+	echo -e "all:\ninstall:">libevent/Makefile
 	msg2 'Configuring...'
-	CFLAGS="-Wno-unused-result" ./configure --prefix=/usr --localstatedir=/var --libexecdir='${libdir}' \
-		--with-cracklib --with-cnid-cdb-backend --enable-fhs $_options
+	CFLAGS="-Wno-unused-result" LIBS=-levent ./configure --prefix=/usr --localstatedir=/etc --sysconfdir=/etc \
+		--disable-bundled-libevent --with-cracklib --with-cnid-cdb-backend --enable-pgp-uam
 	msg2 'Making...'
 	make >/dev/null
-	echo $pkgname >made
 }
 package() {
-	cd $pkgbase-$pkgver
-	if [ -f made ];then rm made;else rm -rf "$pkgdir";continue;fi
+	cd $pkgname-$pkgver
 	msg2 'Building...'
 	make DESTDIR="$pkgdir" install >/dev/null
 	msg2 'Copying initscripts...'
 	install -D -m755 "$srcdir"/netatalk.rc "$pkgdir"/etc/rc.d/netatalk
-	install -m755 "$srcdir"/cnid_metad.rc "$pkgdir"/etc/rc.d/cnid_metad
-	install -m755 "$srcdir"/afpd.rc "$pkgdir"/etc/rc.d/afpd
-	rm "$pkgdir"/usr/include/netatalk/at.h
-}
-package_netatalk() {
-	package
-	msg2 'Removing extraneous files...'
-	rm "$pkgdir"/usr/share/man/man8/timelord.8
-}
-package_netatalk-ddp() {
-	package
-	install -m755 "$srcdir"/a2boot.rc "$pkgdir"/etc/rc.d/a2boot
-	install -m755 "$srcdir"/atalkd.rc "$pkgdir"/etc/rc.d/atalkd
-	install -m755 "$srcdir"/papd.rc "$pkgdir"/etc/rc.d/papd
-	install -m755 "$srcdir"/timelord.rc "$pkgdir"/etc/rc.d/timelord
-	optdepends=('cups: required for PAP support')
-	backup+=('etc/netatalk/atalkd.conf' 'etc/netatalk/papd.conf' 'etc/pam.d/netatalk')
-	conflicts=('netatalk');provides=(${conflicts[@]});depends=(${_depddp[@]})
 }
