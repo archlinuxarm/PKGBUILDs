@@ -15,8 +15,8 @@
 buildarch=4
 
 pkgname=chromium
-pkgver=20.0.1132.57
-pkgrel=2
+pkgver=20.0.1180.57
+pkgrel=1
 pkgdesc="The open-source project behind Google Chrome, an attempt at creating a safer, faster, and more stable browser"
 arch=('i686' 'x86_64')
 url="http://www.chromium.org/"
@@ -37,18 +37,16 @@ source=(http://commondatastorage.googleapis.com/chromium-browser-official/$pkgna
         chromium.desktop
         chromium.default
         chromium.sh
-        chromium-gcc47.patch
-        chromium-20.0.1132.57-bison-2.6-remove-yyparse-decl.patch
         chromium-20.0.1132.57-glib-2.16-use-siginfo_t.patch
-        sqlite-3.7.6.3-fix-out-of-scope-memory-reference.patch)
-sha256sums=('1225c6b6306e89c8892bc0d18e94567d6081d777dee9b8c90efd0da9f6f2641b'
-            '0137e738cad095aeb03da0e4eb92df4ab8f4693c81d462eb5a413de6ecd875d1'
+        chromium-20.0.1132.57-bison-2.6-fix.patch
+        chromium-ppapi-r0.patch)
+sha256sums=('311ba95249ea994747355596885c9ad583e55bcbe7220a47ea096898e7aeb145'
+            '09bfac44104f4ccda4c228053f689c947b3e97da9a4ab6fa34ce061ee83d0322'
             '478340d5760a9bd6c549e19b1b5d1c5b4933ebf5f8cfb2b3e2d70d07443fe232'
             '4999fded897af692f4974f0a3e3bbb215193519918a1fa9b31ed51e74a2dccb9'
-            'f607347ba8477d3c8e60eb3803d26f3c9869f77fd49986c60887c59a6aa7d30d'
-            '8d0e0c53562eee3400606365e33aab035c487d7d958063bc25eea550c6fa3793'
             'c1baf14121502efbc2a31b64029dcafa0e28ca5b71ad0e28a3c6342d18198615'
-            'a700aa054800d1b21d84eaba27c38a703dfa023e9226d11a942690c2a0630aff')
+            'd7aecc17e1eb582fe791c3e5fb2ca3f0efcb9bf5379309c1c27be35be4363bba'
+            '1f4b57670d317959bc2dc60e5d2a44aa8fc6028f7ed540cdb502fa0aa99c81bd')
 
 build() {
   cd "$srcdir/chromium-$pkgver"
@@ -56,22 +54,16 @@ build() {
   # Fix build with glibc 2.16
   patch -Np1 -i "$srcdir/chromium-20.0.1132.57-glib-2.16-use-siginfo_t.patch"
 
-  # Fix build with bison 2.6 (XXX: hacky; waiting on proper upstream fix)
-  # http://crbug.com/138243 / https://bugs.webkit.org/show_bug.cgi?id=91943
-  patch -Np1 -i \
-    "$srcdir/chromium-20.0.1132.57-bison-2.6-remove-yyparse-decl.patch"
+  # Fix build with bison 2.6 (patch from Alexis Menard)
+  # http://crbug.com/138243 / https://bugs.webkit.org/show_bug.cgi?id=92264
+  patch -d third_party/WebKit -Np1 -i \
+    "$srcdir/chromium-20.0.1132.57-bison-2.6-fix.patch"
 
-  # Fix build with gcc 4.7 (patch from openSUSE)
-  patch -Np2 -i "$srcdir/chromium-gcc47.patch"
+  # Fix build without NaCl glibc toolchain (patch from Gentoo)
+  patch -Np0 -i "$srcdir/chromium-ppapi-r0.patch"
 
   # http://code.google.com/p/chromium/issues/detail?id=109527
   sed -i 's|glib/gutils.h|glib.h|' ui/base/l10n/l10n_util.cc
-
-  # SQLite: Fix a problem in fts3_write.c causing stack memory to be referenced
-  # after it is out of scope (http://www.sqlite.org/src/info/f9c4a7c8f4)
-  # (http://code.google.com/p/chromium/issues/detail?id=122525)
-  patch -i "$srcdir/sqlite-3.7.6.3-fix-out-of-scope-memory-reference.patch" \
-    third_party/sqlite/amalgamation/sqlite3.c
 
   # Use Python 2
   find . -type f -exec sed -i -r \
@@ -83,7 +75,7 @@ build() {
   ln -s /usr/bin/python2 "$srcdir/python2-path/python"
   export PATH="$srcdir/python2-path:$PATH"
 
-  ln -s "$srcdir/pepper_${pkgver%%.*}/toolchain/linux_x86_newlib" \
+  ln -s "$srcdir/pepper_${_nacl_sdk%%.*}/toolchain/linux_x86_newlib" \
     native_client/toolchain/linux_x86_newlib
 
   # CFLAGS are passed through release_extra_cflags below
@@ -111,6 +103,7 @@ build() {
     -Duse_system_yasm=1 \
     -Duse_system_zlib=1 \
     -Duse_gconf=0 \
+    -Ddisable_glibc=1 \
     -Ddisable_sse2=1 \
     -Dtarget_arch=arm \
     -Darmv7=1 \
@@ -136,17 +129,20 @@ package() {
   # Allow users to override command-line options
   install -Dm644 "$srcdir/chromium.default" "$pkgdir/etc/chromium/default"
 
-  cp -a out/Release/locales out/Release/resources "$pkgdir/usr/lib/chromium/"
-
-  find "$pkgdir/usr/lib/chromium/" -name '*.d' -type f -delete
+  cp -a out/Release/locales "$pkgdir/usr/lib/chromium/"
 
   install -Dm644 out/Release/chrome.1 "$pkgdir/usr/share/man/man1/chromium.1"
 
   install -Dm644 "$srcdir/chromium.desktop" \
     "$pkgdir/usr/share/applications/chromium.desktop"
 
-  for size in 16 22 24 32 48 64 128 256; do
+  for size in 22 24 48 64 128 256; do
     install -Dm644 "chrome/app/theme/chromium/product_logo_$size.png" \
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/chromium.png"
+  done
+
+  for size in 16 32; do
+    install -Dm644 "chrome/app/theme/default_100_percent/chromium/product_logo_$size.png" \
       "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/chromium.png"
   done
 
