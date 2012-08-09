@@ -1,31 +1,44 @@
-# $Id: PKGBUILD 74810 2012-08-06 02:37:26Z seblu $
+# $Id: PKGBUILD 74870 2012-08-07 22:24:52Z seblu $
 # Maintainer: Sébastien Luttringer <seblu@aur.archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - removed x86_energy_perf_policy build/package, uses x86 asm
 
 pkgbase=linux-tools
-pkgname=('perf' 'cpupower')
+pkgname=('perf' 'cpupower' 'usbip')
 pkgver=3.5
-pkgrel=2
+pkgrel=3
 license=('GPL2')
 arch=('i686' 'x86_64')
 url='http://www.kernel.org'
 options=('!strip')
-makedepends=('asciidoc' 'xmlto')
 # split packages need all package dependencies set manually in makedepends
-makedepends+=('python2' 'libnewt' 'elfutils' 'pciutils')
+# kernel source deps
+makedepends=('asciidoc' 'xmlto')
+# perf deps
+makedepends+=('perl' 'python2' 'libnewt' 'elfutils')
+# cpupower deps
+makedepends+=('pciutils')
+# usbip deps
+makedepends+=('glib2' 'sysfsutils')
+groups=("$pkgbase")
 source=("http://ftp.kernel.org/pub/linux/kernel/v3.x/linux-$pkgver.tar.xz"
 #        "http://ftp.kernel.org/pub/linux/kernel/v3.x/patch-$pkgver.4.xz"
-        'cpupower.rc'
         'cpupower.conf'
+        'cpupower.rc'
         'cpupower.systemd'
-        'cpupower.service')
+        'cpupower.service'
+        'usbipd.conf'
+        'usbipd.rc'
+        'usbipd.service')
 md5sums=('24153eaaa81dedc9481ada8cd9c3b83d'
-         '1d9214637968b91706b6e616a100d44b'
          '857ccdd0598511e3bf4b63522754dc48'
+         '1d9214637968b91706b6e616a100d44b'
          'c0d17b5295fe964623c772a2dd981771'
-         '2450e8ff41b30eb58d43b5fffbfde1f4')
+         '2450e8ff41b30eb58d43b5fffbfde1f4'
+         'e8fac9c45a628015644b4150b139278a'
+         '8a3831d962ff6a9968c0c20fd601cdec'
+         'ba7c1c513314dd21fb2334fb8417738f')
 
 build() {
   # apply stable patching set
@@ -52,11 +65,18 @@ build() {
   LDFLAGS=${LDFLAGS:+"$LDFLAGS,--no-as-needed"}
   make VERSION=$pkgver-$pkgrel
   popd
+
+  msg2 'Build usbip'
+  pushd linux-$pkgver/drivers/staging/usbip/userspace
+  ./autogen.sh
+  ./configure --prefix=/usr
+  make
+  popd
 }
 
 package_perf() {
   pkgdesc='Linux kernel performance auditing tool'
-  depends=('python2' 'libnewt' 'elfutils')
+  depends=('perl' 'python2' 'libnewt' 'elfutils')
 
   cd linux-$pkgver/tools/perf
   make \
@@ -72,7 +92,7 @@ package_perf() {
 package_cpupower() {
   pkgdesc='Linux kernel tool to examine and tune power saving related features of your processor'
   backup=('etc/conf.d/cpupower')
-  depends=('pciutils')
+  depends=('bash' 'pciutils')
   conflicts=('cpufrequtils')
 
   pushd linux-$pkgver/tools/power/cpupower
@@ -82,10 +102,28 @@ package_cpupower() {
     docdir='/usr/share/doc/cpupower' \
     install install-man
   popd
-  # install rc.d script
+  # install daemon scripts
   install -Dm 755 $pkgname.rc "$pkgdir/etc/rc.d/$pkgname"
   install -Dm 644 $pkgname.conf "$pkgdir/etc/conf.d/$pkgname"
   install -Dm 644 $pkgname.service "$pkgdir/usr/lib/systemd/system/$pkgname.service"
   install -Dm 755 $pkgname.systemd "$pkgdir/usr/lib/systemd/scripts/$pkgname"
 }
 
+package_usbip() {
+  pkgdesc='An USB device sharing system over IP network'
+  depends=('glib2' 'sysfsutils')
+  options=('!libtool')
+
+  pushd linux-$pkgver/drivers/staging/usbip/userspace
+  make install DESTDIR="$pkgdir"
+  popd
+  # module loading
+  install -Dm 644 /dev/null "$pkgdir/usr/lib/modules-load.d/$pkgname.conf"
+  printf 'usbip-core\nusbip-host\n' > "$pkgdir/usr/lib/modules-load.d/$pkgname.conf"
+  # install daemon scripts
+  install -Dm 755 usbipd.rc "$pkgdir/etc/rc.d/usbipd"
+  install -Dm 644 usbipd.conf "$pkgdir/etc/conf.d/usbipd"
+  install -Dm 644 usbipd.service "$pkgdir/usr/lib/systemd/system/usbipd.service"
+}
+
+# vim:set ts=2 sw=2 ft=sh et:
