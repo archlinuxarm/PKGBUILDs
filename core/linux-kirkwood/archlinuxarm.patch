@@ -1,4 +1,229 @@
-diff -urN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/dockstar-setup.c
+diff -ruN a/arch/arm/boot/dts/kirkwood-iconnect.dts b/arch/arm/boot/dts/kirkwood-iconnect.dts
+--- a/arch/arm/boot/dts/kirkwood-iconnect.dts	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/boot/dts/kirkwood-iconnect.dts	1969-12-31 19:00:00.000000000 -0500
+@@ -1,26 +0,0 @@
+-/dts-v1/;
+-
+-/include/ "kirkwood.dtsi"
+-
+-/ {
+-	model = "Iomega Iconnect";
+-	compatible = "iom,iconnect-1.1", "iom,iconnect", "mrvl,kirkwood-88f6281", "mrvl,kirkwood";
+-
+-	memory {
+-		device_type = "memory";
+-		reg = <0x00000000 0x10000000>;
+-	};
+-
+-	chosen {
+-		bootargs = "console=ttyS0,115200n8 earlyprintk mtdparts=orion_nand:0xc0000@0x0(uboot),0x20000@0xa0000(env),0x300000@0x100000(zImage),0x300000@0x540000(initrd),0x1f400000@0x980000(boot)";
+-		linux,initrd-start = <0x4500040>;
+-		linux,initrd-end   = <0x4800000>;
+-	};
+-
+-	ocp@f1000000 {
+-		serial@12000 {
+-			clock-frequency = <200000000>;
+-			status = "ok";
+-		};
+-	};
+-};
+diff -ruN a/arch/arm/mach-kirkwood/board-dt.c b/arch/arm/mach-kirkwood/board-dt.c
+--- a/arch/arm/mach-kirkwood/board-dt.c	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/board-dt.c	2012-08-10 14:00:08.000000000 -0400
+@@ -62,9 +62,6 @@
+ 	if (of_machine_is_compatible("dlink,dns-kirkwood"))
+ 		dnskw_init();
+ 
+-	if (of_machine_is_compatible("iom,iconnect"))
+-		iconnect_init();
+-
+ 	if (of_machine_is_compatible("raidsonic,ib-nas62x0"))
+ 		ib62x0_init();
+ 
+diff -ruN a/arch/arm/mach-kirkwood/board-iconnect.c b/arch/arm/mach-kirkwood/board-iconnect.c
+--- a/arch/arm/mach-kirkwood/board-iconnect.c	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/board-iconnect.c	1969-12-31 19:00:00.000000000 -0500
+@@ -1,162 +0,0 @@
+-/*
+- * arch/arm/mach-kirkwood/board-iconnect.c
+- *
+- * Iomega i-connect Board Setup
+- *
+- * This file is licensed under the terms of the GNU General Public
+- * License version 2.  This program is licensed "as is" without any
+- * warranty of any kind, whether express or implied.
+- */
+-
+-#include <linux/kernel.h>
+-#include <linux/init.h>
+-#include <linux/platform_device.h>
+-#include <linux/of.h>
+-#include <linux/of_address.h>
+-#include <linux/of_fdt.h>
+-#include <linux/of_irq.h>
+-#include <linux/of_platform.h>
+-#include <linux/mtd/partitions.h>
+-#include <linux/mv643xx_eth.h>
+-#include <linux/gpio.h>
+-#include <linux/leds.h>
+-#include <linux/i2c.h>
+-#include <linux/input.h>
+-#include <linux/gpio_keys.h>
+-#include <asm/mach/arch.h>
+-#include <mach/kirkwood.h>
+-#include "common.h"
+-#include "mpp.h"
+-
+-static struct mv643xx_eth_platform_data iconnect_ge00_data = {
+-	.phy_addr	= MV643XX_ETH_PHY_ADDR(11),
+-};
+-
+-static struct gpio_led iconnect_led_pins[] = {
+-	{
+-		.name		= "led_level",
+-		.gpio		= 41,
+-		.default_trigger = "default-on",
+-	}, {
+-		.name		= "power:blue",
+-		.gpio		= 42,
+-		.default_trigger = "timer",
+-	}, {
+-		.name		= "power:red",
+-		.gpio		= 43,
+-	}, {
+-		.name		= "usb1:blue",
+-		.gpio		= 44,
+-	}, {
+-		.name		= "usb2:blue",
+-		.gpio		= 45,
+-	}, {
+-		.name		= "usb3:blue",
+-		.gpio		= 46,
+-	}, {
+-		.name		= "usb4:blue",
+-		.gpio		= 47,
+-	}, {
+-		.name		= "otb:blue",
+-		.gpio		= 48,
+-	},
+-};
+-
+-static struct gpio_led_platform_data iconnect_led_data = {
+-	.leds		= iconnect_led_pins,
+-	.num_leds	= ARRAY_SIZE(iconnect_led_pins),
+-	.gpio_blink_set	= orion_gpio_led_blink_set,
+-};
+-
+-static struct platform_device iconnect_leds = {
+-	.name	= "leds-gpio",
+-	.id	= -1,
+-	.dev	= {
+-		.platform_data	= &iconnect_led_data,
+-	}
+-};
+-
+-static unsigned int iconnect_mpp_config[] __initdata = {
+-	MPP12_GPIO,
+-	MPP35_GPIO,
+-	MPP41_GPIO,
+-	MPP42_GPIO,
+-	MPP43_GPIO,
+-	MPP44_GPIO,
+-	MPP45_GPIO,
+-	MPP46_GPIO,
+-	MPP47_GPIO,
+-	MPP48_GPIO,
+-	0
+-};
+-
+-static struct i2c_board_info __initdata iconnect_board_info[] = {
+-	{
+-		I2C_BOARD_INFO("lm63", 0x4c),
+-	},
+-};
+-
+-static struct mtd_partition iconnect_nand_parts[] = {
+-	{
+-		.name = "flash",
+-		.offset = 0,
+-		.size = MTDPART_SIZ_FULL,
+-	},
+-};
+-
+-/* yikes... theses are the original input buttons */
+-/* but I'm not convinced by the sw event choices  */
+-static struct gpio_keys_button iconnect_buttons[] = {
+-	{
+-		.type		= EV_SW,
+-		.code		= SW_LID,
+-		.gpio		= 12,
+-		.desc		= "Reset Button",
+-		.active_low	= 1,
+-		.debounce_interval = 100,
+-	}, {
+-		.type		= EV_SW,
+-		.code		= SW_TABLET_MODE,
+-		.gpio		= 35,
+-		.desc		= "OTB Button",
+-		.active_low	= 1,
+-		.debounce_interval = 100,
+-	},
+-};
+-
+-static struct gpio_keys_platform_data iconnect_button_data = {
+-	.buttons	= iconnect_buttons,
+-	.nbuttons	= ARRAY_SIZE(iconnect_buttons),
+-};
+-
+-static struct platform_device iconnect_button_device = {
+-	.name		= "gpio-keys",
+-	.id		= -1,
+-	.num_resources	= 0,
+-	.dev        = {
+-		.platform_data  = &iconnect_button_data,
+-	},
+-};
+-
+-void __init iconnect_init(void)
+-{
+-	kirkwood_mpp_conf(iconnect_mpp_config);
+-	kirkwood_nand_init(ARRAY_AND_SIZE(iconnect_nand_parts), 25);
+-	kirkwood_i2c_init();
+-	i2c_register_board_info(0, iconnect_board_info,
+-		ARRAY_SIZE(iconnect_board_info));
+-
+-	kirkwood_ehci_init();
+-	kirkwood_ge00_init(&iconnect_ge00_data);
+-
+-	platform_device_register(&iconnect_button_device);
+-	platform_device_register(&iconnect_leds);
+-}
+-
+-static int __init iconnect_pci_init(void)
+-{
+-	if (of_machine_is_compatible("iom,iconnect"))
+-		kirkwood_pcie_init(KW_PCIE0);
+-	return 0;
+-}
+-subsys_initcall(iconnect_pci_init);
+diff -ruN a/arch/arm/mach-kirkwood/common.h b/arch/arm/mach-kirkwood/common.h
+--- a/arch/arm/mach-kirkwood/common.h	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/common.h	2012-08-10 13:56:00.000000000 -0400
+@@ -65,12 +65,6 @@
+ static inline void dnskw_init(void) {};
+ #endif
+ 
+-#ifdef CONFIG_MACH_ICONNECT_DT
+-void iconnect_init(void);
+-#else
+-static inline void iconnect_init(void) {};
+-#endif
+-
+ #ifdef CONFIG_MACH_IB62X0_DT
+ void ib62x0_init(void);
+ #else
+diff -ruN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/dockstar-setup.c
 --- a/arch/arm/mach-kirkwood/dockstar-setup.c	2012-08-09 11:23:56.000000000 -0400
 +++ b/arch/arm/mach-kirkwood/dockstar-setup.c	2012-08-10 10:47:31.000000000 -0400
 @@ -29,6 +29,10 @@
@@ -44,7 +269,7 @@ diff -urN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/doc
  	0
  };
  
-diff -urN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/goflexhome-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/goflexhome-setup.c
 --- a/arch/arm/mach-kirkwood/goflexhome-setup.c	1969-12-31 19:00:00.000000000 -0500
 +++ b/arch/arm/mach-kirkwood/goflexhome-setup.c	2012-08-10 11:00:53.000000000 -0400
 @@ -0,0 +1,124 @@
@@ -172,7 +397,7 @@ diff -urN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/g
 +	.restart	= kirkwood_restart,
 +MACHINE_END
 +
-diff -urN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/goflexnet-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/goflexnet-setup.c
 --- a/arch/arm/mach-kirkwood/goflexnet-setup.c	1969-12-31 19:00:00.000000000 -0500
 +++ b/arch/arm/mach-kirkwood/goflexnet-setup.c	2012-08-10 11:01:57.000000000 -0400
 @@ -0,0 +1,177 @@
@@ -353,7 +578,7 @@ diff -urN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/go
 +	.restart	= kirkwood_restart,
 +MACHINE_END
 +
-diff -urN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/guruplug-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/guruplug-setup.c
 --- a/arch/arm/mach-kirkwood/guruplug-setup.c	2012-08-09 11:23:56.000000000 -0400
 +++ b/arch/arm/mach-kirkwood/guruplug-setup.c	2012-08-10 11:03:53.000000000 -0400
 @@ -57,22 +57,24 @@
@@ -385,7 +610,7 @@ diff -urN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/gur
  		.gpio			= 49,
  		.active_low		= 1,
  	},
-diff -urN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/iconnect-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/iconnect-setup.c
 --- a/arch/arm/mach-kirkwood/iconnect-setup.c	1969-12-31 19:00:00.000000000 -0500
 +++ b/arch/arm/mach-kirkwood/iconnect-setup.c	2012-08-10 11:05:01.000000000 -0400
 @@ -0,0 +1,204 @@
@@ -593,7 +818,7 @@ diff -urN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/ico
 +	.timer		= &kirkwood_timer,
 +	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/ionics-stratus-setup.c b/arch/arm/mach-kirkwood/ionics-stratus-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/ionics-stratus-setup.c b/arch/arm/mach-kirkwood/ionics-stratus-setup.c
 --- a/arch/arm/mach-kirkwood/ionics-stratus-setup.c	1969-12-31 19:00:00.000000000 -0500
 +++ b/arch/arm/mach-kirkwood/ionics-stratus-setup.c	2012-08-10 11:05:45.000000000 -0400
 @@ -0,0 +1,137 @@
@@ -734,10 +959,23 @@ diff -urN a/arch/arm/mach-kirkwood/ionics-stratus-setup.c b/arch/arm/mach-kirkwo
 +	.timer		= &kirkwood_timer,
 +	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
+diff -ruN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
 --- a/arch/arm/mach-kirkwood/Kconfig	2012-08-09 11:23:56.000000000 -0400
-+++ b/arch/arm/mach-kirkwood/Kconfig	2012-08-10 11:08:21.000000000 -0400
-@@ -100,6 +100,54 @@
++++ b/arch/arm/mach-kirkwood/Kconfig	2012-08-10 13:55:37.000000000 -0400
+@@ -58,12 +58,6 @@
+ 	  Say 'Y' here if you want your kernel to support the
+ 	  Marvell DreamPlug (Flattened Device Tree).
+ 
+-config MACH_ICONNECT_DT
+-	bool "Iomega Iconnect (Flattened Device Tree)"
+-	select ARCH_KIRKWOOD_DT
+-	help
+-	  Say 'Y' here to enable Iomega Iconnect support.
+-
+ config MACH_DLINK_KIRKWOOD_DT
+ 	bool "D-Link Kirkwood-based NAS (Flattened Device Tree)"
+ 	select ARCH_KIRKWOOD_DT
+@@ -100,6 +94,54 @@
  	  Say 'Y' here if you want your kernel to support the
  	  Seagate FreeAgent DockStar.
  
@@ -792,9 +1030,9 @@ diff -urN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
  config MACH_OPENRD
          bool
  
-diff -urN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
+diff -ruN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
 --- a/arch/arm/mach-kirkwood/Makefile	2012-08-09 11:23:56.000000000 -0400
-+++ b/arch/arm/mach-kirkwood/Makefile	2012-08-10 11:09:35.000000000 -0400
++++ b/arch/arm/mach-kirkwood/Makefile	2012-08-10 14:01:03.000000000 -0400
 @@ -8,6 +8,14 @@
  obj-$(CONFIG_MACH_ESATA_SHEEVAPLUG)	+= sheevaplug-setup.o
  obj-$(CONFIG_MACH_GURUPLUG)		+= guruplug-setup.o
@@ -810,7 +1048,23 @@ diff -urN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
  obj-$(CONFIG_MACH_TS219)		+= ts219-setup.o tsx1x-common.o
  obj-$(CONFIG_MACH_TS41X)		+= ts41x-setup.o tsx1x-common.o
  obj-$(CONFIG_MACH_OPENRD)		+= openrd-setup.o
-diff -urN a/arch/arm/mach-kirkwood/mpp.h b/arch/arm/mach-kirkwood/mpp.h
+@@ -22,6 +30,5 @@
+ obj-$(CONFIG_CPU_IDLE)			+= cpuidle.o
+ obj-$(CONFIG_ARCH_KIRKWOOD_DT)		+= board-dt.o
+ obj-$(CONFIG_MACH_DREAMPLUG_DT)		+= board-dreamplug.o
+-obj-$(CONFIG_MACH_ICONNECT_DT)		+= board-iconnect.o
+ obj-$(CONFIG_MACH_DLINK_KIRKWOOD_DT)	+= board-dnskw.o
+ obj-$(CONFIG_MACH_IB62X0_DT)		+= board-ib62x0.o
+diff -ruN a/arch/arm/mach-kirkwood/Makefile.boot b/arch/arm/mach-kirkwood/Makefile.boot
+--- a/arch/arm/mach-kirkwood/Makefile.boot	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/Makefile.boot	2012-08-10 14:01:12.000000000 -0400
+@@ -5,5 +5,4 @@
+ dtb-$(CONFIG_MACH_DREAMPLUG_DT) += kirkwood-dreamplug.dtb
+ dtb-$(CONFIG_MACH_DLINK_KIRKWOOD_DT) += kirkwood-dns320.dtb
+ dtb-$(CONFIG_MACH_DLINK_KIRKWOOD_DT) += kirkwood-dns325.dtb
+-dtb-$(CONFIG_MACH_ICONNECT_DT) += kirkwood-iconnect.dtb
+ dtb-$(CONFIG_MACH_IB62X0_DT) += kirkwood-ib62x0.dtb
+diff -ruN a/arch/arm/mach-kirkwood/mpp.h b/arch/arm/mach-kirkwood/mpp.h
 --- a/arch/arm/mach-kirkwood/mpp.h	2012-08-09 11:23:56.000000000 -0400
 +++ b/arch/arm/mach-kirkwood/mpp.h	2012-08-10 11:10:55.000000000 -0400
 @@ -102,7 +102,7 @@
@@ -822,7 +1076,7 @@ diff -urN a/arch/arm/mach-kirkwood/mpp.h b/arch/arm/mach-kirkwood/mpp.h
  #define MPP12_SD_CLK		MPP( 12, 0x1, 0, 0, 1,   1,   1,   1,   1 )
  #define MPP12_AU_SPDIF0		MPP( 12, 0xa, 0, 0, 0,   0,   0,   0,   1 )
  #define MPP12_SPI_MOSI		MPP( 12, 0xb, 0, 0, 0,   0,   0,   0,   1 )
-diff -urN a/arch/arm/mach-kirkwood/nas6210-setup.c b/arch/arm/mach-kirkwood/nas6210-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/nas6210-setup.c b/arch/arm/mach-kirkwood/nas6210-setup.c
 --- a/arch/arm/mach-kirkwood/nas6210-setup.c	1969-12-31 19:00:00.000000000 -0500
 +++ b/arch/arm/mach-kirkwood/nas6210-setup.c	2012-08-10 11:12:03.000000000 -0400
 @@ -0,0 +1,186 @@
@@ -1012,7 +1266,7 @@ diff -urN a/arch/arm/mach-kirkwood/nas6210-setup.c b/arch/arm/mach-kirkwood/nas6
 +	.timer		= &kirkwood_timer,
 +	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/pogo_e02-setup.c b/arch/arm/mach-kirkwood/pogo_e02-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/pogo_e02-setup.c b/arch/arm/mach-kirkwood/pogo_e02-setup.c
 --- a/arch/arm/mach-kirkwood/pogo_e02-setup.c	1969-12-31 19:00:00.000000000 -0500
 +++ b/arch/arm/mach-kirkwood/pogo_e02-setup.c	2012-08-10 11:12:53.000000000 -0400
 @@ -0,0 +1,115 @@
@@ -1131,10 +1385,10 @@ diff -urN a/arch/arm/mach-kirkwood/pogo_e02-setup.c b/arch/arm/mach-kirkwood/pog
 +	.timer		= &kirkwood_timer,
 +	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/pogoplugv4-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/pogoplugv4-setup.c
 --- a/arch/arm/mach-kirkwood/pogoplugv4-setup.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/pogoplugv4-setup.c	2012-08-10 11:13:39.000000000 -0400
-@@ -0,0 +1,195 @@
++++ b/arch/arm/mach-kirkwood/pogoplugv4-setup.c	2012-08-10 14:34:19.000000000 -0400
+@@ -0,0 +1,194 @@
 +/*
 + * arch/arm/mach-kirkwood/pogoplugv4-setup.c
 + *
@@ -1158,7 +1412,6 @@ diff -urN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/p
 +#include <linux/irq.h>
 +#include <linux/spi/flash.h>
 +#include <linux/spi/spi.h>
-+#include <linux/spi/orion_spi.h>
 +#include <linux/input.h>
 +#include <asm/mach-types.h>
 +#include <asm/mach/arch.h>
@@ -1330,7 +1583,7 @@ diff -urN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/p
 +	.timer		= &kirkwood_timer,
 +	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/sheevaplug-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/sheevaplug-setup.c
 --- a/arch/arm/mach-kirkwood/sheevaplug-setup.c	2012-08-09 11:23:56.000000000 -0400
 +++ b/arch/arm/mach-kirkwood/sheevaplug-setup.c	2012-08-10 11:19:35.000000000 -0400
 @@ -43,7 +43,7 @@
@@ -1411,7 +1664,7 @@ diff -urN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/s
  	else
  		kirkwood_sdio_init(&sheevaplug_mvsdio_data);
  
-diff -urN a/arch/arm/mach-kirkwood/topkick-setup.c b/arch/arm/mach-kirkwood/topkick-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/topkick-setup.c b/arch/arm/mach-kirkwood/topkick-setup.c
 --- a/arch/arm/mach-kirkwood/topkick-setup.c	1969-12-31 19:00:00.000000000 -0500
 +++ b/arch/arm/mach-kirkwood/topkick-setup.c	2012-08-10 11:20:38.000000000 -0400
 @@ -0,0 +1,165 @@
@@ -1580,7 +1833,7 @@ diff -urN a/arch/arm/mach-kirkwood/topkick-setup.c b/arch/arm/mach-kirkwood/topk
 +	.timer		= &kirkwood_timer,
 +	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/plat-orion/common.c b/arch/arm/plat-orion/common.c
+diff -ruN a/arch/arm/plat-orion/common.c b/arch/arm/plat-orion/common.c
 --- a/arch/arm/plat-orion/common.c	2012-08-09 11:23:56.000000000 -0400
 +++ b/arch/arm/plat-orion/common.c	2012-08-10 11:22:56.000000000 -0400
 @@ -252,7 +252,9 @@
@@ -1594,7 +1847,7 @@ diff -urN a/arch/arm/plat-orion/common.c b/arch/arm/plat-orion/common.c
  
  static struct resource orion_ge00_shared_resources[] = {
  	{
-diff -urN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+diff -ruN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
 --- a/drivers/mmc/core/core.c	2012-08-09 11:23:56.000000000 -0400
 +++ b/drivers/mmc/core/core.c	2012-08-10 11:24:17.000000000 -0400
 @@ -537,7 +537,7 @@
@@ -1606,7 +1859,7 @@ diff -urN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
  
  		/*
  		 * SDHC cards always use these fixed values.
-diff -urN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+diff -ruN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
 --- a/drivers/mmc/core/sd.c	2012-08-09 11:23:56.000000000 -0400
 +++ b/drivers/mmc/core/sd.c	2012-08-10 11:25:11.000000000 -0400
 @@ -389,6 +389,15 @@
@@ -1625,7 +1878,7 @@ diff -urN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
  	err = mmc_sd_switch(card, 1, 0, 1, status);
  	if (err)
  		goto out;
-diff -urN a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
+diff -ruN a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
 --- a/drivers/mmc/host/mvsdio.c	2012-08-09 11:23:56.000000000 -0400
 +++ b/drivers/mmc/host/mvsdio.c	2012-08-10 11:26:52.000000000 -0400
 @@ -22,6 +22,7 @@
