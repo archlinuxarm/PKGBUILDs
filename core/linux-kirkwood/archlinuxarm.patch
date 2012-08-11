@@ -1,26 +1,243 @@
-diff -urN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/dockstar-setup.c
---- a/arch/arm/mach-kirkwood/dockstar-setup.c	2012-05-20 18:29:13.000000000 -0400
-+++ b/arch/arm/mach-kirkwood/dockstar-setup.c	2012-05-24 12:02:12.000000000 -0400
-@@ -19,7 +19,6 @@
- #include <asm/mach-types.h>
- #include <asm/mach/arch.h>
- #include <mach/kirkwood.h>
--#include <plat/mvsdio.h>
- #include "common.h"
- #include "mpp.h"
+diff -ruN a/arch/arm/boot/dts/kirkwood-iconnect.dts b/arch/arm/boot/dts/kirkwood-iconnect.dts
+--- a/arch/arm/boot/dts/kirkwood-iconnect.dts	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/boot/dts/kirkwood-iconnect.dts	1969-12-31 19:00:00.000000000 -0500
+@@ -1,26 +0,0 @@
+-/dts-v1/;
+-
+-/include/ "kirkwood.dtsi"
+-
+-/ {
+-	model = "Iomega Iconnect";
+-	compatible = "iom,iconnect-1.1", "iom,iconnect", "mrvl,kirkwood-88f6281", "mrvl,kirkwood";
+-
+-	memory {
+-		device_type = "memory";
+-		reg = <0x00000000 0x10000000>;
+-	};
+-
+-	chosen {
+-		bootargs = "console=ttyS0,115200n8 earlyprintk mtdparts=orion_nand:0xc0000@0x0(uboot),0x20000@0xa0000(env),0x300000@0x100000(zImage),0x300000@0x540000(initrd),0x1f400000@0x980000(boot)";
+-		linux,initrd-start = <0x4500040>;
+-		linux,initrd-end   = <0x4800000>;
+-	};
+-
+-	ocp@f1000000 {
+-		serial@12000 {
+-			clock-frequency = <200000000>;
+-			status = "ok";
+-		};
+-	};
+-};
+diff -ruN a/arch/arm/mach-kirkwood/board-dt.c b/arch/arm/mach-kirkwood/board-dt.c
+--- a/arch/arm/mach-kirkwood/board-dt.c	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/board-dt.c	2012-08-10 14:00:08.000000000 -0400
+@@ -62,9 +62,6 @@
+ 	if (of_machine_is_compatible("dlink,dns-kirkwood"))
+ 		dnskw_init();
  
-@@ -33,6 +32,10 @@
- 		.offset = MTDPART_OFS_NXTBLK,
- 		.size = SZ_4M
+-	if (of_machine_is_compatible("iom,iconnect"))
+-		iconnect_init();
+-
+ 	if (of_machine_is_compatible("raidsonic,ib-nas62x0"))
+ 		ib62x0_init();
+ 
+diff -ruN a/arch/arm/mach-kirkwood/board-iconnect.c b/arch/arm/mach-kirkwood/board-iconnect.c
+--- a/arch/arm/mach-kirkwood/board-iconnect.c	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/board-iconnect.c	1969-12-31 19:00:00.000000000 -0500
+@@ -1,162 +0,0 @@
+-/*
+- * arch/arm/mach-kirkwood/board-iconnect.c
+- *
+- * Iomega i-connect Board Setup
+- *
+- * This file is licensed under the terms of the GNU General Public
+- * License version 2.  This program is licensed "as is" without any
+- * warranty of any kind, whether express or implied.
+- */
+-
+-#include <linux/kernel.h>
+-#include <linux/init.h>
+-#include <linux/platform_device.h>
+-#include <linux/of.h>
+-#include <linux/of_address.h>
+-#include <linux/of_fdt.h>
+-#include <linux/of_irq.h>
+-#include <linux/of_platform.h>
+-#include <linux/mtd/partitions.h>
+-#include <linux/mv643xx_eth.h>
+-#include <linux/gpio.h>
+-#include <linux/leds.h>
+-#include <linux/i2c.h>
+-#include <linux/input.h>
+-#include <linux/gpio_keys.h>
+-#include <asm/mach/arch.h>
+-#include <mach/kirkwood.h>
+-#include "common.h"
+-#include "mpp.h"
+-
+-static struct mv643xx_eth_platform_data iconnect_ge00_data = {
+-	.phy_addr	= MV643XX_ETH_PHY_ADDR(11),
+-};
+-
+-static struct gpio_led iconnect_led_pins[] = {
+-	{
+-		.name		= "led_level",
+-		.gpio		= 41,
+-		.default_trigger = "default-on",
+-	}, {
+-		.name		= "power:blue",
+-		.gpio		= 42,
+-		.default_trigger = "timer",
+-	}, {
+-		.name		= "power:red",
+-		.gpio		= 43,
+-	}, {
+-		.name		= "usb1:blue",
+-		.gpio		= 44,
+-	}, {
+-		.name		= "usb2:blue",
+-		.gpio		= 45,
+-	}, {
+-		.name		= "usb3:blue",
+-		.gpio		= 46,
+-	}, {
+-		.name		= "usb4:blue",
+-		.gpio		= 47,
+-	}, {
+-		.name		= "otb:blue",
+-		.gpio		= 48,
+-	},
+-};
+-
+-static struct gpio_led_platform_data iconnect_led_data = {
+-	.leds		= iconnect_led_pins,
+-	.num_leds	= ARRAY_SIZE(iconnect_led_pins),
+-	.gpio_blink_set	= orion_gpio_led_blink_set,
+-};
+-
+-static struct platform_device iconnect_leds = {
+-	.name	= "leds-gpio",
+-	.id	= -1,
+-	.dev	= {
+-		.platform_data	= &iconnect_led_data,
+-	}
+-};
+-
+-static unsigned int iconnect_mpp_config[] __initdata = {
+-	MPP12_GPIO,
+-	MPP35_GPIO,
+-	MPP41_GPIO,
+-	MPP42_GPIO,
+-	MPP43_GPIO,
+-	MPP44_GPIO,
+-	MPP45_GPIO,
+-	MPP46_GPIO,
+-	MPP47_GPIO,
+-	MPP48_GPIO,
+-	0
+-};
+-
+-static struct i2c_board_info __initdata iconnect_board_info[] = {
+-	{
+-		I2C_BOARD_INFO("lm63", 0x4c),
+-	},
+-};
+-
+-static struct mtd_partition iconnect_nand_parts[] = {
+-	{
+-		.name = "flash",
+-		.offset = 0,
+-		.size = MTDPART_SIZ_FULL,
+-	},
+-};
+-
+-/* yikes... theses are the original input buttons */
+-/* but I'm not convinced by the sw event choices  */
+-static struct gpio_keys_button iconnect_buttons[] = {
+-	{
+-		.type		= EV_SW,
+-		.code		= SW_LID,
+-		.gpio		= 12,
+-		.desc		= "Reset Button",
+-		.active_low	= 1,
+-		.debounce_interval = 100,
+-	}, {
+-		.type		= EV_SW,
+-		.code		= SW_TABLET_MODE,
+-		.gpio		= 35,
+-		.desc		= "OTB Button",
+-		.active_low	= 1,
+-		.debounce_interval = 100,
+-	},
+-};
+-
+-static struct gpio_keys_platform_data iconnect_button_data = {
+-	.buttons	= iconnect_buttons,
+-	.nbuttons	= ARRAY_SIZE(iconnect_buttons),
+-};
+-
+-static struct platform_device iconnect_button_device = {
+-	.name		= "gpio-keys",
+-	.id		= -1,
+-	.num_resources	= 0,
+-	.dev        = {
+-		.platform_data  = &iconnect_button_data,
+-	},
+-};
+-
+-void __init iconnect_init(void)
+-{
+-	kirkwood_mpp_conf(iconnect_mpp_config);
+-	kirkwood_nand_init(ARRAY_AND_SIZE(iconnect_nand_parts), 25);
+-	kirkwood_i2c_init();
+-	i2c_register_board_info(0, iconnect_board_info,
+-		ARRAY_SIZE(iconnect_board_info));
+-
+-	kirkwood_ehci_init();
+-	kirkwood_ge00_init(&iconnect_ge00_data);
+-
+-	platform_device_register(&iconnect_button_device);
+-	platform_device_register(&iconnect_leds);
+-}
+-
+-static int __init iconnect_pci_init(void)
+-{
+-	if (of_machine_is_compatible("iom,iconnect"))
+-		kirkwood_pcie_init(KW_PCIE0);
+-	return 0;
+-}
+-subsys_initcall(iconnect_pci_init);
+diff -ruN a/arch/arm/mach-kirkwood/common.h b/arch/arm/mach-kirkwood/common.h
+--- a/arch/arm/mach-kirkwood/common.h	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/common.h	2012-08-10 13:56:00.000000000 -0400
+@@ -65,12 +65,6 @@
+ static inline void dnskw_init(void) {};
+ #endif
+ 
+-#ifdef CONFIG_MACH_ICONNECT_DT
+-void iconnect_init(void);
+-#else
+-static inline void iconnect_init(void) {};
+-#endif
+-
+ #ifdef CONFIG_MACH_IB62X0_DT
+ void ib62x0_init(void);
+ #else
+diff -ruN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/dockstar-setup.c
+--- a/arch/arm/mach-kirkwood/dockstar-setup.c	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/dockstar-setup.c	2012-08-10 10:47:31.000000000 -0400
+@@ -29,6 +29,10 @@
+ 		.offset = 0,
+ 		.size = SZ_1M
  	}, {
 +		.name = "pogoplug",
 +		.offset = MTDPART_OFS_NXTBLK,
 +		.size = SZ_32M
 +	}, {
- 		.name = "root",
+ 		.name = "uImage",
  		.offset = MTDPART_OFS_NXTBLK,
- 		.size = MTDPART_SIZ_FULL
-@@ -45,17 +48,17 @@
+ 		.size = SZ_4M
+@@ -45,17 +49,17 @@
  
  static struct gpio_led dockstar_led_pins[] = {
  	{
@@ -41,21 +258,21 @@ diff -urN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/doc
  };
  
  static struct gpio_led_platform_data dockstar_led_data = {
-@@ -73,8 +76,8 @@
+@@ -73,8 +77,8 @@
  
  static unsigned int dockstar_mpp_config[] __initdata = {
  	MPP29_GPIO,	/* USB Power Enable */
 -	MPP46_GPIO,	/* LED green */
 -	MPP47_GPIO,	/* LED orange */
-+	MPP47_GPIO,	/* LED Orange */
 +	MPP46_GPIO,	/* LED Green */
++	MPP47_GPIO,	/* LED Orange */
  	0
  };
  
-diff -urN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/goflexhome-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/goflexhome-setup.c
 --- a/arch/arm/mach-kirkwood/goflexhome-setup.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/goflexhome-setup.c	2012-05-24 12:02:12.000000000 -0400
-@@ -0,0 +1,123 @@
++++ b/arch/arm/mach-kirkwood/goflexhome-setup.c	2012-08-10 11:00:53.000000000 -0400
+@@ -0,0 +1,124 @@
 +/*
 + * arch/arm/mach-kirkwood/goflexhome-setup.c
 + *
@@ -177,12 +394,13 @@ diff -urN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/g
 +	.init_early	= kirkwood_init_early,
 +	.init_irq	= kirkwood_init_irq,
 +	.timer		= &kirkwood_timer,
++	.restart	= kirkwood_restart,
 +MACHINE_END
 +
-diff -urN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/goflexnet-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/goflexnet-setup.c
 --- a/arch/arm/mach-kirkwood/goflexnet-setup.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/goflexnet-setup.c	2012-05-24 12:02:12.000000000 -0400
-@@ -0,0 +1,176 @@
++++ b/arch/arm/mach-kirkwood/goflexnet-setup.c	2012-08-10 11:01:57.000000000 -0400
+@@ -0,0 +1,177 @@
 +/*
 + * arch/arm/mach-kirkwood/goflexnet-setup.c
 + *
@@ -357,11 +575,12 @@ diff -urN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/go
 +	.init_early	= kirkwood_init_early,
 +	.init_irq	= kirkwood_init_irq,
 +	.timer		= &kirkwood_timer,
++	.restart	= kirkwood_restart,
 +MACHINE_END
 +
-diff -urN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/guruplug-setup.c
---- a/arch/arm/mach-kirkwood/guruplug-setup.c	2012-05-20 18:29:13.000000000 -0400
-+++ b/arch/arm/mach-kirkwood/guruplug-setup.c	2012-05-24 12:02:12.000000000 -0400
+diff -ruN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/guruplug-setup.c
+--- a/arch/arm/mach-kirkwood/guruplug-setup.c	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/guruplug-setup.c	2012-08-10 11:03:53.000000000 -0400
 @@ -57,22 +57,24 @@
  
  static struct gpio_led guruplug_led_pins[] = {
@@ -391,10 +610,10 @@ diff -urN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/gur
  		.gpio			= 49,
  		.active_low		= 1,
  	},
-diff -urN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/iconnect-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/iconnect-setup.c
 --- a/arch/arm/mach-kirkwood/iconnect-setup.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/iconnect-setup.c	2012-05-24 12:02:12.000000000 -0400
-@@ -0,0 +1,203 @@
++++ b/arch/arm/mach-kirkwood/iconnect-setup.c	2012-08-10 11:05:01.000000000 -0400
+@@ -0,0 +1,204 @@
 +/*
 + * arch/arm/mach-kirkwood/iconnect-setup.c
 + *
@@ -597,11 +816,12 @@ diff -urN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/ico
 +	.init_early	= kirkwood_init_early,
 +	.init_irq	= kirkwood_init_irq,
 +	.timer		= &kirkwood_timer,
++	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/ionics-stratus-setup.c b/arch/arm/mach-kirkwood/ionics-stratus-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/ionics-stratus-setup.c b/arch/arm/mach-kirkwood/ionics-stratus-setup.c
 --- a/arch/arm/mach-kirkwood/ionics-stratus-setup.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/ionics-stratus-setup.c	2012-05-24 12:02:12.000000000 -0400
-@@ -0,0 +1,136 @@
++++ b/arch/arm/mach-kirkwood/ionics-stratus-setup.c	2012-08-10 11:05:45.000000000 -0400
+@@ -0,0 +1,137 @@
 +/*
 + * arch/arm/mach-kirkwood/ionics-stratus-setup.c
 + *
@@ -737,11 +957,25 @@ diff -urN a/arch/arm/mach-kirkwood/ionics-stratus-setup.c b/arch/arm/mach-kirkwo
 +	.init_early	= kirkwood_init_early,
 +	.init_irq	= kirkwood_init_irq,
 +	.timer		= &kirkwood_timer,
++	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
---- a/arch/arm/mach-kirkwood/Kconfig	2012-05-20 18:29:13.000000000 -0400
-+++ b/arch/arm/mach-kirkwood/Kconfig	2012-05-24 12:02:12.000000000 -0400
-@@ -78,6 +78,54 @@
+diff -ruN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
+--- a/arch/arm/mach-kirkwood/Kconfig	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/Kconfig	2012-08-10 13:55:37.000000000 -0400
+@@ -58,12 +58,6 @@
+ 	  Say 'Y' here if you want your kernel to support the
+ 	  Marvell DreamPlug (Flattened Device Tree).
+ 
+-config MACH_ICONNECT_DT
+-	bool "Iomega Iconnect (Flattened Device Tree)"
+-	select ARCH_KIRKWOOD_DT
+-	help
+-	  Say 'Y' here to enable Iomega Iconnect support.
+-
+ config MACH_DLINK_KIRKWOOD_DT
+ 	bool "D-Link Kirkwood-based NAS (Flattened Device Tree)"
+ 	select ARCH_KIRKWOOD_DT
+@@ -100,6 +94,54 @@
  	  Say 'Y' here if you want your kernel to support the
  	  Seagate FreeAgent DockStar.
  
@@ -796,162 +1030,9 @@ diff -urN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
  config MACH_OPENRD
          bool
  
-diff -urN a/arch/arm/mach-kirkwood/Kconfig.orig b/arch/arm/mach-kirkwood/Kconfig.orig
---- a/arch/arm/mach-kirkwood/Kconfig.orig	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/Kconfig.orig	2012-05-24 12:02:12.000000000 -0400
-@@ -0,0 +1,149 @@
-+if ARCH_KIRKWOOD
-+
-+menu "Marvell Kirkwood Implementations"
-+
-+config MACH_DB88F6281_BP
-+	bool "Marvell DB-88F6281-BP Development Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell DB-88F6281-BP Development Board.
-+
-+config MACH_RD88F6192_NAS
-+	bool "Marvell RD-88F6192-NAS Reference Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell RD-88F6192-NAS Reference Board.
-+
-+config MACH_RD88F6281
-+	bool "Marvell RD-88F6281 Reference Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell RD-88F6281 Reference Board.
-+
-+config MACH_MV88F6281GTW_GE
-+	bool "Marvell 88F6281 GTW GE Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell 88F6281 GTW GE Board.
-+
-+config MACH_SHEEVAPLUG
-+	bool "Marvell SheevaPlug Reference Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell SheevaPlug Reference Board.
-+
-+config MACH_ESATA_SHEEVAPLUG
-+	bool "Marvell eSATA SheevaPlug Reference Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell eSATA SheevaPlug Reference Board.
-+
-+config MACH_GURUPLUG
-+	bool "Marvell GuruPlug Reference Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell GuruPlug Reference Board.
-+
-+config ARCH_KIRKWOOD_DT
-+	bool "Marvell Kirkwood Flattened Device Tree"
-+	select USE_OF
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell Kirkwood using flattened device tree.
-+
-+config MACH_DREAMPLUG_DT
-+	bool "Marvell DreamPlug (Flattened Device Tree)"
-+	select ARCH_KIRKWOOD_DT
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell DreamPlug (Flattened Device Tree).
-+
-+config MACH_TS219
-+	bool "QNAP TS-110, TS-119, TS-119P+, TS-210, TS-219, TS-219P and TS-219P+ Turbo NAS"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  QNAP TS-110, TS-119, TS-119P+, TS-210, TS-219, TS-219P and
-+	  TS-219P+ Turbo NAS devices.
-+
-+config MACH_TS41X
-+	bool "QNAP TS-410, TS-410U, TS-419P, TS-419P+ and TS-419U Turbo NAS"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  QNAP TS-410, TS-410U, TS-419P, TS-419P+ and TS-419U Turbo
-+	  NAS devices.
-+
-+config MACH_DOCKSTAR
-+	bool "Seagate FreeAgent DockStar"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Seagate FreeAgent DockStar.
-+
-+config MACH_OPENRD
-+        bool
-+
-+config MACH_OPENRD_BASE
-+	bool "Marvell OpenRD Base Board"
-+	select MACH_OPENRD
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell OpenRD Base Board.
-+
-+config MACH_OPENRD_CLIENT
-+	bool "Marvell OpenRD Client Board"
-+	select MACH_OPENRD
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell OpenRD Client Board.
-+
-+config MACH_OPENRD_ULTIMATE
-+	bool "Marvell OpenRD Ultimate Board"
-+	select MACH_OPENRD
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  Marvell OpenRD Ultimate Board.
-+
-+config MACH_NETSPACE_V2
-+	bool "LaCie Network Space v2 NAS Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  LaCie Network Space v2 NAS.
-+
-+config MACH_INETSPACE_V2
-+	bool "LaCie Internet Space v2 NAS Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  LaCie Internet Space v2 NAS.
-+
-+config MACH_NETSPACE_MAX_V2
-+	bool "LaCie Network Space Max v2 NAS Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  LaCie Network Space Max v2 NAS.
-+
-+config MACH_D2NET_V2
-+	bool "LaCie d2 Network v2 NAS Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  LaCie d2 Network v2 NAS.
-+
-+config MACH_NET2BIG_V2
-+	bool "LaCie 2Big Network v2 NAS Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  LaCie 2Big Network v2 NAS.
-+
-+config MACH_NET5BIG_V2
-+	bool "LaCie 5Big Network v2 NAS Board"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  LaCie 5Big Network v2 NAS.
-+
-+config MACH_T5325
-+	bool "HP t5325 Thin Client"
-+	help
-+	  Say 'Y' here if you want your kernel to support the
-+	  HP t5325 Thin Client.
-+
-+endmenu
-+
-+endif
-diff -urN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
---- a/arch/arm/mach-kirkwood/Makefile	2012-05-20 18:29:13.000000000 -0400
-+++ b/arch/arm/mach-kirkwood/Makefile	2012-05-24 12:02:12.000000000 -0400
+diff -ruN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
+--- a/arch/arm/mach-kirkwood/Makefile	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/Makefile	2012-08-10 14:01:03.000000000 -0400
 @@ -8,6 +8,14 @@
  obj-$(CONFIG_MACH_ESATA_SHEEVAPLUG)	+= sheevaplug-setup.o
  obj-$(CONFIG_MACH_GURUPLUG)		+= guruplug-setup.o
@@ -967,9 +1048,25 @@ diff -urN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
  obj-$(CONFIG_MACH_TS219)		+= ts219-setup.o tsx1x-common.o
  obj-$(CONFIG_MACH_TS41X)		+= ts41x-setup.o tsx1x-common.o
  obj-$(CONFIG_MACH_OPENRD)		+= openrd-setup.o
-diff -urN a/arch/arm/mach-kirkwood/mpp.h b/arch/arm/mach-kirkwood/mpp.h
---- a/arch/arm/mach-kirkwood/mpp.h	2012-05-20 18:29:13.000000000 -0400
-+++ b/arch/arm/mach-kirkwood/mpp.h	2012-05-24 12:02:12.000000000 -0400
+@@ -22,6 +30,5 @@
+ obj-$(CONFIG_CPU_IDLE)			+= cpuidle.o
+ obj-$(CONFIG_ARCH_KIRKWOOD_DT)		+= board-dt.o
+ obj-$(CONFIG_MACH_DREAMPLUG_DT)		+= board-dreamplug.o
+-obj-$(CONFIG_MACH_ICONNECT_DT)		+= board-iconnect.o
+ obj-$(CONFIG_MACH_DLINK_KIRKWOOD_DT)	+= board-dnskw.o
+ obj-$(CONFIG_MACH_IB62X0_DT)		+= board-ib62x0.o
+diff -ruN a/arch/arm/mach-kirkwood/Makefile.boot b/arch/arm/mach-kirkwood/Makefile.boot
+--- a/arch/arm/mach-kirkwood/Makefile.boot	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/Makefile.boot	2012-08-10 14:01:12.000000000 -0400
+@@ -5,5 +5,4 @@
+ dtb-$(CONFIG_MACH_DREAMPLUG_DT) += kirkwood-dreamplug.dtb
+ dtb-$(CONFIG_MACH_DLINK_KIRKWOOD_DT) += kirkwood-dns320.dtb
+ dtb-$(CONFIG_MACH_DLINK_KIRKWOOD_DT) += kirkwood-dns325.dtb
+-dtb-$(CONFIG_MACH_ICONNECT_DT) += kirkwood-iconnect.dtb
+ dtb-$(CONFIG_MACH_IB62X0_DT) += kirkwood-ib62x0.dtb
+diff -ruN a/arch/arm/mach-kirkwood/mpp.h b/arch/arm/mach-kirkwood/mpp.h
+--- a/arch/arm/mach-kirkwood/mpp.h	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/mpp.h	2012-08-10 11:10:55.000000000 -0400
 @@ -102,7 +102,7 @@
  #define MPP11_SATA0_ACTn	MPP( 11, 0x5, 0, 0, 0,   1,   1,   1,   1 )
  
@@ -979,10 +1076,10 @@ diff -urN a/arch/arm/mach-kirkwood/mpp.h b/arch/arm/mach-kirkwood/mpp.h
  #define MPP12_SD_CLK		MPP( 12, 0x1, 0, 0, 1,   1,   1,   1,   1 )
  #define MPP12_AU_SPDIF0		MPP( 12, 0xa, 0, 0, 0,   0,   0,   0,   1 )
  #define MPP12_SPI_MOSI		MPP( 12, 0xb, 0, 0, 0,   0,   0,   0,   1 )
-diff -urN a/arch/arm/mach-kirkwood/nas6210-setup.c b/arch/arm/mach-kirkwood/nas6210-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/nas6210-setup.c b/arch/arm/mach-kirkwood/nas6210-setup.c
 --- a/arch/arm/mach-kirkwood/nas6210-setup.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/nas6210-setup.c	2012-05-24 12:02:12.000000000 -0400
-@@ -0,0 +1,185 @@
++++ b/arch/arm/mach-kirkwood/nas6210-setup.c	2012-08-10 11:12:03.000000000 -0400
+@@ -0,0 +1,186 @@
 +/*
 + * arch/arm/mach-kirkwood/nas6210-setup.c
 + *
@@ -1167,11 +1264,12 @@ diff -urN a/arch/arm/mach-kirkwood/nas6210-setup.c b/arch/arm/mach-kirkwood/nas6
 +	.init_early	= kirkwood_init_early,
 +	.init_irq	= kirkwood_init_irq,
 +	.timer		= &kirkwood_timer,
++	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/pogo_e02-setup.c b/arch/arm/mach-kirkwood/pogo_e02-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/pogo_e02-setup.c b/arch/arm/mach-kirkwood/pogo_e02-setup.c
 --- a/arch/arm/mach-kirkwood/pogo_e02-setup.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/pogo_e02-setup.c	2012-05-24 12:02:12.000000000 -0400
-@@ -0,0 +1,114 @@
++++ b/arch/arm/mach-kirkwood/pogo_e02-setup.c	2012-08-10 11:12:53.000000000 -0400
+@@ -0,0 +1,115 @@
 +/*
 + * arch/arm/mach-kirkwood/pogo_e02-setup.c
 + *
@@ -1285,10 +1383,11 @@ diff -urN a/arch/arm/mach-kirkwood/pogo_e02-setup.c b/arch/arm/mach-kirkwood/pog
 +	.init_early	= kirkwood_init_early,
 +	.init_irq	= kirkwood_init_irq,
 +	.timer		= &kirkwood_timer,
++	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/pogoplugv4-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/pogoplugv4-setup.c
 --- a/arch/arm/mach-kirkwood/pogoplugv4-setup.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/pogoplugv4-setup.c	2012-05-24 12:02:12.000000000 -0400
++++ b/arch/arm/mach-kirkwood/pogoplugv4-setup.c	2012-08-10 14:34:19.000000000 -0400
 @@ -0,0 +1,194 @@
 +/*
 + * arch/arm/mach-kirkwood/pogoplugv4-setup.c
@@ -1313,7 +1412,6 @@ diff -urN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/p
 +#include <linux/irq.h>
 +#include <linux/spi/flash.h>
 +#include <linux/spi/spi.h>
-+#include <linux/spi/orion_spi.h>
 +#include <linux/input.h>
 +#include <asm/mach-types.h>
 +#include <asm/mach/arch.h>
@@ -1483,10 +1581,11 @@ diff -urN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/p
 +	.init_early	= kirkwood_init_early,
 +	.init_irq	= kirkwood_init_irq,
 +	.timer		= &kirkwood_timer,
++	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/sheevaplug-setup.c
---- a/arch/arm/mach-kirkwood/sheevaplug-setup.c	2012-05-20 18:29:13.000000000 -0400
-+++ b/arch/arm/mach-kirkwood/sheevaplug-setup.c	2012-05-24 12:05:49.000000000 -0400
+diff -ruN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/sheevaplug-setup.c
+--- a/arch/arm/mach-kirkwood/sheevaplug-setup.c	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/mach-kirkwood/sheevaplug-setup.c	2012-08-10 11:19:35.000000000 -0400
 @@ -43,7 +43,7 @@
  	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
  };
@@ -1565,10 +1664,10 @@ diff -urN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/s
  	else
  		kirkwood_sdio_init(&sheevaplug_mvsdio_data);
  
-diff -urN a/arch/arm/mach-kirkwood/topkick-setup.c b/arch/arm/mach-kirkwood/topkick-setup.c
+diff -ruN a/arch/arm/mach-kirkwood/topkick-setup.c b/arch/arm/mach-kirkwood/topkick-setup.c
 --- a/arch/arm/mach-kirkwood/topkick-setup.c	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/topkick-setup.c	2012-05-24 12:02:12.000000000 -0400
-@@ -0,0 +1,164 @@
++++ b/arch/arm/mach-kirkwood/topkick-setup.c	2012-08-10 11:20:38.000000000 -0400
+@@ -0,0 +1,165 @@
 +/*
 + * arch/arm/mach-kirkwood/topkick-setup.c
 + *
@@ -1732,11 +1831,12 @@ diff -urN a/arch/arm/mach-kirkwood/topkick-setup.c b/arch/arm/mach-kirkwood/topk
 +	.init_early	= kirkwood_init_early,
 +	.init_irq	= kirkwood_init_irq,
 +	.timer		= &kirkwood_timer,
++	.restart	= kirkwood_restart,
 +MACHINE_END
-diff -urN a/arch/arm/plat-orion/common.c b/arch/arm/plat-orion/common.c
---- a/arch/arm/plat-orion/common.c	2012-05-20 18:29:13.000000000 -0400
-+++ b/arch/arm/plat-orion/common.c	2012-05-24 12:02:12.000000000 -0400
-@@ -222,7 +222,9 @@
+diff -ruN a/arch/arm/plat-orion/common.c b/arch/arm/plat-orion/common.c
+--- a/arch/arm/plat-orion/common.c	2012-08-09 11:23:56.000000000 -0400
++++ b/arch/arm/plat-orion/common.c	2012-08-10 11:22:56.000000000 -0400
+@@ -252,7 +252,9 @@
  /*****************************************************************************
   * GE00
   ****************************************************************************/
@@ -1747,950 +1847,10 @@ diff -urN a/arch/arm/plat-orion/common.c b/arch/arm/plat-orion/common.c
  
  static struct resource orion_ge00_shared_resources[] = {
  	{
-diff -urN a/arch/arm/plat-orion/common.c.orig b/arch/arm/plat-orion/common.c.orig
---- a/arch/arm/plat-orion/common.c.orig	1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/plat-orion/common.c.orig	2012-05-24 12:02:12.000000000 -0400
-@@ -0,0 +1,936 @@
-+/*
-+ * arch/arm/plat-orion/common.c
-+ *
-+ * Marvell Orion SoC common setup code used by multiple mach-/common.c
-+ *
-+ * This file is licensed under the terms of the GNU General Public
-+ * License version 2.  This program is licensed "as is" without any
-+ * warranty of any kind, whether express or implied.
-+ */
-+
-+#include <linux/kernel.h>
-+#include <linux/init.h>
-+#include <linux/platform_device.h>
-+#include <linux/dma-mapping.h>
-+#include <linux/serial_8250.h>
-+#include <linux/ata_platform.h>
-+#include <linux/mv643xx_eth.h>
-+#include <linux/mv643xx_i2c.h>
-+#include <net/dsa.h>
-+#include <linux/spi/orion_spi.h>
-+#include <plat/orion_wdt.h>
-+#include <plat/mv_xor.h>
-+#include <plat/ehci-orion.h>
-+#include <mach/bridge-regs.h>
-+
-+/* Fill in the resources structure and link it into the platform
-+   device structure. There is always a memory region, and nearly
-+   always an interrupt.*/
-+static void fill_resources(struct platform_device *device,
-+			   struct resource *resources,
-+			   resource_size_t mapbase,
-+			   resource_size_t size,
-+			   unsigned int irq)
-+{
-+	device->resource = resources;
-+	device->num_resources = 1;
-+	resources[0].flags = IORESOURCE_MEM;
-+	resources[0].start = mapbase;
-+	resources[0].end = mapbase + size;
-+
-+	if (irq != NO_IRQ) {
-+		device->num_resources++;
-+		resources[1].flags = IORESOURCE_IRQ;
-+		resources[1].start = irq;
-+		resources[1].end = irq;
-+	}
-+}
-+
-+/*****************************************************************************
-+ * UART
-+ ****************************************************************************/
-+static void __init uart_complete(
-+	struct platform_device *orion_uart,
-+	struct plat_serial8250_port *data,
-+	struct resource *resources,
-+	unsigned int membase,
-+	resource_size_t mapbase,
-+	unsigned int irq,
-+	unsigned int uartclk)
-+{
-+	data->mapbase = mapbase;
-+	data->membase = (void __iomem *)membase;
-+	data->irq = irq;
-+	data->uartclk = uartclk;
-+	orion_uart->dev.platform_data = data;
-+
-+	fill_resources(orion_uart, resources, mapbase, 0xff, irq);
-+	platform_device_register(orion_uart);
-+}
-+
-+/*****************************************************************************
-+ * UART0
-+ ****************************************************************************/
-+static struct plat_serial8250_port orion_uart0_data[] = {
-+	{
-+		.flags		= UPF_SKIP_TEST | UPF_BOOT_AUTOCONF,
-+		.iotype		= UPIO_MEM,
-+		.regshift	= 2,
-+	}, {
-+	},
-+};
-+
-+static struct resource orion_uart0_resources[2];
-+
-+static struct platform_device orion_uart0 = {
-+	.name			= "serial8250",
-+	.id			= PLAT8250_DEV_PLATFORM,
-+};
-+
-+void __init orion_uart0_init(unsigned int membase,
-+			     resource_size_t mapbase,
-+			     unsigned int irq,
-+			     unsigned int uartclk)
-+{
-+	uart_complete(&orion_uart0, orion_uart0_data, orion_uart0_resources,
-+		      membase, mapbase, irq, uartclk);
-+}
-+
-+/*****************************************************************************
-+ * UART1
-+ ****************************************************************************/
-+static struct plat_serial8250_port orion_uart1_data[] = {
-+	{
-+		.flags		= UPF_SKIP_TEST | UPF_BOOT_AUTOCONF,
-+		.iotype		= UPIO_MEM,
-+		.regshift	= 2,
-+	}, {
-+	},
-+};
-+
-+static struct resource orion_uart1_resources[2];
-+
-+static struct platform_device orion_uart1 = {
-+	.name			= "serial8250",
-+	.id			= PLAT8250_DEV_PLATFORM1,
-+};
-+
-+void __init orion_uart1_init(unsigned int membase,
-+			     resource_size_t mapbase,
-+			     unsigned int irq,
-+			     unsigned int uartclk)
-+{
-+	uart_complete(&orion_uart1, orion_uart1_data, orion_uart1_resources,
-+		      membase, mapbase, irq, uartclk);
-+}
-+
-+/*****************************************************************************
-+ * UART2
-+ ****************************************************************************/
-+static struct plat_serial8250_port orion_uart2_data[] = {
-+	{
-+		.flags		= UPF_SKIP_TEST | UPF_BOOT_AUTOCONF,
-+		.iotype		= UPIO_MEM,
-+		.regshift	= 2,
-+	}, {
-+	},
-+};
-+
-+static struct resource orion_uart2_resources[2];
-+
-+static struct platform_device orion_uart2 = {
-+	.name			= "serial8250",
-+	.id			= PLAT8250_DEV_PLATFORM2,
-+};
-+
-+void __init orion_uart2_init(unsigned int membase,
-+			     resource_size_t mapbase,
-+			     unsigned int irq,
-+			     unsigned int uartclk)
-+{
-+	uart_complete(&orion_uart2, orion_uart2_data, orion_uart2_resources,
-+		      membase, mapbase, irq, uartclk);
-+}
-+
-+/*****************************************************************************
-+ * UART3
-+ ****************************************************************************/
-+static struct plat_serial8250_port orion_uart3_data[] = {
-+	{
-+		.flags		= UPF_SKIP_TEST | UPF_BOOT_AUTOCONF,
-+		.iotype		= UPIO_MEM,
-+		.regshift	= 2,
-+	}, {
-+	},
-+};
-+
-+static struct resource orion_uart3_resources[2];
-+
-+static struct platform_device orion_uart3 = {
-+	.name			= "serial8250",
-+	.id			= 3,
-+};
-+
-+void __init orion_uart3_init(unsigned int membase,
-+			     resource_size_t mapbase,
-+			     unsigned int irq,
-+			     unsigned int uartclk)
-+{
-+	uart_complete(&orion_uart3, orion_uart3_data, orion_uart3_resources,
-+		      membase, mapbase, irq, uartclk);
-+}
-+
-+/*****************************************************************************
-+ * SoC RTC
-+ ****************************************************************************/
-+static struct resource orion_rtc_resource[2];
-+
-+void __init orion_rtc_init(unsigned long mapbase,
-+			   unsigned long irq)
-+{
-+	orion_rtc_resource[0].start = mapbase;
-+	orion_rtc_resource[0].end = mapbase + SZ_32 - 1;
-+	orion_rtc_resource[0].flags = IORESOURCE_MEM;
-+	orion_rtc_resource[1].start = irq;
-+	orion_rtc_resource[1].end = irq;
-+	orion_rtc_resource[1].flags = IORESOURCE_IRQ;
-+
-+	platform_device_register_simple("rtc-mv", -1, orion_rtc_resource, 2);
-+}
-+
-+/*****************************************************************************
-+ * GE
-+ ****************************************************************************/
-+static __init void ge_complete(
-+	struct mv643xx_eth_shared_platform_data *orion_ge_shared_data,
-+	int tclk,
-+	struct resource *orion_ge_resource, unsigned long irq,
-+	struct platform_device *orion_ge_shared,
-+	struct mv643xx_eth_platform_data *eth_data,
-+	struct platform_device *orion_ge)
-+{
-+	orion_ge_shared_data->t_clk = tclk;
-+	orion_ge_resource->start = irq;
-+	orion_ge_resource->end = irq;
-+	eth_data->shared = orion_ge_shared;
-+	orion_ge->dev.platform_data = eth_data;
-+
-+	platform_device_register(orion_ge_shared);
-+	platform_device_register(orion_ge);
-+}
-+
-+/*****************************************************************************
-+ * GE00
-+ ****************************************************************************/
-+struct mv643xx_eth_shared_platform_data orion_ge00_shared_data;
-+
-+static struct resource orion_ge00_shared_resources[] = {
-+	{
-+		.name	= "ge00 base",
-+	}, {
-+		.name	= "ge00 err irq",
-+	},
-+};
-+
-+static struct platform_device orion_ge00_shared = {
-+	.name		= MV643XX_ETH_SHARED_NAME,
-+	.id		= 0,
-+	.dev		= {
-+		.platform_data	= &orion_ge00_shared_data,
-+	},
-+};
-+
-+static struct resource orion_ge00_resources[] = {
-+	{
-+		.name	= "ge00 irq",
-+		.flags	= IORESOURCE_IRQ,
-+	},
-+};
-+
-+static struct platform_device orion_ge00 = {
-+	.name		= MV643XX_ETH_NAME,
-+	.id		= 0,
-+	.num_resources	= 1,
-+	.resource	= orion_ge00_resources,
-+	.dev		= {
-+		.coherent_dma_mask	= DMA_BIT_MASK(32),
-+	},
-+};
-+
-+void __init orion_ge00_init(struct mv643xx_eth_platform_data *eth_data,
-+			    unsigned long mapbase,
-+			    unsigned long irq,
-+			    unsigned long irq_err,
-+			    int tclk)
-+{
-+	fill_resources(&orion_ge00_shared, orion_ge00_shared_resources,
-+		       mapbase + 0x2000, SZ_16K - 1, irq_err);
-+	ge_complete(&orion_ge00_shared_data, tclk,
-+		    orion_ge00_resources, irq, &orion_ge00_shared,
-+		    eth_data, &orion_ge00);
-+}
-+
-+/*****************************************************************************
-+ * GE01
-+ ****************************************************************************/
-+struct mv643xx_eth_shared_platform_data orion_ge01_shared_data = {
-+	.shared_smi	= &orion_ge00_shared,
-+};
-+
-+static struct resource orion_ge01_shared_resources[] = {
-+	{
-+		.name	= "ge01 base",
-+	}, {
-+		.name	= "ge01 err irq",
-+	},
-+};
-+
-+static struct platform_device orion_ge01_shared = {
-+	.name		= MV643XX_ETH_SHARED_NAME,
-+	.id		= 1,
-+	.dev		= {
-+		.platform_data	= &orion_ge01_shared_data,
-+	},
-+};
-+
-+static struct resource orion_ge01_resources[] = {
-+	{
-+		.name	= "ge01 irq",
-+		.flags	= IORESOURCE_IRQ,
-+	},
-+};
-+
-+static struct platform_device orion_ge01 = {
-+	.name		= MV643XX_ETH_NAME,
-+	.id		= 1,
-+	.num_resources	= 1,
-+	.resource	= orion_ge01_resources,
-+	.dev		= {
-+		.coherent_dma_mask	= DMA_BIT_MASK(32),
-+	},
-+};
-+
-+void __init orion_ge01_init(struct mv643xx_eth_platform_data *eth_data,
-+			    unsigned long mapbase,
-+			    unsigned long irq,
-+			    unsigned long irq_err,
-+			    int tclk)
-+{
-+	fill_resources(&orion_ge01_shared, orion_ge01_shared_resources,
-+		       mapbase + 0x2000, SZ_16K - 1, irq_err);
-+	ge_complete(&orion_ge01_shared_data, tclk,
-+		    orion_ge01_resources, irq, &orion_ge01_shared,
-+		    eth_data, &orion_ge01);
-+}
-+
-+/*****************************************************************************
-+ * GE10
-+ ****************************************************************************/
-+struct mv643xx_eth_shared_platform_data orion_ge10_shared_data = {
-+	.shared_smi	= &orion_ge00_shared,
-+};
-+
-+static struct resource orion_ge10_shared_resources[] = {
-+	{
-+		.name	= "ge10 base",
-+	}, {
-+		.name	= "ge10 err irq",
-+	},
-+};
-+
-+static struct platform_device orion_ge10_shared = {
-+	.name		= MV643XX_ETH_SHARED_NAME,
-+	.id		= 1,
-+	.dev		= {
-+		.platform_data	= &orion_ge10_shared_data,
-+	},
-+};
-+
-+static struct resource orion_ge10_resources[] = {
-+	{
-+		.name	= "ge10 irq",
-+		.flags	= IORESOURCE_IRQ,
-+	},
-+};
-+
-+static struct platform_device orion_ge10 = {
-+	.name		= MV643XX_ETH_NAME,
-+	.id		= 1,
-+	.num_resources	= 2,
-+	.resource	= orion_ge10_resources,
-+	.dev		= {
-+		.coherent_dma_mask	= DMA_BIT_MASK(32),
-+	},
-+};
-+
-+void __init orion_ge10_init(struct mv643xx_eth_platform_data *eth_data,
-+			    unsigned long mapbase,
-+			    unsigned long irq,
-+			    unsigned long irq_err,
-+			    int tclk)
-+{
-+	fill_resources(&orion_ge10_shared, orion_ge10_shared_resources,
-+		       mapbase + 0x2000, SZ_16K - 1, irq_err);
-+	ge_complete(&orion_ge10_shared_data, tclk,
-+		    orion_ge10_resources, irq, &orion_ge10_shared,
-+		    eth_data, &orion_ge10);
-+}
-+
-+/*****************************************************************************
-+ * GE11
-+ ****************************************************************************/
-+struct mv643xx_eth_shared_platform_data orion_ge11_shared_data = {
-+	.shared_smi	= &orion_ge00_shared,
-+};
-+
-+static struct resource orion_ge11_shared_resources[] = {
-+	{
-+		.name	= "ge11 base",
-+	}, {
-+		.name	= "ge11 err irq",
-+	},
-+};
-+
-+static struct platform_device orion_ge11_shared = {
-+	.name		= MV643XX_ETH_SHARED_NAME,
-+	.id		= 1,
-+	.dev		= {
-+		.platform_data	= &orion_ge11_shared_data,
-+	},
-+};
-+
-+static struct resource orion_ge11_resources[] = {
-+	{
-+		.name	= "ge11 irq",
-+		.flags	= IORESOURCE_IRQ,
-+	},
-+};
-+
-+static struct platform_device orion_ge11 = {
-+	.name		= MV643XX_ETH_NAME,
-+	.id		= 1,
-+	.num_resources	= 2,
-+	.resource	= orion_ge11_resources,
-+	.dev		= {
-+		.coherent_dma_mask	= DMA_BIT_MASK(32),
-+	},
-+};
-+
-+void __init orion_ge11_init(struct mv643xx_eth_platform_data *eth_data,
-+			    unsigned long mapbase,
-+			    unsigned long irq,
-+			    unsigned long irq_err,
-+			    int tclk)
-+{
-+	fill_resources(&orion_ge11_shared, orion_ge11_shared_resources,
-+		       mapbase + 0x2000, SZ_16K - 1, irq_err);
-+	ge_complete(&orion_ge11_shared_data, tclk,
-+		    orion_ge11_resources, irq, &orion_ge11_shared,
-+		    eth_data, &orion_ge11);
-+}
-+
-+/*****************************************************************************
-+ * Ethernet switch
-+ ****************************************************************************/
-+static struct resource orion_switch_resources[] = {
-+	{
-+		.start	= 0,
-+		.end	= 0,
-+		.flags	= IORESOURCE_IRQ,
-+	},
-+};
-+
-+static struct platform_device orion_switch_device = {
-+	.name		= "dsa",
-+	.id		= 0,
-+	.num_resources	= 0,
-+	.resource	= orion_switch_resources,
-+};
-+
-+void __init orion_ge00_switch_init(struct dsa_platform_data *d, int irq)
-+{
-+	int i;
-+
-+	if (irq != NO_IRQ) {
-+		orion_switch_resources[0].start = irq;
-+		orion_switch_resources[0].end = irq;
-+		orion_switch_device.num_resources = 1;
-+	}
-+
-+	d->netdev = &orion_ge00.dev;
-+	for (i = 0; i < d->nr_chips; i++)
-+		d->chip[i].mii_bus = &orion_ge00_shared.dev;
-+	orion_switch_device.dev.platform_data = d;
-+
-+	platform_device_register(&orion_switch_device);
-+}
-+
-+/*****************************************************************************
-+ * I2C
-+ ****************************************************************************/
-+static struct mv64xxx_i2c_pdata orion_i2c_pdata = {
-+	.freq_n		= 3,
-+	.timeout	= 1000, /* Default timeout of 1 second */
-+};
-+
-+static struct resource orion_i2c_resources[2];
-+
-+static struct platform_device orion_i2c = {
-+	.name		= MV64XXX_I2C_CTLR_NAME,
-+	.id		= 0,
-+	.dev		= {
-+		.platform_data	= &orion_i2c_pdata,
-+	},
-+};
-+
-+static struct mv64xxx_i2c_pdata orion_i2c_1_pdata = {
-+	.freq_n		= 3,
-+	.timeout	= 1000, /* Default timeout of 1 second */
-+};
-+
-+static struct resource orion_i2c_1_resources[2];
-+
-+static struct platform_device orion_i2c_1 = {
-+	.name		= MV64XXX_I2C_CTLR_NAME,
-+	.id		= 1,
-+	.dev		= {
-+		.platform_data	= &orion_i2c_1_pdata,
-+	},
-+};
-+
-+void __init orion_i2c_init(unsigned long mapbase,
-+			   unsigned long irq,
-+			   unsigned long freq_m)
-+{
-+	orion_i2c_pdata.freq_m = freq_m;
-+	fill_resources(&orion_i2c, orion_i2c_resources, mapbase,
-+		       SZ_32 - 1, irq);
-+	platform_device_register(&orion_i2c);
-+}
-+
-+void __init orion_i2c_1_init(unsigned long mapbase,
-+			     unsigned long irq,
-+			     unsigned long freq_m)
-+{
-+	orion_i2c_1_pdata.freq_m = freq_m;
-+	fill_resources(&orion_i2c_1, orion_i2c_1_resources, mapbase,
-+		       SZ_32 - 1, irq);
-+	platform_device_register(&orion_i2c_1);
-+}
-+
-+/*****************************************************************************
-+ * SPI
-+ ****************************************************************************/
-+static struct orion_spi_info orion_spi_plat_data;
-+static struct resource orion_spi_resources;
-+
-+static struct platform_device orion_spi = {
-+	.name		= "orion_spi",
-+	.id		= 0,
-+	.dev		= {
-+		.platform_data	= &orion_spi_plat_data,
-+	},
-+};
-+
-+static struct orion_spi_info orion_spi_1_plat_data;
-+static struct resource orion_spi_1_resources;
-+
-+static struct platform_device orion_spi_1 = {
-+	.name		= "orion_spi",
-+	.id		= 1,
-+	.dev		= {
-+		.platform_data	= &orion_spi_1_plat_data,
-+	},
-+};
-+
-+/* Note: The SPI silicon core does have interrupts. However the
-+ * current Linux software driver does not use interrupts. */
-+
-+void __init orion_spi_init(unsigned long mapbase,
-+			   unsigned long tclk)
-+{
-+	orion_spi_plat_data.tclk = tclk;
-+	fill_resources(&orion_spi, &orion_spi_resources,
-+		       mapbase, SZ_512 - 1, NO_IRQ);
-+	platform_device_register(&orion_spi);
-+}
-+
-+void __init orion_spi_1_init(unsigned long mapbase,
-+			     unsigned long tclk)
-+{
-+	orion_spi_1_plat_data.tclk = tclk;
-+	fill_resources(&orion_spi_1, &orion_spi_1_resources,
-+		       mapbase, SZ_512 - 1, NO_IRQ);
-+	platform_device_register(&orion_spi_1);
-+}
-+
-+/*****************************************************************************
-+ * Watchdog
-+ ****************************************************************************/
-+static struct orion_wdt_platform_data orion_wdt_data;
-+
-+static struct resource orion_wdt_resource =
-+		DEFINE_RES_MEM(TIMER_VIRT_BASE, 0x28);
-+
-+static struct platform_device orion_wdt_device = {
-+	.name		= "orion_wdt",
-+	.id		= -1,
-+	.dev		= {
-+		.platform_data	= &orion_wdt_data,
-+	},
-+	.resource	= &orion_wdt_resource,
-+	.num_resources	= 1,
-+};
-+
-+void __init orion_wdt_init(unsigned long tclk)
-+{
-+	orion_wdt_data.tclk = tclk;
-+	platform_device_register(&orion_wdt_device);
-+}
-+
-+/*****************************************************************************
-+ * XOR
-+ ****************************************************************************/
-+static u64 orion_xor_dmamask = DMA_BIT_MASK(32);
-+
-+void __init orion_xor_init_channels(
-+	struct mv_xor_platform_data *orion_xor0_data,
-+	struct platform_device *orion_xor0_channel,
-+	struct mv_xor_platform_data *orion_xor1_data,
-+	struct platform_device *orion_xor1_channel)
-+{
-+	/*
-+	 * two engines can't do memset simultaneously, this limitation
-+	 * satisfied by removing memset support from one of the engines.
-+	 */
-+	dma_cap_set(DMA_MEMCPY, orion_xor0_data->cap_mask);
-+	dma_cap_set(DMA_XOR, orion_xor0_data->cap_mask);
-+	platform_device_register(orion_xor0_channel);
-+
-+	dma_cap_set(DMA_MEMCPY, orion_xor1_data->cap_mask);
-+	dma_cap_set(DMA_MEMSET, orion_xor1_data->cap_mask);
-+	dma_cap_set(DMA_XOR, orion_xor1_data->cap_mask);
-+	platform_device_register(orion_xor1_channel);
-+}
-+
-+/*****************************************************************************
-+ * XOR0
-+ ****************************************************************************/
-+static struct resource orion_xor0_shared_resources[] = {
-+	{
-+		.name	= "xor 0 low",
-+		.flags	= IORESOURCE_MEM,
-+	}, {
-+		.name	= "xor 0 high",
-+		.flags	= IORESOURCE_MEM,
-+	},
-+};
-+
-+static struct platform_device orion_xor0_shared = {
-+	.name		= MV_XOR_SHARED_NAME,
-+	.id		= 0,
-+	.num_resources	= ARRAY_SIZE(orion_xor0_shared_resources),
-+	.resource	= orion_xor0_shared_resources,
-+};
-+
-+static struct resource orion_xor00_resources[] = {
-+	[0] = {
-+		.flags	= IORESOURCE_IRQ,
-+	},
-+};
-+
-+static struct mv_xor_platform_data orion_xor00_data = {
-+	.shared		= &orion_xor0_shared,
-+	.hw_id		= 0,
-+	.pool_size	= PAGE_SIZE,
-+};
-+
-+static struct platform_device orion_xor00_channel = {
-+	.name		= MV_XOR_NAME,
-+	.id		= 0,
-+	.num_resources	= ARRAY_SIZE(orion_xor00_resources),
-+	.resource	= orion_xor00_resources,
-+	.dev		= {
-+		.dma_mask		= &orion_xor_dmamask,
-+		.coherent_dma_mask	= DMA_BIT_MASK(64),
-+		.platform_data		= &orion_xor00_data,
-+	},
-+};
-+
-+static struct resource orion_xor01_resources[] = {
-+	[0] = {
-+		.flags	= IORESOURCE_IRQ,
-+	},
-+};
-+
-+static struct mv_xor_platform_data orion_xor01_data = {
-+	.shared		= &orion_xor0_shared,
-+	.hw_id		= 1,
-+	.pool_size	= PAGE_SIZE,
-+};
-+
-+static struct platform_device orion_xor01_channel = {
-+	.name		= MV_XOR_NAME,
-+	.id		= 1,
-+	.num_resources	= ARRAY_SIZE(orion_xor01_resources),
-+	.resource	= orion_xor01_resources,
-+	.dev		= {
-+		.dma_mask		= &orion_xor_dmamask,
-+		.coherent_dma_mask	= DMA_BIT_MASK(64),
-+		.platform_data		= &orion_xor01_data,
-+	},
-+};
-+
-+void __init orion_xor0_init(unsigned long mapbase_low,
-+			    unsigned long mapbase_high,
-+			    unsigned long irq_0,
-+			    unsigned long irq_1)
-+{
-+	orion_xor0_shared_resources[0].start = mapbase_low;
-+	orion_xor0_shared_resources[0].end = mapbase_low + 0xff;
-+	orion_xor0_shared_resources[1].start = mapbase_high;
-+	orion_xor0_shared_resources[1].end = mapbase_high + 0xff;
-+
-+	orion_xor00_resources[0].start = irq_0;
-+	orion_xor00_resources[0].end = irq_0;
-+	orion_xor01_resources[0].start = irq_1;
-+	orion_xor01_resources[0].end = irq_1;
-+
-+	platform_device_register(&orion_xor0_shared);
-+
-+	orion_xor_init_channels(&orion_xor00_data, &orion_xor00_channel,
-+				&orion_xor01_data, &orion_xor01_channel);
-+}
-+
-+/*****************************************************************************
-+ * XOR1
-+ ****************************************************************************/
-+static struct resource orion_xor1_shared_resources[] = {
-+	{
-+		.name	= "xor 1 low",
-+		.flags	= IORESOURCE_MEM,
-+	}, {
-+		.name	= "xor 1 high",
-+		.flags	= IORESOURCE_MEM,
-+	},
-+};
-+
-+static struct platform_device orion_xor1_shared = {
-+	.name		= MV_XOR_SHARED_NAME,
-+	.id		= 1,
-+	.num_resources	= ARRAY_SIZE(orion_xor1_shared_resources),
-+	.resource	= orion_xor1_shared_resources,
-+};
-+
-+static struct resource orion_xor10_resources[] = {
-+	[0] = {
-+		.flags	= IORESOURCE_IRQ,
-+	},
-+};
-+
-+static struct mv_xor_platform_data orion_xor10_data = {
-+	.shared		= &orion_xor1_shared,
-+	.hw_id		= 0,
-+	.pool_size	= PAGE_SIZE,
-+};
-+
-+static struct platform_device orion_xor10_channel = {
-+	.name		= MV_XOR_NAME,
-+	.id		= 2,
-+	.num_resources	= ARRAY_SIZE(orion_xor10_resources),
-+	.resource	= orion_xor10_resources,
-+	.dev		= {
-+		.dma_mask		= &orion_xor_dmamask,
-+		.coherent_dma_mask	= DMA_BIT_MASK(64),
-+		.platform_data		= &orion_xor10_data,
-+	},
-+};
-+
-+static struct resource orion_xor11_resources[] = {
-+	[0] = {
-+		.flags	= IORESOURCE_IRQ,
-+	},
-+};
-+
-+static struct mv_xor_platform_data orion_xor11_data = {
-+	.shared		= &orion_xor1_shared,
-+	.hw_id		= 1,
-+	.pool_size	= PAGE_SIZE,
-+};
-+
-+static struct platform_device orion_xor11_channel = {
-+	.name		= MV_XOR_NAME,
-+	.id		= 3,
-+	.num_resources	= ARRAY_SIZE(orion_xor11_resources),
-+	.resource	= orion_xor11_resources,
-+	.dev		= {
-+		.dma_mask		= &orion_xor_dmamask,
-+		.coherent_dma_mask	= DMA_BIT_MASK(64),
-+		.platform_data		= &orion_xor11_data,
-+	},
-+};
-+
-+void __init orion_xor1_init(unsigned long mapbase_low,
-+			    unsigned long mapbase_high,
-+			    unsigned long irq_0,
-+			    unsigned long irq_1)
-+{
-+	orion_xor1_shared_resources[0].start = mapbase_low;
-+	orion_xor1_shared_resources[0].end = mapbase_low + 0xff;
-+	orion_xor1_shared_resources[1].start = mapbase_high;
-+	orion_xor1_shared_resources[1].end = mapbase_high + 0xff;
-+
-+	orion_xor10_resources[0].start = irq_0;
-+	orion_xor10_resources[0].end = irq_0;
-+	orion_xor11_resources[0].start = irq_1;
-+	orion_xor11_resources[0].end = irq_1;
-+
-+	platform_device_register(&orion_xor1_shared);
-+
-+	orion_xor_init_channels(&orion_xor10_data, &orion_xor10_channel,
-+				&orion_xor11_data, &orion_xor11_channel);
-+}
-+
-+/*****************************************************************************
-+ * EHCI
-+ ****************************************************************************/
-+static struct orion_ehci_data orion_ehci_data;
-+static u64 ehci_dmamask = DMA_BIT_MASK(32);
-+
-+
-+/*****************************************************************************
-+ * EHCI0
-+ ****************************************************************************/
-+static struct resource orion_ehci_resources[2];
-+
-+static struct platform_device orion_ehci = {
-+	.name		= "orion-ehci",
-+	.id		= 0,
-+	.dev		= {
-+		.dma_mask		= &ehci_dmamask,
-+		.coherent_dma_mask	= DMA_BIT_MASK(32),
-+		.platform_data		= &orion_ehci_data,
-+	},
-+};
-+
-+void __init orion_ehci_init(unsigned long mapbase,
-+			    unsigned long irq,
-+			    enum orion_ehci_phy_ver phy_version)
-+{
-+	orion_ehci_data.phy_version = phy_version;
-+	fill_resources(&orion_ehci, orion_ehci_resources, mapbase, SZ_4K - 1,
-+		       irq);
-+
-+	platform_device_register(&orion_ehci);
-+}
-+
-+/*****************************************************************************
-+ * EHCI1
-+ ****************************************************************************/
-+static struct resource orion_ehci_1_resources[2];
-+
-+static struct platform_device orion_ehci_1 = {
-+	.name		= "orion-ehci",
-+	.id		= 1,
-+	.dev		= {
-+		.dma_mask		= &ehci_dmamask,
-+		.coherent_dma_mask	= DMA_BIT_MASK(32),
-+		.platform_data		= &orion_ehci_data,
-+	},
-+};
-+
-+void __init orion_ehci_1_init(unsigned long mapbase,
-+			      unsigned long irq)
-+{
-+	fill_resources(&orion_ehci_1, orion_ehci_1_resources,
-+		       mapbase, SZ_4K - 1, irq);
-+
-+	platform_device_register(&orion_ehci_1);
-+}
-+
-+/*****************************************************************************
-+ * EHCI2
-+ ****************************************************************************/
-+static struct resource orion_ehci_2_resources[2];
-+
-+static struct platform_device orion_ehci_2 = {
-+	.name		= "orion-ehci",
-+	.id		= 2,
-+	.dev		= {
-+		.dma_mask		= &ehci_dmamask,
-+		.coherent_dma_mask	= DMA_BIT_MASK(32),
-+		.platform_data		= &orion_ehci_data,
-+	},
-+};
-+
-+void __init orion_ehci_2_init(unsigned long mapbase,
-+			      unsigned long irq)
-+{
-+	fill_resources(&orion_ehci_2, orion_ehci_2_resources,
-+		       mapbase, SZ_4K - 1, irq);
-+
-+	platform_device_register(&orion_ehci_2);
-+}
-+
-+/*****************************************************************************
-+ * SATA
-+ ****************************************************************************/
-+static struct resource orion_sata_resources[2] = {
-+	{
-+		.name	= "sata base",
-+	}, {
-+		.name	= "sata irq",
-+	},
-+};
-+
-+static struct platform_device orion_sata = {
-+	.name		= "sata_mv",
-+	.id		= 0,
-+	.dev		= {
-+		.coherent_dma_mask	= DMA_BIT_MASK(32),
-+	},
-+};
-+
-+void __init orion_sata_init(struct mv_sata_platform_data *sata_data,
-+			    unsigned long mapbase,
-+			    unsigned long irq)
-+{
-+	orion_sata.dev.platform_data = sata_data;
-+	fill_resources(&orion_sata, orion_sata_resources,
-+		       mapbase, 0x5000 - 1, irq);
-+
-+	platform_device_register(&orion_sata);
-+}
-+
-+/*****************************************************************************
-+ * Cryptographic Engines and Security Accelerator (CESA)
-+ ****************************************************************************/
-+static struct resource orion_crypto_resources[] = {
-+	{
-+		.name   = "regs",
-+	}, {
-+		.name   = "crypto interrupt",
-+	}, {
-+		.name   = "sram",
-+		.flags  = IORESOURCE_MEM,
-+	},
-+};
-+
-+static struct platform_device orion_crypto = {
-+	.name           = "mv_crypto",
-+	.id             = -1,
-+};
-+
-+void __init orion_crypto_init(unsigned long mapbase,
-+			      unsigned long srambase,
-+			      unsigned long sram_size,
-+			      unsigned long irq)
-+{
-+	fill_resources(&orion_crypto, orion_crypto_resources,
-+		       mapbase, 0xffff, irq);
-+	orion_crypto.num_resources = 3;
-+	orion_crypto_resources[2].start = srambase;
-+	orion_crypto_resources[2].end = srambase + sram_size - 1;
-+
-+	platform_device_register(&orion_crypto);
-+}
-diff -urN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
---- a/drivers/mmc/core/core.c	2012-05-20 18:29:13.000000000 -0400
-+++ b/drivers/mmc/core/core.c	2012-05-24 12:02:12.000000000 -0400
-@@ -536,7 +536,7 @@
+diff -ruN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+--- a/drivers/mmc/core/core.c	2012-08-09 11:23:56.000000000 -0400
++++ b/drivers/mmc/core/core.c	2012-08-10 11:24:17.000000000 -0400
+@@ -537,7 +537,7 @@
  			 */
  			limit_us = 3000000;
  		else
@@ -2699,9 +1859,9 @@ diff -urN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
  
  		/*
  		 * SDHC cards always use these fixed values.
-diff -urN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
---- a/drivers/mmc/core/sd.c	2012-05-20 18:29:13.000000000 -0400
-+++ b/drivers/mmc/core/sd.c	2012-05-24 12:02:12.000000000 -0400
+diff -ruN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+--- a/drivers/mmc/core/sd.c	2012-08-09 11:23:56.000000000 -0400
++++ b/drivers/mmc/core/sd.c	2012-08-10 11:25:11.000000000 -0400
 @@ -389,6 +389,15 @@
  		return -ENOMEM;
  	}
@@ -2718,1267 +1878,18 @@ diff -urN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
  	err = mmc_sd_switch(card, 1, 0, 1, status);
  	if (err)
  		goto out;
-diff -urN a/drivers/mmc/core/sd.c.orig b/drivers/mmc/core/sd.c.orig
---- a/drivers/mmc/core/sd.c.orig	1969-12-31 19:00:00.000000000 -0500
-+++ b/drivers/mmc/core/sd.c.orig	2012-05-24 12:02:12.000000000 -0400
-@@ -0,0 +1,1245 @@
-+/*
-+ *  linux/drivers/mmc/core/sd.c
-+ *
-+ *  Copyright (C) 2003-2004 Russell King, All Rights Reserved.
-+ *  SD support Copyright (C) 2004 Ian Molton, All Rights Reserved.
-+ *  Copyright (C) 2005-2007 Pierre Ossman, All Rights Reserved.
-+ *
-+ * This program is free software; you can redistribute it and/or modify
-+ * it under the terms of the GNU General Public License version 2 as
-+ * published by the Free Software Foundation.
-+ */
-+
-+#include <linux/err.h>
-+#include <linux/slab.h>
-+#include <linux/stat.h>
-+
-+#include <linux/mmc/host.h>
-+#include <linux/mmc/card.h>
-+#include <linux/mmc/mmc.h>
-+#include <linux/mmc/sd.h>
-+
-+#include "core.h"
-+#include "bus.h"
-+#include "mmc_ops.h"
-+#include "sd.h"
-+#include "sd_ops.h"
-+
-+static const unsigned int tran_exp[] = {
-+	10000,		100000,		1000000,	10000000,
-+	0,		0,		0,		0
-+};
-+
-+static const unsigned char tran_mant[] = {
-+	0,	10,	12,	13,	15,	20,	25,	30,
-+	35,	40,	45,	50,	55,	60,	70,	80,
-+};
-+
-+static const unsigned int tacc_exp[] = {
-+	1,	10,	100,	1000,	10000,	100000,	1000000, 10000000,
-+};
-+
-+static const unsigned int tacc_mant[] = {
-+	0,	10,	12,	13,	15,	20,	25,	30,
-+	35,	40,	45,	50,	55,	60,	70,	80,
-+};
-+
-+#define UNSTUFF_BITS(resp,start,size)					\
-+	({								\
-+		const int __size = size;				\
-+		const u32 __mask = (__size < 32 ? 1 << __size : 0) - 1;	\
-+		const int __off = 3 - ((start) / 32);			\
-+		const int __shft = (start) & 31;			\
-+		u32 __res;						\
-+									\
-+		__res = resp[__off] >> __shft;				\
-+		if (__size + __shft > 32)				\
-+			__res |= resp[__off-1] << ((32 - __shft) % 32);	\
-+		__res & __mask;						\
-+	})
-+
-+/*
-+ * Given the decoded CSD structure, decode the raw CID to our CID structure.
-+ */
-+void mmc_decode_cid(struct mmc_card *card)
-+{
-+	u32 *resp = card->raw_cid;
-+
-+	memset(&card->cid, 0, sizeof(struct mmc_cid));
-+
-+	/*
-+	 * SD doesn't currently have a version field so we will
-+	 * have to assume we can parse this.
-+	 */
-+	card->cid.manfid		= UNSTUFF_BITS(resp, 120, 8);
-+	card->cid.oemid			= UNSTUFF_BITS(resp, 104, 16);
-+	card->cid.prod_name[0]		= UNSTUFF_BITS(resp, 96, 8);
-+	card->cid.prod_name[1]		= UNSTUFF_BITS(resp, 88, 8);
-+	card->cid.prod_name[2]		= UNSTUFF_BITS(resp, 80, 8);
-+	card->cid.prod_name[3]		= UNSTUFF_BITS(resp, 72, 8);
-+	card->cid.prod_name[4]		= UNSTUFF_BITS(resp, 64, 8);
-+	card->cid.hwrev			= UNSTUFF_BITS(resp, 60, 4);
-+	card->cid.fwrev			= UNSTUFF_BITS(resp, 56, 4);
-+	card->cid.serial		= UNSTUFF_BITS(resp, 24, 32);
-+	card->cid.year			= UNSTUFF_BITS(resp, 12, 8);
-+	card->cid.month			= UNSTUFF_BITS(resp, 8, 4);
-+
-+	card->cid.year += 2000; /* SD cards year offset */
-+}
-+
-+/*
-+ * Given a 128-bit response, decode to our card CSD structure.
-+ */
-+static int mmc_decode_csd(struct mmc_card *card)
-+{
-+	struct mmc_csd *csd = &card->csd;
-+	unsigned int e, m, csd_struct;
-+	u32 *resp = card->raw_csd;
-+
-+	csd_struct = UNSTUFF_BITS(resp, 126, 2);
-+
-+	switch (csd_struct) {
-+	case 0:
-+		m = UNSTUFF_BITS(resp, 115, 4);
-+		e = UNSTUFF_BITS(resp, 112, 3);
-+		csd->tacc_ns	 = (tacc_exp[e] * tacc_mant[m] + 9) / 10;
-+		csd->tacc_clks	 = UNSTUFF_BITS(resp, 104, 8) * 100;
-+
-+		m = UNSTUFF_BITS(resp, 99, 4);
-+		e = UNSTUFF_BITS(resp, 96, 3);
-+		csd->max_dtr	  = tran_exp[e] * tran_mant[m];
-+		csd->cmdclass	  = UNSTUFF_BITS(resp, 84, 12);
-+
-+		e = UNSTUFF_BITS(resp, 47, 3);
-+		m = UNSTUFF_BITS(resp, 62, 12);
-+		csd->capacity	  = (1 + m) << (e + 2);
-+
-+		csd->read_blkbits = UNSTUFF_BITS(resp, 80, 4);
-+		csd->read_partial = UNSTUFF_BITS(resp, 79, 1);
-+		csd->write_misalign = UNSTUFF_BITS(resp, 78, 1);
-+		csd->read_misalign = UNSTUFF_BITS(resp, 77, 1);
-+		csd->r2w_factor = UNSTUFF_BITS(resp, 26, 3);
-+		csd->write_blkbits = UNSTUFF_BITS(resp, 22, 4);
-+		csd->write_partial = UNSTUFF_BITS(resp, 21, 1);
-+
-+		if (UNSTUFF_BITS(resp, 46, 1)) {
-+			csd->erase_size = 1;
-+		} else if (csd->write_blkbits >= 9) {
-+			csd->erase_size = UNSTUFF_BITS(resp, 39, 7) + 1;
-+			csd->erase_size <<= csd->write_blkbits - 9;
-+		}
-+		break;
-+	case 1:
-+		/*
-+		 * This is a block-addressed SDHC or SDXC card. Most
-+		 * interesting fields are unused and have fixed
-+		 * values. To avoid getting tripped by buggy cards,
-+		 * we assume those fixed values ourselves.
-+		 */
-+		mmc_card_set_blockaddr(card);
-+
-+		csd->tacc_ns	 = 0; /* Unused */
-+		csd->tacc_clks	 = 0; /* Unused */
-+
-+		m = UNSTUFF_BITS(resp, 99, 4);
-+		e = UNSTUFF_BITS(resp, 96, 3);
-+		csd->max_dtr	  = tran_exp[e] * tran_mant[m];
-+		csd->cmdclass	  = UNSTUFF_BITS(resp, 84, 12);
-+		csd->c_size	  = UNSTUFF_BITS(resp, 48, 22);
-+
-+		/* SDXC cards have a minimum C_SIZE of 0x00FFFF */
-+		if (csd->c_size >= 0xFFFF)
-+			mmc_card_set_ext_capacity(card);
-+
-+		m = UNSTUFF_BITS(resp, 48, 22);
-+		csd->capacity     = (1 + m) << 10;
-+
-+		csd->read_blkbits = 9;
-+		csd->read_partial = 0;
-+		csd->write_misalign = 0;
-+		csd->read_misalign = 0;
-+		csd->r2w_factor = 4; /* Unused */
-+		csd->write_blkbits = 9;
-+		csd->write_partial = 0;
-+		csd->erase_size = 1;
-+		break;
-+	default:
-+		pr_err("%s: unrecognised CSD structure version %d\n",
-+			mmc_hostname(card->host), csd_struct);
-+		return -EINVAL;
-+	}
-+
-+	card->erase_size = csd->erase_size;
-+
-+	return 0;
-+}
-+
-+/*
-+ * Given a 64-bit response, decode to our card SCR structure.
-+ */
-+static int mmc_decode_scr(struct mmc_card *card)
-+{
-+	struct sd_scr *scr = &card->scr;
-+	unsigned int scr_struct;
-+	u32 resp[4];
-+
-+	resp[3] = card->raw_scr[1];
-+	resp[2] = card->raw_scr[0];
-+
-+	scr_struct = UNSTUFF_BITS(resp, 60, 4);
-+	if (scr_struct != 0) {
-+		pr_err("%s: unrecognised SCR structure version %d\n",
-+			mmc_hostname(card->host), scr_struct);
-+		return -EINVAL;
-+	}
-+
-+	scr->sda_vsn = UNSTUFF_BITS(resp, 56, 4);
-+	scr->bus_widths = UNSTUFF_BITS(resp, 48, 4);
-+	if (scr->sda_vsn == SCR_SPEC_VER_2)
-+		/* Check if Physical Layer Spec v3.0 is supported */
-+		scr->sda_spec3 = UNSTUFF_BITS(resp, 47, 1);
-+
-+	if (UNSTUFF_BITS(resp, 55, 1))
-+		card->erased_byte = 0xFF;
-+	else
-+		card->erased_byte = 0x0;
-+
-+	if (scr->sda_spec3)
-+		scr->cmds = UNSTUFF_BITS(resp, 32, 2);
-+	return 0;
-+}
-+
-+/*
-+ * Fetch and process SD Status register.
-+ */
-+static int mmc_read_ssr(struct mmc_card *card)
-+{
-+	unsigned int au, es, et, eo;
-+	int err, i;
-+	u32 *ssr;
-+
-+	if (!(card->csd.cmdclass & CCC_APP_SPEC)) {
-+		pr_warning("%s: card lacks mandatory SD Status "
-+			"function.\n", mmc_hostname(card->host));
-+		return 0;
-+	}
-+
-+	ssr = kmalloc(64, GFP_KERNEL);
-+	if (!ssr)
-+		return -ENOMEM;
-+
-+	err = mmc_app_sd_status(card, ssr);
-+	if (err) {
-+		pr_warning("%s: problem reading SD Status "
-+			"register.\n", mmc_hostname(card->host));
-+		err = 0;
-+		goto out;
-+	}
-+
-+	for (i = 0; i < 16; i++)
-+		ssr[i] = be32_to_cpu(ssr[i]);
-+
-+	/*
-+	 * UNSTUFF_BITS only works with four u32s so we have to offset the
-+	 * bitfield positions accordingly.
-+	 */
-+	au = UNSTUFF_BITS(ssr, 428 - 384, 4);
-+	if (au > 0 || au <= 9) {
-+		card->ssr.au = 1 << (au + 4);
-+		es = UNSTUFF_BITS(ssr, 408 - 384, 16);
-+		et = UNSTUFF_BITS(ssr, 402 - 384, 6);
-+		eo = UNSTUFF_BITS(ssr, 400 - 384, 2);
-+		if (es && et) {
-+			card->ssr.erase_timeout = (et * 1000) / es;
-+			card->ssr.erase_offset = eo * 1000;
-+		}
-+	} else {
-+		pr_warning("%s: SD Status: Invalid Allocation Unit "
-+			"size.\n", mmc_hostname(card->host));
-+	}
-+out:
-+	kfree(ssr);
-+	return err;
-+}
-+
-+/*
-+ * Fetches and decodes switch information
-+ */
-+static int mmc_read_switch(struct mmc_card *card)
-+{
-+	int err;
-+	u8 *status;
-+
-+	if (card->scr.sda_vsn < SCR_SPEC_VER_1)
-+		return 0;
-+
-+	if (!(card->csd.cmdclass & CCC_SWITCH)) {
-+		pr_warning("%s: card lacks mandatory switch "
-+			"function, performance might suffer.\n",
-+			mmc_hostname(card->host));
-+		return 0;
-+	}
-+
-+	err = -EIO;
-+
-+	status = kmalloc(64, GFP_KERNEL);
-+	if (!status) {
-+		pr_err("%s: could not allocate a buffer for "
-+			"switch capabilities.\n",
-+			mmc_hostname(card->host));
-+		return -ENOMEM;
-+	}
-+
-+	/* Find out the supported Bus Speed Modes. */
-+	err = mmc_sd_switch(card, 0, 0, 1, status);
-+	if (err) {
-+		/*
-+		 * If the host or the card can't do the switch,
-+		 * fail more gracefully.
-+		 */
-+		if (err != -EINVAL && err != -ENOSYS && err != -EFAULT)
-+			goto out;
-+
-+		pr_warning("%s: problem reading Bus Speed modes.\n",
-+			mmc_hostname(card->host));
-+		err = 0;
-+
-+		goto out;
-+	}
-+
-+	if (status[13] & SD_MODE_HIGH_SPEED)
-+		card->sw_caps.hs_max_dtr = HIGH_SPEED_MAX_DTR;
-+
-+	if (card->scr.sda_spec3) {
-+		card->sw_caps.sd3_bus_mode = status[13];
-+
-+		/* Find out Driver Strengths supported by the card */
-+		err = mmc_sd_switch(card, 0, 2, 1, status);
-+		if (err) {
-+			/*
-+			 * If the host or the card can't do the switch,
-+			 * fail more gracefully.
-+			 */
-+			if (err != -EINVAL && err != -ENOSYS && err != -EFAULT)
-+				goto out;
-+
-+			pr_warning("%s: problem reading "
-+				"Driver Strength.\n",
-+				mmc_hostname(card->host));
-+			err = 0;
-+
-+			goto out;
-+		}
-+
-+		card->sw_caps.sd3_drv_type = status[9];
-+
-+		/* Find out Current Limits supported by the card */
-+		err = mmc_sd_switch(card, 0, 3, 1, status);
-+		if (err) {
-+			/*
-+			 * If the host or the card can't do the switch,
-+			 * fail more gracefully.
-+			 */
-+			if (err != -EINVAL && err != -ENOSYS && err != -EFAULT)
-+				goto out;
-+
-+			pr_warning("%s: problem reading "
-+				"Current Limit.\n",
-+				mmc_hostname(card->host));
-+			err = 0;
-+
-+			goto out;
-+		}
-+
-+		card->sw_caps.sd3_curr_limit = status[7];
-+	}
-+
-+out:
-+	kfree(status);
-+
-+	return err;
-+}
-+
-+/*
-+ * Test if the card supports high-speed mode and, if so, switch to it.
-+ */
-+int mmc_sd_switch_hs(struct mmc_card *card)
-+{
-+	int err;
-+	u8 *status;
-+
-+	if (card->scr.sda_vsn < SCR_SPEC_VER_1)
-+		return 0;
-+
-+	if (!(card->csd.cmdclass & CCC_SWITCH))
-+		return 0;
-+
-+	if (!(card->host->caps & MMC_CAP_SD_HIGHSPEED))
-+		return 0;
-+
-+	if (card->sw_caps.hs_max_dtr == 0)
-+		return 0;
-+
-+	err = -EIO;
-+
-+	status = kmalloc(64, GFP_KERNEL);
-+	if (!status) {
-+		pr_err("%s: could not allocate a buffer for "
-+			"switch capabilities.\n", mmc_hostname(card->host));
-+		return -ENOMEM;
-+	}
-+
-+	err = mmc_sd_switch(card, 1, 0, 1, status);
-+	if (err)
-+		goto out;
-+
-+	if ((status[16] & 0xF) != 1) {
-+		pr_warning("%s: Problem switching card "
-+			"into high-speed mode!\n",
-+			mmc_hostname(card->host));
-+		err = 0;
-+	} else {
-+		err = 1;
-+	}
-+
-+out:
-+	kfree(status);
-+
-+	return err;
-+}
-+
-+static int sd_select_driver_type(struct mmc_card *card, u8 *status)
-+{
-+	int host_drv_type = SD_DRIVER_TYPE_B;
-+	int card_drv_type = SD_DRIVER_TYPE_B;
-+	int drive_strength;
-+	int err;
-+
-+	/*
-+	 * If the host doesn't support any of the Driver Types A,C or D,
-+	 * or there is no board specific handler then default Driver
-+	 * Type B is used.
-+	 */
-+	if (!(card->host->caps & (MMC_CAP_DRIVER_TYPE_A | MMC_CAP_DRIVER_TYPE_C
-+	    | MMC_CAP_DRIVER_TYPE_D)))
-+		return 0;
-+
-+	if (!card->host->ops->select_drive_strength)
-+		return 0;
-+
-+	if (card->host->caps & MMC_CAP_DRIVER_TYPE_A)
-+		host_drv_type |= SD_DRIVER_TYPE_A;
-+
-+	if (card->host->caps & MMC_CAP_DRIVER_TYPE_C)
-+		host_drv_type |= SD_DRIVER_TYPE_C;
-+
-+	if (card->host->caps & MMC_CAP_DRIVER_TYPE_D)
-+		host_drv_type |= SD_DRIVER_TYPE_D;
-+
-+	if (card->sw_caps.sd3_drv_type & SD_DRIVER_TYPE_A)
-+		card_drv_type |= SD_DRIVER_TYPE_A;
-+
-+	if (card->sw_caps.sd3_drv_type & SD_DRIVER_TYPE_C)
-+		card_drv_type |= SD_DRIVER_TYPE_C;
-+
-+	if (card->sw_caps.sd3_drv_type & SD_DRIVER_TYPE_D)
-+		card_drv_type |= SD_DRIVER_TYPE_D;
-+
-+	/*
-+	 * The drive strength that the hardware can support
-+	 * depends on the board design.  Pass the appropriate
-+	 * information and let the hardware specific code
-+	 * return what is possible given the options
-+	 */
-+	mmc_host_clk_hold(card->host);
-+	drive_strength = card->host->ops->select_drive_strength(
-+		card->sw_caps.uhs_max_dtr,
-+		host_drv_type, card_drv_type);
-+	mmc_host_clk_release(card->host);
-+
-+	err = mmc_sd_switch(card, 1, 2, drive_strength, status);
-+	if (err)
-+		return err;
-+
-+	if ((status[15] & 0xF) != drive_strength) {
-+		pr_warning("%s: Problem setting drive strength!\n",
-+			mmc_hostname(card->host));
-+		return 0;
-+	}
-+
-+	mmc_set_driver_type(card->host, drive_strength);
-+
-+	return 0;
-+}
-+
-+static void sd_update_bus_speed_mode(struct mmc_card *card)
-+{
-+	/*
-+	 * If the host doesn't support any of the UHS-I modes, fallback on
-+	 * default speed.
-+	 */
-+	if (!(card->host->caps & (MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25 |
-+	    MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_SDR104 | MMC_CAP_UHS_DDR50))) {
-+		card->sd_bus_speed = 0;
-+		return;
-+	}
-+
-+	if ((card->host->caps & MMC_CAP_UHS_SDR104) &&
-+	    (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR104)) {
-+			card->sd_bus_speed = UHS_SDR104_BUS_SPEED;
-+	} else if ((card->host->caps & MMC_CAP_UHS_DDR50) &&
-+		   (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_DDR50)) {
-+			card->sd_bus_speed = UHS_DDR50_BUS_SPEED;
-+	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
-+		    MMC_CAP_UHS_SDR50)) && (card->sw_caps.sd3_bus_mode &
-+		    SD_MODE_UHS_SDR50)) {
-+			card->sd_bus_speed = UHS_SDR50_BUS_SPEED;
-+	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
-+		    MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_SDR25)) &&
-+		   (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR25)) {
-+			card->sd_bus_speed = UHS_SDR25_BUS_SPEED;
-+	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
-+		    MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_SDR25 |
-+		    MMC_CAP_UHS_SDR12)) && (card->sw_caps.sd3_bus_mode &
-+		    SD_MODE_UHS_SDR12)) {
-+			card->sd_bus_speed = UHS_SDR12_BUS_SPEED;
-+	}
-+}
-+
-+static int sd_set_bus_speed_mode(struct mmc_card *card, u8 *status)
-+{
-+	int err;
-+	unsigned int timing = 0;
-+
-+	switch (card->sd_bus_speed) {
-+	case UHS_SDR104_BUS_SPEED:
-+		timing = MMC_TIMING_UHS_SDR104;
-+		card->sw_caps.uhs_max_dtr = UHS_SDR104_MAX_DTR;
-+		break;
-+	case UHS_DDR50_BUS_SPEED:
-+		timing = MMC_TIMING_UHS_DDR50;
-+		card->sw_caps.uhs_max_dtr = UHS_DDR50_MAX_DTR;
-+		break;
-+	case UHS_SDR50_BUS_SPEED:
-+		timing = MMC_TIMING_UHS_SDR50;
-+		card->sw_caps.uhs_max_dtr = UHS_SDR50_MAX_DTR;
-+		break;
-+	case UHS_SDR25_BUS_SPEED:
-+		timing = MMC_TIMING_UHS_SDR25;
-+		card->sw_caps.uhs_max_dtr = UHS_SDR25_MAX_DTR;
-+		break;
-+	case UHS_SDR12_BUS_SPEED:
-+		timing = MMC_TIMING_UHS_SDR12;
-+		card->sw_caps.uhs_max_dtr = UHS_SDR12_MAX_DTR;
-+		break;
-+	default:
-+		return 0;
-+	}
-+
-+	err = mmc_sd_switch(card, 1, 0, card->sd_bus_speed, status);
-+	if (err)
-+		return err;
-+
-+	if ((status[16] & 0xF) != card->sd_bus_speed)
-+		pr_warning("%s: Problem setting bus speed mode!\n",
-+			mmc_hostname(card->host));
-+	else {
-+		mmc_set_timing(card->host, timing);
-+		mmc_set_clock(card->host, card->sw_caps.uhs_max_dtr);
-+	}
-+
-+	return 0;
-+}
-+
-+static int sd_set_current_limit(struct mmc_card *card, u8 *status)
-+{
-+	int current_limit = 0;
-+	int err;
-+
-+	/*
-+	 * Current limit switch is only defined for SDR50, SDR104, and DDR50
-+	 * bus speed modes. For other bus speed modes, we set the default
-+	 * current limit of 200mA.
-+	 */
-+	if ((card->sd_bus_speed == UHS_SDR50_BUS_SPEED) ||
-+	    (card->sd_bus_speed == UHS_SDR104_BUS_SPEED) ||
-+	    (card->sd_bus_speed == UHS_DDR50_BUS_SPEED)) {
-+		if (card->host->caps & MMC_CAP_MAX_CURRENT_800) {
-+			if (card->sw_caps.sd3_curr_limit & SD_MAX_CURRENT_800)
-+				current_limit = SD_SET_CURRENT_LIMIT_800;
-+			else if (card->sw_caps.sd3_curr_limit &
-+					SD_MAX_CURRENT_600)
-+				current_limit = SD_SET_CURRENT_LIMIT_600;
-+			else if (card->sw_caps.sd3_curr_limit &
-+					SD_MAX_CURRENT_400)
-+				current_limit = SD_SET_CURRENT_LIMIT_400;
-+			else if (card->sw_caps.sd3_curr_limit &
-+					SD_MAX_CURRENT_200)
-+				current_limit = SD_SET_CURRENT_LIMIT_200;
-+		} else if (card->host->caps & MMC_CAP_MAX_CURRENT_600) {
-+			if (card->sw_caps.sd3_curr_limit & SD_MAX_CURRENT_600)
-+				current_limit = SD_SET_CURRENT_LIMIT_600;
-+			else if (card->sw_caps.sd3_curr_limit &
-+					SD_MAX_CURRENT_400)
-+				current_limit = SD_SET_CURRENT_LIMIT_400;
-+			else if (card->sw_caps.sd3_curr_limit &
-+					SD_MAX_CURRENT_200)
-+				current_limit = SD_SET_CURRENT_LIMIT_200;
-+		} else if (card->host->caps & MMC_CAP_MAX_CURRENT_400) {
-+			if (card->sw_caps.sd3_curr_limit & SD_MAX_CURRENT_400)
-+				current_limit = SD_SET_CURRENT_LIMIT_400;
-+			else if (card->sw_caps.sd3_curr_limit &
-+					SD_MAX_CURRENT_200)
-+				current_limit = SD_SET_CURRENT_LIMIT_200;
-+		} else if (card->host->caps & MMC_CAP_MAX_CURRENT_200) {
-+			if (card->sw_caps.sd3_curr_limit & SD_MAX_CURRENT_200)
-+				current_limit = SD_SET_CURRENT_LIMIT_200;
-+		}
-+	} else
-+		current_limit = SD_SET_CURRENT_LIMIT_200;
-+
-+	err = mmc_sd_switch(card, 1, 3, current_limit, status);
-+	if (err)
-+		return err;
-+
-+	if (((status[15] >> 4) & 0x0F) != current_limit)
-+		pr_warning("%s: Problem setting current limit!\n",
-+			mmc_hostname(card->host));
-+
-+	return 0;
-+}
-+
-+/*
-+ * UHS-I specific initialization procedure
-+ */
-+static int mmc_sd_init_uhs_card(struct mmc_card *card)
-+{
-+	int err;
-+	u8 *status;
-+
-+	if (!card->scr.sda_spec3)
-+		return 0;
-+
-+	if (!(card->csd.cmdclass & CCC_SWITCH))
-+		return 0;
-+
-+	status = kmalloc(64, GFP_KERNEL);
-+	if (!status) {
-+		pr_err("%s: could not allocate a buffer for "
-+			"switch capabilities.\n", mmc_hostname(card->host));
-+		return -ENOMEM;
-+	}
-+
-+	/* Set 4-bit bus width */
-+	if ((card->host->caps & MMC_CAP_4_BIT_DATA) &&
-+	    (card->scr.bus_widths & SD_SCR_BUS_WIDTH_4)) {
-+		err = mmc_app_set_bus_width(card, MMC_BUS_WIDTH_4);
-+		if (err)
-+			goto out;
-+
-+		mmc_set_bus_width(card->host, MMC_BUS_WIDTH_4);
-+	}
-+
-+	/*
-+	 * Select the bus speed mode depending on host
-+	 * and card capability.
-+	 */
-+	sd_update_bus_speed_mode(card);
-+
-+	/* Set the driver strength for the card */
-+	err = sd_select_driver_type(card, status);
-+	if (err)
-+		goto out;
-+
-+	/* Set current limit for the card */
-+	err = sd_set_current_limit(card, status);
-+	if (err)
-+		goto out;
-+
-+	/* Set bus speed mode of the card */
-+	err = sd_set_bus_speed_mode(card, status);
-+	if (err)
-+		goto out;
-+
-+	/* SPI mode doesn't define CMD19 */
-+	if (!mmc_host_is_spi(card->host) && card->host->ops->execute_tuning) {
-+		mmc_host_clk_hold(card->host);
-+		err = card->host->ops->execute_tuning(card->host,
-+						      MMC_SEND_TUNING_BLOCK);
-+		mmc_host_clk_release(card->host);
-+	}
-+
-+out:
-+	kfree(status);
-+
-+	return err;
-+}
-+
-+MMC_DEV_ATTR(cid, "%08x%08x%08x%08x\n", card->raw_cid[0], card->raw_cid[1],
-+	card->raw_cid[2], card->raw_cid[3]);
-+MMC_DEV_ATTR(csd, "%08x%08x%08x%08x\n", card->raw_csd[0], card->raw_csd[1],
-+	card->raw_csd[2], card->raw_csd[3]);
-+MMC_DEV_ATTR(scr, "%08x%08x\n", card->raw_scr[0], card->raw_scr[1]);
-+MMC_DEV_ATTR(date, "%02d/%04d\n", card->cid.month, card->cid.year);
-+MMC_DEV_ATTR(erase_size, "%u\n", card->erase_size << 9);
-+MMC_DEV_ATTR(preferred_erase_size, "%u\n", card->pref_erase << 9);
-+MMC_DEV_ATTR(fwrev, "0x%x\n", card->cid.fwrev);
-+MMC_DEV_ATTR(hwrev, "0x%x\n", card->cid.hwrev);
-+MMC_DEV_ATTR(manfid, "0x%06x\n", card->cid.manfid);
-+MMC_DEV_ATTR(name, "%s\n", card->cid.prod_name);
-+MMC_DEV_ATTR(oemid, "0x%04x\n", card->cid.oemid);
-+MMC_DEV_ATTR(serial, "0x%08x\n", card->cid.serial);
-+
-+
-+static struct attribute *sd_std_attrs[] = {
-+	&dev_attr_cid.attr,
-+	&dev_attr_csd.attr,
-+	&dev_attr_scr.attr,
-+	&dev_attr_date.attr,
-+	&dev_attr_erase_size.attr,
-+	&dev_attr_preferred_erase_size.attr,
-+	&dev_attr_fwrev.attr,
-+	&dev_attr_hwrev.attr,
-+	&dev_attr_manfid.attr,
-+	&dev_attr_name.attr,
-+	&dev_attr_oemid.attr,
-+	&dev_attr_serial.attr,
-+	NULL,
-+};
-+
-+static struct attribute_group sd_std_attr_group = {
-+	.attrs = sd_std_attrs,
-+};
-+
-+static const struct attribute_group *sd_attr_groups[] = {
-+	&sd_std_attr_group,
-+	NULL,
-+};
-+
-+struct device_type sd_type = {
-+	.groups = sd_attr_groups,
-+};
-+
-+/*
-+ * Fetch CID from card.
-+ */
-+int mmc_sd_get_cid(struct mmc_host *host, u32 ocr, u32 *cid, u32 *rocr)
-+{
-+	int err;
-+
-+	/*
-+	 * Since we're changing the OCR value, we seem to
-+	 * need to tell some cards to go back to the idle
-+	 * state.  We wait 1ms to give cards time to
-+	 * respond.
-+	 */
-+	mmc_go_idle(host);
-+
-+	/*
-+	 * If SD_SEND_IF_COND indicates an SD 2.0
-+	 * compliant card and we should set bit 30
-+	 * of the ocr to indicate that we can handle
-+	 * block-addressed SDHC cards.
-+	 */
-+	err = mmc_send_if_cond(host, ocr);
-+	if (!err)
-+		ocr |= SD_OCR_CCS;
-+
-+	/*
-+	 * If the host supports one of UHS-I modes, request the card
-+	 * to switch to 1.8V signaling level.
-+	 */
-+	if (host->caps & (MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25 |
-+	    MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_SDR104 | MMC_CAP_UHS_DDR50))
-+		ocr |= SD_OCR_S18R;
-+
-+	/* If the host can supply more than 150mA, XPC should be set to 1. */
-+	if (host->caps & (MMC_CAP_SET_XPC_330 | MMC_CAP_SET_XPC_300 |
-+	    MMC_CAP_SET_XPC_180))
-+		ocr |= SD_OCR_XPC;
-+
-+try_again:
-+	err = mmc_send_app_op_cond(host, ocr, rocr);
-+	if (err)
-+		return err;
-+
-+	/*
-+	 * In case CCS and S18A in the response is set, start Signal Voltage
-+	 * Switch procedure. SPI mode doesn't support CMD11.
-+	 */
-+	if (!mmc_host_is_spi(host) && rocr &&
-+	   ((*rocr & 0x41000000) == 0x41000000)) {
-+		err = mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_180, true);
-+		if (err) {
-+			ocr &= ~SD_OCR_S18R;
-+			goto try_again;
-+		}
-+	}
-+
-+	if (mmc_host_is_spi(host))
-+		err = mmc_send_cid(host, cid);
-+	else
-+		err = mmc_all_send_cid(host, cid);
-+
-+	return err;
-+}
-+
-+int mmc_sd_get_csd(struct mmc_host *host, struct mmc_card *card)
-+{
-+	int err;
-+
-+	/*
-+	 * Fetch CSD from card.
-+	 */
-+	err = mmc_send_csd(card, card->raw_csd);
-+	if (err)
-+		return err;
-+
-+	err = mmc_decode_csd(card);
-+	if (err)
-+		return err;
-+
-+	return 0;
-+}
-+
-+int mmc_sd_setup_card(struct mmc_host *host, struct mmc_card *card,
-+	bool reinit)
-+{
-+	int err;
-+
-+	if (!reinit) {
-+		/*
-+		 * Fetch SCR from card.
-+		 */
-+		err = mmc_app_send_scr(card, card->raw_scr);
-+		if (err)
-+			return err;
-+
-+		err = mmc_decode_scr(card);
-+		if (err)
-+			return err;
-+
-+		/*
-+		 * Fetch and process SD Status register.
-+		 */
-+		err = mmc_read_ssr(card);
-+		if (err)
-+			return err;
-+
-+		/* Erase init depends on CSD and SSR */
-+		mmc_init_erase(card);
-+
-+		/*
-+		 * Fetch switch information from card.
-+		 */
-+		err = mmc_read_switch(card);
-+		if (err)
-+			return err;
-+	}
-+
-+	/*
-+	 * For SPI, enable CRC as appropriate.
-+	 * This CRC enable is located AFTER the reading of the
-+	 * card registers because some SDHC cards are not able
-+	 * to provide valid CRCs for non-512-byte blocks.
-+	 */
-+	if (mmc_host_is_spi(host)) {
-+		err = mmc_spi_set_crc(host, use_spi_crc);
-+		if (err)
-+			return err;
-+	}
-+
-+	/*
-+	 * Check if read-only switch is active.
-+	 */
-+	if (!reinit) {
-+		int ro = -1;
-+
-+		if (host->ops->get_ro) {
-+			mmc_host_clk_hold(card->host);
-+			ro = host->ops->get_ro(host);
-+			mmc_host_clk_release(card->host);
-+		}
-+
-+		if (ro < 0) {
-+			pr_warning("%s: host does not "
-+				"support reading read-only "
-+				"switch. assuming write-enable.\n",
-+				mmc_hostname(host));
-+		} else if (ro > 0) {
-+			mmc_card_set_readonly(card);
-+		}
-+	}
-+
-+	return 0;
-+}
-+
-+unsigned mmc_sd_get_max_clock(struct mmc_card *card)
-+{
-+	unsigned max_dtr = (unsigned int)-1;
-+
-+	if (mmc_card_highspeed(card)) {
-+		if (max_dtr > card->sw_caps.hs_max_dtr)
-+			max_dtr = card->sw_caps.hs_max_dtr;
-+	} else if (max_dtr > card->csd.max_dtr) {
-+		max_dtr = card->csd.max_dtr;
-+	}
-+
-+	return max_dtr;
-+}
-+
-+void mmc_sd_go_highspeed(struct mmc_card *card)
-+{
-+	mmc_card_set_highspeed(card);
-+	mmc_set_timing(card->host, MMC_TIMING_SD_HS);
-+}
-+
-+/*
-+ * Handle the detection and initialisation of a card.
-+ *
-+ * In the case of a resume, "oldcard" will contain the card
-+ * we're trying to reinitialise.
-+ */
-+static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
-+	struct mmc_card *oldcard)
-+{
-+	struct mmc_card *card;
-+	int err;
-+	u32 cid[4];
-+	u32 rocr = 0;
-+
-+	BUG_ON(!host);
-+	WARN_ON(!host->claimed);
-+
-+	/* The initialization should be done at 3.3 V I/O voltage. */
-+	mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_330, 0);
-+
-+	err = mmc_sd_get_cid(host, ocr, cid, &rocr);
-+	if (err)
-+		return err;
-+
-+	if (oldcard) {
-+		if (memcmp(cid, oldcard->raw_cid, sizeof(cid)) != 0)
-+			return -ENOENT;
-+
-+		card = oldcard;
-+	} else {
-+		/*
-+		 * Allocate card structure.
-+		 */
-+		card = mmc_alloc_card(host, &sd_type);
-+		if (IS_ERR(card))
-+			return PTR_ERR(card);
-+
-+		card->type = MMC_TYPE_SD;
-+		memcpy(card->raw_cid, cid, sizeof(card->raw_cid));
-+	}
-+
-+	/*
-+	 * For native busses:  get card RCA and quit open drain mode.
-+	 */
-+	if (!mmc_host_is_spi(host)) {
-+		err = mmc_send_relative_addr(host, &card->rca);
-+		if (err)
-+			return err;
-+	}
-+
-+	if (!oldcard) {
-+		err = mmc_sd_get_csd(host, card);
-+		if (err)
-+			return err;
-+
-+		mmc_decode_cid(card);
-+	}
-+
-+	/*
-+	 * Select card, as all following commands rely on that.
-+	 */
-+	if (!mmc_host_is_spi(host)) {
-+		err = mmc_select_card(card);
-+		if (err)
-+			return err;
-+	}
-+
-+	err = mmc_sd_setup_card(host, card, oldcard != NULL);
-+	if (err)
-+		goto free_card;
-+
-+	/* Initialization sequence for UHS-I cards */
-+	if (rocr & SD_ROCR_S18A) {
-+		err = mmc_sd_init_uhs_card(card);
-+		if (err)
-+			goto free_card;
-+
-+		/* Card is an ultra-high-speed card */
-+		mmc_card_set_uhs(card);
-+
-+		/*
-+		 * Since initialization is now complete, enable preset
-+		 * value registers for UHS-I cards.
-+		 */
-+		if (host->ops->enable_preset_value) {
-+			mmc_host_clk_hold(card->host);
-+			host->ops->enable_preset_value(host, true);
-+			mmc_host_clk_release(card->host);
-+		}
-+	} else {
-+		/*
-+		 * Attempt to change to high-speed (if supported)
-+		 */
-+		err = mmc_sd_switch_hs(card);
-+		if (err > 0)
-+			mmc_sd_go_highspeed(card);
-+		else if (err)
-+			goto free_card;
-+
-+		/*
-+		 * Set bus speed.
-+		 */
-+		mmc_set_clock(host, mmc_sd_get_max_clock(card));
-+
-+		/*
-+		 * Switch to wider bus (if supported).
-+		 */
-+		if ((host->caps & MMC_CAP_4_BIT_DATA) &&
-+			(card->scr.bus_widths & SD_SCR_BUS_WIDTH_4)) {
-+			err = mmc_app_set_bus_width(card, MMC_BUS_WIDTH_4);
-+			if (err)
-+				goto free_card;
-+
-+			mmc_set_bus_width(host, MMC_BUS_WIDTH_4);
-+		}
-+	}
-+
-+	host->card = card;
-+	return 0;
-+
-+free_card:
-+	if (!oldcard)
-+		mmc_remove_card(card);
-+
-+	return err;
-+}
-+
-+/*
-+ * Host is being removed. Free up the current card.
-+ */
-+static void mmc_sd_remove(struct mmc_host *host)
-+{
-+	BUG_ON(!host);
-+	BUG_ON(!host->card);
-+
-+	mmc_remove_card(host->card);
-+	host->card = NULL;
-+}
-+
-+/*
-+ * Card detection - card is alive.
-+ */
-+static int mmc_sd_alive(struct mmc_host *host)
-+{
-+	return mmc_send_status(host->card, NULL);
-+}
-+
-+/*
-+ * Card detection callback from host.
-+ */
-+static void mmc_sd_detect(struct mmc_host *host)
-+{
-+	int err;
-+
-+	BUG_ON(!host);
-+	BUG_ON(!host->card);
-+
-+	mmc_claim_host(host);
-+
-+	/*
-+	 * Just check if our card has been removed.
-+	 */
-+	err = _mmc_detect_card_removed(host);
-+
-+	mmc_release_host(host);
-+
-+	if (err) {
-+		mmc_sd_remove(host);
-+
-+		mmc_claim_host(host);
-+		mmc_detach_bus(host);
-+		mmc_power_off(host);
-+		mmc_release_host(host);
-+	}
-+}
-+
-+/*
-+ * Suspend callback from host.
-+ */
-+static int mmc_sd_suspend(struct mmc_host *host)
-+{
-+	BUG_ON(!host);
-+	BUG_ON(!host->card);
-+
-+	mmc_claim_host(host);
-+	if (!mmc_host_is_spi(host))
-+		mmc_deselect_cards(host);
-+	host->card->state &= ~MMC_STATE_HIGHSPEED;
-+	mmc_release_host(host);
-+
-+	return 0;
-+}
-+
-+/*
-+ * Resume callback from host.
-+ *
-+ * This function tries to determine if the same card is still present
-+ * and, if so, restore all state to it.
-+ */
-+static int mmc_sd_resume(struct mmc_host *host)
-+{
-+	int err;
-+
-+	BUG_ON(!host);
-+	BUG_ON(!host->card);
-+
-+	mmc_claim_host(host);
-+	err = mmc_sd_init_card(host, host->ocr, host->card);
-+	mmc_release_host(host);
-+
-+	return err;
-+}
-+
-+static int mmc_sd_power_restore(struct mmc_host *host)
-+{
-+	int ret;
-+
-+	host->card->state &= ~MMC_STATE_HIGHSPEED;
-+	mmc_claim_host(host);
-+	ret = mmc_sd_init_card(host, host->ocr, host->card);
-+	mmc_release_host(host);
-+
-+	return ret;
-+}
-+
-+static const struct mmc_bus_ops mmc_sd_ops = {
-+	.remove = mmc_sd_remove,
-+	.detect = mmc_sd_detect,
-+	.suspend = NULL,
-+	.resume = NULL,
-+	.power_restore = mmc_sd_power_restore,
-+	.alive = mmc_sd_alive,
-+};
-+
-+static const struct mmc_bus_ops mmc_sd_ops_unsafe = {
-+	.remove = mmc_sd_remove,
-+	.detect = mmc_sd_detect,
-+	.suspend = mmc_sd_suspend,
-+	.resume = mmc_sd_resume,
-+	.power_restore = mmc_sd_power_restore,
-+	.alive = mmc_sd_alive,
-+};
-+
-+static void mmc_sd_attach_bus_ops(struct mmc_host *host)
-+{
-+	const struct mmc_bus_ops *bus_ops;
-+
-+	if (!mmc_card_is_removable(host))
-+		bus_ops = &mmc_sd_ops_unsafe;
-+	else
-+		bus_ops = &mmc_sd_ops;
-+	mmc_attach_bus(host, bus_ops);
-+}
-+
-+/*
-+ * Starting point for SD card init.
-+ */
-+int mmc_attach_sd(struct mmc_host *host)
-+{
-+	int err;
-+	u32 ocr;
-+
-+	BUG_ON(!host);
-+	WARN_ON(!host->claimed);
-+
-+	/* Disable preset value enable if already set since last time */
-+	if (host->ops->enable_preset_value) {
-+		mmc_host_clk_hold(host);
-+		host->ops->enable_preset_value(host, false);
-+		mmc_host_clk_release(host);
-+	}
-+
-+	err = mmc_send_app_op_cond(host, 0, &ocr);
-+	if (err)
-+		return err;
-+
-+	mmc_sd_attach_bus_ops(host);
-+	if (host->ocr_avail_sd)
-+		host->ocr_avail = host->ocr_avail_sd;
-+
-+	/*
-+	 * We need to get OCR a different way for SPI.
-+	 */
-+	if (mmc_host_is_spi(host)) {
-+		mmc_go_idle(host);
-+
-+		err = mmc_spi_read_ocr(host, 0, &ocr);
-+		if (err)
-+			goto err;
-+	}
-+
-+	/*
-+	 * Sanity check the voltages that the card claims to
-+	 * support.
-+	 */
-+	if (ocr & 0x7F) {
-+		pr_warning("%s: card claims to support voltages "
-+		       "below the defined range. These will be ignored.\n",
-+		       mmc_hostname(host));
-+		ocr &= ~0x7F;
-+	}
-+
-+	if ((ocr & MMC_VDD_165_195) &&
-+	    !(host->ocr_avail_sd & MMC_VDD_165_195)) {
-+		pr_warning("%s: SD card claims to support the "
-+		       "incompletely defined 'low voltage range'. This "
-+		       "will be ignored.\n", mmc_hostname(host));
-+		ocr &= ~MMC_VDD_165_195;
-+	}
-+
-+	host->ocr = mmc_select_voltage(host, ocr);
-+
-+	/*
-+	 * Can we support the voltage(s) of the card(s)?
-+	 */
-+	if (!host->ocr) {
-+		err = -EINVAL;
-+		goto err;
-+	}
-+
-+	/*
-+	 * Detect and init the card.
-+	 */
-+	err = mmc_sd_init_card(host, host->ocr, NULL);
-+	if (err)
-+		goto err;
-+
-+	mmc_release_host(host);
-+	err = mmc_add_card(host->card);
-+	mmc_claim_host(host);
-+	if (err)
-+		goto remove_card;
-+
-+	return 0;
-+
-+remove_card:
-+	mmc_release_host(host);
-+	mmc_remove_card(host->card);
-+	host->card = NULL;
-+	mmc_claim_host(host);
-+err:
-+	mmc_detach_bus(host);
-+
-+	pr_err("%s: error %d whilst initialising SD card\n",
-+		mmc_hostname(host), err);
-+
-+	return err;
-+}
-+
-diff -urN a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
---- a/drivers/mmc/host/mvsdio.c	2012-05-20 18:29:13.000000000 -0400
-+++ b/drivers/mmc/host/mvsdio.c	2012-05-24 12:02:12.000000000 -0400
-@@ -21,6 +21,7 @@
- #include <linux/irq.h>
+diff -ruN a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
+--- a/drivers/mmc/host/mvsdio.c	2012-08-09 11:23:56.000000000 -0400
++++ b/drivers/mmc/host/mvsdio.c	2012-08-10 11:26:52.000000000 -0400
+@@ -22,6 +22,7 @@
+ #include <linux/clk.h>
  #include <linux/gpio.h>
  #include <linux/mmc/host.h>
 +#include <linux/mmc/sd.h>
  
  #include <asm/sizes.h>
  #include <asm/unaligned.h>
-@@ -148,6 +149,7 @@
+@@ -150,6 +151,7 @@
  
  	dev_dbg(host->dev, "cmd %d (hw state 0x%04x)\n",
  		cmd->opcode, mvsd_read(MVSD_HW_STATE));
