@@ -1,6 +1,5 @@
-# $Id: PKGBUILD 146512 2012-01-12 08:07:59Z andrea $
-# Maintainer:
-# Contributor: Andrea Scarpino <andrea@archlinux.org>
+# $Id: PKGBUILD 165439 2012-08-19 15:29:10Z andrea $
+# Maintainer: Andrea Scarpino <andrea@archlinux.org>
 # Contributor: Douglas Soares de Andrade <douglas@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
@@ -9,19 +8,20 @@
 pkgbase=mysql
 pkgname=('libmysqlclient' 'mysql-clients' 'mysql')
 pkgver=5.5.27
-pkgrel=1
+pkgrel=3
 arch=('i686' 'x86_64')
 license=('GPL')
 url="https://www.mysql.com/products/community/"
 makedepends=('cmake' 'openssl' 'zlib')
 options=('!libtool')
 source=("http://ftp.gwdg.de/pub/misc/mysql/Downloads/MySQL-5.5/${pkgbase}-${pkgver}.tar.gz"
-        'mysqld'
-        'my.cnf'
-        'alarm.patch')
+        'mysqld.rc' 'my.cnf' 'mysqld-post.sh' 'mysqld-tmpfile.conf' 'mysqld.service' 'alarm.patch')
 md5sums=('82baf46acfced6eef072e9d8a479c86e'
-         '2234207625baa29b2ff7d7b4f088abce'
+         'e7eb2faeab755cbb2fe03542bf328da9'
          '1c949c0dbea5206af0db14942d9927b6'
+         '6ea6ceb360d09a774e87335ee098ddd5'
+         '2fa6e456964d4ff5e6d4f9ff0126aed6'
+         'a0e1460c276a50a9666c331de83271f2'
          '9eb0ad531d162e031a2bcc08a5ab3bc5')
 
 build() {
@@ -32,15 +32,13 @@ build() {
   cd build
 
   # CFLAGS/CXXFLAGS as suggested upstream
-  CFLAGS="-fPIC ${CFLAGS} -fno-strict-aliasing -DBIG_JOINS=1 -fomit-frame-pointer" \
-  CXXFLAGS="-fPIC ${CXXFLAGS} -fno-strict-aliasing -DBIG_JOINS=1 -felide-constructors -fno-rtti" \
 
   cmake ../${pkgbase}-${pkgver} \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DSYSCONFDIR=/etc/mysql \
     -DMYSQL_DATADIR=/var/lib/mysql \
-    -DMYSQL_UNIX_ADDR=/var/run/mysqld/mysqld.sock \
+    -DMYSQL_UNIX_ADDR=/run/mysqld/mysqld.sock \
     -DDEFAULT_CHARSET=utf8 \
     -DDEFAULT_COLLATION=utf8_general_ci \
     -DENABLED_LOCAL_INFILE=ON \
@@ -77,7 +75,7 @@ package_libmysqlclient(){
   pkgdesc="MySQL client libraries"
   depends=('openssl')
   
-  cd "${srcdir}"/build
+  cd build
   for dir in include libmysql libmysqld libservices; do
     make -C ${dir} DESTDIR="${pkgdir}" install
   done
@@ -94,7 +92,7 @@ package_mysql-clients(){
   pkgdesc="MySQL client tools"
   depends=('libmysqlclient')
   
-  cd "${srcdir}"/build
+  cd build
   make -C client DESTDIR="${pkgdir}" install
 
   # install man pages
@@ -111,15 +109,18 @@ package_mysql(){
   pkgdesc="A fast SQL database server"
   backup=('etc/mysql/my.cnf')
   install=mysql.install
-  depends=('mysql-clients')
-  optdepends=('perl-dbi' 'perl-dbd-mysql')
+  depends=('mysql-clients' 'systemd-tools')
   options=('emptydirs')
 
-  cd "${srcdir}"/build
+  cd build
   make DESTDIR="${pkgdir}" install
 
   install -Dm644 "${srcdir}"/my.cnf "${pkgdir}"/etc/mysql/my.cnf
-  install -Dm755 "${srcdir}"/mysqld "${pkgdir}"/etc/rc.d/mysqld
+  install -Dm755 "${srcdir}"/mysqld.rc "${pkgdir}"/etc/rc.d/mysqld
+  install -Dm755 "${srcdir}"/mysqld-post.sh "${pkgdir}"/usr/bin/mysqld-post
+  install -Dm644 "${srcdir}"/mysqld-tmpfile.conf "${pkgdir}"/usr/lib/tmpfiles.d/mysqld.conf
+  install -d "${pkgdir}"/usr/lib/systemd/system
+  install -Dm644 "${srcdir}"/mysqld.service "${pkgdir}"/usr/lib/systemd/system/
 
   # provided by libmysqlclient
   rm "${pkgdir}"/usr/bin/{mysql_config,mysql_client_test_embedded,mysqltest_embedded}
