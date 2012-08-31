@@ -6,8 +6,6 @@
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
 #  - Build v7h with -O1 instead of -O2
 
-plugrel=1
-
 pkgbase=mesa
 pkgname=('mesa' 'libgl' 'osmesa' 'libglapi' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
 
@@ -21,10 +19,10 @@ if [ "${_git}" = "true" ]; then
   else
     pkgver=8.0.4
 fi
-pkgrel=2
+pkgrel=3
 arch=('i686' 'x86_64')
 makedepends=('glproto>=1.4.15' 'libdrm>=2.4.30' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.99.1' 'libxt>=1.1.1' 
-             'gcc-libs>=4.7.1-5' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'udev>=183')
+             'gcc-libs>=4.7.1-5' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'systemd-tools')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 source=(LICENSE
@@ -56,7 +54,9 @@ if [ "${_git}" = "true" ]; then
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
     --with-gallium-drivers=swrast \
     --enable-gallium-llvm \
+    --enable-egl \
     --enable-gallium-egl \
+    --with-egl-platforms=x11,drm \
     --enable-shared-glapi \
     --enable-gbm \
     --enable-glx-tls \
@@ -65,7 +65,6 @@ if [ "${_git}" = "true" ]; then
     --enable-osmesa \
     --enable-gles1 \
     --enable-gles2 \
-    --enable-egl \
     --enable-texture-float \
     --enable-xa \
     --enable-shared-dricore
@@ -79,7 +78,9 @@ if [ "${_git}" = "true" ]; then
     --with-dri-drivers=swrast \
     --with-gallium-drivers=swrast \
     --enable-gallium-llvm \
+    --enable-egl \
     --enable-gallium-egl \
+    --with-egl-platforms=x11,drm \
     --enable-shared-glapi \
     --enable-gbm \
     --enable-glx-tls \
@@ -88,7 +89,6 @@ if [ "${_git}" = "true" ]; then
     --enable-osmesa \
     --enable-gles1 \
     --enable-gles2 \
-    --enable-egl \
     --enable-texture-float \
     --enable-xa \
     --enable-shared-dricore
@@ -140,12 +140,15 @@ package_libglapi() {
 }
 
 package_libgbm() {
-  depends=('glibc')
+  depends=('systemd-tools')
   pkgdesc="Mesa gbm library"
 
   cd ${srcdir}/?esa-*
-  install -m755 -d "${pkgdir}/usr/lib"
+  install -m755 -d ${pkgdir}/usr/{include,lib/gbm}
   bin/minstall lib/libgbm.so* "${pkgdir}/usr/lib/"
+  bin/minstall src/gbm/main/gbm.h "${pkgdir}/usr/include/"
+  bin/minstall lib/libgbm.so* "${pkgdir}/usr/lib/"
+  bin/minstall lib/gbm/gbm_gallium_drm.so* "${pkgdir}/usr/lib/gbm/"
   install -m755 -d "${pkgdir}/usr/lib/pkgconfig"
   bin/minstall src/gbm/main/gbm.pc "${pkgdir}/usr/lib/pkgconfig/"
 
@@ -175,7 +178,7 @@ package_libgles() {
 }
 
 package_libegl() {
-  depends=('libglapi' 'libdrm' 'libxext' 'libxfixes' 'udev' 'khrplatform-devel')
+  depends=('libglapi' 'libdrm' 'libxext' 'libxfixes' 'libdbm' 'khrplatform-devel')
   pkgdesc="Mesa EGL libraries and headers"
 
   cd ${srcdir}/?esa-*   
@@ -226,12 +229,14 @@ package_mesa() {
   rm -f "${pkgdir}/usr/lib/libEGL"*
   rm -rf "${pkgdir}/usr/lib/egl"
   rm -f "${pkgdir}/usr/lib/libOSMesa"*
+  rm -rf "${pkgdir}/usr/lib/gbm"
   rm -f ${pkgdir}/usr/lib/pkgconfig/{glesv1_cm.pc,glesv2.pc,egl.pc,osmesa.pc,gbm.pc}
   rm -rf "${pkgdir}/usr/lib/xorg"
   rm -f "${pkgdir}/usr/include/GL/glew.h"
   rm -f "${pkgdir}/usr/include/GL/glxew.h"
   rm -f "${pkgdir}/usr/include/GL/wglew.h"
   rm -f "${pkgdir}/usr/include/GL/glut.h"
+  rm -f "${pkgdir}/usr/include/gbm.h"
   rm -rf ${pkgdir}/usr/include/{GLES,GLES2,EGL,KHR}
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
