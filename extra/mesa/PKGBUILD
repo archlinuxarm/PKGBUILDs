@@ -19,7 +19,7 @@ if [ "${_git}" = "true" ]; then
   else
     pkgver=8.0.4
 fi
-pkgrel=3
+pkgrel=3.1
 arch=('i686' 'x86_64')
 makedepends=('glproto>=1.4.15' 'libdrm>=2.4.30' 'libxxf86vm>=1.1.1' 'libxdamage>=1.1.3' 'expat>=2.0.1' 'libx11>=1.4.99.1' 'libxt>=1.1.1' 
              'gcc-libs>=4.7.1-5' 'dri2proto>=2.6' 'python2' 'libxml2' 'imake' 'llvm' 'systemd-tools')
@@ -178,7 +178,7 @@ package_libgles() {
 }
 
 package_libegl() {
-  depends=('libglapi' 'libdrm' 'libxext' 'libxfixes' 'libdbm' 'khrplatform-devel')
+  depends=('libglapi' 'libdrm' 'libxext' 'libxfixes' 'libgbm' 'khrplatform-devel')
   pkgdesc="Mesa EGL libraries and headers"
 
   cd ${srcdir}/?esa-*   
