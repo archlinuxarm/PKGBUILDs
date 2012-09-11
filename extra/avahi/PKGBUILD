@@ -1,0 +1,78 @@
+# $Id: PKGBUILD 166539 2012-09-10 04:37:24Z bisson $
+# Contributor: Douglas Soares de Andrade <douglas@archlinux.org>
+# Maintainer: Gaetan Bisson <bisson@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - drop qt3 bindings
+
+pkgname=avahi
+pkgver=0.6.31
+pkgrel=4
+pkgdesc='Multicast/unicast DNS-SD framework'
+url='http://www.avahi.org/'
+license=('LGPL')
+arch=('i686' 'x86_64')
+options=('!libtool' '!emptydirs')
+depends=('expat' 'libdaemon' 'glib2' 'dbus' 'libcap' 'gdbm')
+optdepends=('gtk3: avahi-discover-standalone, bshell, bssh, bvnc'
+            'gtk2: gtk2 bindings'
+            'qt: qt bindings'
+            'pygtk: avahi-bookmarks, avahi-discover'
+            'twisted: avahi-bookmarks'
+            'mono: mono bindings'
+            'dbus-python: avahi-discover'
+            'nss-mdns: NSS support for mDNS')
+makedepends=('qt' 'pygtk' 'mono' 'intltool' 'dbus-python'
+             'gtk-sharp-2' 'gobject-introspection' 'gtk3' 'xmltoman')
+backup=('etc/avahi/hosts'
+        'etc/avahi/avahi-daemon.conf'
+        'etc/avahi/services/ssh.service'
+        'etc/avahi/services/sftp-ssh.service')
+source=("http://www.avahi.org/download/avahi-${pkgver}.tar.gz"
+        'rc.d.patch')
+sha1sums=('7e05bd78572c9088b03b1207a0ad5aba38490684'
+          '625ad7c131c0c1c383caeddef18fc7a32d8f3ab9')
+
+conflicts=('howl' 'mdnsresponder')
+provides=('howl' 'mdnsresponder')
+
+install=install
+
+build() {
+	cd "${srcdir}/${pkgname}-${pkgver}"
+
+	sed -i 's/netdev/network/g' avahi-daemon/avahi-dbus.conf
+	patch -p1 -i ../rc.d.patch
+
+	# pygtk requires python2; make it explicit in case other python are installed: FS#21865
+	PYTHON=python2 \
+	PKG_CONFIG_PATH=/opt/qt/lib/pkgconfig \
+	./configure \
+		--prefix=/usr \
+		--sysconfdir=/etc \
+		--localstatedir=/var \
+		--disable-static \
+		--disable-monodoc \
+                --disable-qt3 \
+		--enable-compat-libdns_sd \
+		--enable-compat-howl \
+		--with-distro=archlinux \
+		--with-avahi-priv-access-group=network \
+		--with-autoipd-user=avahi \
+		--with-autoipd-group=avahi \
+		--with-systemdsystemunitdir=/usr/lib/systemd/system \
+
+	make
+}
+
+package() {
+	cd "${srcdir}/${pkgname}-${pkgver}"
+	make DESTDIR="${pkgdir}" install
+
+	cd "${pkgdir}"
+	sed -i '1c #!/usr/bin/python2' usr/bin/avahi-{bookmarks,discover}
+
+	# howl and mdnsresponder compatability
+	(cd usr/include; ln -s avahi-compat-libdns_sd/dns_sd.h dns_sd.h; ln -s avahi-compat-howl howl)
+	(cd usr/lib/pkgconfig; ln -s avahi-compat-howl.pc howl.pc)
+}
