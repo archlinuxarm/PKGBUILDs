@@ -15,13 +15,13 @@ noautobuild=1
 
 pkgname=glibc
 pkgver=2.16.0
-pkgrel=1
+pkgrel=4
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
 url="http://www.gnu.org/software/libc"
 license=('GPL' 'LGPL')
 groups=('base')
-depends=('linux-api-headers>=3.4' 'tzdata')
+depends=('linux-api-headers>=3.5' 'tzdata')
 makedepends=('gcc>=4.7')
 backup=(etc/gai.conf
         etc/locale.gen
@@ -32,6 +32,9 @@ source=(http://ftp.gnu.org/gnu/libc/${pkgname}-${pkgver}.tar.xz{,.sig}
         http://ftp.gnu.org/gnu/libc/glibc-ports-${pkgver}.tar.bz2
         glibc-2.15-fix-res_query-assert.patch
         glibc-2.15-revert-c5a0802a.patch
+        glibc-2.16-rpcgen-cpp-path.patch
+        glibc-2.16-strncasecmp-segfault.patch
+        glibc-2.16-strtod-overflow.patch
         local-soname-hack.diff
         nscd.rcd
         nscd.service
@@ -43,6 +46,9 @@ md5sums=('80b181b02ab249524ec92822c0174cf7'
          '668bcd584718ff0c6aa2f14b668595b6'
          '31f415b41197d85d3bbee3d1eecd06a3'
          '0a0383d50d63f1c02919fe9943b82014'
+         'ea6a43915474e8276e9361eed6a01280'
+         'f042d37cc8ca3459023431809039bc88'
+         '61d322f7681a85d3293ada5c3ccc2c7e'
          'fa192d063312907797eb48f59da99588'
          '589d79041aa767a5179eaa4e2737dd3f'
          'ad8a9af15ab7eeaa23dc7ee85024af9f'
@@ -65,6 +71,18 @@ build() {
   # https://bugzilla.redhat.com/show_bug.cgi?id=552960
   patch -p1 -i ${srcdir}/glibc-2.15-revert-c5a0802a.patch
 
+  # prevent need for /lib/cpp symlink
+  # http://sourceware.org/git/?p=glibc.git;a=commit;h=bf9b740a
+  patch -p1 -i ${srcdir}/glibc-2.16-rpcgen-cpp-path.patch
+
+  # strncasecmp segfault on i686
+  # http://sourceware.org/git/?p=glibc.git;a=commit;h=6db8f737
+  patch -p1 -i ${srcdir}/glibc-2.16-strncasecmp-segfault.patch
+
+  # strtod integer/buffer overflow
+  # http://sourceware.org/git/?p=glibc.git;a=commit;h=da1f4319
+  patch -p1 -i ${srcdir}/glibc-2.16-strtod-overflow.patch
+
   cd ${srcdir}
   mkdir glibc-build
   cd glibc-build
@@ -80,7 +98,7 @@ build() {
   [[ $CARCH == "armv6h" ]] && CONFIGFLAG="--host=armv6l-unknown-linux-gnueabihf --build=armv6l-unknown-linux-gnueabihf" && MAKEFLAG="-j2"
   [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf" && MAKEFLAG="-j2"
 
-  echo "slibdir=/lib" >> configparms
+  echo "slibdir=/usr/lib" >> configparms
 
   # remove hardening options from CFLAGS for building libraries
   CFLAGS=${CFLAGS/-fstack-protector/}
@@ -125,6 +143,9 @@ package() {
 
   rm -f ${pkgdir}/etc/ld.so.{cache,conf}
 
+  # eventually this will move to the filesystem package
+  ln -s usr/lib ${pkgdir}/lib
+
   install -dm755 ${pkgdir}/{etc/rc.d,usr/{sbin,lib/{,locale,systemd/system,tmpfiles.d}}}
 
   install -m644 ${srcdir}/${pkgname}-${pkgver}/nscd/nscd.conf ${pkgdir}/etc/nscd.conf
@@ -168,9 +189,9 @@ package() {
 
   strip $STRIP_STATIC usr/lib/*.a
 
-  strip $STRIP_SHARED lib/{libanl,libBrokenLocale,libcidn,libcrypt}-*.so \
-                      lib/libnss_{compat,db,dns,files,hesiod,nis,nisplus}-*.so \
-                      lib/{libdl,libm,libnsl,libresolv,librt,libutil}-*.so \
-                      lib/{libmemusage,libpcprofile,libSegFault}.so \
+  strip $STRIP_SHARED usr/lib/{libanl,libBrokenLocale,libcidn,libcrypt}-*.so \
+                      usr/lib/libnss_{compat,db,dns,files,hesiod,nis,nisplus}-*.so \
+                      usr/lib/{libdl,libm,libnsl,libresolv,librt,libutil}-*.so \
+                      usr/lib/{libmemusage,libpcprofile,libSegFault}.so \
                       usr/lib/{pt_chown,{audit,gconv}/*.so}
 }
