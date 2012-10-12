@@ -1,0 +1,219 @@
+# Maintainer: Mike Staszel <mikestaszel@plugapps.com>
+# Maintainer: Kevin Mihelich <kevin@plugapps.com>
+
+buildarch=2
+
+pkgbase=linux-kirkwood-dt
+pkgname=('linux-kirkwood-dt' 'linux-headers-kirkwood-dt')
+#pkgname=linux-test       # Build kernel with a different name
+_kernelname=${pkgname#linux}
+_basekernel=next.20121011
+pkgver=${_basekernel}
+pkgrel=1
+cryptover=1.5
+arch=('arm')
+url="http://www.kernel.org/"
+license=('GPL2')
+makedepends=('git' 'xmlto' 'docbook-xsl' 'uboot-mkimage')
+options=('!strip')
+source=('support.patch'
+        'config'
+	'dts-bootarg-wipe.patch'
+	'read_current_timer2.patch'
+        'change-default-console-loglevel.patch'
+        'usb-add-reset-resume-quirk-for-several-webcams.patch'
+        "http://download.gna.org/cryptodev-linux/cryptodev-linux-${cryptover}.tar.gz"
+	"http://algo.ing.unimo.it/people/paolo/disk_sched/patches/3.6.0-v5/0001-block-cgroups-kconfig-build-bits-for-BFQ-v5-3.6.patch"
+        "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/3.6.0-v5/0002-block-introduce-the-BFQ-v5-I-O-sched-for-3.6.patch")
+md5sums=('f5d3635da03cb45904bedd69b47133de'
+         '7d7ee71db286f04672f404609fcec98a'
+	 '874483fdd661993035c04d3e96abad37'
+	 'c811a057604262b3e5b502d5214ee497'
+         '9d3c56a4b999c8bfbd4018089a62f662'
+         'd00814b57448895e65fbbc800e8a58ba'
+         '3a4b8d23c1708283e29477931d63ffb8'
+	 'f8d5472706d94a2707dd53bad5ccd00e'
+         'b5df48a60787f0abe275fe9df1bbef35')
+
+__gitroot="git://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git"
+__gitname="linux-next"
+__gitbranch="next-20121011"
+
+build() {
+  cd "${srcdir}"
+
+  msg "Connecting to GIT server..."
+  if [ -d $__gitname ] ; then
+    cd $__gitname && git pull origin
+    msg "The local files are updated."
+  else
+    git clone --depth 1 --branch=${__gitbranch} $__gitroot
+  fi
+
+  cd "${srcdir}/${__gitname}"
+
+  msg "GIT checkout done or server timeout"
+
+  # Wipe preconfigured bootargs
+  patch -Np1 -i "${srcdir}/dts-bootarg-wipe.patch"
+
+  # Add the USB_QUIRK_RESET_RESUME for several webcams
+  # FS#26528
+  patch -Np1 -i "${srcdir}/usb-add-reset-resume-quirk-for-several-webcams.patch"
+
+  # Add requested additional support
+  patch -Np1 -i "${srcdir}/support.patch"
+
+  # add latest fixes from stable queue, if needed
+  # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
+
+  # set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)
+  # remove this when a Kconfig knob is made available by upstream
+  # (relevant patch sent upstream: https://lkml.org/lkml/2011/7/26/227)
+  patch -Np1 -i "${srcdir}/change-default-console-loglevel.patch"
+
+  # Fix read_current_timer so it's exported to modules, upstream is aware and
+  # a proper fix is pending.
+  patch -Np1 -i "${srcdir}/read_current_timer2.patch"
+
+  # Add BFQ patches
+  patch -Np1 -i "${srcdir}/0001-block-cgroups-kconfig-build-bits-for-BFQ-v5-3.6.patch"
+  patch -Np1 -i "${srcdir}/0002-block-introduce-the-BFQ-v5-I-O-sched-for-3.6.patch"
+  cat "${srcdir}/config" > ./.config
+
+  # set extraversion to pkgrel
+  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
+
+  # don't run depmod on 'make install'. We'll do this ourselves in packaging
+  sed -i '2iexit 0' scripts/depmod.sh
+
+  # get kernel version
+  make prepare
+
+  # load configuration
+  # Configure the kernel. Replace the line below with one of your choice.
+  #make menuconfig # CLI menu for configuration
+  #make nconfig # new CLI menu for configuration
+  #make xconfig # X-based configuration
+  #make oldconfig # using old config from previous kernel version
+  # ... or manually edit .config
+
+  # Copy back our configuration (use with new kernel version)
+  #cp ./.config ../${_basekernel}.config
+
+  ####################
+  # stop here
+  # this is useful to configure the kernel
+  #msg "Stopping build"
+  #return 1
+  ####################
+
+  #yes "" | make config
+
+  # build!
+  make ${MAKEFLAGS} zImage modules
+  make dtbs
+
+  # build cryptodev module
+  cd "${srcdir}/cryptodev-linux-${cryptover}"
+  make KERNEL_DIR="${srcdir}/${__gitname}"
+}
+
+package_linux-kirkwood-dt() {
+  pkgdesc="The Linux Kernel and modules - Marvell Kirkwood DT"
+  groups=('base')
+  depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7' 'uboot-mkimage' 'uboot-env')
+  optdepends=('crda: to set the correct wireless channels of your country')
+  provides=('kernel26' 'aufs_friendly' 'cryptodev_friendly' 'linux=${pkgver}')
+  conflicts=('linux')
+  install=${pkgname}.install
+
+  cd "${srcdir}/${__gitname}"
+
+  KARCH=arm
+
+  # get kernel version
+  _kernver="$(make kernelrelease)"
+
+  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/dtb}
+  make INSTALL_MOD_PATH="${pkgdir}" modules_install
+  cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
+  cp arch/$KARCH/boot/*.dtb "${pkgdir}/boot/dtb/."
+  cp arch/$KARCH/boot/dts/skeleton.dtsi "${pkgdir}/boot/dtb/."
+  cp arch/$KARCH/boot/dts/kirkwood* "${pkgdir}/boot/dtb/."
+
+  mkdir -p "${pkgdir}"/usr/local/sbin
+  cp scripts/dtc/dtc "${pkgdir}/usr/local/sbin/."
+
+  # set correct depmod command for install
+  sed \
+    -e  "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
+    -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
+    -i "${startdir}/${pkgname}.install"
+
+  # remove build and source links
+  rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
+  # remove the firmware
+  rm -rf "${pkgdir}/lib/firmware"
+  # gzip -9 all modules to save 100MB of space
+  find "${pkgdir}" -name '*.ko' -exec gzip -9 {} \;
+  # make room for external modules
+  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
+  # add real version for building modules and running depmod from post_install/upgrade
+  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
+  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
+
+  # install cryptodev module
+  cd "${srcdir}/cryptodev-linux-${cryptover}"
+  make -C "${srcdir}/${__gitname}" INSTALL_MOD_PATH="${pkgdir}" SUBDIRS=`pwd` modules_install
+
+  cd "${srcdir}/${__gitname}"
+
+  # Now we call depmod...
+  depmod -b "$pkgdir" -F System.map "$_kernver"
+
+  # move module tree /lib -> /usr/lib
+  mkdir -p "${pkgdir}/usr"
+  mv "$pkgdir/lib" "$pkgdir/usr"
+}
+
+package_linux-headers-kirkwood-dt() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - Marvell Kirkwood"
+  provides=('kernel26-headers' 'linux-headers=${pkgver}')
+  conflicts=('kernel26-headers' 'linux-headers')
+
+  install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
+
+  cd "${pkgdir}/usr/lib/modules/${_kernver}"
+  ln -sf ../../../src/linux-${_kernver} build
+
+  cd "${srcdir}/${__gitname}"
+  install -D -m644 Makefile \
+    "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
+  install -D -m644 kernel/Makefile \
+    "${pkgdir}/usr/src/linux-${_kernver}/kernel/Makefile"
+  install -D -m644 .config \
+    "${pkgdir}/usr/src/linux-${_kernver}/.config"
+
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include"
+  make headers_install INSTALL_HDR_PATH="${pkgdir}/usr/src/linux-${_kernver}"
+
+  # strip scripts directory
+  find "${pkgdir}/usr/src/linux-${_kernver}/scripts" -type f -perm -u+w 2>/dev/null | while read binary ; do
+    case "$(file -bi "${binary}")" in
+      *application/x-sharedlib*) # Libraries (.so)
+        /usr/bin/strip ${STRIP_SHARED} "${binary}";;
+      *application/x-archive*) # Libraries (.a)
+        /usr/bin/strip ${STRIP_STATIC} "${binary}";;
+      *application/x-executable*) # Binaries
+        /usr/bin/strip ${STRIP_BINARIES} "${binary}";;
+    esac
+  done
+
+  # Clean up unneeded files
+  find "${pkgdir}" -name "..install.cmd" -delete
+
+  # install cryptodev header
+  cd "${srcdir}/cryptodev-linux-${cryptover}"
+  install -D crypto/cryptodev.h "${pkgdir}/usr/src/linux-${_kernver}/crypto/cryptodev.h"
+}
