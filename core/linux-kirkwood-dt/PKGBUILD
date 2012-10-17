@@ -7,9 +7,9 @@ pkgbase=linux-kirkwood-dt
 pkgname=('linux-kirkwood-dt' 'linux-headers-kirkwood-dt')
 #pkgname=linux-test       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel=next.20121011
+_basekernel=next.20121016
 pkgver=${_basekernel}
-pkgrel=1
+pkgrel=0
 cryptover=1.5
 arch=('arm')
 url="http://www.kernel.org/"
@@ -37,7 +37,7 @@ md5sums=('f5d3635da03cb45904bedd69b47133de'
 
 __gitroot="git://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git"
 __gitname="linux-next"
-__gitbranch="next-20121011"
+__gitbranch="next-20121016"
 
 build() {
   cd "${srcdir}"
@@ -197,6 +197,46 @@ package_linux-headers-kirkwood-dt() {
 
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include"
   make headers_install INSTALL_HDR_PATH="${pkgdir}/usr/src/linux-${_kernver}"
+
+  # copy arch includes for external modules
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/arm
+  cp -a arch/arm/include ${pkgdir}/usr/src/linux-${_kernver}/arch/arm/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/arm/mach-kirkwood   
+  cp -a arch/arm/mach-kirkwood/include ${pkgdir}/usr/src/linux-${_kernver}/arch/arm/mach-kirkwood/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/arm/plat-orion
+  cp -a arch/arm/plat-orion/include ${pkgdir}/usr/src/linux-${_kernver}/arch/arm/plat-orion/
+
+  # copy files necessary for later builds, like nvidia and vmware
+  cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
+  cp -a scripts "${pkgdir}/usr/src/linux-${_kernver}"
+
+  # fix permissions on scripts dir
+  chmod og-w -R "${pkgdir}/usr/src/linux-${_kernver}/scripts"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/.tmp_versions"
+
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/arch/arm/kernel"
+
+  cp arch/arm/Makefile "${pkgdir}/usr/src/linux-${_kernver}/arch/arm/"
+
+  cp arch/arm/kernel/asm-offsets.s "${pkgdir}/usr/src/linux-${_kernver}/arch/arm/kernel/"
+
+  # add docbook makefile
+  install -D -m644 Documentation/DocBook/Makefile \
+    "${pkgdir}/usr/src/linux-${_kernver}/Documentation/DocBook/Makefile"
+
+  # add xfs and shmem for aufs building
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/mm"
+  cp fs/xfs/xfs_sb.h "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs/xfs_sb.h"
+
+  # copy in Kconfig files
+  for i in `find . -name "Kconfig*"`; do
+    mkdir -p "${pkgdir}"/usr/src/linux-${_kernver}/`echo ${i} | sed 's|/Kconfig.*||'`
+    cp ${i} "${pkgdir}/usr/src/linux-${_kernver}/${i}"
+  done
+
+  chown -R root.root "${pkgdir}/usr/src/linux-${_kernver}"
+  find "${pkgdir}/usr/src/linux-${_kernver}" -type d -exec chmod 755 {} \;
 
   # strip scripts directory
   find "${pkgdir}/usr/src/linux-${_kernver}/scripts" -type f -perm -u+w 2>/dev/null | while read binary ; do
