@@ -6,7 +6,6 @@
 #  - Just say NO to x86 optimizations ;)
 #  - disabled distcc, ccache - bad things happen
 #  - don't use -no-neon on armv7
-#  - make -j1 for v5, -j2 for v7 (pandaboard builder)
 #  - added -fno-strict-volatile-bitfields to CXXFLAGS to fix ARM bug
 #  - disabled gcc47.patch since we're not on that yet
 #  - no libfbclient/ibase, issues building on ARM
@@ -14,7 +13,7 @@
 pkgbase=qt
 pkgname=('qt' 'qt-private-headers')
 pkgver=4.8.3
-pkgrel=4
+pkgrel=5
 arch=('i686' 'x86_64')
 url='http://qt-project.org/'
 license=('GPL3' 'LGPL')
@@ -29,7 +28,9 @@ source=("http://releases.qt-project.org/qt4/source/${_pkgfqn}.tar.gz"
         'qtconfig.desktop'
         'improve-cups-support.patch'
         'fix-crash-in-assistant.patch'
-        'disable-ssl-compression.patch')
+        'disable-ssl-compression.patch'
+        'fix-qtscript-crash.patch'
+        'qsortfilterproxymodel.patch')
 md5sums=('a663b6c875f8d7caa8ac9c30e4a4ec3b'
          'fc211414130ab2764132e7370f8e5caa'
          '85179f5e0437514f8639957e1d8baf62'
@@ -37,10 +38,12 @@ md5sums=('a663b6c875f8d7caa8ac9c30e4a4ec3b'
          '6b771c8a81dd90b45e8a79afa0e5bbfd'
          'b9fb6b953cec428d59c026b1ef370e86'
          '57590084078b6379f0501f7728b02ae2'
-         '94e9e433342018bf35e8d6d968b7432c')
+         '94e9e433342018bf35e8d6d968b7432c'
+         '71579422635e9343665de1c1ba5a3f91'
+         'cd550cd628d10459128ca5f231ca6d3f')
 
 build() {
-  cd "${srcdir}"/${_pkgfqn}
+  cd ${_pkgfqn}
 
   # (FS#28381) (KDEBUG#180051)
   patch -p1 -i "${srcdir}"/improve-cups-support.patch
@@ -50,6 +53,12 @@ build() {
   # Security fix
   patch -p1 -i "${srcdir}"/disable-ssl-compression.patch
 
+  # QTBUG#27322
+  patch -p1 -i "${srcdir}"/fix-qtscript-crash.patch
+
+  # QTBUG#27122
+  patch -p1 -i "${srcdir}"/qsortfilterproxymodel.patch
+
   export QT4DIR="${srcdir}"/${_pkgfqn}
   export LD_LIBRARY_PATH=${QT4DIR}/lib:${LD_LIBRARY_PATH}
 
@@ -58,12 +67,6 @@ build() {
   sed -i "s|-O2|${CXXFLAGS}|" mkspecs/common/{g++,gcc}-base.conf
   sed -i "/^QMAKE_LFLAGS_RPATH/s| -Wl,-rpath,||g" mkspecs/common/gcc-base-unix.conf
   sed -i "/^QMAKE_LFLAGS\s/s|+=|+= ${LDFLAGS}|g" mkspecs/common/gcc-base.conf
-
-  if [ "${CARCH}" = "armv6h" -o "${CARCH}" = "armv7h" ]; then
-    mymakeflags="-j2"
-  else
-    mymakeflags="-j1"
-  fi
 
   ./configure -confirm-license -opensource \
     -prefix /usr \
@@ -101,7 +104,7 @@ build() {
     -no-sse4.2 \
     -no-avx \
     -no-neon
-  make ${mymakeflags}
+  make
 }
 
 package_qt() {
@@ -114,10 +117,11 @@ package_qt() {
                 'unixodbc: ODBC driver'
                 'libxinerama: Xinerama support'
                 'libxcursor: Xcursor support'
-                'libxfixes: Xfixes support')
+                'libxfixes: Xfixes support'
+                'icu: Unicode support')
     install='qt.install'
 
-    cd "${srcdir}"/${_pkgfqn}
+    cd ${_pkgfqn}
     make INSTALL_ROOT="${pkgdir}" install
 
     # install missing icons and desktop files
@@ -157,11 +161,11 @@ package_qt-private-headers(){
     install -d "${pkgdir}"/usr/src/{corelib,declarative,gui,script}
     
     for i in QtCore QtDeclarative QtGui QtScript; do
-      cp -r "${srcdir}"/${_pkgfqn}/include/${i}/private/ \
+      cp -r ${_pkgfqn}/include/${i}/private/ \
         "${pkgdir}"/usr/include/${i}/
     done
 
     for i in corelib declarative gui script; do
-      cp -r "${srcdir}"/${_pkgfqn}/src/${i} "${pkgdir}"/usr/src/
+      cp -r ${_pkgfqn}/src/${i} "${pkgdir}"/usr/src/
     done
 }
