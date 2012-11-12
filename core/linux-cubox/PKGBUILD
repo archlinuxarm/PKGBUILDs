@@ -8,16 +8,19 @@ pkgname=('linux-cubox' 'linux-headers-cubox')
 _kernelname=${pkgname#linux}
 _basekernel=3.5
 pkgver=${_basekernel}.7
-pkgrel=3
+pkgrel=4
+cryptover=1.4
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'git' 'python2')
 options=('!strip')
 source=('config'
-        'change-default-console-loglevel.patch')
-md5sums=('004ab6ff32c7ada65f33d241e8d5b515'
-         '9d3c56a4b999c8bfbd4018089a62f662')
+        'change-default-console-loglevel.patch'
+        "http://download.gna.org/cryptodev-linux/cryptodev-linux-${cryptover}.tar.gz")
+md5sums=('64f271dbdde04963c91092c88bce50e8'
+         '9d3c56a4b999c8bfbd4018089a62f662'
+         '7b0ac1c0a88d8fbe7316db02f21666e6')
 
 __gitroot="git://github.com/vDorst/linux.git"
 __gitname="linux"
@@ -75,13 +78,17 @@ build() {
 
   # build!
   make ${MAKEFLAGS} modules uImage
+
+  # build cryptodev module
+  cd "${srcdir}/cryptodev-linux-${cryptover}"
+  make KERNEL_DIR="${srcdir}/${__gitname}"
 }
 
 package_linux-cubox() {
   pkgdesc="The Linux Kernel and modules for the Cubox"
   depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26-cubox' 'linux=${pkgver}')
+  provides=('kernel26-cubox' 'linux=${pkgver}' 'cryptodev_friendly')
   conflicts=('kernel26' 'linux')
   replaces=('kernel26')
   backup=("etc/mkinitcpio.d/${pkgname}.preset")
@@ -115,6 +122,12 @@ package_linux-cubox() {
   # add real version for building modules and running depmod from post_install/upgrade
   mkdir -p "${pkgdir}/lib/modules/extramodules-${pkgver}-${_kernelname:-ARCH}"
   echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${pkgver}-${_kernelname:-ARCH}/version"
+
+  # install cryptodev module
+  cd "${srcdir}/cryptodev-linux-${cryptover}"
+  make -C "${srcdir}/${__gitname}" INSTALL_MOD_PATH="${pkgdir}" SUBDIRS=`pwd` modules_install
+
+  cd "${srcdir}/${__gitname}"
 
   # Now we call depmod...
   depmod -b "$pkgdir" -F System.map "$_kernver"
@@ -235,6 +248,10 @@ package_linux-headers-cubox() {
   cp drivers/media/dvb/frontends/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners"
   cp drivers/media/common/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners/"
+
+  # install cryptodev header
+  install -Dm644 "${srcdir}/cryptodev-linux-${cryptover}/crypto/cryptodev.h" \
+    "${pkgdir}/usr/src/linux-${_kernver}/crypto/cryptodev.h"
 
   # copy in Kconfig files
   for i in `find . -name "Kconfig*"`; do
