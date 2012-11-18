@@ -1,0 +1,59 @@
+# $Id: PKGBUILD 169809 2012-10-29 21:12:03Z ibiru $
+# Maintainer: Jan de Groot <jgc@archlinux.org>
+# Contributor: Alexander Baldeck <alexander@archlinux.org>
+
+# ALARM: Kevin Mihelich
+#  - added --disable-elf-hack to mozconfig
+
+highmem=1
+
+pkgname=xulrunner
+pkgver=16.0.2
+pkgrel=1
+pkgdesc="Mozilla Runtime Environment"
+arch=('i686' 'x86_64')
+license=('MPL' 'GPL' 'LGPL')
+depends=('gtk2' 'mozilla-common' 'nss>=3.13.1' 'libxt' 'libxrender' 'hunspell' 'startup-notification' 'mime-types' 'dbus-glib' 'alsa-lib' 'libevent' 'sqlite>=3.7.4' 'libnotify' 'libvpx' 'python2')
+makedepends=('zip' 'unzip' 'pkg-config' 'diffutils' 'wireless_tools' 'yasm' 'mesa' 'autoconf2.13')
+url="http://wiki.mozilla.org/XUL:Xul_Runner"
+source=(ftp://ftp.mozilla.org/pub/mozilla.org/firefox/releases/$pkgver/source/firefox-$pkgver.source.tar.bz2
+        mozconfig
+        mozilla-pkgconfig.patch
+        shared-libs.patch)
+options=('!emptydirs')
+replaces=('xulrunner-oss')
+md5sums=('1b360968ab05b2a59757d33514897915'
+         '37f005b4b0cf19d823193980b23d334c'
+         '27271ce647a83906ef7a24605e840d61'
+         '52e52f840a49eb1d14be1c0065b03a93')
+
+build() {
+  cd "$srcdir/mozilla-release"
+  cp "$srcdir/mozconfig" .mozconfig
+
+  #fix libdir/sdkdir - fedora
+  patch -Np1 -i ../mozilla-pkgconfig.patch
+  patch -Np1 -i ../shared-libs.patch
+
+  export LDFLAGS="$LDFLAGS -Wl,-rpath,/usr/lib/xulrunner-$pkgver"
+  export PYTHON="/usr/bin/python2"
+
+  make -j1 -f client.mk build MOZ_MAKE_FLAGS="$MAKEFLAGS"
+}
+
+package() {
+  cd "$srcdir/mozilla-release"
+  make -j1 -f client.mk DESTDIR="$pkgdir" install
+
+  rm -rf "$pkgdir"/usr/lib/xulrunner-$pkgver/{dictionaries,hyphenation}
+  ln -sf /usr/share/hunspell "$pkgdir/usr/lib/xulrunner-$pkgver/dictionaries"
+  ln -sf /usr/share/hyphen "$pkgdir/usr/lib/xulrunner-$pkgver/hyphenation"
+
+  # add xulrunner library path to ld.so.conf
+  install -d $pkgdir/etc/ld.so.conf.d
+  echo "/usr/lib/xulrunner-$pkgver" > $pkgdir/etc/ld.so.conf.d/xulrunner.conf
+
+  chmod +x "${pkgdir}/usr/lib/xulrunner-devel-$pkgver/sdk/bin/xpt.py"
+  sed -i 's|!/usr/bin/env python$|!/usr/bin/env python2|' \
+    "$pkgdir"/usr/lib/xulrunner-devel-$pkgver/sdk/bin/{xpt,header,typelib,xpidl}.py
+}
