@@ -17,7 +17,7 @@ if [ "${_git}" = "true" ]; then
     pkgver=7.10.99.git20110709
     #pkgver=7.11
   else
-    pkgver=9.0
+    pkgver=9.0.1
 fi
 pkgrel=1
 arch=('i686' 'x86_64')
@@ -26,8 +26,7 @@ makedepends=('glproto>=1.4.16' 'libdrm>=2.4.39' 'libxxf86vm>=1.1.2' 'libxdamage>
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
-source=(LICENSE
-        git_fixes.diff)
+source=(LICENSE)
 if [ "${_git}" = "true" ]; then
 	# mesa git shot from 7.11 branch - see for state: http://cgit.freedesktop.org/mesa/mesa/commit/?h=7.11&id=1ae00c5960af83bea9545a18a1754bad83d5cbd0
 	#source=(${source[@]} 'ftp://ftp.archlinux.org/other/mesa/mesa-1ae00c5960af83bea9545a18a1754bad83d5cbd0.tar.bz2')
@@ -39,15 +38,12 @@ if [ "${_git}" = "true" ]; then
 )
 fi
 md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
-         '2ebce12196dbb7b69bdf7ef53b8afdee'
-         '60e557ce407be3732711da484ab3db6c')
+         '97d6554c05ea7449398afe3a0ede7018')
 
 build() {
     cd ${srcdir}/?esa-*
 
     [ "${CARCH}" = "armv7h" ] && CFLAGS=`echo $CFLAGS | sed -e 's/-O2/-O1/'` && CXXFLAGS="$CFLAGS"
-
-    patch -Np1 -i ${srcdir}/git_fixes.diff
 
     COMMONOPTS="--prefix=/usr \
     --sysconfdir=/etc \
