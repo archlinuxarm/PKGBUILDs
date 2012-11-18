@@ -124,7 +124,7 @@ package_mesa() {
   make -C ${srcdir}/?esa-*/src/mesa/drivers/dri DESTDIR="${pkgdir}" install-pkgconfigDATA
   make -C ${srcdir}/?esa-*/src/mesa/drivers/dri/common DESTDIR="${pkgdir}" install-sysconfDATA
 
-  make -C ${srcdir}/?esa-*/src/gallium/targets/xa-vmwgfx DESTDIR="${pkgdir}" install
+  #make -C ${srcdir}/?esa-*/src/gallium/targets/xa-vmwgfx DESTDIR="${pkgdir}" install
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa/"
