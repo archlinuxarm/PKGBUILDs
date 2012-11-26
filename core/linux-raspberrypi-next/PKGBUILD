@@ -1,64 +1,56 @@
+# Maintainer: Dave Higham <pepedog@archlinuxarm.org>
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
-# Maintainer: Dave ... <pepdog?@?>
 
-buildarch=4
+buildarch=16
 
-pkgbase=linux-cubox
-pkgname=('linux-cubox' 'linux-headers-cubox')
+pkgbase=linux-raspberrypi-next
+pkgname=('linux-raspberrypi-next' 'linux-headers-raspberrypi-next')
+# pkgname=linux-custom       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel=3.5
+_basekernel=3.6
 pkgver=${_basekernel}.7
-pkgrel=6
-cryptover=1.4
-arch=('arm')
+pkgrel=1
+arch=('arm armv6h')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'git' 'python2')
 options=('!strip')
 source=('config'
         'change-default-console-loglevel.patch'
-        "http://download.gna.org/cryptodev-linux/cryptodev-linux-${cryptover}.tar.gz"
-        'dovefb_patch1'.patch
-        'dovefb_patch2'.patch
-        "kirkwood-spdif-name.patch"
-        "Kirkwood_SPDIF.conf")
-md5sums=('8e36d8bd727aee9405460816085d350d'
-         '9d3c56a4b999c8bfbd4018089a62f662'
-         '7b0ac1c0a88d8fbe7316db02f21666e6'
-         'f1a0a82c5a957c45d3a118e4f7c2a80e'
-         '778d87956820ce7bffe8bb1a45416d2e'
-         '9757a7460741b5284cadd0b12a2d7df6'
-         'a746383e6ce46bcecb662acb3ac21b3f')
+        'usb-add-reset-resume-quirk-for-several-webcams.patch'
+        'args-uncompressed.txt'
+        'boot-uncompressed.txt'
+        'imagetool-uncompressed.py'
+        'https://github.com/raspberrypi/linux/archive/rpi-3.6.y.zip')
 
-__gitroot="git://github.com/vDorst/linux.git"
-__gitname="linux"
+md5sums=('059cc95b6df9f4dd0a39ecfadf808c21'
+         '9d3c56a4b999c8bfbd4018089a62f662'
+         'd00814b57448895e65fbbc800e8a58ba'
+         '9335d1263fd426215db69841a380ea26'
+         'a00e424e2fbb8c5a5f77ba2c4871bed4'
+         '2f82dbe5752af65ff409d737caf11954'
+         'a222e270d8225101244ed513fd29464f')
 
 build() {
-  cd "${srcdir}"
-  msg "Connecting to GIT server...."
+  cd "${srcdir}/linux-rpi-3.6.y"
 
-  if [ -d $__gitname ] ; then
-    cd $__gitname && git pull origin
-    msg "The local files are updated."
-  else
-    git clone --depth 1 $__gitroot
-  fi
+  # add upstream patch
+  #patch -p1 -i "${srcdir}/patch-${pkgver}"
 
-  msg "GIT checkout done or server timeout"
+  # Add the USB_QUIRK_RESET_RESUME for several webcams
+  # FS#26528
+  patch -Np1 -i "${srcdir}/usb-add-reset-resume-quirk-for-several-webcams.patch"
 
-  cd "${srcdir}/${__gitname}"
+  # add latest fixes from stable queue, if needed
+  # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
 
   # set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)
   # remove this when a Kconfig knob is made available by upstream
   # (relevant patch sent upstream: https://lkml.org/lkml/2011/7/26/227)
   patch -Np1 -i "${srcdir}/change-default-console-loglevel.patch"
-
-  #video patches
-  patch -Np1 -i "${srcdir}/dovefb_patch1.patch"
-  patch -Np1 -i "${srcdir}/dovefb_patch2.patch"
-
-  # Changed kirkwood spdif name to SPDIF instead of S/PDIF.
-  patch -Np1 -i "${srcdir}/kirkwood-spdif-name.patch"
+  cp ${srcdir}/args-uncompressed.txt arch/arm/boot/
+  cp ${srcdir}/boot-uncompressed.txt arch/arm/boot/
+  cp ${srcdir}/imagetool-uncompressed.py arch/arm/boot/
 
   cat "${srcdir}/config" > ./.config
 
@@ -93,22 +85,18 @@ build() {
 
   # build!
   make ${MAKEFLAGS} modules uImage
-
-  # build cryptodev module
-  cd "${srcdir}/cryptodev-linux-${cryptover}"
-  make KERNEL_DIR="${srcdir}/${__gitname}"
 }
 
-package_linux-cubox() {
-  pkgdesc="The Linux Kernel and modules for the Cubox"
-  depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7')
+package_linux-raspberrypi-next() {
+  pkgdesc="The Linux Kernel and modules for Raspberry Pi"
+  depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26-cubox' 'linux=${pkgver}' 'cryptodev_friendly')
+  provides=('kernel26-raspberrypi' "linux=${pkgver}")
   conflicts=('kernel26' 'linux')
   replaces=('kernel26')
-  backup=("etc/mkinitcpio.d/${pkgname}.preset")
   install=${pkgname}.install
-  cd "${srcdir}/${__gitname}"
+
+  cd "${srcdir}/linux-rpi-3.6.y"
 
   KARCH=arm
 
@@ -116,9 +104,12 @@ package_linux-cubox() {
   _kernver="$(make kernelrelease)"
 
   mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
-  cd "${srcdir}/linux"
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
-  cp arch/$KARCH/boot/uImage "${pkgdir}/boot/uImage"
+  cd arch/$KARCH/boot/
+  /usr/bin/python2 imagetool-uncompressed.py
+  cd "${srcdir}/linux-rpi-3.6.y"
+  cp arch/$KARCH/boot/kernel.img ${pkgdir}/boot/kernel.img
+  #cp arch/$KARCH/boot/uImage "${pkgdir}/boot/uImage"
 
   # set correct depmod command for install
   sed \
@@ -138,26 +129,17 @@ package_linux-cubox() {
   mkdir -p "${pkgdir}/lib/modules/extramodules-${pkgver}-${_kernelname:-ARCH}"
   echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${pkgver}-${_kernelname:-ARCH}/version"
 
-  # install cryptodev module
-  cd "${srcdir}/cryptodev-linux-${cryptover}"
-  make -C "${srcdir}/${__gitname}" INSTALL_MOD_PATH="${pkgdir}" SUBDIRS=`pwd` modules_install
-
-  cd "${srcdir}/${__gitname}"
-
   # Now we call depmod...
   depmod -b "$pkgdir" -F System.map "$_kernver"
 
   # move module tree /lib -> /usr/lib
   mkdir -p "${pkgdir}/usr"
   mv "$pkgdir/lib" "$pkgdir/usr"
-
-  install -Dm644 "${srcdir}/Kirkwood_SPDIF.conf" \
-    "${pkgdir}/usr/share/alsa/cards/Kirkwood_SPDIF.conf"
 }
 
-package_linux-headers-cubox() {
-  pkgdesc="Header files and scripts for building modules for linux kernel for the Cubox"
-  provides=('kernel26-headers' 'linux-headers=${pkgver}')
+package_linux-headers-raspberrypi-next() {
+  pkgdesc="Header files and scripts for building modules for linux kernel for Raspberry Pi"
+  provides=('kernel26-headers' "linux-headers=${pkgver}")
   conflicts=('kernel26-headers')
   replaces=('kernel26-headers')
 
@@ -166,7 +148,7 @@ package_linux-headers-cubox() {
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/${__gitname}"
+  cd "${srcdir}/linux-rpi-3.6.y"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -184,8 +166,8 @@ package_linux-headers-cubox() {
    # copy arch includes for external modules
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH
   cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-dove   
-  cp -a arch/$KARCH/mach-dove/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-dove/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-bcm2708   
+  cp -a arch/$KARCH/mach-bcm2708/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-bcm2708/
 
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
@@ -214,15 +196,6 @@ package_linux-headers-cubox() {
     mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/${i}"
     cp -a drivers/media/video/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/${i}"
   done
-
-  # headers for libcec-cubox package
-  install -d "${pkgdir}/usr/src/linux-${_kernver}/include/nxp_hdmi"{,/comps/tmdlHdmiCEC}/inc
-  install -m644 drivers/video/dovefb/nxp_hdmi/tda998x_ioctl.h \
-    "${pkgdir}/usr/src/linux-${_kernver}/include/nxp_hdmi"
-  install -m644 drivers/video/dovefb/nxp_hdmi/inc/* \
-    "${pkgdir}/usr/src/linux-${_kernver}/include/nxp_hdmi/inc/"
-  install -m644 drivers/video/dovefb/nxp_hdmi/comps/tmdlHdmiCEC/inc/tmdlHdmiCEC_Types.h \
-    "${pkgdir}/usr/src/linux-${_kernver}/include/nxp_hdmi/comps/tmdlHdmiCEC/inc/"
 
   # add docbook makefile
   install -D -m644 Documentation/DocBook/Makefile \
@@ -267,10 +240,6 @@ package_linux-headers-cubox() {
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners"
   cp drivers/media/common/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners/"
 
-  # install cryptodev header
-  install -Dm644 "${srcdir}/cryptodev-linux-${cryptover}/crypto/cryptodev.h" \
-    "${pkgdir}/usr/src/linux-${_kernver}/crypto/cryptodev.h"
-
   # copy in Kconfig files
   for i in `find . -name "Kconfig*"`; do
     mkdir -p "${pkgdir}"/usr/src/linux-${_kernver}/`echo ${i} | sed 's|/Kconfig.*||'`
@@ -295,4 +264,3 @@ package_linux-headers-cubox() {
   # remove unneeded architectures
   rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
 }
-
