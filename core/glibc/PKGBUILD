@@ -5,8 +5,6 @@
 # NOTE: valgrind requires rebuilt with each major glibc version
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-# - Added source file for glibc-ports, needed for building on ARM
-# - Symlink glibc-ports source dir to ports dir in glibc directory
 # - Patch glibc for ld-linux-armhf.so.3 and symlink ld-linux.so.3
 # - Changed configure to enable ports add-on, specify our build host type
 # - Disabled distcc
@@ -14,14 +12,14 @@
 noautobuild=1
 
 pkgname=glibc
-pkgver=2.16.0
-pkgrel=5
+pkgver=2.17
+pkgrel=1
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
 url="http://www.gnu.org/software/libc"
 license=('GPL' 'LGPL')
 groups=('base')
-depends=('linux-api-headers>=3.5' 'tzdata')
+depends=('linux-api-headers>=3.7' 'tzdata')
 makedepends=('gcc>=4.7')
 backup=(etc/gai.conf
         etc/locale.gen
@@ -29,31 +27,12 @@ backup=(etc/gai.conf
 options=('!strip')
 install=glibc.install
 source=(http://ftp.gnu.org/gnu/libc/${pkgname}-${pkgver}.tar.xz{,.sig}
-        http://ftp.gnu.org/gnu/libc/glibc-ports-${pkgver}.tar.bz2
-        glibc-2.15-fix-res_query-assert.patch
-        glibc-2.16-unlock-mutex.patch
-        glibc-2.16-rpcgen-cpp-path.patch
-        glibc-2.16-strncasecmp-segfault.patch
-        glibc-2.16-strtod-overflow.patch
-        glibc-2.16-detect-fma.patch
-        glibc-2.16-glob-use-size_t.patch
         local-soname-hack.diff
-        nscd.rcd
         nscd.service
         nscd.tmpfiles
         locale.gen.txt
         locale-gen)
-md5sums=('80b181b02ab249524ec92822c0174cf7'
-         '2a1221a15575820751c325ef4d2fbb90'
-         '668bcd584718ff0c6aa2f14b668595b6'
-         '31f415b41197d85d3bbee3d1eecd06a3'
-         '0afcd8c6020d61684aba63ed5f26bd91'
-         '8f26740c248d8b0de68eef8a00f09583'
-         '05f163ec80e6b5b5e38e4eb15ecaa211'
-         '198f366c0b1c18d5a201aa27e8bc76f0'
-         '2426f593bc43f5499c41d21b57ee0e30'
-         'a441353901992feda4b15a11a20140a1'
-         'fa192d063312907797eb48f59da99588'
+md5sums=('87bf675c8ee523ebda4803e8e1cec638'
          '589d79041aa767a5179eaa4e2737dd3f'
          'ad8a9af15ab7eeaa23dc7ee85024af9f'
          'bccbe5619e75cf1d97312ec3681c605c'
@@ -63,37 +42,8 @@ md5sums=('80b181b02ab249524ec92822c0174cf7'
 build() {
   cd ${srcdir}/${pkgname}-${pkgver}
 
-  # ALARM: Symlink ports dir, patch for hard-float ld-linux soname
-  ln -s ${srcdir}/${pkgname}-ports-${pkgver} ./ports
+  # ALARM: patch for hard-float ld-linux soname
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i ${srcdir}/local-soname-hack.diff
-
-  # fix res_query assertion
-  # http://sourceware.org/bugzilla/show_bug.cgi?id=13013
-  patch -p1 -i ${srcdir}/glibc-2.15-fix-res_query-assert.patch
-
-  # prevent hang by locked mutex
-  # http://sourceware.org/git/?p=glibc.git;a=patch;h=c30e8edf
-  patch -p1 -i ${srcdir}/glibc-2.16-unlock-mutex.patch
-
-  # prevent need for /lib/cpp symlink
-  # http://sourceware.org/git/?p=glibc.git;a=commit;h=bf9b740a
-  patch -p1 -i ${srcdir}/glibc-2.16-rpcgen-cpp-path.patch
-
-  # strncasecmp segfault on i686
-  # http://sourceware.org/git/?p=glibc.git;a=commit;h=6db8f737
-  patch -p1 -i ${srcdir}/glibc-2.16-strncasecmp-segfault.patch
-
-  # strtod integer/buffer overflow
-  # http://sourceware.org/git/?p=glibc.git;a=commit;h=da1f4319
-  patch -p1 -i ${srcdir}/glibc-2.16-strtod-overflow.patch
-
-  # detect FMA supprt
-  # http://sourceware.org/git/?p=glibc.git;a=commit;h=a5cfcf08
-  patch -p1 -i ${srcdir}/glibc-2.16-detect-fma.patch
-
-  # prevent overflow in globc
-  # http://sourceware.org/git/?p=glibc.git;a=commit;h=6c62f108
-  patch -p1 -i ${srcdir}/glibc-2.16-glob-use-size_t.patch
 
   cd ${srcdir}
   mkdir glibc-build
@@ -119,6 +69,7 @@ build() {
   ${srcdir}/${pkgname}-${pkgver}/configure --prefix=/usr \
       --libdir=/usr/lib --libexecdir=/usr/lib \
       --with-headers=/usr/include \
+      --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
       --enable-add-ons=nptl,libidn,ports \
       --enable-obsolete-rpc \
       --enable-kernel=2.6.27 \
@@ -141,6 +92,9 @@ build() {
 }
 
 check() {
+  # bug to file - the linker commands need to be reordered
+  LDFLAGS=${LDFLAGS/--as-needed,/}
+
   cd ${srcdir}/glibc-build
   #make -k check
 }
@@ -161,8 +115,6 @@ package() {
   install -dm755 ${pkgdir}/{etc/rc.d,usr/{sbin,lib/{,locale,systemd/system,tmpfiles.d}}}
 
   install -m644 ${srcdir}/${pkgname}-${pkgver}/nscd/nscd.conf ${pkgdir}/etc/nscd.conf
-  sed -i -e 's/^\tserver-user/#\tserver-user/' ${pkgdir}/etc/nscd.conf
-  install -m755 ${srcdir}/nscd.rcd ${pkgdir}/etc/rc.d/nscd
   install -m644 ${srcdir}/nscd.service ${pkgdir}/usr/lib/systemd/system
   install -m644 ${srcdir}/nscd.tmpfiles ${pkgdir}/usr/lib/tmpfiles.d/nscd.conf
 
@@ -173,7 +125,7 @@ package() {
   # create /etc/locale.gen
   install -m644 ${srcdir}/locale.gen.txt ${pkgdir}/etc/locale.gen
   sed -e '1,3d' -e 's|/| |g' -e 's|\\| |g' -e 's|^|#|g' \
-    ${srcdir}/glibc-2.16.0/localedata/SUPPORTED >> ${pkgdir}/etc/locale.gen
+    ${srcdir}/glibc-${pkgver}/localedata/SUPPORTED >> ${pkgdir}/etc/locale.gen
 
   if [[ ${CARCH} = "x86_64" ]]; then
     # fix paths and compliance with binary blobs...
