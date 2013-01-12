@@ -1,7 +1,13 @@
+# Change these to modify the ownership of sabnzbd
+# If you change this here, you also have to change
+# the user and group in the systemd service file.
+SABNZBD_USER="sabnzbd"
+SABNZBD_GROUP="sabnzbd"
+
+SABNZBD_DIR="/opt/sabnzbd"  # should not be changed
+
 ## arg 1:  the new package version
 post_install() {
-  . /etc/conf.d/sabnzbd
-
   # add x-nzb mimetype
   xdg-mime install --mode system "${SABNZBD_DIR}/x-nzb.xml"
   xdg-icon-resource install --context mimetypes --size 64 "${SABNZBD_DIR}/nzb-2.png" application-x-nzb
@@ -9,8 +15,6 @@ post_install() {
   post_upgrade
 
   cat << "EOM"
-==> Don't forget to edit /etc/conf.d/sabnzbd or /etc/conf.d/sabnzbd_systemd!
-==> Add your Session key and if necessary your username and password to ensure a proper shutdown.
 ==> If you want to associate .nzb-files with SABnzbd, run 'xdg-mime default sabnzbd.desktop applications/x-nzb'
 EOM
 }
@@ -19,76 +23,31 @@ EOM
 ## arg 2:  the old package version
 pre_upgrade() {
   PID="$(pgrep -f SABnzbd.py)"
-  if [ -f /run/daemons/sabnzbd ]; then
-    /etc/rc.d/sabnzbd stop # kill the daemon
-  
-    if [ -n "${PID}" ];then
-       kill "${PID}"          # kill the daemon finaly
-    fi
-  fi
-  
-  if [[ -d "/run/sabnzbd/" && "$(ls -A /run/sabnzbd/)" ]]; then
+
+  if [ -n "${PID}" ];then
     systemctl stop sabnzbd.service
   fi
-  
 }
 
 ## arg 1:  the new package version
 ## arg 2:  the old package version
 post_upgrade() {
-  . /etc/conf.d/sabnzbd
+  # if the group or user already exists, the request will be denied 
+  # and all original settings will be retained
+  if [ "$SABNZBD_GROUP" == "sabnzbd" ]; then
+    groupadd -r sabnzbd &> /dev/null
+  fi
 
-  if [ "${USE_SYSTEM_IDS}" == "1" ]; then
-    if grep -q "^sabnzbd:" /etc/group &> /dev/null; then
-      if grep -q "^SABNZBD_GID=" /etc/conf.d/sabnzbd &> /dev/null; then
-        groupmod -g "${SABNZBD_GID}" -n sabnzbd sabnzbd &> /dev/null
-      else
-        groupmod -r -n sabnzbd sabnzbd &> /dev/null
-      fi
-    else
-      if grep -q "^SABNZBD_GID=" /etc/conf.d/sabnzbd &> /dev/null; then
-        groupadd -g "${SABNZBD_GID}" sabnzbd &> /dev/null
-      else
-        groupadd -r sabnzbd &> /dev/null
-      fi
-    fi
-
-    if grep -q "^SABNZBD_AGROUP=" /etc/conf.d/sabnzbd &> /dev/null; then
-      SABNZBD_GS="-G ${SABNZBD_AGROUP}"
-    else
-      SABNZBD_GS=""
-    fi
-
-    if grep -q "^sabnzbd:" /etc/passwd 2> /dev/null; then
-      if grep -q "^SABNZBD_UID=" /etc/conf.d/sabnzbd &> /dev/null; then
-        usermod -s /sbin/nologin -c "SABnzbd user" -d "${SABNZBD_DIR}" \
-          -u "${SABNZBD_UID}" -g sabnzbd ${SABNZBD_GS} sabnzbd &> /dev/null
-      else
-        usermod -s /sbin/nologin -c "SABnzbd user" -d "${SABNZBD_DIR}" \
-          -g sabnzbd ${SABNZBD_GS} -r sabnzbd &> /dev/null
-      fi
-    else
-      if grep -q "^SABNZBD_UID=" /etc/conf.d/sabnzbd &> /dev/null; then
-        useradd -s /sbin/nologin -c "SABnzbd user" -d "${SABNZBD_DIR}" \
-          -u ${SABNZBD_UID} -g sabnzbd "${SABNZBD_GS}" -r sabnzbd &> /dev/null
-      else
-        useradd -s /sbin/nologin -c "SABnzbd user" -d "${SABNZBD_DIR}" \
-          -g sabnzbd ${SABNZBD_GS} -r sabnzbd &> /dev/null
-      fi
-    fi
+  if [ "$SABNZBD_USER" == "sabnzbd" ]; then
+  useradd -s /sbin/nologin -c "SABnzbd user" -d "${SABNZBD_DIR}" \
+          -g sabnzbd -r sabnzbd &> /dev/null
   fi
 
   chown -R "${SABNZBD_USER}:${SABNZBD_GROUP}" "${SABNZBD_DIR}"
-  
-  if command -v "systemd-tmpfiles" &> /dev/null; then
-    systemd-tmpfiles --create /usr/lib/tmpfiles.d/sabnzbd.conf
-  fi
 }
 
 ## arg 1:  the old package version
 pre_remove() {
-  . /etc/conf.d/sabnzbd
-
   pre_upgrade
 
   xdg-mime uninstall --mode system "${SABNZBD_DIR}/x-nzb.xml"
@@ -97,9 +56,10 @@ pre_remove() {
 
 ## arg 1:  the old package version
 post_remove() {
-  userdel sabnzbd &> /dev/null
+  # only delete if user is sabnzbd
+  userdel sabnzbd &> /dev/null 
   groupdel sabnzbd &> /dev/null || /bin/true
-  echo "==> There may be some files left in /opt/sabnzbd."
+  echo "==> There may be some files left in ${SABNZBD_DIR}."
 }
 
 # vim:set ts=2 sw=2 et:
