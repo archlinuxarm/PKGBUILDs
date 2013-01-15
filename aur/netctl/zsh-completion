@@ -1,0 +1,149 @@
+#compdef netctl netctl-auto
+
+local -a _long_opts _profile_opts
+_long_opts=(
+    '--help[Show help message]'
+    '--version[Show version]'
+    )
+
+_profile_opts=(
+    'start' 'stop' 'restart'
+    'switch-to' 'status' 'enable'
+    'disable' 'reenable'
+    )
+
+__systemctl()
+{
+  systemctl --full --no-legend --no-pager "$@"
+}
+
+for fun in start switch-to; do
+    (( $+function[_netctl_$fun] )) || _netctl_$fun(){
+        local -a _profiles
+        _profiles=( ${${${(f)"$(_call_program profiles "$service list 2>/dev/null")"}:#\**}##  })
+        [[ -z "$_profiles" ]] && _message "No More Options." && return 0
+        _describe 'Stopped Profiles' _profiles
+    }
+done
+
+(( $+functions[_netctl_stop] )) || _netctl_stop(){
+    local -a _profiles
+    _profiles=( ${${(M)${(f)"$(_call_program profiles "$service list 2>/dev/null")"}:#\**}##\* })
+    [[ -z "$_profiles" ]] && _message "No More Options." && return 0
+    _describe 'Running Profiles' _profiles
+}
+
+(( $+functions[_netctl_restart] )) || _netctl_restart(){
+    local -a _profiles
+    _profiles=( ${${(M)${(f)"$(_call_program profiles "$service list 2>/dev/null")"}:#\**}##\* })
+    [[ -z "$_profiles" ]] && _message "No More Options." && return 0
+    _describe 'profiles' _profiles
+}
+
+(( $+functions[_netctl_enable] )) || _netctl_enable(){
+    local -a _profiles
+    _profiles=( ${${(f)"$(_call_program profiles "$service list 2>/dev/null")"}##[\* ] })
+    [[ -z "$_profiles" ]] && _message "No More Options."
+    _describe "Disabled Netctl Units" _profiles
+}
+
+(( $+functions[_netctl_disable] )) || _netctl_disable(){
+    local -a _profiles
+    _profiles=(${${${(M)${(f)"$(_call_program "Enabled Netctl Units" "__systemctl list-unit-files 2>/dev/null")"}:#netctl@*enabled*}%%.service *}#netctl@}) 
+    [[ -z "$_profiles" ]] && _message "No More Options."
+    _describe 'Enabled Netctl Units' _profiles
+}
+
+(( $+function[_netctl_reenable] )) || _netctl_reenable(){
+    local -a _profiles
+    _profiles=(${${${(M)${(f)"$(_call_program "Netctl Units" "__systemctl list-unit-files 2>/dev/null")"}:#netctl@*}%%.service *}#netctl@}) 
+    [[ -z "$_profiles" ]] && _message "No More Options."
+    _describe "Netctl Units" _profiles
+}
+
+for fun in $_profile_opts[@]; do
+    (( $+functions[_netctl_$fun] )) || _netctl_$fun () {
+        local -a _profiles
+        _profiles=( $(find -L /etc/network.d -maxdepth 1 -type f -not -name '.*' -not -name '*~' -not -name '*.conf' -not -name '*.service' -printf "%f\n") )
+        for f in $words[@]; do
+            _profiles=(${_profiles:#$f})
+        done
+        [[ -z "$_profiles" ]] && _message "No More Options."
+        compadd "$_profiles[@]"
+    }
+done
+
+_netctl_command(){
+    local -a _command_opts
+    _command_opts=(
+        'list:List available profiles'
+        'store:Save which profiles are active'
+        'restore:Load saved profiles'
+        'stop-all:Stops all profiles'
+        'start:Start a profile'
+        'stop:Stop a profile'
+        'restart:Restart a profile'
+        'switch-to:Switch to a profile'
+        'status:Show runtime status of a profile'
+        'enable:Enable the systemd unit for a profile'
+        'disable:Disable the systemd unit for a profile'
+        'reenable:Reenable the systemd unit for a profile'
+        )
+
+    if (( CURRENT == 1 )); then
+        _describe "Netctl Commands" _command_opts
+    else
+        cmd="${${_command_opts[(r)$words[1]:*]%%:*}}"
+        if (( $#cmd )); then
+            if ((CURRENT < 3 )); then
+                _call_function ret _netctl_$cmd || _message "no more options"
+            else
+                _message "No More Options."
+            fi
+        else
+            _message "Unknown netctl command: $words[1]"
+        fi
+        return ret;
+    fi
+}
+
+(( $+functions[_auto_command] )) || _auto_command(){
+    local -a _interfaces _command_opts
+    _interfaces=(${${${(M)${(f)"$(_call_program interfaces "ip l 2>/dev/null")"}:#(0|1|2|3|4|5|6|7|8|9)*}#* }%%:*})
+    _command_opts=(
+        'start:start interface'
+        'stop:stop interface'
+        )
+
+    if (( CURRENT == 1 )); then
+        _describe "netctl-auto Commands" _command_opts
+    else
+        cmd="${${_command_opts[(r)$words[1]:*]%%:*}}"
+        if (( $#cmd )); then
+            if ((CURRENT < 3 )); then
+                _describe interfaces _interfaces
+            else
+                _message "No More Options."
+            fi
+        else
+            _message "Unknown netctl command: $words[1]"
+        fi
+        return ret;
+    fi
+}
+
+case $service in
+    netctl)
+        _arguments \
+            "$_long_opts[@]" \
+            '*::netctl commands:_netctl_command'
+        ;;
+    netctl-auto)
+        _arguments \
+            '--help[Show Help Message]' \
+            '*::network interfaces:_auto_command'
+        ;;
+    *)
+        _message "Unknown Command: $words[0]"
+        ;;
+esac

@@ -11,13 +11,13 @@ noautobuild=1
 
 pkgname=binutils
 pkgver=2.23.1
-pkgrel=1
+pkgrel=3
 pkgdesc="A set of programs to assemble and manipulate binary and object files"
 arch=('i686' 'x86_64')
 url="http://www.gnu.org/software/binutils/"
 license=('GPL')
 groups=('base-devel')
-depends=('glibc>=2.16' 'zlib')
+depends=('glibc>=2.17' 'zlib')
 checkdepends=('dejagnu')
 options=('!libtool' '!distcc' '!ccache')
 install=binutils.install
@@ -38,30 +38,16 @@ build() {
 
   ${srcdir}/binutils-${pkgver}/configure --prefix=/usr \
     --with-lib-path=/usr/lib:/usr/local/lib \
+    --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
     --enable-ld=default --enable-gold \
     --enable-plugins --enable-threads \
-    --enable-shared $CONFIGFLAG
+    --with-pic --enable-shared \
+    --disable-werror $CONFIGFLAG
 
   # check the host environment and makes sure all the necessary tools are available
   make configure-host
 
   make tooldir=${pkgdir}/usr
-
-  # Rebuild libiberty.a with -fPIC
-  cp -a libiberty libiberty-pic
-  make -C libiberty-pic clean
-  make CFLAGS="$CFLAGS -fPIC" -C libiberty-pic
-
-  # Rebuild libbfd.a with -fPIC
-  # hidden visability prevent 3rd party shared libraries exporting bfd non-stable API
-  cp -a bfd bfd-pic
-  make -C bfd-pic clean
-  make CFLAGS="$CFLAGS -fPIC -fvisibility=hidden" -C bfd-pic
-
-  # Rebuild libopcodes.a with -fPIC
-  cp -a opcodes opcodes-pic
-  make -C opcodes-pic clean
-  make CFLAGS="$CFLAGS -fPIC" -C opcodes-pic
 }
 
 check() {
@@ -79,20 +65,13 @@ package() {
   install -m644 ${srcdir}/binutils-${pkgver}/include/libiberty.h ${pkgdir}/usr/include
   install -m644 ${srcdir}/binutils-${pkgver}/include/demangle.h ${pkgdir}/usr/include
 
-  # install libraries rebuilt with -fPIC
-  install -m644 libiberty-pic/libiberty.a ${pkgdir}/usr/lib
-  install -m644 bfd-pic/libbfd.a ${pkgdir}/usr/lib
-  install -m644 opcodes/libopcodes.a ${pkgdir}/usr/lib
+  # Install PIC libiberty.a
+  install -m644 libiberty/pic/libiberty.a ${pkgdir}/usr/lib
 
-  # Remove Windows/Novell specific man pages
+  # Remove unwanted files
   rm -f ${pkgdir}/usr/share/man/man1/{dlltool,nlmconv,windres,windmc}*
-
-  # why are these distributed with binutils?
   rm ${pkgdir}/usr/share/info/{configure,standards}.info
 
-  # Remove these symlinks, they are not ABI stable.
-  # Programs should compile static to the .a file.
+  # No shared linking to these files outside binutils
   rm -f ${pkgdir}/usr/lib/lib{bfd,opcodes}.so
-  echo "INPUT ( /usr/lib/libbfd.a -liberty -lz )" >${pkgdir}/usr/lib/libbfd.so
-  echo "INPUT ( /usr/lib/libopcodes.a -lbfd )" >${pkgdir}/usr/lib/libopcodes.so
 }

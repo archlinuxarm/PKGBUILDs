@@ -1,4 +1,4 @@
-# pkgbuilds.git - README - 11/28/2012
+# pkgbuilds.git - README - 2012-12-03
 This repository hosts
 [PKGBUILDs](https://wiki.archlinux.org/index.php/PKGBUILD) that have been
 modified from the upstream [Arch Linux](http://archlinux.org) release in order
@@ -37,7 +37,7 @@ you would on Arch, and we have included Yaourt to compile and install directly
 from AUR (`yaourt -AS packagename`).
 
 ### alarm
-Contains packages we have created or that have been submitted to us, to enable
+Contains packages we have created or have been submitted to us, to enable
 functionality on ARM systems in use by the community.  These are our own or
 have changed significantly enough from upstream or AUR to no longer qualify as
 being in those respective locations here.
