@@ -17,7 +17,7 @@ if [ "${_git}" = "true" ]; then
     pkgver=7.10.99.git20110709
     #pkgver=7.11
   else
-    pkgver=9.0.1
+    pkgver=9.0.2
 fi
 pkgrel=1
 arch=('i686' 'x86_64')
@@ -37,7 +37,7 @@ if [ "${_git}" = "true" ]; then
 	#source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-4464ee1a9aa3745109cee23531e3fb2323234d07.tar.bz2"
 )
 fi
-md5sums=('5c65a0fe315dd347e09b1f2826a1df5a'
+md5sums=('dc45d1192203e418163e0017640e1cfc'
          '97d6554c05ea7449398afe3a0ede7018')
 
 build() {
