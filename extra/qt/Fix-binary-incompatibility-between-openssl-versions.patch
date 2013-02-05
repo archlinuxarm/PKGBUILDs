@@ -1,0 +1,80 @@
+From 691e78e5061d4cbc0de212d23b06c5dffddf2098 Mon Sep 17 00:00:00 2001
+From: Shane Kearns <dbgshane@gmail.com>
+Date: Thu, 6 Dec 2012 17:03:18 +0000
+Subject: [PATCH 54/79] Fix binary incompatibility between openssl versions
+
+OpenSSL changed the layout of X509_STORE_CTX between 0.9 and 1.0
+So we have to consider this struct as private implementation, and use
+the access functions instead.
+
+This bug would cause certificate verification problems if a different
+version of openssl is loaded at runtime to the headers Qt was compiled
+against.
+
+Task-number: QTBUG-28343
+Change-Id: I47fc24336f7d9c80f08f9c8ba6debc51a5591258
+Reviewed-by: Richard J. Moore <rich@kde.org>
+(cherry picked from commit eb2688c4c4f257d0a4d978ba4bf57d6347b15252)
+---
+ src/network/ssl/qsslsocket_openssl.cpp         | 2 +-
+ src/network/ssl/qsslsocket_openssl_symbols.cpp | 8 ++++++++
+ src/network/ssl/qsslsocket_openssl_symbols_p.h | 4 ++++
+ 3 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/src/network/ssl/qsslsocket_openssl.cpp b/src/network/ssl/qsslsocket_openssl.cpp
+index b7ca290..e912abac 100644
+--- a/src/network/ssl/qsslsocket_openssl.cpp
++++ b/src/network/ssl/qsslsocket_openssl.cpp
+@@ -236,7 +236,7 @@ static int q_X509Callback(int ok, X509_STORE_CTX *ctx)
+ {
+     if (!ok) {
+         // Store the error and at which depth the error was detected.
+-        _q_sslErrorList()->errors << qMakePair<int, int>(ctx->error, ctx->error_depth);
++        _q_sslErrorList()->errors << qMakePair<int, int>(q_X509_STORE_CTX_get_error(ctx), q_X509_STORE_CTX_get_error_depth(ctx));
+     }
+     // Always return OK to allow verification to continue. We're handle the
+     // errors gracefully after collecting all errors, after verification has
+diff --git a/src/network/ssl/qsslsocket_openssl_symbols.cpp b/src/network/ssl/qsslsocket_openssl_symbols.cpp
+index 2d6a25b..2e6ccd0 100644
+--- a/src/network/ssl/qsslsocket_openssl_symbols.cpp
++++ b/src/network/ssl/qsslsocket_openssl_symbols.cpp
+@@ -267,6 +267,10 @@ DEFINEFUNC2(int, X509_STORE_add_cert, X509_STORE *a, a, X509 *b, b, return 0, re
+ DEFINEFUNC(void, X509_STORE_CTX_free, X509_STORE_CTX *a, a, return, DUMMYARG)
+ DEFINEFUNC4(int, X509_STORE_CTX_init, X509_STORE_CTX *a, a, X509_STORE *b, b, X509 *c, c, STACK_OF(X509) *d, d, return -1, return)
+ DEFINEFUNC2(int, X509_STORE_CTX_set_purpose, X509_STORE_CTX *a, a, int b, b, return -1, return)
++DEFINEFUNC(int, X509_STORE_CTX_get_error, X509_STORE_CTX *a, a, return -1, return)
++DEFINEFUNC(int, X509_STORE_CTX_get_error_depth, X509_STORE_CTX *a, a, return -1, return)
++DEFINEFUNC(X509 *, X509_STORE_CTX_get_current_cert, X509_STORE_CTX *a, a, return 0, return)
++DEFINEFUNC(STACK_OF(X509) *, X509_STORE_CTX_get_chain, X509_STORE_CTX *a, a, return 0, return)
+ DEFINEFUNC(X509_STORE_CTX *, X509_STORE_CTX_new, DUMMYARG, DUMMYARG, return 0, return)
+ #ifdef SSLEAY_MACROS
+ DEFINEFUNC2(int, i2d_DSAPrivateKey, const DSA *a, a, unsigned char **b, b, return -1, return)
+@@ -832,6 +836,10 @@ bool q_resolveOpenSslSymbols()
+     RESOLVEFUNC(X509_STORE_CTX_init)
+     RESOLVEFUNC(X509_STORE_CTX_new)
+     RESOLVEFUNC(X509_STORE_CTX_set_purpose)
++    RESOLVEFUNC(X509_STORE_CTX_get_error)
++    RESOLVEFUNC(X509_STORE_CTX_get_error_depth)
++    RESOLVEFUNC(X509_STORE_CTX_get_current_cert)
++    RESOLVEFUNC(X509_STORE_CTX_get_chain)
+     RESOLVEFUNC(X509_cmp)
+ #ifndef SSLEAY_MACROS
+     RESOLVEFUNC(X509_dup)
+diff --git a/src/network/ssl/qsslsocket_openssl_symbols_p.h b/src/network/ssl/qsslsocket_openssl_symbols_p.h
+index fa9a157..87f3697 100644
+--- a/src/network/ssl/qsslsocket_openssl_symbols_p.h
++++ b/src/network/ssl/qsslsocket_openssl_symbols_p.h
+@@ -374,6 +374,10 @@ int q_X509_STORE_CTX_init(X509_STORE_CTX *ctx, X509_STORE *store,
+                           X509 *x509, STACK_OF(X509) *chain);
+ X509_STORE_CTX *q_X509_STORE_CTX_new();
+ int q_X509_STORE_CTX_set_purpose(X509_STORE_CTX *ctx, int purpose);
++int q_X509_STORE_CTX_get_error(X509_STORE_CTX *ctx);
++int q_X509_STORE_CTX_get_error_depth(X509_STORE_CTX *ctx);
++X509 *q_X509_STORE_CTX_get_current_cert(X509_STORE_CTX *ctx);
++STACK_OF(X509) *q_X509_STORE_CTX_get_chain(X509_STORE_CTX *ctx);
+ 
+ #define q_BIO_get_mem_data(b, pp) (int)q_BIO_ctrl(b,BIO_CTRL_INFO,0,(char *)pp)
+ #define q_BIO_pending(b) (int)q_BIO_ctrl(b,BIO_CTRL_PENDING,0,NULL)
+-- 
+1.8.0.2
+

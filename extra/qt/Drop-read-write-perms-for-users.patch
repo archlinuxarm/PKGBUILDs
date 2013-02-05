@@ -1,0 +1,145 @@
+From 20b26bdb3dd5e46b01b9a7e1ce8342074df3c89c Mon Sep 17 00:00:00 2001
+From: Thiago Macieira <thiago.macieira@intel.com>
+Date: Sat, 22 Dec 2012 08:32:12 -0800
+Subject: [PATCH] Change all shmget calls to user-only memory
+
+Drop the read and write permissions for group and other users in the
+system.
+
+Change-Id: I8fc753f09126651af3fb82df3049050f0b14e876
+(cherry-picked from Qt 5 commit 856f209fb63ae336bfb389a12d2a75fa886dc1c5)
+Reviewed-by: Richard J. Moore <rich@kde.org>
+---
+ src/corelib/kernel/qsharedmemory_unix.cpp          |    6 +++---
+ src/corelib/kernel/qsystemsemaphore_unix.cpp       |    4 ++--
+ src/gui/image/qnativeimage.cpp                     |    2 +-
+ src/gui/image/qpixmap_x11.cpp                      |    2 +-
+ src/plugins/platforms/xcb/qxcbwindowsurface.cpp    |    2 +-
+ src/plugins/platforms/xlib/qxlibwindowsurface.cpp  |    2 +-
+ .../auto/qtipc/qsharedmemory/tst_qsharedmemory.cpp |    2 +-
+ tools/qvfb/qvfbshmem.cpp                           |    4 ++--
+ 8 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/src/corelib/kernel/qsharedmemory_unix.cpp b/src/corelib/kernel/qsharedmemory_unix.cpp
+index 20d76e3..4cf3acf 100644
+--- a/src/corelib/kernel/qsharedmemory_unix.cpp
++++ b/src/corelib/kernel/qsharedmemory_unix.cpp
+@@ -238,7 +238,7 @@ bool QSharedMemoryPrivate::create(int size)
+     }
+ 
+     // create
+-    if (-1 == shmget(unix_key, size, 0666 | IPC_CREAT | IPC_EXCL)) {
++    if (-1 == shmget(unix_key, size, 0600 | IPC_CREAT | IPC_EXCL)) {
+         QString function = QLatin1String("QSharedMemory::create");
+         switch (errno) {
+         case EINVAL:
+@@ -293,7 +293,7 @@ bool QSharedMemoryPrivate::attach(QSharedMemory::AccessMode mode)
+ {
+ #ifndef QT_POSIX_IPC
+     // grab the shared memory segment id
+-    int id = shmget(unix_key, 0, (mode == QSharedMemory::ReadOnly ? 0444 : 0660));
++    int id = shmget(unix_key, 0, (mode == QSharedMemory::ReadOnly ? 0400 : 0600));
+     if (-1 == id) {
+         setErrorString(QLatin1String("QSharedMemory::attach (shmget)"));
+         return false;
+@@ -381,7 +381,7 @@ bool QSharedMemoryPrivate::detach()
+     size = 0;
+ 
+     // Get the number of current attachments
+-    int id = shmget(unix_key, 0, 0444);
++    int id = shmget(unix_key, 0, 0400);
+     cleanHandle();
+ 
+     struct shmid_ds shmid_ds;
+diff --git a/src/corelib/kernel/qsystemsemaphore_unix.cpp b/src/corelib/kernel/qsystemsemaphore_unix.cpp
+index fad9acc..e77456b 100644
+--- a/src/corelib/kernel/qsystemsemaphore_unix.cpp
++++ b/src/corelib/kernel/qsystemsemaphore_unix.cpp
+@@ -153,10 +153,10 @@ key_t QSystemSemaphorePrivate::handle(QSystemSemaphore::AccessMode mode)
+     }
+ 
+     // Get semaphore
+-    semaphore = semget(unix_key, 1, 0666 | IPC_CREAT | IPC_EXCL);
++    semaphore = semget(unix_key, 1, 0600 | IPC_CREAT | IPC_EXCL);
+     if (-1 == semaphore) {
+         if (errno == EEXIST)
+-            semaphore = semget(unix_key, 1, 0666 | IPC_CREAT);
++            semaphore = semget(unix_key, 1, 0600 | IPC_CREAT);
+         if (-1 == semaphore) {
+             setErrorString(QLatin1String("QSystemSemaphore::handle"));
+             cleanHandle();
+diff --git a/src/gui/image/qnativeimage.cpp b/src/gui/image/qnativeimage.cpp
+index 9654afe..fef38c5 100644
+--- a/src/gui/image/qnativeimage.cpp
++++ b/src/gui/image/qnativeimage.cpp
+@@ -176,7 +176,7 @@ QNativeImage::QNativeImage(int width, int height, QImage::Format format,bool /*
+ 
+     bool ok;
+     xshminfo.shmid = shmget(IPC_PRIVATE, xshmimg->bytes_per_line * xshmimg->height,
+-                            IPC_CREAT | 0777);
++                            IPC_CREAT | 0700);
+     ok = xshminfo.shmid != -1;
+     if (ok) {
+         xshmimg->data = (char*)shmat(xshminfo.shmid, 0, 0);
+diff --git a/src/gui/image/qpixmap_x11.cpp b/src/gui/image/qpixmap_x11.cpp
+index 280d8bd..88c9b7b 100644
+--- a/src/gui/image/qpixmap_x11.cpp
++++ b/src/gui/image/qpixmap_x11.cpp
+@@ -193,7 +193,7 @@ static bool qt_create_mitshm_buffer(const QPaintDevice* dev, int w, int h)
+     bool ok;
+     xshminfo.shmid = shmget(IPC_PRIVATE,
+                              xshmimg->bytes_per_line * xshmimg->height,
+-                             IPC_CREAT | 0777);
++                             IPC_CREAT | 0700);
+     ok = xshminfo.shmid != -1;
+     if (ok) {
+         xshmimg->data = (char*)shmat(xshminfo.shmid, 0, 0);
+diff --git a/src/plugins/platforms/xcb/qxcbwindowsurface.cpp b/src/plugins/platforms/xcb/qxcbwindowsurface.cpp
+index b6a42d8..0d56821 100644
+--- a/src/plugins/platforms/xcb/qxcbwindowsurface.cpp
++++ b/src/plugins/platforms/xcb/qxcbwindowsurface.cpp
+@@ -98,7 +98,7 @@ QXcbShmImage::QXcbShmImage(QXcbScreen *screen, const QSize &size, uint depth, QI
+                                           0);
+ 
+     m_shm_info.shmid = shmget (IPC_PRIVATE,
+-          m_xcb_image->stride * m_xcb_image->height, IPC_CREAT|0777);
++          m_xcb_image->stride * m_xcb_image->height, IPC_CREAT|0600);
+ 
+     m_shm_info.shmaddr = m_xcb_image->data = (quint8 *)shmat (m_shm_info.shmid, 0, 0);
+     m_shm_info.shmseg = xcb_generate_id(xcb_connection());
+diff --git a/src/plugins/platforms/xlib/qxlibwindowsurface.cpp b/src/plugins/platforms/xlib/qxlibwindowsurface.cpp
+index bf003eb..46a2f97 100644
+--- a/src/plugins/platforms/xlib/qxlibwindowsurface.cpp
++++ b/src/plugins/platforms/xlib/qxlibwindowsurface.cpp
+@@ -99,7 +99,7 @@ void QXlibWindowSurface::resizeShmImage(int width, int height)
+ 
+ 
+     image_info->shminfo.shmid = shmget (IPC_PRIVATE,
+-          image->bytes_per_line * image->height, IPC_CREAT|0777);
++          image->bytes_per_line * image->height, IPC_CREAT|0700);
+ 
+     image_info->shminfo.shmaddr = image->data = (char*)shmat (image_info->shminfo.shmid, 0, 0);
+     image_info->shminfo.readOnly = False;
+diff --git a/tools/qvfb/qvfbshmem.cpp b/tools/qvfb/qvfbshmem.cpp
+index 7f9671f..84b6ebe 100644
+--- a/tools/qvfb/qvfbshmem.cpp
++++ b/tools/qvfb/qvfbshmem.cpp
+@@ -176,13 +176,13 @@ QShMemViewProtocol::QShMemViewProtocol(int displayid, const QSize &s,
+     uint data_offset_value = sizeof(QVFbHeader);
+ 
+     int dataSize = bpl * h + data_offset_value;
+-    shmId = shmget(key, dataSize, IPC_CREAT | 0666);
++    shmId = shmget(key, dataSize, IPC_CREAT | 0600);
+     if (shmId != -1)
+ 	data = (unsigned char *)shmat(shmId, 0, 0);
+     else {
+ 	struct shmid_ds shm;
+ 	shmctl(shmId, IPC_RMID, &shm);
+-	shmId = shmget(key, dataSize, IPC_CREAT | 0666);
++    shmId = shmget(key, dataSize, IPC_CREAT | 0600);
+ 	if (shmId == -1) {
+             perror("QShMemViewProtocol::QShMemViewProtocol");
+             qFatal("Cannot get shared memory 0x%08x", key);
+-- 
+1.7.1
+
