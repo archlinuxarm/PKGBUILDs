@@ -1,0 +1,55 @@
+# Maintainer: Alexander Rødseth <rodseth@gmail.com>
+
+pkgname=despotify-svn
+pkgver=521
+pkgrel=1
+pkgdesc="Console client for Spotify (development version)"
+arch=('x86_64' 'i686')
+url="http://despotify.sourceforge.net/"
+license=('BSD')
+depends=('libvorbis' 'openssl' 'libao>=1.1.0' 'mpg123')
+makedepends=('subversion' 'ncurses' 'libtool' 'expat')
+conflicts=('despotify-pulse-svn' 'despotify-ao-svn')
+install=despotify.install
+_svntrunk=https://despotify.svn.sourceforge.net/svnroot/despotify
+_svnmod=despotify
+
+build() {
+  cd "$srcdir"
+
+  if [ -d "$_svnmod/.svn" ]; then
+    (cd "$_svnmod" && svn up -r "$pkgver")
+  else
+    svn co "$_svntrunk" --config-dir ./ -r "$pkgver" "$_svnmod"
+  fi
+  msg "SVN checkout done or server timeout"
+  cd "$_svnmod/src"
+
+  msg2 "Configuring..."
+
+  # Use libao
+  sed -i 's/gstreamer/libao/' Makefile.local.mk.dist
+  cp Makefile.local.mk.dist Makefile.local.mk
+
+  # anti-segfault fix, adding format.matrix = NULL; to libao.c
+  sed -i 's/_LITTLE;/_LITTLE; format.matrix = NULL;/' \
+    clients/despotify/libao.c
+
+  msg2 "Compiling..."
+  make
+}
+
+package() {
+  cd "$_svnmod/src"
+
+  # The installer fails to make these directories
+  mkdir -p "$pkgdir/usr/bin" "$pkgdir/usr/include"
+
+  # Install to the pkgdir
+  make INSTALL_PREFIX="$pkgdir/usr" DESTDIR="$pkgdir/" install
+
+  # Shouldn't be executable, fixing
+  chmod -x "$pkgdir/usr/include/despotify.h"
+}
+
+# vim:set ts=2 sw=2 et:
