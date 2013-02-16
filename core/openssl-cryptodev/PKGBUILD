@@ -10,7 +10,7 @@ buildarch=6
 
 pkgname=openssl-cryptodev
 _pkgname=openssl
-_ver=1.0.1d
+_ver=1.0.1e
 # use a pacman compatible version scheme
 pkgver=${_ver/[a-z]/.${_ver//[0-9.]/}}
 #pkgver=$_ver
@@ -31,15 +31,11 @@ backup=('etc/ssl/openssl.cnf')
 conflicts=('openssl')
 provides=("openssl=${pkgver}")
 source=("https://www.openssl.org/source/${_pkgname}-${_ver}.tar.gz"
-        'fix-manpages.patch'
         'no-rpath.patch'
-        'ca-dir.patch'
-        'Fix-IV-check-and-padding-removal.patch')
-md5sums=('b92fc634f0f1f31a67ed4175adc5ba33'
-         '5bbc0655bda2af95bc8eb568963ce8ba'
+        'ca-dir.patch')
+md5sums=('66bf6f10f060d561929de96f9dfe5b8c'
          'dc78d3d06baffc16217519242ce92478'
-         '3bf51be3a1bbd262be46dc619f92aa90'
-         'b92ec62a1f3e7fdc65481afff709cd8b')
+         '3bf51be3a1bbd262be46dc619f92aa90')
 
 build() {
 	cd $srcdir/$_pkgname-$_ver
@@ -58,22 +54,19 @@ build() {
 		_kernel_release="$(uname -r)"
 	fi
 
-	# avoid conflicts with other man pages
-	# see http://www.linuxfromscratch.org/patches/downloads/openssl/
-	patch -p1 -i $srcdir/fix-manpages.patch
 	# remove rpath: http://bugs.archlinux.org/task/14367
 	patch -p0 -i $srcdir/no-rpath.patch
 	# set ca dir to /etc/ssl by default
 	patch -p0 -i $srcdir/ca-dir.patch
-	# https://rt.openssl.org/Ticket/Display.html?id=2975
-	patch -p1 -i $srcdir/Fix-IV-check-and-padding-removal.patch
+
 	# mark stack as non-executable: http://bugs.archlinux.org/task/12434
+	# workaround for https://rt.openssl.org/Ticket/Display.html?id=2771: OPENSSL_MAX_TLS1_2_CIPHER_LENGTH=50
 	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib \
 		-DHAVE_CRYPTODEV -DUSE_CRYPTODEV_DIGESTS -DHASH_MAX_LEN=64 \
 		shared threads zlib enable-md2 \
 		"${openssltarget}" \
 		-Wa,--noexecstack "${CFLAGS} -I/usr/src/linux-${_kernel_release}" \
-		-DOPENSSL_NO_TLS1_2_CLIENT
+		-DOPENSSL_MAX_TLS1_2_CIPHER_LENGTH=50
 
 	make depend
 	make
@@ -91,6 +84,6 @@ check() {
 package() {
 	depends=('cryptodev_friendly')
 	cd $srcdir/$_pkgname-$_ver
-	make INSTALL_PREFIX=$pkgdir MANDIR=/usr/share/man install
+	make INSTALL_PREFIX=$pkgdir MANDIR=/usr/share/man MANSUFFIX=ssl install
 	install -D -m644 LICENSE $pkgdir/usr/share/licenses/$_pkgname/LICENSE
 }
