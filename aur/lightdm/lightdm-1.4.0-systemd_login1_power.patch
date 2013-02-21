@@ -1,0 +1,209 @@
+diff -up lightdm-1.4.0/liblightdm-gobject/power.c.systemd_login1_power lightdm-1.4.0/liblightdm-gobject/power.c
+--- lightdm-1.4.0/liblightdm-gobject/power.c.systemd_login1_power	2011-12-08 19:51:23.000000000 -0600
++++ lightdm-1.4.0/liblightdm-gobject/power.c	2013-01-10 22:34:41.782151231 -0600
+@@ -18,6 +18,7 @@
+ 
+ static GDBusProxy *upower_proxy = NULL;
+ static GDBusProxy *ck_proxy = NULL;
++static GDBusProxy *login1_proxy = NULL;
+ 
+ static gboolean
+ upower_call_function (const gchar *function, gboolean default_result, GError **error)
+@@ -148,6 +149,59 @@ ck_call_function (const gchar *function,
+     return function_result;
+ }
+ 
++static gboolean
++login1_call_function (const gchar *function, GVariant *parameters, gboolean default_result, GError **error)
++{
++    GVariant *result;
++    gboolean function_result = FALSE;
++    const gchar *true_result = "yes";
++    gchar *str_result;
++
++    if (!login1_proxy)
++    {
++        login1_proxy = g_dbus_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
++                                                  G_DBUS_PROXY_FLAGS_NONE,
++                                                  NULL,
++                                                  "org.freedesktop.login1",
++                                                  "/org/freedesktop/login1",
++                                                  "org.freedesktop.login1.Manager",
++                                                  NULL,
++                                                  error);
++        if (!login1_proxy)
++            return FALSE;
++    }
++
++    result = g_dbus_proxy_call_sync (login1_proxy,
++                                     function,
++                                     parameters,
++                                     G_DBUS_CALL_FLAGS_NONE,
++                                     -1,
++                                     NULL,
++                                     error);
++
++    if (!result)
++        return default_result;
++
++    if (g_variant_is_of_type (result, G_VARIANT_TYPE ("(b)")))
++        g_variant_get (result, "(s)", &function_result);
++
++    /**
++    * CanReboot, CanPowerOff returns a string "yes", "no", or "challenge", not a boolean as ConsoleKit
++    **/
++    if (g_variant_is_of_type (result, G_VARIANT_TYPE ("(s)"))) {
++        g_variant_get (result, "(b)", str_result);
++        if(g_strcmp0(str_result,true_result) == 0) {
++            function_result = TRUE;
++        }
++        else {
++            function_result = default_result;
++        }
++    }       
++    
++    g_variant_unref (result);
++    return function_result;
++}
++
+ /**
+  * lightdm_get_can_restart:
+  *
+@@ -158,7 +212,11 @@ ck_call_function (const gchar *function,
+ gboolean
+ lightdm_get_can_restart (void)
+ {
+-    return ck_call_function ("CanRestart", FALSE, NULL);
++    gboolean function_result = FALSE;
++    function_result = login1_call_function ("CanReboot", NULL, FALSE, NULL);
++    if (!function_result)
++          function_result = ck_call_function ("CanRestart", FALSE, NULL);
++    return function_result;
+ }
+ 
+ /**
+@@ -172,7 +230,11 @@ lightdm_get_can_restart (void)
+ gboolean
+ lightdm_restart (GError **error)
+ {
+-    return ck_call_function ("Restart", TRUE, error);
++    gboolean function_result = FALSE;
++    function_result = login1_call_function ("Reboot", g_variant_new("(b)",0), TRUE, error);
++    if (!function_result)
++          function_result = ck_call_function ("Restart", TRUE, error);
++    return function_result;
+ }
+ 
+ /**
+@@ -185,7 +247,11 @@ lightdm_restart (GError **error)
+ gboolean
+ lightdm_get_can_shutdown (void)
+ {
+-    return ck_call_function ("CanStop", FALSE, NULL);
++    gboolean function_result = FALSE; 
++    function_result = login1_call_function ("CanPowerOff", NULL, FALSE, NULL);
++    if (!function_result)
++          function_result = ck_call_function ("CanStop", FALSE, NULL);
++    return function_result;
+ }
+ 
+ /**
+@@ -199,5 +265,9 @@ lightdm_get_can_shutdown (void)
+ gboolean
+ lightdm_shutdown (GError **error)
+ {
+-    return ck_call_function ("Stop", TRUE, error);
++    gboolean function_result = FALSE; 
++    function_result = login1_call_function ("PowerOff", g_variant_new("(b)",0), TRUE, error);
++    if (!function_result)
++          function_result = ck_call_function ("Stop", TRUE, error);
++    return function_result;
+ }
+diff -up lightdm-1.4.0/liblightdm-qt/power.cpp.systemd_login1_power lightdm-1.4.0/liblightdm-qt/power.cpp
+--- lightdm-1.4.0/liblightdm-qt/power.cpp.systemd_login1_power	2011-12-08 19:51:23.000000000 -0600
++++ lightdm-1.4.0/liblightdm-qt/power.cpp	2013-01-10 22:57:15.458512125 -0600
+@@ -16,6 +16,7 @@
+ #include <QtCore/QVariant>
+ #include <QtDBus/QDBusInterface>
+ #include <QtDBus/QDBusReply>
++#include <QDebug>
+ 
+ #include "config.h"
+ 
+@@ -27,11 +28,13 @@ public:
+     PowerInterfacePrivate();
+     QScopedPointer<QDBusInterface> powerManagementInterface;
+     QScopedPointer<QDBusInterface> consoleKitInterface;
++    QScopedPointer<QDBusInterface> login1Interface;
+ };
+ 
+ PowerInterface::PowerInterfacePrivate::PowerInterfacePrivate() :
+     powerManagementInterface(new QDBusInterface("org.freedesktop.UPower","/org/freedesktop/UPower", "org.freedesktop.UPower", QDBusConnection::systemBus())),
+-    consoleKitInterface(new QDBusInterface("org.freedesktop.ConsoleKit", "/org/freedesktop/ConsoleKit/Manager", "org.freedesktop.ConsoleKit.Manager", QDBusConnection::systemBus()))
++    consoleKitInterface(new QDBusInterface("org.freedesktop.ConsoleKit", "/org/freedesktop/ConsoleKit/Manager", "org.freedesktop.ConsoleKit.Manager", QDBusConnection::systemBus())),
++    login1Interface(new QDBusInterface("org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager", QDBusConnection::systemBus()))
+ {
+ }
+ 
+@@ -81,34 +84,53 @@ void PowerInterface::hibernate()
+ 
+ bool PowerInterface::canShutdown()
+ {
++    if ( d->login1Interface->isValid() ) {
++      QDBusReply<QString> reply1 = d->login1Interface->call("CanPowerOff");
++      if (reply1.isValid()) {
++        return (reply1.value()=="yes");
++      }
++    }
++    qWarning() << d->login1Interface->lastError();
++
+     QDBusReply<bool> reply = d->consoleKitInterface->call("CanStop");
+     if (reply.isValid()) {
+         return reply.value();
+     }
+-    else {
+-        return false;
+-    }
++    return false;
+ }
+ 
+ void PowerInterface::shutdown()
+ {
+-    d->consoleKitInterface->call("Stop");
++    if ( d->login1Interface->isValid() )
++        d->login1Interface->call("PowerOff",false);
++    else
++        d->consoleKitInterface->call("Stop");
+ }
+ 
+ bool PowerInterface::canRestart()
+ {
++    if ( d->login1Interface->isValid() ) {
++      QDBusReply<QString> reply1 = d->login1Interface->call("CanReboot");
++      if (reply1.isValid()) {
++        return (reply1.value()=="yes");
++      }
++    }
++    qWarning() << d->login1Interface->lastError();
++  
+     QDBusReply<bool> reply = d->consoleKitInterface->call("CanRestart");
+     if (reply.isValid()) {
+         return reply.value();
+     }
+-    else {
+-        return false;
+-    }
++
++    return false;
+ }
+ 
+ void PowerInterface::restart()
+ {
+-    d->consoleKitInterface->call("Restart");
++    if ( d->login1Interface->isValid() )
++        d->login1Interface->call("Reboot",false);
++    else
++        d->consoleKitInterface->call("Restart");
+ }
+ 
+ #include "power_moc.cpp"

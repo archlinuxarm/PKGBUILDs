@@ -1,0 +1,70 @@
+# $Id: PKGBUILD 176934 2013-02-02 19:39:14Z eric $
+# Maintainer: 
+# Contributor: Dale Blount <dale@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - don't use PCI on v5/v6
+
+pkgname=net-snmp
+pkgver=5.7.2
+pkgrel=2
+pkgdesc="A suite of applications used to implement SNMP v1, SNMP v2c and SNMP v3 using both IPv4 and IPv6"
+arch=('i686' 'x86_64')
+url="http://www.net-snmp.org/"
+license=('BSD')
+depends=('openssl' 'libnl' 'pciutils')
+makedepends=('python2-distribute')
+optdepends=('perl-term-readkey: for snmpcheck application' 
+            'perl-tk: for snmpcheck and tkmib applications'
+            'python2: for the python modules')
+provides=('ucd-snmp')
+backup=('etc/conf.d/snmpd')
+options=('!libtool' '!emptydirs')
+source=(http://downloads.sourceforge.net/${pkgname}/${pkgname}-${pkgver}.tar.gz{,.asc}
+        snmpd.confd snmpd.rc snmpd.service libnl32.patch)
+sha1sums=('c493027907f32400648244d81117a126aecd27ee'
+          '25ee4b2e7b5a1b91122d06e82d41ef5bb5359d6d'
+          'cf811da9e57bbca34d8e2a3c358bb3bfc0c2b33b'
+          '90600c0141eed10d6e3ca3ccc97ad8dda15c2112'
+          'f59ddc049c1c689f04e68c3c7cd8b8e301df3158'
+          '74a9848b95f63378eb1753fc309d2b74de5afb0f')
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+
+  # http://sourceforge.net/tracker/index.php?func=detail&aid=3250304&group_id=12694&atid=112694
+  patch -Np1 -i "$srcdir/libnl32.patch"
+  autoreconf -f -i
+
+  PYTHONPROG=/usr/bin/python2 ./configure --prefix=/usr \
+    --sysconfdir=/etc \
+    --mandir=/usr/share/man \
+    --enable-ucd-snmp-compatibility \
+    --enable-ipv6 \
+    --with-python-modules \
+    --with-default-snmp-version="3" \
+    --with-sys-contact="root@localhost" \
+    --with-sys-location="Unknown" \
+    --with-logfile="/var/log/snmpd.log" \
+    --with-mib-modules="host misc/ipfwacc ucd-snmp/diskio tunnel ucd-snmp/dlmod" \
+    --with-persistent-directory="/var/net-snmp" \
+    --disable-static
+
+  # ALARM: don't use PCI on v5/v6
+  if [ "$CARCH" = "arm" -o "$CARCH" = "armv6h" ]; then
+    sed -i 's/HAVE_PCI_LOOKUP_NAME 1/HAVE_PCI_LOOKUP_NAME 0/' include/net-snmp/net-snmp-config.h
+    sed -i 's/HAVE_PCI_PCI_H 1/HAVE_PCI_PCI_H 0/' include/net-snmp/net-snmp-config.h
+  fi
+
+  make NETSNMP_DONT_CHECK_VERSION=1
+}
+
+package() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  sed -i -e "s:install --basedir=\$\$dir:install --basedir=\$\$dir --root=${pkgdir}:" Makefile
+  make DESTDIR="${pkgdir}" INSTALL_PREFIX="${pkgdir}" INSTALLDIRS=vendor install
+  install -D -m755 "${srcdir}/snmpd.rc" "${pkgdir}/etc/rc.d/snmpd"
+  install -D -m644 "${srcdir}/snmpd.confd" "${pkgdir}/etc/conf.d/snmpd"
+  install -D -m644 "${srcdir}/snmpd.service" "${pkgdir}/usr/lib/systemd/system/snmpd.service"
+  install -D -m644 COPYING "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

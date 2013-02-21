@@ -6,8 +6,9 @@
 
 pkgbase=kdebindings-python
 pkgname=('kdebindings-python'
-         'kdebindings-python2')
-pkgver=4.9.5
+         'kdebindings-python2'
+         'kdebindings-python-common')
+pkgver=4.10.0
 pkgrel=1
 url='https://projects.kde.org/projects/kde/kdebindings/pykde4'
 arch=('i686' 'x86_64')
@@ -16,23 +17,25 @@ groups=('kdebindings')
 makedepends=('cmake' 'automoc4' 'boost' 'kdepim-runtime' 'python2-pyqt'
              'pyqt' 'qscintilla' 'python2-sip' 'python-sip' 'mesa')
 source=("http://download.kde.org/stable/${pkgver}/src/pykde4-${pkgver}.tar.xz"
-        "pykde4-4.4.4-arm-sip.patch")
-sha1sums=('8a0cf08aa4747df05edae833139e5eea739adf45'
-          '20d37a8b127eebffc4556352168786036969ee78')
+        "pykde4-4.10.0-arm-sip.patch")
+sha1sums=('d587d16363d2184320faf3636ac92f9b50ef5720'
+          'f0798d25767768006d5f674049e51b2e39f9f4eb')
 
 build() {
   export PYTHONDONTWRITEBYTECODE="TRUE"
 
   cd "${srcdir}/pykde4-${pkgver}"
-  patch -Np3 -i "${srcdir}/pykde4-4.4.4-arm-sip.patch"
+  patch -Np1 -i "${srcdir}/pykde4-4.10.0-arm-sip.patch"
   cd "${srcdir}"
   mkdir build
   cd build
   cmake ../pykde4-${pkgver} \
     -DCMAKE_BUILD_TYPE=Release \
+    -DKDE4_BUILD_TESTS=OFF \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DPYTHON_EXECUTABLE=/usr/bin/python3 \
-    -DPYTHON_LIBRARY=/usr/lib/libpython3.3m.so.1.0
+    -DPYTHON_LIBRARY=/usr/lib/libpython3.3m.so.1.0 \
+    -DPYKDEUIC4_ALTINSTALL=TRUE
   make
   cd ..
 
@@ -40,38 +43,53 @@ build() {
   cd build-python2
   cmake ../pykde4-${pkgver} \
     -DCMAKE_BUILD_TYPE=Release \
+    -DKDE4_BUILD_TESTS=OFF \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DPYTHON_EXECUTABLE=/usr/bin/python2
+    -DPYTHON_EXECUTABLE=/usr/bin/python2 \
+    -DPYKDEUIC4_ALTINSTALL=TRUE
   make
 }
 
 package_kdebindings-python() {
   pkgdesc="A set of Python 3.x bindings for KDE"
-  depends=('kdepim-runtime' 'pyqt' 'qscintilla')
+  depends=('kdepim-runtime' 'pyqt' 'kdebindings-python-common')
 
   cd "${srcdir}"/build
   make DESTDIR="${pkgdir}" install
+
+  # Provided by kdebindings-python-common
+  rm -r "${pkgdir}"/usr/share/apps/pykde4/examples
+  rm -r "${pkgdir}"/usr/share/sip/PyKDE4
+
+  ln -s /usr/bin/pykdeuic4-3.3 "${pkgdir}"/usr/bin/pykdeuic4
 }
 
 package_kdebindings-python2() {
   pkgdesc="A set of Python 2.x bindings for KDE"
-  depends=('kdepim-runtime' 'python2-pyqt' 'qscintilla')
+  depends=('kdepim-runtime' 'python2-pyqt'  'kdebindings-python-common')
   conflicts=('kdebindings-python<4.8.1-2')
  
   cd "${srcdir}"/build-python2
   make DESTDIR="${pkgdir}" install
 
-  # Fix conflicts
-  rm "${pkgdir}"/usr/bin/pykdeuic4
-  ln -sf /usr/lib/python2.7/site-packages/PyQt4/uic/pykdeuic4.py \
-    "${pkgdir}"/usr/bin/python2-pykdeuic4
+  # Provided by kdebindings-python-common
+  rm -r "${pkgdir}"/usr/share/apps/pykde4/examples
+  rm -r "${pkgdir}"/usr/share/sip/PyKDE4
 
-  mv "${pkgdir}"/usr/share/apps/pykde4/examples \
-    "${pkgdir}"/usr/share/apps/pykde4/python2-examples
-
-  mv "${pkgdir}"/usr/share/sip/PyKDE4 \
-    "${pkgdir}"/usr/share/sip/python2-PyKDE4
+  # pykdeuic4 should point to the python3 version
+  #rm "${pkgdir}"/usr/bin/pykdeuic4
 
   # Use the python2 executable
   find "${pkgdir}" -name '*.py' | xargs sed -i 's|#!/usr/bin/env python|#!/usr/bin/env python2|'
+}
+
+package_kdebindings-python-common() {
+  pkgdesc="Common files shared between python2 and python3 kdebindings"
+  depends=('qscintilla')
+  conflicts=('kdebindings-python<4.8.1-2')
+
+  cd build
+  make DESTDIR="${pkgdir}" install
+
+  rm -r "${pkgdir}"/usr/{bin,lib}
 }

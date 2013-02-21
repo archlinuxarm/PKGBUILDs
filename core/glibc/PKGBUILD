@@ -5,7 +5,8 @@
 # NOTE: valgrind requires rebuilt with each major glibc version
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-# - Patch glibc for ld-linux-armhf.so.3 and symlink ld-linux.so.3
+# - Patch for ld-linux-armhf.so.3 transition and symlink ld-linux.so.3
+# - Patch for hard-float ld.so.cache transition
 # - Changed configure to enable ports add-on, specify our build host type
 # - Disabled distcc
 
@@ -13,26 +14,29 @@ noautobuild=1
 
 pkgname=glibc
 pkgver=2.17
-pkgrel=1
+pkgrel=3
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
 url="http://www.gnu.org/software/libc"
 license=('GPL' 'LGPL')
 groups=('base')
-depends=('linux-api-headers>=3.7' 'tzdata')
+depends=('linux-api-headers>=3.7' 'tzdata' 'filesystem>=2013.01')
 makedepends=('gcc>=4.7')
 backup=(etc/gai.conf
         etc/locale.gen
         etc/nscd.conf)
-options=('!strip')
+options=('!strip' '!distcc')
 install=glibc.install
 source=(http://ftp.gnu.org/gnu/libc/${pkgname}-${pkgver}.tar.xz{,.sig}
+        glibc-2.17-sync-with-linux37.patch
         local-soname-hack.diff
+        fix-hf-ld.so.cache.patch
         nscd.service
         nscd.tmpfiles
         locale.gen.txt
         locale-gen)
 md5sums=('87bf675c8ee523ebda4803e8e1cec638'
+         'fb99380d94598cc76d793deebf630022'
          '589d79041aa767a5179eaa4e2737dd3f'
          'ad8a9af15ab7eeaa23dc7ee85024af9f'
          'bccbe5619e75cf1d97312ec3681c605c'
@@ -42,8 +46,14 @@ md5sums=('87bf675c8ee523ebda4803e8e1cec638'
 build() {
   cd ${srcdir}/${pkgname}-${pkgver}
 
+  # combination of upstream commits 318cd0b, b540704 and fc1abbe
+  patch -p1 -i ${srcdir}/glibc-2.17-sync-with-linux37.patch
+
   # ALARM: patch for hard-float ld-linux soname
-  [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i ${srcdir}/local-soname-hack.diff
+  if [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]]; then
+    patch -p1 -i ${srcdir}/local-soname-hack.diff
+    patch -p1 -i ${srcdir}/fix-hf-ld.so.cache.patch
+  fi
 
   cd ${srcdir}
   mkdir glibc-build
@@ -109,10 +119,7 @@ package() {
 
   rm -f ${pkgdir}/etc/ld.so.{cache,conf}
 
-  # eventually this will move to the filesystem package
-  ln -s usr/lib ${pkgdir}/lib
-
-  install -dm755 ${pkgdir}/{etc/rc.d,usr/{sbin,lib/{,locale,systemd/system,tmpfiles.d}}}
+  install -dm755 ${pkgdir}/usr/lib/{locale,systemd/system,tmpfiles.d}
 
   install -m644 ${srcdir}/${pkgname}-${pkgver}/nscd/nscd.conf ${pkgdir}/etc/nscd.conf
   install -m644 ${srcdir}/nscd.service ${pkgdir}/usr/lib/systemd/system
@@ -120,21 +127,18 @@ package() {
 
   install -m644 ${srcdir}/${pkgname}-${pkgver}/posix/gai.conf ${pkgdir}/etc/gai.conf
 
-  install -m755 ${srcdir}/locale-gen ${pkgdir}/usr/sbin
+  install -m755 ${srcdir}/locale-gen ${pkgdir}/usr/bin
+
+  # temporary symlink
+  ln -s ../../sbin/ldconfig ${pkgdir}/usr/bin/ldconfig
 
   # create /etc/locale.gen
   install -m644 ${srcdir}/locale.gen.txt ${pkgdir}/etc/locale.gen
   sed -e '1,3d' -e 's|/| |g' -e 's|\\| |g' -e 's|^|#|g' \
     ${srcdir}/glibc-${pkgver}/localedata/SUPPORTED >> ${pkgdir}/etc/locale.gen
 
-  if [[ ${CARCH} = "x86_64" ]]; then
-    # fix paths and compliance with binary blobs...
-    sed -i '/RTLDLIST/s%lib64%lib%' ${pkgdir}/usr/bin/ldd
-    ln -s /lib ${pkgdir}/lib64
-  fi
-
   # ALARM: symlink ld-linux.so.3 for hard-float
-  [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && ln -s /lib/ld-2.17.so ${pkgdir}/lib/ld-linux.so.3
+  [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && ln -s /lib/ld-${pkgver}.so ${pkgdir}/usr/lib/ld-linux.so.3
 
   # Do not strip the following files for improved debugging support
   # ("improved" as in not breaking gdb and valgrind...):
@@ -159,3 +163,12 @@ package() {
                       usr/lib/{libmemusage,libpcprofile,libSegFault}.so \
                       usr/lib/{pt_chown,{audit,gconv}/*.so}
 }
+md5sums=('87bf675c8ee523ebda4803e8e1cec638'
+         '6db4d1661cf34282755dc90330465f6d'
+         'fb99380d94598cc76d793deebf630022'
+         'fa192d063312907797eb48f59da99588'
+         'dee46cbd2e544a61c263a0af39cc934c'
+         'ad8a9af15ab7eeaa23dc7ee85024af9f'
+         'bccbe5619e75cf1d97312ec3681c605c'
+         '07ac979b6ab5eeb778d55f041529d623'
+         '476e9113489f93b348b21e144b6a8fcf')
