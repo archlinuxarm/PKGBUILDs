@@ -1,4 +1,4 @@
-# $Id: PKGBUILD 153287 2012-03-12 20:52:14Z andyrtr $
+# $Id$
 # Maintainer: Jan de Groot <jgc@archlinux.org>
 # Maintainer: Andreas Radke <andyrtr@archlinux.org>
 
@@ -7,53 +7,35 @@
 #  - Build v7h with -O1 instead of -O2
 
 pkgbase=mesa
-pkgname=('mesa' 'libgl' 'osmesa' 'libglapi' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
-
-#_git=true
-_gitdate=20111031
-_git=false
-
-if [ "${_git}" = "true" ]; then
-    pkgver=7.10.99.git20110709
-    #pkgver=7.11
-  else
-    pkgver=9.0.2
-fi
-pkgrel=1
+pkgname=('mesa' 'mesa-libgl')
+pkgver=9.1
+pkgrel=2
 arch=('i686' 'x86_64')
-makedepends=('glproto>=1.4.16' 'libdrm>=2.4.39' 'libxxf86vm>=1.1.2' 'libxdamage>=1.1.3' 'expat>=2.1.0' 'libx11>=1.5.0' 'libxt>=1.1.3'
-             'gcc-libs>=4.7.1-6' 'dri2proto>=2.8' 'python2' 'libxml2' 'imake' 'llvm' 'systemd' 'libvdpau>=0.5')
+makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
+             'libvdpau' 'wayland')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
-source=(LICENSE)
-if [ "${_git}" = "true" ]; then
-	# mesa git shot from 7.11 branch - see for state: http://cgit.freedesktop.org/mesa/mesa/commit/?h=7.11&id=1ae00c5960af83bea9545a18a1754bad83d5cbd0
-	#source=(${source[@]} 'ftp://ftp.archlinux.org/other/mesa/mesa-1ae00c5960af83bea9545a18a1754bad83d5cbd0.tar.bz2')
-	source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-ef9f16f6322a89fb699fbe3da868b10f9acaef98.tar.bz2")
-  else
-	source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2"
-	#source=(${source[@]} "ftp://ftp.freedesktop.org/pub/mesa/8.0/MesaLib-8.0-rc2.tar.bz2"
-	#source=(${source[@]} "MesaLib-git${_gitdate}.zip"::"http://cgit.freedesktop.org/mesa/mesa/snapshot/mesa-4464ee1a9aa3745109cee23531e3fb2323234d07.tar.bz2"
-)
-fi
-md5sums=('dc45d1192203e418163e0017640e1cfc'
-         '97d6554c05ea7449398afe3a0ede7018')
+source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
+	    #ftp://ftp.freedesktop.org/pub/mesa/9.1/MesaLib-9.1-rc2.tar.bz2 # for RC testing
+        LICENSE)
+md5sums=('d3891e02215422e120271d976ff1947e'
+         '5c65a0fe315dd347e09b1f2826a1df5a')
 
 build() {
     cd ${srcdir}/?esa-*
 
-    [ "${CARCH}" = "armv7h" ] && CFLAGS=`echo $CFLAGS | sed -e 's/-O2/-O1/'` && CXXFLAGS="$CFLAGS"
+    autoreconf -vfi # our automake is far too new for their build system :)
 
-    COMMONOPTS="--prefix=/usr \
+    ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-dri-drivers=swrast \
     --with-gallium-drivers=swrast \
+    --with-dri-drivers=swrast \
     --enable-gallium-llvm \
     --enable-egl \
     --enable-gallium-egl \
-    --with-egl-platforms=x11,drm \
+    --with-egl-platforms=x11,drm,wayland \
     --enable-shared-glapi \
     --enable-gbm \
     --enable-glx-tls \
@@ -63,155 +45,47 @@ build() {
     --enable-gles1 \
     --enable-gles2 \
     --enable-texture-float \
-    --enable-xa "
+    --enable-xa
+    # --help
+    # --with-llvm-shared-libs \ # enabling this would force us to move llvm-amdgpu-snapshot from community to extra, delay it until llvm 3.3 / Mesa 9.2/10.0
 
-  if [ "${_git}" = "true" ]; then
-    ./autogen.sh \
-      $COMMONOPTS
-  else
-    autoreconf -vfi
-    ./configure \
-      $COMMONOPTS
-  fi
-
-  make
-}
-
-package_libglapi() {
-  depends=('glibc')
-  pkgdesc="free implementation of the GL API -- shared library. The Mesa GL API module is responsible for dispatching all the gl* functions"
-
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" install
-
-  install -m755 -d "${pkgdir}/usr/share/licenses/libglapi"
-  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libglapi/"
-}
-
-package_libgl() {
-  depends=('libdrm>=2.4.39' 'libxxf86vm>=1.1.2' 'libxdamage>=1.1.3' 'expat>=2.1.0' 'libglapi' 'gcc-libs')
-  pkgdesc="Mesa 3-D graphics library and DRI software rasterizer"
-
-  # fix linking because of splitted package
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" install
-
-  # libGL & libdricore
-  make -C ${srcdir}/?esa-*/src/glx DESTDIR="${pkgdir}" install
-  make -C ${srcdir}/?esa-*/src/mesa/libdricore DESTDIR="${pkgdir}" install
-
-  # fix linking because of splitted package - cleanup
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" uninstall
-
-
-  make -C ${srcdir}/?esa-*/src/gallium/targets/dri-swrast DESTDIR="${pkgdir}" install
-
-  # See FS#26284
-  install -m755 -d "${pkgdir}/usr/lib/xorg/modules/extensions"
-  ln -s libglx.xorg "${pkgdir}/usr/lib/xorg/modules/extensions/libglx.so"
-
-  install -m755 -d "${pkgdir}/usr/share/licenses/libgl"
-  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libgl/"
+    make
+    # fake installation
+	mkdir $srcdir/fakeinstall
+	make DESTDIR=${srcdir}/fakeinstall install
 }
 
 package_mesa() {
-  # check also gl.pc
-  depends=('libgl' 'libx11>=1.5.0' 'libxext>=1.3.1' 'libxdamage' 'libxfixes' 'libxcb' 'libxxf86vm')
+  pkgdesc="an open-source implementation of the OpenGL specification"
+  depends=('libdrm' 'libvdpau' 'wayland' 'libxxf86vm' 'libxdamage' 'systemd')
   optdepends=('opengl-man-pages: for the OpenGL API man pages')
-  pkgdesc="Mesa 3-D graphics libraries and include files"
+  provides=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
+  conflicts=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
+  replaces=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
 
-  make -C ${srcdir}/?esa-*/src/mesa DESTDIR="${pkgdir}" install-glHEADERS
-  make -C ${srcdir}/?esa-*/src/mesa/drivers/dri DESTDIR="${pkgdir}" install-driincludeHEADERS
-  make -C ${srcdir}/?esa-*/src/mesa DESTDIR="${pkgdir}" install-pkgconfigDATA
-  make -C ${srcdir}/?esa-*/src/mesa/drivers/dri DESTDIR="${pkgdir}" install-pkgconfigDATA
-  make -C ${srcdir}/?esa-*/src/mesa/drivers/dri/common DESTDIR="${pkgdir}" install-sysconfDATA
-
-  #make -C ${srcdir}/?esa-*/src/gallium/targets/xa-vmwgfx DESTDIR="${pkgdir}" install
+  mv -v ${srcdir}/fakeinstall/* ${pkgdir}
+  # rename libgl.so to not conflict with blobs - may break gl.pc ?
+  mv ${pkgdir}/usr/lib/libGL.so.1.2.0 	${pkgdir}/usr/lib/mesa-libGL.so.1.2.0
+  rm ${pkgdir}/usr/lib/libGL.so{,.1}
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa/"
 }
 
-package_osmesa() {
-  depends=('libglapi' 'gcc-libs')
-  optdepends=('opengl-man-pages: for the OpenGL API man pages')
-  pkgdesc="Mesa 3D off-screen rendering library"
+package_mesa-libgl() {
+  pkgdesc="Mesa 3-D graphics library"
+  depends=("mesa=${pkgver}")
+  provides=("libgl=${pkgver}")
+  replaces=('libgl')
+ 
+  # See FS#26284
+  install -m755 -d "${pkgdir}/usr/lib/xorg/modules/extensions"
+  ln -s libglx.xorg "${pkgdir}/usr/lib/xorg/modules/extensions/libglx.so"
 
-  # fix linking because of splitted package
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" install
+  ln -s mesa-libGL.so.1.2.0      ${pkgdir}/usr/lib/libGL.so
+  ln -s mesa-libGL.so.1.2.0      ${pkgdir}/usr/lib/libGL.so.1
+  ln -s mesa-libGL.so.1.2.0      ${pkgdir}/usr/lib/libGL.so.1.2.0
 
-  make -C ${srcdir}/?esa-*/src/mesa/drivers/osmesa DESTDIR="${pkgdir}" install
-
-  # fix linking because of splitted package - cleanup
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" uninstall
-
-  install -m755 -d "${pkgdir}/usr/share/licenses/osmesa"
-  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/osmesa/"
-}
-
-package_libgbm() {
-  depends=('systemd' 'libglapi' 'libdrm')
-  pkgdesc="Mesa gbm library"
-
-  # fix linking because of splitted package
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" install
-
-  make -C ${srcdir}/?esa-*/src/gbm DESTDIR="${pkgdir}" install
-
-  # fix linking because of splitted package - cleanup
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" uninstall
-
-  install -m755 -d "${pkgdir}/usr/share/licenses/libgbm"
-  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libgbm/"
-}
-
-package_libgles() {
-  depends=('libglapi' 'libdrm' 'khrplatform-devel')
-  pkgdesc="Mesa GLES libraries and headers"
-
-  # fix linking because of splitted package
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" install
-
-  make -C ${srcdir}/?esa-*/src/mapi/es1api DESTDIR="${pkgdir}" install
-  make -C ${srcdir}/?esa-*/src/mapi/es2api DESTDIR="${pkgdir}" install
-
-  # fix linking because of splitted package - cleanup
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" uninstall
-
-  install -m755 -d "${pkgdir}/usr/share/licenses/libgles"
-  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libgles/"
-}
-
-package_libegl() {
-  # check also egl.pc
-  depends=('libx11' 'libxext' 'libxdamage' 'libxfixes' 'libxxf86vm' 'libxcb' 'libgbm' 'khrplatform-devel')
-  pkgdesc="Mesa EGL libraries and headers"
-
-  make -C ${srcdir}/?esa-*/src/gallium/targets/egl-static DESTDIR="${pkgdir}" install
-  install -m755 -d "${pkgdir}/usr/share/doc/libegl"
-  install -m644 ${srcdir}/?esa-*/docs/egl.html "${pkgdir}/usr/share/doc/libegl/"
-
-  # fix linking because of splitted package
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" install
-  make -C ${srcdir}/?esa-*/src/gbm DESTDIR="${pkgdir}" install
-
-  make -C ${srcdir}/?esa-*/src/egl DESTDIR="${pkgdir}" install
-
-  # fix linking because of splitted package - cleanup
-  make -C ${srcdir}/?esa-*/src/gbm DESTDIR="${pkgdir}" uninstall
-  make -C ${srcdir}/?esa-*/src/mapi/shared-glapi DESTDIR="${pkgdir}" uninstall
-
-  install -m755 -d "${pkgdir}/usr/share/licenses/libegl"
-  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libegl/"
-
-  # fix file conflicts
-  rm -rf ${pkgdir}/usr/include/KHR
-}
-
-package_khrplatform-devel() {
-  pkgdesc="Khronos platform development package"
-
-  install -m755 -d "${pkgdir}/usr/include/KHR"
-  install -m644 ${srcdir}/?esa-*/include/KHR/khrplatform.h "${pkgdir}/usr/include/KHR/"
-
-  install -m755 -d "${pkgdir}/usr/share/licenses/khrplatform-devel"
-  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/khrplatform-devel/"
+  install -m755 -d "${pkgdir}/usr/share/licenses/mesa-libgl"
+  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa-libgl/"
 }
