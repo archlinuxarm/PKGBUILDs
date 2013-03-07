@@ -7,7 +7,7 @@ pkgbase=linux-kirkwood
 pkgname=('linux-kirkwood' 'linux-headers-kirkwood')
 #pkgname=linux-test       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel=3.7.10
+_basekernel=3.8.2
 pkgver=${_basekernel}
 pkgrel=0
 cryptover=1.5
@@ -27,19 +27,18 @@ source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${_basekernel}.tar.bz2
         "http://download.gna.org/cryptodev-linux/cryptodev-linux-${cryptover}.tar.gz"
 	"http://algo.ing.unimo.it/people/paolo/disk_sched/patches/$(echo $_basekernel |cut -c 1-3).0-${bfqver}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-$(echo $_basekernel | cut -c 1-3).patch"
 	"http://algo.ing.unimo.it/people/paolo/disk_sched/patches/$(echo $_basekernel |cut -c 1-3).0-${bfqver}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-$(echo $_basekernel |cut -c 1-3).patch"
-	'aufs3-3.7.patch.xz')
-md5sums=('56ec294a922b6112a1ef129668f38a83'
-         '17c0496b7f3031c864f49894702b8911'
+	'aufs3-3.8.patch.xz')
+md5sums=('ba543a7a61d861f90589de875d2724aa'
+         'ddabf9f75419d6e811f30eeb985654d5'
          'f5d3635da03cb45904bedd69b47133de'
-         'b471f37d4dfa802b8a4eaf8c9f437197'
+         '5fa50284cbae738f5076d65bc5519c0f'
          '96fc4f78d37d8f824401b2ca66a5dc0a'
          '9d3c56a4b999c8bfbd4018089a62f662'
          'd00814b57448895e65fbbc800e8a58ba'
          '3a4b8d23c1708283e29477931d63ffb8'
-         'fc5936d5966359fcc40e175916e6c65f'
-         '9d1c42c395ed5a81a79222a808366687'
-         '961e19a119443158f104a68ea4d0d9f1')
-
+         '03eca1c188c076041f8d74100d55d659'
+         '90b11395c702610bf4b42e72913f23f8'
+         '5969c9f71833365582cde1918e368e5b')
 build() {
   cd "${srcdir}/linux-${_basekernel}"
 
@@ -55,7 +54,7 @@ msg2 "requested additional support, mach-types"
   cp "${srcdir}/mach-types" arch/arm/tools
 
 msg2 "Add AUFS3 patches"
-  patch -Np1 -i "${srcdir}/aufs3-3.7.patch"
+  patch -Np1 -i "${srcdir}/aufs3-3.8.patch"
 
 msg2 "Add BFQ patches"
   patch -Np1 -i "${srcdir}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-$(echo $_basekernel | cut -c 1-3).patch"
@@ -182,8 +181,13 @@ package_linux-headers-kirkwood() {
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include"
   make headers_install INSTALL_HDR_PATH="${pkgdir}/usr/src/linux-${_kernver}"
 
-  # Clean up unneeded files
-  find "${pkgdir}" -name "..install.cmd" -delete
+# Clean up unneeded files
+#  find "${pkgdir}" -name "..install.cmd" -delete
+
+  for i in acpi asm-generic config crypto drm generated linux math-emu \
+    media net pcmcia scsi sound trace uapi video xen; do
+    cp -a include/${i} "${pkgdir}/usr/src/linux-${_kernver}/include/"
+  done
 
   # copy arch includes for external modules
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/arm
@@ -207,9 +211,67 @@ package_linux-headers-kirkwood() {
 
   cp arch/arm/kernel/asm-offsets.s "${pkgdir}/usr/src/linux-${_kernver}/arch/arm/kernel/"
 
+ # add headers for lirc package
+  # pci
+  for i in bt8xx cx88 saa7134; do
+mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
+    cp -a drivers/media/pci/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
+  done
+  # usb
+  for i in cpia2 em28xx pwc sn9c102; do
+mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
+    cp -a drivers/media/usb/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
+  done
+  # i2c
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c"
+  cp drivers/media/i2c/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
+  for i in cx25840; do
+mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
+    cp -a drivers/media/i2c/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
+  done
+
   # add docbook makefile
   install -D -m644 Documentation/DocBook/Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Documentation/DocBook/Makefile"
+
+# add dm headers
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/md"
+  cp drivers/md/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/md"
+
+  # add inotify.h
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/linux"
+  cp include/linux/inotify.h "${pkgdir}/usr/src/linux-${_kernver}/include/linux/"
+
+  # add wireless headers
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
+  cp net/mac80211/*.h "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
+
+  # add dvb headers for external modules
+  # in reference to:
+  # http://bugs.archlinux.org/task/9912
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-core"
+  cp drivers/media/dvb-core/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-core/"
+  # and...
+  # http://bugs.archlinux.org/task/11194
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
+  cp include/config/dvb/*.h "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
+
+  # add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
+  # in reference to:
+  # http://bugs.archlinux.org/task/13146
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  cp drivers/media/dvb-frontends/lgdt330x.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  #cp drivers/media/i2c/msp3400-driver.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
+
+  # add dvb headers
+  # in reference to:
+  # http://bugs.archlinux.org/task/20402
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/dvb-usb"
+  cp drivers/media/usb/dvb-usb/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/dvb-usb/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends"
+  cp drivers/media/dvb-frontends/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/tuners"
+  cp drivers/media/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/tuners/"
 
   # add xfs and shmem for aufs building
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs"
@@ -221,7 +283,7 @@ package_linux-headers-kirkwood() {
     mkdir -p "${pkgdir}"/usr/src/linux-${_kernver}/`echo ${i} | sed 's|/Kconfig.*||'`
     cp ${i} "${pkgdir}/usr/src/linux-${_kernver}/${i}"
   done
-
+  
   chown -R root.root "${pkgdir}/usr/src/linux-${_kernver}"
   find "${pkgdir}/usr/src/linux-${_kernver}" -type d -exec chmod 755 {} \;
 
