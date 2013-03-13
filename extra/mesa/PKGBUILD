@@ -5,11 +5,12 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
 #  - Build v7h with -O1 instead of -O2
+#  - Removed libgles, libegl and khrplatform-devel from conflicts for marvell-libgfx compatibility.
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=9.1
-pkgrel=2
+pkgrel=3
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
              'libvdpau' 'wayland')
@@ -60,7 +61,7 @@ package_mesa() {
   depends=('libdrm' 'libvdpau' 'wayland' 'libxxf86vm' 'libxdamage' 'systemd')
   optdepends=('opengl-man-pages: for the OpenGL API man pages')
   provides=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
-  conflicts=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
+  conflicts=('libglapi' 'osmesa' 'libgbm')
   replaces=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
 
   mv -v ${srcdir}/fakeinstall/* ${pkgdir}
