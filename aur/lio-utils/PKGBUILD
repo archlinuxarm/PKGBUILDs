@@ -1,7 +1,7 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
 pkgname=lio-utils
 pkgver=4.1
-pkgrel=8
+pkgrel=9
 epoch=
 pkgdesc="a simple low-level configuration tool set for LIO (Target and iSCSI)"
 arch=('i686' 'x86_64')
@@ -23,7 +23,7 @@ md5sums=('1afad3e324d0bdde01d0383b482fac5f'
 
 build() {
   if [ ! -e "$pkgname-$pkgver.tgz" ]; then
-    wget "http://www.risingtidesystems.com/git/?p=$pkgname.git;a=snapshot;h=595cd43e38ebd19813b91a3db35f3a707d2ba475;sf=tgz" -O "$pkgname-$pkgver.tgz"
+    curl -fLC - "http://www.risingtidesystems.com/git/?p=$pkgname.git;a=snapshot;h=595cd43e38ebd19813b91a3db35f3a707d2ba475;sf=tgz" -o "$pkgname-$pkgver.tgz"
   fi
   bsdtar -xf "$srcdir/$pkgname-$pkgver.tgz"
 

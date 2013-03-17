@@ -4,7 +4,7 @@
 
 pkgname=chocolate-doom
 pkgver=1.7.0
-pkgrel=1
+pkgrel=2
 pkgdesc="A Doom port reproducing the behavior of the original DOS version"
 arch=('i686' 'x86_64')
 url="http://www.chocolate-doom.org/"
@@ -28,6 +28,7 @@ build() {
 	-e 's| CFLAGS=|: # CFLAGS=|g' \
 	-i configure.in
 
+  autoupdate
   autoreconf -i
 
   ./configure --prefix=/usr
