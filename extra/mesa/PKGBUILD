@@ -9,8 +9,8 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
-pkgver=9.1
-pkgrel=3
+pkgver=9.1.1
+pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
              'libvdpau' 'wayland')
@@ -21,7 +21,7 @@ source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
 	    #ftp://ftp.freedesktop.org/pub/mesa/9.1/MesaLib-9.1-rc2.tar.bz2 # for RC testing
 	    git-fixes.patch
         LICENSE)
-md5sums=('d3891e02215422e120271d976ff1947e'
+md5sums=('6ea2bdc3b7ecfb4257b39814b4182580'
          'c3e45fe7287bbf8f620c209a872330dc'
          '5c65a0fe315dd347e09b1f2826a1df5a')
 
