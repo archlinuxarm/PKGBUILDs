@@ -11,34 +11,35 @@
 #  - Change build.mk to use the LLVM backend with the right
 #    optimization passes
 #  - Add LLVM as a dependency
-#  - Disable distcc explicitly because the C compiler path is embedded
-#    during build
+#  - Correct gcc path after bulding with distcc
+#  - Uncommented !makeflags option
+#  - Use debian package for the initial build
+
+buildarch=1
 
 pkgname=ghc
-pkgver=7.6.1
+pkgver=7.6.2
 pkgrel=1
 pkgdesc='The Glasgow Haskell Compiler'
-arch=('i686' 'x86_64' 'armv6h')
+arch=('i686' 'x86_64' 'arm' 'armv6h' 'armv7h')
 url='http://www.haskell.org/ghc/'
 license=('custom')
 # libffi might be needed in the future: http://hackage.haskell.org/trac/ghc/ticket/4496
 depends=('llvm' 'perl' 'gmp>=5.0' 'gcc') # 'libffi')
 makedepends=('ghc' 'perl' 'libxslt' 'docbook-xsl')
-buildarch=16
 checkdepends=('python2')
 install='ghc.install'
 # keep this otherwise a lot of tests will show as unexpected failures... need to investigate why using -jn for n > 1 does this...
-#options=('!makeflags')
-options=('!distcc')
+options=('!makeflags')
 # missing rtl?
 provides=('haskell-array=0.4.0.1'
-          'haskell-base=4.6.0.0'
+          'haskell-base=4.6.0.1'
           'haskell-binary=0.5.1.1'
           'haskell-bin-package-db=0.0.0.0'
-          'haskell-bytestring=0.10.0.0'
+          'haskell-bytestring=0.10.0.2'
           'haskell-containers=0.5.0.0'
           'haskell-deepseq=1.3.0.1'
-          'haskell-directory=1.2.0.0'
+          'haskell-directory=1.2.0.1'
           'haskell-filepath=1.3.0.1'
           'haskell-ghc-prim=0.3.0.0'
           'haskell-haskell2010=1.1.1.0'
@@ -52,16 +53,17 @@ provides=('haskell-array=0.4.0.1'
           'haskell-process=1.1.0.2'
           'haskell-template-haskell=2.8.0.0'
           'haskell-time=1.4.0.1'
-          'haskell-unix=2.6.0.0'
-          'haskell-cabal=1.16.0')
+          'haskell-unix=2.6.0.1'
+          'haskell-cabal=1.16.0'
+          )
 replaces=('haskell-array<0.4.0.1'
-          'haskell-base<4.6.0.0'
+          'haskell-base<4.6.0.1'
           'haskell-binary<0.5.1.1'
           'haskell-bin-package-db<0.0.0.0'
-          'haskell-bytestring<0.10.0.0'
+          'haskell-bytestring<0.10.0.2'
           'haskell-containers<0.5.0.0'
           'haskell-deepseq<1.3.0.1'
-          'haskell-directory<1.2.0.0'
+          'haskell-directory<1.2.0.1'
           'haskell-filepath<1.3.0.1'
           'haskell-ghc-prim<0.3.0.0'
           'haskell-haskell2010<1.1.1.0'
@@ -75,17 +77,18 @@ replaces=('haskell-array<0.4.0.1'
           'haskell-process<1.1.0.2'
           'haskell-template-haskell<2.8.0.0'
           'haskell-time<1.4.0.1'
-          'haskell-unix<2.6.0.0'
-          'haskell-cabal<1.16.0')
+          'haskell-unix<2.6.0.1'
+          'haskell-cabal<1.16.0'
+          )
 source=("http://www.haskell.org/ghc/dist/${pkgver}/ghc-${pkgver}-src.tar.bz2"
         "http://www.haskell.org/ghc/dist/${pkgver}/ghc-${pkgver}-testsuite.tar.bz2"
         'build.mk'
         'add-vfp-flags.patch')
 
-md5sums=('e9d892d2970550ec5e70130b3621f6b6'
-         '0d93c458e3b445a7e524ef6ae459ce11'
+md5sums=('2585d83e7d8daece2fe0949c6bc42a2c'
+         '8454aaeb4e226ddb66c237c15874a47f'
          'cb89e280f907c60791d08613f05ec049'
-         'bb3a7c6982ce8aeec4a1156f46d69d3f')
+         'de3d0a2ae5330459481b33584f15a1cd')
 
 build() {
   cd ghc-${pkgver}
@@ -143,4 +146,46 @@ package() {
   install -d ${pkgdir}/usr/share/licenses/ghc
   install -m644 LICENSE \
     ${pkgdir}/usr/share/licenses/ghc
+
+  sed -r 's|("C compiler command", ")[^"]+|\1/usr/bin/gcc|' \
+    -i "${pkgdir}/usr/lib/ghc-${pkgver}/settings"
 }
+
+# Chicken and egg fix
+if ! pacman -Ssq ^ghc$ > /dev/null; then
+  makedepends=("${makedepends[@]:1}" "ncurses")
+  if [ "${CARCH}" = "armv7h" ]; then
+    source+=("http://ftp.uk.debian.org/debian/pool/main/g/ghc/ghc_7.6.2-1_armhf.deb")
+    md5sums+=("5d7190b3cc48771019b47376d1e69a1c")
+  elif [ "${CARCH}" = "armv6h" ]; then
+    source+=("http://downloads.raspberrypi.org/raspbian/raspbian/pool/main/g/ghc/ghc_7.4.1-4+rpi1_armhf.deb")
+    md5sums+=("79c70db16e69b5617a3761e735db0f42")
+  else
+    source+=("http://ftp.uk.debian.org/debian/pool/main/g/ghc/ghc_7.6.2-1_armel.deb")
+    md5sums+=("69894b056a12a608bd4d454ffbe30d9c")
+  fi
+
+  eval "$(echo "_build()"; declare -f build | tail -n +2)"
+
+  build() {
+    if [ "${CARCH}" = "armv7h" ]; then
+      ar x "ghc_7.6.2-1_armhf.deb"
+    elif [ "${CARCH}" = "armv6h" ]; then
+      ar x "ghc_7.4.1-4+rpi1_armhf.deb"
+    else
+      ar x "ghc_7.6.2-1_armel.deb"
+    fi
+    rm -rf usr var
+    tar -zxf data.tar.gz
+    sed "s|\"/|\"${srcdir}/|" -i usr/lib/ghc/bin/ghc{,-pkg}
+    sed "s| /usr| ${srcdir}/usr|" -i var/lib/ghc/package.conf.d/*
+    sed "s/-3.0//" -i usr/lib/ghc/settings # correct LLVM commands
+    ln -s /usr/lib/libffi.so.6 usr/lib/libffi.so.5
+    ln -s /usr/lib/libncurses.so.5 usr/lib/libtinfo.so.5
+    ln -fs ../../../var/lib/ghc/package.conf.d usr/lib/ghc/package.conf.d
+    export PATH="${PATH}:${srcdir}/usr/lib/ghc/bin"
+    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${srcdir}/usr/lib"
+    ghc-pkg recache
+    _build
+  }
+fi
