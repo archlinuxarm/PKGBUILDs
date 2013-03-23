@@ -1,0 +1,191 @@
+# $Id: PKGBUILD 168343 2012-10-09 04:08:52Z tdziedzic $
+# Maintainer: Thomas Dziedzic <gostrc@gmail.com>
+# Maintainer: Vesa Kaihlavirta <vesa@archlinux.org>
+# Special note for devs looking to upgrade this package:
+#   ghc places a unique hash for each library when it is built.
+#   Libraries depend on versions specified by those hashes.
+#   This implies that all libraries need to be rebuilt when ghc is rebuilt.
+
+# ALARM: David Flemström <david.flemstrom@gmail.com>
+#  - Add patch for vfp flags (add-vfp-flags.patch)
+#  - Change build.mk to use the LLVM backend with the right
+#    optimization passes
+#  - Add LLVM as a dependency
+#  - Correct gcc path after bulding with distcc
+#  - Uncommented !makeflags option
+#  - Use debian package for the initial build
+
+buildarch=1
+
+pkgname=ghc
+pkgver=7.6.2
+pkgrel=1
+pkgdesc='The Glasgow Haskell Compiler'
+arch=('i686' 'x86_64' 'arm' 'armv6h' 'armv7h')
+url='http://www.haskell.org/ghc/'
+license=('custom')
+# libffi might be needed in the future: http://hackage.haskell.org/trac/ghc/ticket/4496
+depends=('llvm' 'perl' 'gmp>=5.0' 'gcc') # 'libffi')
+makedepends=('ghc' 'perl' 'libxslt' 'docbook-xsl')
+checkdepends=('python2')
+install='ghc.install'
+# keep this otherwise a lot of tests will show as unexpected failures... need to investigate why using -jn for n > 1 does this...
+options=('!makeflags')
+# missing rtl?
+provides=('haskell-array=0.4.0.1'
+          'haskell-base=4.6.0.1'
+          'haskell-binary=0.5.1.1'
+          'haskell-bin-package-db=0.0.0.0'
+          'haskell-bytestring=0.10.0.2'
+          'haskell-containers=0.5.0.0'
+          'haskell-deepseq=1.3.0.1'
+          'haskell-directory=1.2.0.1'
+          'haskell-filepath=1.3.0.1'
+          'haskell-ghc-prim=0.3.0.0'
+          'haskell-haskell2010=1.1.1.0'
+          'haskell-haskell98=2.0.0.2'
+          'haskell-hoopl=3.9.0.0'
+          'haskell-hpc=0.6.0.0'
+          'haskell-integer-gmp=0.5.0.0'
+          'haskell-old-locale=1.0.0.5'
+          'haskell-old-time=1.1.0.1'
+          'haskell-pretty=1.1.1.0'
+          'haskell-process=1.1.0.2'
+          'haskell-template-haskell=2.8.0.0'
+          'haskell-time=1.4.0.1'
+          'haskell-unix=2.6.0.1'
+          'haskell-cabal=1.16.0'
+          )
+replaces=('haskell-array<0.4.0.1'
+          'haskell-base<4.6.0.1'
+          'haskell-binary<0.5.1.1'
+          'haskell-bin-package-db<0.0.0.0'
+          'haskell-bytestring<0.10.0.2'
+          'haskell-containers<0.5.0.0'
+          'haskell-deepseq<1.3.0.1'
+          'haskell-directory<1.2.0.1'
+          'haskell-filepath<1.3.0.1'
+          'haskell-ghc-prim<0.3.0.0'
+          'haskell-haskell2010<1.1.1.0'
+          'haskell-haskell98<2.0.0.2'
+          'haskell-hoopl<3.9.0.0'
+          'haskell-hpc<0.6.0.0'
+          'haskell-integer-gmp<0.5.0.0'
+          'haskell-old-locale<1.0.0.5'
+          'haskell-old-time<1.1.0.1'
+          'haskell-pretty<1.1.1.0'
+          'haskell-process<1.1.0.2'
+          'haskell-template-haskell<2.8.0.0'
+          'haskell-time<1.4.0.1'
+          'haskell-unix<2.6.0.1'
+          'haskell-cabal<1.16.0'
+          )
+source=("http://www.haskell.org/ghc/dist/${pkgver}/ghc-${pkgver}-src.tar.bz2"
+        "http://www.haskell.org/ghc/dist/${pkgver}/ghc-${pkgver}-testsuite.tar.bz2"
+        'build.mk'
+        'add-vfp-flags.patch')
+
+md5sums=('2585d83e7d8daece2fe0949c6bc42a2c'
+         '8454aaeb4e226ddb66c237c15874a47f'
+         'cb89e280f907c60791d08613f05ec049'
+         'de3d0a2ae5330459481b33584f15a1cd')
+
+build() {
+  cd ghc-${pkgver}
+
+  cp ${srcdir}/build.mk mk/build.mk
+
+  patch -p1 < ${srcdir}/add-vfp-flags.patch
+
+  # have to 're-boot' because the patch changes configure stuff
+  ./boot
+  ./configure \
+    --prefix=/usr
+
+  make
+}
+
+check() {
+  # keep this otherwise a lot of tests will show as unexpected failures... need to investigate why using -jn for n > 1 does this...
+  unset MAKEFLAGS
+
+  cd ghc-${pkgver}
+
+  # python2 rename
+  sed -e 's/PYTHON = python/&2/' -i testsuite/mk/boilerplate.mk
+  sed -e 's_#!/usr/bin/env python_&2_' -i testsuite/timeout/calibrate testsuite/timeout/timeout.py
+
+  # upstream known failures on both i686 and x86_64:
+  #    ghci.debugger/scripts     break011 [bad stderr] (ghci)
+  #    perf/compiler             parsing001 [stat not good enough] (normal)
+  #    simplCore/should_compile  spec-inline [stderr mismatch] (optasm)
+  # upstream known failures on i686 only:
+  #    numrun012 test fails on i686 works on x86_64 - http://hackage.haskell.org/trac/ghc/ticket/5856
+  make test
+
+  # enabling threads to speed up
+  # causes more failures than make test, need to investigate
+  # upstream known failures on both i686 and x86_64:
+  #    perf/compiler             parsing001 [stat not good enough] (normal)
+  #    simplCore/should_compile  spec-inline [stderr mismatch] (optasm)
+  # upstream known failures on i686 only:
+  #    numrun012 test fails on i686 works on x86_64 - http://hackage.haskell.org/trac/ghc/ticket/5856
+  #make THREADS=9 test
+
+  # will most likely cause lots of failures
+  # enable this when upstream has 0 test failures from a simple 'make test'
+  # zero unexpected failures on all tier 1 platforms - http://hackage.haskell.org/trac/ghc/ticket/5757
+  #make fulltest
+}
+
+package() {
+  cd ghc-${pkgver}
+
+  make DESTDIR=${pkgdir} install
+
+  install -d ${pkgdir}/usr/share/licenses/ghc
+  install -m644 LICENSE \
+    ${pkgdir}/usr/share/licenses/ghc
+
+  sed -r 's|("C compiler command", ")[^"]+|\1/usr/bin/gcc|' \
+    -i "${pkgdir}/usr/lib/ghc-${pkgver}/settings"
+}
+
+# Chicken and egg fix
+if ! pacman -Ssq ^ghc$ > /dev/null; then
+  makedepends=("${makedepends[@]:1}" "ncurses")
+  if [ "${CARCH}" = "armv7h" ]; then
+    source+=("http://ftp.uk.debian.org/debian/pool/main/g/ghc/ghc_7.6.2-1_armhf.deb")
+    md5sums+=("5d7190b3cc48771019b47376d1e69a1c")
+  elif [ "${CARCH}" = "armv6h" ]; then
+    source+=("http://downloads.raspberrypi.org/raspbian/raspbian/pool/main/g/ghc/ghc_7.4.1-4+rpi1_armhf.deb")
+    md5sums+=("79c70db16e69b5617a3761e735db0f42")
+  else
+    source+=("http://ftp.uk.debian.org/debian/pool/main/g/ghc/ghc_7.6.2-1_armel.deb")
+    md5sums+=("69894b056a12a608bd4d454ffbe30d9c")
+  fi
+
+  eval "$(echo "_build()"; declare -f build | tail -n +2)"
+
+  build() {
+    if [ "${CARCH}" = "armv7h" ]; then
+      ar x "ghc_7.6.2-1_armhf.deb"
+    elif [ "${CARCH}" = "armv6h" ]; then
+      ar x "ghc_7.4.1-4+rpi1_armhf.deb"
+    else
+      ar x "ghc_7.6.2-1_armel.deb"
+    fi
+    rm -rf usr var
+    tar -zxf data.tar.gz
+    sed "s|\"/|\"${srcdir}/|" -i usr/lib/ghc/bin/ghc{,-pkg}
+    sed "s| /usr| ${srcdir}/usr|" -i var/lib/ghc/package.conf.d/*
+    sed "s/-3.0//" -i usr/lib/ghc/settings # correct LLVM commands
+    ln -s /usr/lib/libffi.so.6 usr/lib/libffi.so.5
+    ln -s /usr/lib/libncurses.so.5 usr/lib/libtinfo.so.5
+    ln -fs ../../../var/lib/ghc/package.conf.d usr/lib/ghc/package.conf.d
+    export PATH="${PATH}:${srcdir}/usr/lib/ghc/bin"
+    export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${srcdir}/usr/lib"
+    ghc-pkg recache
+    _build
+  }
+fi
