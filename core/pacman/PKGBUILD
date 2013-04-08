@@ -9,33 +9,30 @@
 #  - makepkg.conf: adjusted C/CXX/LDFLAGS
 
 pkgname=pacman
-pkgver=4.0.3
-pkgrel=7
+pkgver=4.1.0
+pkgrel=2
 pkgdesc="A library-based package manager with dependency support"
 arch=('i686' 'x86_64')
 url="http://www.archlinux.org/pacman/"
 license=('GPL')
 groups=('base' 'base-devel')
-depends=('bash' 'glibc>=2.16.0' 'libarchive>=3.1.2' 'curl>=7.19.4'
+depends=('bash>=4.2.042-2' 'glibc>=2.17-2' 'libarchive>=3.1.2' 'curl>=7.19.4'
          'gpgme' 'pacman-mirrorlist')
-makedepends=('asciidoc')
+checkdepends=('python2' 'fakechroot')
 optdepends=('fakeroot: for makepkg usage as normal user')
+provides=('pacman-contrib')
+conflicts=('pacman-contrib')
+replaces=('pacman-contrib')
 backup=(etc/pacman.conf etc/makepkg.conf)
 install=pacman.install
 options=(!libtool)
 source=(ftp://ftp.archlinux.org/other/pacman/$pkgname-$pkgver.tar.gz{,.sig}
-        0001-Add-conflict-for-replacing-owned-empty-directory.patch
-        0002-Check-empty-subdirectory-ownership.patch
-        0003-Ensure-pre_upgrade-scriptlet-gets-old-package-version.patch
         pacman.conf
         makepkg.conf)
-md5sums=('387965c7125e60e5f0b9ff3b427fe0f9'
-         '1a70392526c8768470da678b31905a6e'
-         '0c1d326d0ca48c9a9819ea8060ea3bba'
-         '02db451be806335ce189ffadb5cf84b9'
-         '2e8cbf55a94b1954b167c5dee6b62317'
-         '9a7d914def620cc4dd1a94ed53892175'
-         'e6d44e71b847d2c98bb38087e33cd76b')
+md5sums=('a0f2b3148bee4784f21cf373cf59a0bc'
+         '4959b8d00056398195f4e549e7bdd346'
+         '5c491b27bae54d93d6ba972ce0fccfa7'
+         '105c1e891b91cc715bb80b532514f8b1')
 
 # keep an upgrade path for older installations
 PKGEXT='.pkg.tar.gz'
@@ -48,8 +45,11 @@ build() {
   patch -p1 -i $srcdir/0003-Ensure-pre_upgrade-scriptlet-gets-old-package-version.patch
 
   ./configure --prefix=/usr --sysconfdir=/etc \
-    --localstatedir=/var --enable-doc
+    --localstatedir=/var --enable-doc \
+    --with-scriptlet-shell=/usr/bin/bash \
+    --with-ldconfig=/usr/bin/ldconfig
   make
+  make -C contrib
 }
 
 check() {
@@ -59,36 +59,23 @@ check() {
 package() {
   cd $srcdir/$pkgname-$pkgver
   make DESTDIR=$pkgdir install
+  make DESTDIR=$pkgdir -C contrib install
 
   # install Arch specific stuff
-  mkdir -p $pkgdir/etc
+  install -dm755 $pkgdir/etc
+  install -m644 $srcdir/pacman.conf $pkgdir/etc/pacman.conf
   case "$CARCH" in
-    i686)
-      install -m644 $srcdir/pacman.conf $pkgdir/etc/pacman.conf
-      mycarch="i686"
-      mychost="i686-pc-linux-gnu"
-      myflags="-march=i686 "
-      ;;
-    x86_64)
-      install -m644 $srcdir/pacman.conf.x86_64 $pkgdir/etc/pacman.conf
-      mycarch="x86_64"
-      mychost="x86_64-unknown-linux-gnu"
-      myflags="-march=x86-64 "
-      ;;
     arm)
-      install -m644 $srcdir/pacman.conf $pkgdir/etc/pacman.conf
       mycarch="arm"
       mychost="armv5tel-unknown-linux-gnueabi"
       myflags="-march=armv5te "
       ;;
     armv6h)
-      install -m644 $srcdir/pacman.conf $pkgdir/etc/pacman.conf
       mycarch="armv6h"
       mychost="armv6l-unknown-linux-gnueabihf"
       myflags="-march=armv6 -mfloat-abi=hard -mfpu=vfp "
       ;;
     armv7h)
-      install -m644 $srcdir/pacman.conf $pkgdir/etc/pacman.conf
       mycarch="armv7h"
       mychost="armv7l-unknown-linux-gnueabihf"
       myflags="-march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16 "
@@ -102,11 +89,13 @@ package() {
     -e "s|@CARCHFLAGS[@]|$myflags|g"
   sed -i $pkgdir/etc/pacman.conf -e "s|@CARCH[@]|$mycarch|g"
 
-  # install completion files
-  install -Dm644 contrib/bash_completion "$pkgdir/usr/share/bash-completion/completions/pacman"
+  # put bash_completion in the right location
+  install -dm755 ${pkgdir}/usr/share/bash-completion/completions
+  mv ${pkgdir}/etc/bash_completion.d/pacman \
+    ${pkgdir}/usr/share/bash-completion/completions
+  rmdir ${pkgdir}/etc/bash_completion.d
+
   for f in makepkg pacman-key; do
     ln -s pacman "$pkgdir/usr/share/bash-completion/completions/$f"
   done
-
-  install -Dm644 contrib/zsh_completion $pkgdir/usr/share/zsh/site-functions/_pacman
 }
