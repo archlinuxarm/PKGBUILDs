@@ -11,23 +11,23 @@
 
 pkgname=qt3
 pkgver=3.3.8b
-pkgrel=3
+pkgrel=4
 epoch=1
-pkgdesc="The QT3 gui toolkit"
+pkgdesc="A cross-platform application and UI framework"
 arch=('i686' 'x86_64')
 url="http://www.trolltech.com/products/qt/index.html"
 license=('GPL')
 depends=('libpng' 'libxmu' 'libxcursor' 'libxinerama' 'libxft'
          'libxrandr' 'libmng')
 makedepends=('mariadb' 'postgresql' 'unixodbc' 'sqlite' 'mesa')
-optdepends=('libmariadbclient' 'postgresql-libs' 'unixodbc')
-options=('!libtool')
-install=qt.install
+optdepends=('libmariadbclient: MariaDB driver'
+            'postgresql-libs: PostgreSQL driver'
+            'unixodbc: ODBC driver')
+options=('!libtool' '!docs')
 source=(ftp://ftp.qt-project.org/qt/source/qt-x11-free-${pkgver}.tar.gz
-        qt.profile qt3-png15.patch qt-copy-kde-patches.tar.bz2 qt-patches.tar.bz2
+        qt3-png15.patch qt-copy-kde-patches.tar.bz2 qt-patches.tar.bz2
         eastern_asian_languagues.diff qt-odbc.patch gcc-4.6.patch arm_no_packed.patch)
 sha1sums=('745def6250dc7f337dbb265e20bf38dcb41fd854'
-          'd2e257a9011208b2cb81b9cf47915b9a2f9dab83'
           '3d19510c46016a1a211d97bf8f82b01498b1b33c'
           '33418e5b117458af23c72cdbffc0c339bc34bdc4'
           '116afa0e737bdf27ea27f9b3653aeb56db9ec151'
@@ -40,11 +40,11 @@ sha1sums=('745def6250dc7f337dbb265e20bf38dcb41fd854'
 # other qt-patches come from fedora and gentoo
 
 build() {
-  unset QMAKESPEC
   export QTDIR="${srcdir}"/qt-x11-free-${pkgver}
   export PATH=${QTDIR}/bin:${PATH}
   export LD_LIBRARY_PATH=${QTDIR}/lib:${LD_LIBRARY_PATH}
   export QMAKESPEC=$QTDIR/mkspecs/linux-g++
+
   cd "${srcdir}"/qt-x11-free-${pkgver}
   # apply qt patches from kde.org
   for i in ../qt-copy-kde-patches/*; do
@@ -60,30 +60,27 @@ build() {
   patch -p1 -i "${srcdir}"/qt-odbc.patch 
   # fix build with gcc 4.6.0
   patch -p1 -i "${srcdir}"/gcc-4.6.patch
-
   patch -p0 -i "${srcdir}"/qt3-png15.patch
   # Arch Linux ARM patch
   patch -p1 -i ${srcdir}/arm_no_packed.patch
 
-  # start compiling qt
-  sed -i 's|-cp -P -f|-cp -L -f|' qmake/Makefile.unix
-  rm -rf doc/html examples tutorial
-  sed -i "s|sub-tutorial sub-examples||" Makefile
-  sed -i "s|-O2|$CXXFLAGS|" mkspecs/linux-g++/qmake.conf
-  sed -i "s|-O2|$CXXFLAGS|" mkspecs/linux-g++-32/qmake.conf
-  sed -i "s|-O2|$CXXFLAGS|" mkspecs/linux-g++-64/qmake.conf
+  sed -i "s|-O2|$CXXFLAGS|" mkspecs/linux-g++{,-32,-64}/qmake.conf
   sed -i "s|-I. |$CXXFLAGS -I. |" qmake/Makefile.unix
   sed -i "s|read acceptance|acceptance=yes|" configure
-
- # remove unwanted mkspecs
-  rm -rf mkspecs/{*aix*,*bsd*,cygwin*,dgux*,darwin*,hpux*,hurd*,irix*,lynxos*,macx*,qnx*,reliant*,sco*,solaris*,tru64*,unixware*,win32*}
 
   if [ "$CARCH" = "x86_64" ]; then
       export ARCH="-64"	
     else unset ARCH
   fi
 
-  ./configure -prefix /opt/qt \
+  ./configure \
+    -prefix /usr \
+    -bindir /usr/lib/qt3/bin \
+    -headerdir /usr/include/qt3 \
+    -plugindir /usr/lib/qt3/plugins \
+    -datadir /usr/share/qt3 \
+    -translationdir /usr/share/qt3/translations \
+    -I/usr/include/mysql -I/usr/include/postgresql/server \
     -platform linux-g++$ARCH \
     -system-zlib \
     -qt-gif \
@@ -97,40 +94,26 @@ build() {
     -no-g++-exceptions \
     -plugin-sql-{mysql,psql,sqlite,odbc}
 
-  # fix /opt/qt/lib path
-  [ "$CARCH" = "x86_64" ] && sed -i "s|/opt/qt/lib64|/opt/qt/lib|g" "${srcdir}"/qt-x11-free-${pkgver}/src/Makefile
-  [ "$CARCH" = "x86_64" ] && sed -i "s|/opt/qt/lib64|/opt/qt/lib|g" "${srcdir}"/qt-x11-free-${pkgver}/tools/designer/designer/Makefile
-  [ "$CARCH" = "x86_64" ] && sed -i "s|/opt/qt/lib64|/opt/qt/lib|g" "${srcdir}"/qt-x11-free-${pkgver}/tools/designer/editor/Makefile
-  [ "$CARCH" = "x86_64" ] && sed -i "s|/opt/qt/lib64|/opt/qt/lib|g" "${srcdir}"/qt-x11-free-${pkgver}/tools/assistant/lib/Makefile
-  [ "$CARCH" = "x86_64" ] && sed -i "s|/opt/qt/lib64|/opt/qt/lib|g" "${srcdir}"/qt-x11-free-${pkgver}/tools/designer/uilib/Makefile
-
-  cd "${srcdir}"/qt-x11-free-${pkgver}
-  make -C qmake 
-  cd "${srcdir}"/qt-x11-free-${pkgver}/plugins/src/sqldrivers/mysql
-  "${srcdir}"/qt-x11-free-${pkgver}/bin/qmake -o Makefile "INCPATH+=/usr/include/mysql" "LIBS+=-L/usr/lib/mysql -lmysqlclient" mysql.pro
-  cd "${srcdir}"/qt-x11-free-${pkgver}/plugins/src/sqldrivers/psql
-  "${srcdir}"/qt-x11-free-${pkgver}/bin/qmake -o Makefile "INCPATH+=/usr/src/include /usr/include/postgresql/server" "LIBS+=-L/usr/lib -lpq" psql.pro
-
-  cd "${srcdir}"/qt-x11-free-${pkgver}
-  # fix the broken makefiles
-  #sed -i 's|[[:space:]]*strip.*doc/html.*$|#|g' src/Makefile
   make
 }
 
 package() {
   cd "${srcdir}"/qt-x11-free-${pkgver}
   make INSTALL_ROOT="${pkgdir}" install
-  rm -rf "${pkgdir}"/opt/qt/{phrasebooks,templates,translations}
-  sed -i "s|-L${srcdir}/qt-x11-free-${pkgver}/lib ||g" "${pkgdir}"/opt/qt/lib/*.prl
-  install -D -m755 qmake/qmake "${pkgdir}"/opt/qt/bin/qmake
-  install -D -m755 "${srcdir}"/qt.profile "${pkgdir}"/etc/profile.d/qt3.sh
-  ln -sf /opt/qt/bin/qtconfig "${pkgdir}"/opt/qt/bin/qt3config 
-  rm -f "${pkgdir}"/opt/qt/mkspecs/linux-g++$ARCH/linux-g++$ARCH
+  sed -i -e "s|-L${srcdir}/qt-x11-free-${pkgver}/lib ||g" -e "s|${srcdir}/||g" "${pkgdir}"/usr/lib/*.prl
+  rm -rf "${pkgdir}"/usr/share/qt3/{phrasebooks,templates,translations}
+  rm -rf "${pkgdir}"/usr/share/qt3/mkspecs/{aix*,*bsd*,cygwin*,dgux*,darwin*,hpux*,hurd*,irix*,linux-g++$ARCH/linux-g++$ARCH,lynxos*,macx*,qnx*,reliant*,sco*,solaris*,tru64*,unixware*,win32*}
 
-  # install man pages
-  install -d -m755 "${pkgdir}"/opt/qt/man
-  cp -r "${srcdir}"/qt-x11-free-${pkgver}/doc/man/{man1,man3} "${pkgdir}"/opt/qt/man/
+# install man pages
+  install -d -m755 "${pkgdir}"/usr/share/man
+  cp -r "${srcdir}"/qt-x11-free-${pkgver}/doc/man/{man1,man3} "${pkgdir}"/usr/share/man/
+  for i in "${pkgdir}"/usr/share/man/man1/*; do
+    mv $i ${i%.*}-qt3.1
+  done
 
-  install -d -m755 "${pkgdir}"/etc/ld.so.conf.d/
-  echo '/opt/qt/lib' > "${pkgdir}"/etc/ld.so.conf.d/qt3.conf
+# Useful symlinks for cmake and configure scripts
+  install -d "${pkgdir}"/usr/bin
+  for b in "${pkgdir}"/usr/lib/qt3/bin/*; do
+    ln -s /usr/lib/qt3/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt3
+  done
 }
