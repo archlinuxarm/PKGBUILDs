@@ -5,6 +5,7 @@
 #  - removed libfbclient, ibase
 #  - no x86/neon optimizations
 #  - disabled distcc, restricted makeflags to -j2
+#  - enabled opengl es2, mesa makedepend for headers
 
 highmem=1
 
@@ -22,8 +23,8 @@ pkgname=('qt5-base'
          'qt5-translations'
          'qt5-webkit'
          'qt5-xmlpatterns')
-pkgver=5.0.1
-pkgrel=10.1
+pkgver=5.0.2
+pkgrel=1
 arch=('i686' 'x86_64')
 url='http://qt-project.org/'
 license=('GPL3' 'LGPL')
@@ -32,18 +33,19 @@ makedepends=('libxcb' 'xcb-proto' 'xcb-util' 'xcb-util-image' 'xcb-util-wm' 'xcb
             'libjpeg-turbo' 'cups' 'libpulse' 'hicolor-icon-theme' 'desktop-file-utils'
             'postgresql-libs' 'libmariadbclient' 'sqlite' 'unixodbc'
             'python2' 'ruby' 'gperf' 'libxslt' 'libxcomposite' 'fontconfig'
-            'libmng' 'openal' 'gtk2')
+            'libmng' 'openal' 'gtk2' 'mesa')
 groups=('qt' 'qt5')
 options=('!libtool' '!distcc')
 _pkgfqn="qt-everywhere-opensource-src-${pkgver}"
 source=("http://releases.qt-project.org/${pkgbase}/${pkgver}/single/${_pkgfqn}.tar.xz"
         'assistant.desktop' 'designer.desktop' 'linguist.desktop'
-        'use-python2.patch')
+        'use-python2.patch' 'gcc48.patch')
 md5sums=('00a577bd88e682d1b4d01d41d1d699cf'
          'f1837a03fd0ebbd2da58975845f278e3'
          '480fea1ed076992b688373c8db274be0'
          '5595c24d5bb942c21e3a4d299e6d0bf1'
-         'ec3133b093550f16a21bb91e5f0f2943')
+         'd6ab43fb371be494e3bfd9b210c40bf1'
+         '7927028e2374321c78a76df858e723d6')
 
 build() {
   cd ${_pkgfqn}
@@ -63,10 +65,16 @@ build() {
     -e "s|#![ ]*/usr/bin/env python$|#!/usr/bin/env python2|" \
     $(find . -name '*.py')
 
+  # GCC 4.8 fixes
+  cd qtbase
+  patch -p1 -i "${srcdir}"/gcc48.patch
+  cd ../
+
   ./configure -confirm-license -opensource \
     -prefix /usr \
+    -bindir /usr/lib/qt/bin \
     -docdir /usr/share/doc/qt \
-    -headerdir /usr/include/qt5 \
+    -headerdir /usr/include/qt \
     -archdatadir /usr/lib/qt \
     -datadir /usr/share/qt \
     -sysconfdir /etc/xdg \
@@ -88,16 +96,29 @@ build() {
     -no-sse4.2 \
     -no-avx \
     -no-avx2 \
-    -no-neon
+    -no-neon \
+    -opengl es2
 
   make
+
+  # build docs
+  make docs
+
+  # build examples
+  for m in qtbase qtdeclarative qtmultimedia qtquick1 qtscript qtsvg qttools \
+    qtwebkit-examples-and-demos qtxmlpatterns; do
+    cd ${m}/examples
+    ${QTDIR}/qmake
+    make
+  cd ../../
+  done
 }
 
 package_qt5-base() {
   pkgdesc='A cross-platform application and UI framework'
   depends=('libjpeg-turbo' 'xcb-util-keysyms' 'libgl' 'dbus' 'fontconfig' 'systemd'
            'xcb-util-wm' 'libxrender' 'libxi' 'sqlite' 'libpng' 'xcb-util-image'
-           'hicolor-icon-theme' 'xdg-utils' 'icu')
+           'hicolor-icon-theme' 'xdg-utils' 'icu' 'qtchooser')
   optdepends=('postgresql-libs: PostgreSQL driver'
               'libmariadbclient: MariaDB driver'
               'unixodbc: ODBC driver')
@@ -118,6 +139,12 @@ package_qt5-base() {
   # Fix wrong qmake path in pri file
   sed -i "s|${srcdir}/${_pkgfqn}/qtbase|/usr|" \
     "${pkgdir}"/usr/lib/qt/mkspecs/modules/qt_lib_bootstrap.pri
+
+  # Useful symlinks
+  install -d "${pkgdir}"/usr/bin
+  for b in "${pkgdir}"/usr/lib/qt/bin/*; do
+    ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
+  done
 }
 
 package_qt5-declarative() {
@@ -131,6 +158,32 @@ package_qt5-declarative() {
   # Fix wrong path in prl files
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  # Useful symlinks
+  install -d "${pkgdir}"/usr/bin
+  for b in "${pkgdir}"/usr/lib/qt/bin/*; do
+    ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
+  done
+}
+
+package_qt5-doc() {
+  pkgdesc='A cross-platform application and UI framework (Documentation and Examples)'
+  depends=('qt5-base')
+  conflicts=('qt-doc')
+  replaces=('qt-doc')
+  provides=('qt-doc')
+  options=('docs')
+  groups=()
+
+  cd ${_pkgfqn}
+  make INSTALL_ROOT="${pkgdir}" install_docs
+
+  for m in qtbase qtdeclarative qtmultimedia qtquick1 qtscript qtsvg qttools \
+    qtwebkit-examples-and-demos qtxmlpatterns; do
+    cd ${m}/examples
+    make INSTALL_ROOT="${pkgdir}" install
+    cd ../../
+  done
 }
 
 package_qt5-jsbackend() {
@@ -143,6 +196,12 @@ package_qt5-jsbackend() {
   # Fix wrong path in prl files
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  # Useful symlinks
+  install -d "${pkgdir}"/usr/bin
+  for b in "${pkgdir}"/usr/lib/qt/bin/*; do
+    ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
+  done
 }
 
 package_qt5-xmlpatterns() {
@@ -165,6 +224,12 @@ package_qt5-translations() {
 
   cd ${_pkgfqn}/qttranslations
   make INSTALL_ROOT="${pkgdir}" install
+
+  # Useful symlinks
+  install -d "${pkgdir}"/usr/bin
+  for b in "${pkgdir}"/usr/lib/qt/bin/*; do
+    ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
+  done 
 }
 
 package_qt5-multimedia() {
