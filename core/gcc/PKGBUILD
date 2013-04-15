@@ -16,18 +16,19 @@ noautobuild=1
 
 pkgname=('gcc' 'gcc-libs' 'gcc-fortran' 'gcc-objc' 'gcc-go')
 pkgver=4.8.0
-pkgrel=1
-#_snapshot=4.7-20120721
+pkgrel=2
+_snapshot=4.8-20130411
 pkgdesc="The GNU Compiler Collection"
 arch=('i686' 'x86_64')
 license=('GPL' 'LGPL' 'FDL' 'custom')
 url="http://gcc.gnu.org"
 makedepends=('binutils>=2.23' 'libmpc' 'cloog' 'doxygen')
-checkdepends=('dejagnu')
+checkdepends=('dejagnu' 'inetutils')
 options=('!libtool' '!emptydirs' '!distcc')
-source=(ftp://gcc.gnu.org/pub/gcc/releases/gcc-${pkgver}/gcc-${pkgver}.tar.bz2
+source=(#ftp://gcc.gnu.org/pub/gcc/releases/gcc-${pkgver}/gcc-${pkgver}.tar.bz2
+        ftp://gcc.gnu.org/pub/gcc/snapshots/${_snapshot}/gcc-${_snapshot}.tar.bz2
         armhf-triplet-trunk.diff)
-md5sums=('e6040024eb9e761c3bea348d1fa5abb0'
+md5sums=('cb529205469260f0d56adc01088c4850'
          'bd7330bd41845929f1e0efb3b7d0a060')
 
 if [ -n "${_snapshot}" ]; then
@@ -36,13 +37,22 @@ else
   _basedir=gcc-${pkgver}
 fi
 
-build() {
+prepare() {
   cd ${srcdir}/${_basedir}
 
   # Do not run fixincludes
   sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
 
   echo ${pkgver} > gcc/BASE-VER
+
+  # hack! - some configure tests for header files using "$CPP $CPPFLAGS"
+  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" {libiberty,gcc}/configure
+
+  mkdir ${srcdir}/gcc-build
+}
+
+build() {
+  cd ${srcdir}/gcc-build
 
   # using -pipe causes spurious test-suite failures
   # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48565
@@ -54,9 +64,6 @@ build() {
   [[ $CARCH == "armv6h" ]] && CONFIGFLAG="--host=armv6l-unknown-linux-gnueabihf --build=armv6l-unknown-linux-gnueabihf --with-arch=armv6 --with-float=hard --with-fpu=vfp"
   [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf --with-arch=armv7-a --with-float=hard --with-fpu=vfpv3-d16"
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i "${srcdir}/armhf-triplet-trunk.diff"
-
-  cd ${srcdir}
-  mkdir gcc-build && cd gcc-build
 
   ${srcdir}/${_basedir}/configure --prefix=/usr \
       --libdir=/usr/lib --libexecdir=/usr/lib \
@@ -140,17 +147,15 @@ package_gcc()
   # unfortunately it is much, much easier to install the lot and clean-up the mess...
   rm -f $pkgdir/usr/bin/{{$CHOST-,}gfortran,{$CHOST-,}gccgo}
   rm -f $pkgdir/usr/lib/*.so*
-  rm -f $pkgdir/usr/lib/lib{atomic,ffi,gfortran,go{,begin},iberty,objc}.a
+  rm -f $pkgdir/usr/lib/lib{atomic,gfortran,go{,begin},iberty,objc}.a
   rm -f $pkgdir/usr/lib/libgfortran.spec
   rm -f -r $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{finclude,include/objc}
-  rm -f $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/include/{ffi{,target}.h}
   rm -f $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{cc1obj{,plus},f951,go1}
   rm -f $pkgdir/usr/lib/gcc/$CHOST/${pkgver}/{libcaf_single,libgfortranbegin}.a
-  rm -f $pkgdir/usr/share/info/{gccgo,gfortran,libffi,libgomp,libquadmath,libitm}.info
   rm -f -r $pkgdir/usr/lib/go
+  rm -f $pkgdir/usr/share/info/{gccgo,gfortran,libgomp,libquadmath,libitm}.info
   rm -f $pkgdir/usr/share/locale/{de,fr}/LC_MESSAGES/libstdc++.mo
   rm -f $pkgdir/usr/share/man/man1/{gccgo,gfortran}.1
-  rm -f $pkgdir/usr/share/man/man3/ffi*
 
   # many packages expect this symlink
   #install -dm755 ${pkgdir}/lib
