@@ -1,0 +1,90 @@
+# $Id: PKGBUILD 184413 2013-05-06 19:38:51Z foutrelis $
+# Maintainer: Kevin Piche <kevin@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - add armv7h for -fPIC flag
+
+pkgname=netpbm
+pkgver=10.61.02
+pkgrel=2
+pkgdesc="A toolkit for manipulation of graphic images"
+arch=('i686' 'x86_64')
+license=('custom' 'BSD' 'GPL' 'LGPL')
+url="http://netpbm.sourceforge.net/"
+depends=('perl' 'libpng' 'libtiff' 'libxml2')
+makedepends=('python2')
+options=('!makeflags')
+source=(ftp://ftp.archlinux.org/other/packages/netpbm/${pkgname}-${pkgver}.tar.gz{,.sig} \
+        ftp://ftp.archlinux.org/other/packages/netpbm/netpbm-doc-22Feb2009.tar.xz{,.sig} \
+        netpbm-CAN-2005-2471.patch netpbm-security-code.patch netpbm-security-scripts.patch)
+sha1sums=('dc2354716996c8fe4c4836386e6c403ec2f15589'
+          '253df0e79f9344e68ee907a43347d630ff6b1b95'
+          'dfeba9f9a5fe987d64db0aadb5ca8c1b20fcead2'
+          'e9513608a661beb05a63270931f6191029e935f8'
+          'b79cf9d42488fea065ba16262ed97694c47af08d'
+          'cde27f75fa5ca8010a3b1f08d8e247d42243d0f5'
+          '300a2386d3207005f4cb4120bbb2f3788a9b7716')
+
+# source PKGBUILD && mksource
+mksource() {
+# Get docs with: wget --recursive --relative -nH http://netpbm.sourceforge.net/doc/
+  curl -o advanced.tar.gz 'http://netpbm.svn.sourceforge.net/viewvc/netpbm/advanced.tar.gz?view=tar'
+  tar -xf advanced.tar.gz advanced/version.mk
+  _pkgver=$(grep MAJOR advanced/version.mk |cut -d ' ' -f 3).$(grep MINOR advanced/version.mk |cut -d ' ' -f 3).0$(grep POINT advanced/version.mk |cut -d ' ' -f 3)
+  mv advanced.tar.gz ${pkgname}-${_pkgver}.tar.gz
+  gpg --detach-sign --use-agent -u ${GPGKEY} ${pkgname}-${_pkgver}.tar.gz
+  rm -r advanced
+}
+
+prepare() {
+  cd "${srcdir}/advanced"
+
+  patch -p1 < ../netpbm-CAN-2005-2471.patch
+  patch -p1 < ../netpbm-security-code.patch
+  patch -p1 < ../netpbm-security-scripts.patch
+  sed -i 's|#!/usr/bin/python|#!/usr/bin/python2|' buildtools/makeman
+  sed -i 's|@python|@python2|' buildtools/manpage.mk
+
+  cp config.mk.in  config.mk
+  [ "${CARCH}" = 'x86_64' ] && echo 'CFLAGS_SHLIB = -fPIC' >> config.mk
+  [ "${CARCH}" = 'armv7h' ] && echo 'CFLAGS_SHLIB = -fPIC' >> config.mk
+  echo "NETPBM_DOCURL = file://${srcdir}/doc" >> config.mk
+  echo 'TIFFLIB = libtiff.so' >> config.mk
+  echo 'JPEGLIB = libjpeg.so' >> config.mk
+  echo 'PNGLIB = libpng.so' >> config.mk
+  echo 'ZLIB = libz.so' >> config.mk
+
+  sed -i 's|misc|share/netpbm|' common.mk
+  sed -i 's|/link|/lib|' lib/Makefile
+  sed -i 's|install.manweb install.man|install.man|' GNUmakefile
+}
+
+build() {
+  cd "${srcdir}/advanced"
+
+  make
+
+  # Generating useful man pages with html doc
+  cd  "${srcdir}/doc"
+  make MAKEMAN="${srcdir}/advanced/buildtools/makeman" USERGUIDE=. \
+    -f "${srcdir}/advanced/buildtools/manpage.mk" manpages
+}
+
+package() {
+  cd "${srcdir}/advanced"
+  make pkgdir="${pkgdir}/usr" PKGMANDIR=share/man install-run install-dev
+
+# Removing dummy man pages
+  rm "${pkgdir}"/usr/share/man/man{1,3,5}/*
+
+  cd  "${srcdir}/doc"
+  make MAKEMAN="${srcdir}/advanced/buildtools/makeman" MANDIR="${pkgdir}/usr/share/man" \
+    -f "${srcdir}/advanced/buildtools/manpage.mk" installman
+
+# Replace obsolete utility
+  echo -e '#!/bin/sh\npamditherbw $@ | pamtopnm\n' > "${pkgdir}/usr/bin/pgmtopbm"
+
+# Licensing.  Note that each program in the package has a separate license.
+  install -D -m644 "${srcdir}/advanced/doc/copyright_summary" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/copyright_summary.txt"
+}
