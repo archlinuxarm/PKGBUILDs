@@ -1,26 +1,28 @@
-From d2ba3dc4196b2b1579f6ccbb64880e662684b8ba Mon Sep 17 00:00:00 2001
-From: Arianna Avanzini <avanzini.arianna@gmail.com>
-Date: Sun, 5 Feb 2012 01:04:27 +0100
-Subject: [PATCH 2/2] block: introduce the BFQ-v6 I/O sched for 3.8
+From a02b3c46da38110f8f95a22d2a769569ce3fb65e Mon Sep 17 00:00:00 2001
+From: ponce <matteo.bernardini@gmail.com>
+Date: Sat, 4 May 2013 08:49:43 +0200
+Subject: [PATCH 2/2] block: introduce the BFQ-v6 I/O sched for 3.9
 
-Add the BFQ-v6 I/O scheduler to 3.8.
-The general structure is borrowed from CFQ, as much code. A (bfq_)queue is
-associated to each task doing I/O on a device, and each time a scheduling
-decision has to be made a queue is selected and served until it expires.
+Add the BFQ-v6 I/O scheduler to 3.9.
+The general structure is borrowed from CFQ, as much code. A (bfq_)queue
+is associated to each task doing I/O on a device, and each time a
+scheduling decision has to be made a queue is selected and served until
+it expires.
 
-    - Slices are given in the service domain: tasks are assigned budgets,
-      measured in number of sectors. Once got the disk, a task must
-      however consume its assigned budget within a configurable maximum time
-      (by default, the maximum possible value of the budgets is automatically
-      computed to comply with this timeout). This allows the desired latency
-      vs "throughput boosting" tradeoff to be set.
+    - Slices are given in the service domain: tasks are assigned
+      budgets, measured in number of sectors. Once got the disk, a task
+      must however consume its assigned budget within a configurable
+      maximum time (by default, the maximum possible value of the
+      budgets is automatically computed to comply with this timeout).
+      This allows the desired latency vs "throughput boosting" tradeoff
+      to be set.
 
     - Budgets are scheduled according to a variant of WF2Q+, implemented
       using an augmented rb-tree to take eligibility into account while
       preserving an O(log N) overall complexity.
 
-    - A low-latency tunable is provided; if enabled, both interactive and soft
-      real-time applications are guaranteed very low latency.
+    - A low-latency tunable is provided; if enabled, both interactive
+      and soft real-time applications are guaranteed very low latency.
 
     - Latency guarantees are preserved also in presence of NCQ.
 
@@ -29,38 +31,37 @@ decision has to be made a queue is selected and served until it expires.
 
     - A useful feature borrowed from CFQ: static fallback queue for OOM.
 
-    - Differently from CFQ, BFQ uses a unified mechanism (Early Queue Merge,
-      EQM) to get a sequential read pattern, and hence a high throughput,
-      with any set of processes performing interleaved I/O. EQM also
-      preserves low latency. The code for detecting whether two queues have
-      to be merged is a slightly modified version of the CFQ code for
-      detecting whether two queues belong to cooperating processes and whether
-      the service of a queue should be preempted to boost the throughput.
+    - Differently from CFQ, BFQ uses a unified mechanism (Early Queue
+      Merge, EQM) to get a sequential read pattern, and hence a high
+      throughput, with any set of processes performing interleaved I/O.
+      EQM also preserves low latency. The code for detecting whether two
+      queues have to be merged is a slightly modified version of the CFQ
+      code for detecting whether two queues belong to cooperating
+      processes and whether the service of a queue should be preempted
+      to boost the throughput.
 
     - BFQ supports full hierarchical scheduling, exporting a cgroups
       interface.  Each node has a full scheduler, so each group can
       be assigned its own ioprio (mapped to a weight, see next point)
       and an ioprio_class.
 
-    - If the cgroups interface is used, weights can be explictly assigned,
-      otherwise ioprio values are mapped to weights using the relation
-      weight = IOPRIO_BE_NR - ioprio.
+    - If the cgroups interface is used, weights can be explictly
+      assigned, otherwise ioprio values are mapped to weights using the
+      relation weight = IOPRIO_BE_NR - ioprio.
 
     - ioprio classes are served in strict priority order, i.e., lower
-      priority queues are not served as long as there are higher priority
-      queues.  Among queues in the same class the bandwidth is distributed
-      in proportion to the weight of each queue. A very thin extra bandwidth
-      is however guaranteed to the Idle class, to prevent it from starving.
-
-Signed-off-by: Paolo Valente <paolo.valente@unimore.it>
-Signed-off-by: Arianna Avanzini <avanzini.arianna@gmail.com>
+      priority queues are not served as long as there are higher
+      priority queues.  Among queues in the same class the bandwidth is
+      distributed in proportion to the weight of each queue. A very
+      thin extra bandwidth is however guaranteed to the Idle class, to
+      prevent it from starving.
 ---
- block/bfq-cgroup.c  |  838 ++++++++++++++
+ block/bfq-cgroup.c  |  835 +++++++++++++
  block/bfq-ioc.c     |   36 +
  block/bfq-iosched.c | 3218 +++++++++++++++++++++++++++++++++++++++++++++++++++
  block/bfq-sched.c   | 1044 +++++++++++++++++
  block/bfq.h         |  617 ++++++++++
- 5 files changed, 5753 insertions(+)
+ 5 files changed, 5750 insertions(+)
  create mode 100644 block/bfq-cgroup.c
  create mode 100644 block/bfq-ioc.c
  create mode 100644 block/bfq-iosched.c
@@ -69,10 +70,10 @@ Signed-off-by: Arianna Avanzini <avanzini.arianna@gmail.com>
 
 diff --git a/block/bfq-cgroup.c b/block/bfq-cgroup.c
 new file mode 100644
-index 0000000..1ae54d1
+index 0000000..2c4d4d2
 --- /dev/null
 +++ b/block/bfq-cgroup.c
-@@ -0,0 +1,838 @@
+@@ -0,0 +1,835 @@
 +/*
 + * BFQ: CGROUPS support.
 + *
@@ -119,10 +120,9 @@ index 0000000..1ae54d1
 +					    struct bfq_data *bfqd)
 +{
 +	struct bfq_group *bfqg;
-+	struct hlist_node *n;
 +	void *key;
 +
-+	hlist_for_each_entry_rcu(bfqg, n, &bgrp->group_data, group_node) {
++	hlist_for_each_entry_rcu(bfqg, &bgrp->group_data, group_node) {
 +		key = rcu_dereference(bfqg->bfqd);
 +		if (key == bfqd)
 +			return bfqg;
@@ -604,11 +604,11 @@ index 0000000..1ae54d1
 + */
 +static void bfq_disconnect_groups(struct bfq_data *bfqd)
 +{
-+	struct hlist_node *pos, *n;
++	struct hlist_node *tmp;
 +	struct bfq_group *bfqg;
 +
 +	bfq_log(bfqd, "disconnect_groups beginning") ;
-+	hlist_for_each_entry_safe(bfqg, pos, n, &bfqd->group_list, bfqd_node) {
++	hlist_for_each_entry_safe(bfqg, tmp, &bfqd->group_list, bfqd_node) {
 +		hlist_del(&bfqg->bfqd_node);
 +
 +		__bfq_deactivate_entity(bfqg->my_entity, 0);
@@ -701,7 +701,6 @@ index 0000000..1ae54d1
 +{									\
 +	struct bfqio_cgroup *bgrp;					\
 +	struct bfq_group *bfqg;						\
-+	struct hlist_node *n;						\
 +									\
 +	if (val < (__MIN) || val > (__MAX))				\
 +		return -EINVAL;						\
@@ -713,7 +712,7 @@ index 0000000..1ae54d1
 +									\
 +	spin_lock_irq(&bgrp->lock);					\
 +	bgrp->__VAR = (unsigned short)val;				\
-+	hlist_for_each_entry(bfqg, n, &bgrp->group_data, group_node) {	\
++	hlist_for_each_entry(bfqg, &bgrp->group_data, group_node) {	\
 +		bfqg->entity.new_##__VAR = (unsigned short)val;		\
 +		smp_wmb();						\
 +		bfqg->entity.ioprio_changed = 1;			\
@@ -807,7 +806,6 @@ index 0000000..1ae54d1
 +	struct task_struct *task;
 +	struct io_context *ioc;
 +	struct io_cq *icq;
-+	struct hlist_node *n;
 +
 +	/*
 +	 * IMPORTANT NOTE: The move of more than one process at a time to a
@@ -820,7 +818,7 @@ index 0000000..1ae54d1
 +			 * Handle cgroup change here.
 +			 */
 +			rcu_read_lock();
-+			hlist_for_each_entry_rcu(icq, n, &ioc->icq_list, ioc_node)
++			hlist_for_each_entry_rcu(icq, &ioc->icq_list, ioc_node)
 +				if (!strncmp(icq->q->elevator->type->elevator_name,
 +					     "bfq", ELV_NAME_MAX))
 +					bfq_bic_change_cgroup(icq_to_bic(icq),
@@ -834,7 +832,7 @@ index 0000000..1ae54d1
 +static void bfqio_destroy(struct cgroup *cgroup)
 +{
 +	struct bfqio_cgroup *bgrp = cgroup_to_bfqio(cgroup);
-+	struct hlist_node *n, *tmp;
++	struct hlist_node *tmp;
 +	struct bfq_group *bfqg;
 +
 +	/*
@@ -844,7 +842,7 @@ index 0000000..1ae54d1
 +	 * cgroup is RCU-safe); bgrp->group_data will not be accessed by
 +	 * anything else and we don't need any synchronization.
 +	 */
-+	hlist_for_each_entry_safe(bfqg, n, tmp, &bgrp->group_data, group_node)
++	hlist_for_each_entry_safe(bfqg, tmp, &bgrp->group_data, group_node)
 +		bfq_destroy_group(bgrp, bfqg);
 +
 +	BUG_ON(!hlist_empty(&bgrp->group_data));
@@ -5851,5 +5849,5 @@ index 0000000..ce3c474
 +static void bfq_exit_bfqq(struct bfq_data *bfqd, struct bfq_queue *bfqq);
 +#endif
 -- 
-1.8.1.2
+1.8.2
 
