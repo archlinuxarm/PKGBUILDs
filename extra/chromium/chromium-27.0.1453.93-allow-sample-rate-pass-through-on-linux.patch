@@ -1,0 +1,96 @@
+From ed5409740e3f6c13895a29b770d46d659973863e Mon Sep 17 00:00:00 2001
+From: "dalecurtis@google.com"
+ <dalecurtis@google.com@0039d316-1c4b-4281-b951-d872f2087c98>
+Date: Fri, 24 May 2013 23:54:45 +0000
+Subject: [PATCH] Allow sample rate pass through on Linux.
+
+Requiring the native output sample rate to avoid glitching appears
+to have just been an issue with a poor tlength choice.  xians and
+I resolved this prior to turning PulseAudio on by default, but left
+the native sample rate requirement in at the time.
+
+Since "native sample rate" can change on the fly with PulseAudio
+our approach of specifying FIX_RATE was incorrect.  Allowing Pulse
+to handle resampling lets us remove the FIX_RATE flag.  It also
+improves CPU usage in cases where Pulse can configure the output
+device to match the requested sample rate.
+
+BUG=229918
+TEST=extensive manual checks for glitching.
+R=xians@chromium.org
+
+Review URL: https://codereview.chromium.org/15957002
+
+git-svn-id: svn://svn.chromium.org/chrome/trunk/src@202233 0039d316-1c4b-4281-b951-d872f2087c98
+---
+ content/renderer/media/audio_renderer_mixer_manager.cc | 6 +++---
+ media/audio/pulse/audio_manager_pulse.cc               | 6 +++++-
+ media/audio/pulse/pulse_util.cc                        | 6 +++---
+ 3 files changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/content/renderer/media/audio_renderer_mixer_manager.cc b/content/renderer/media/audio_renderer_mixer_manager.cc
+index 7db67d1..0044d25 100644
+--- a/content/renderer/media/audio_renderer_mixer_manager.cc
++++ b/content/renderer/media/audio_renderer_mixer_manager.cc
+@@ -52,9 +52,9 @@ media::AudioRendererMixer* AudioRendererMixerManager::GetMixer(
+     return it->second.mixer;
+   }
+ 
+-  // On ChromeOS we can rely on the playback device to handle resampling, so
+-  // don't waste cycles on it here.
+-#if defined(OS_CHROMEOS)
++  // On ChromeOS and Linux we can rely on the playback device to handle
++  // resampling, so don't waste cycles on it here.
++#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+   int sample_rate = params.sample_rate();
+ #else
+   int sample_rate = hardware_config_->GetOutputSampleRate();
+diff --git a/media/audio/pulse/audio_manager_pulse.cc b/media/audio/pulse/audio_manager_pulse.cc
+index c127d17..fed919a 100644
+--- a/media/audio/pulse/audio_manager_pulse.cc
++++ b/media/audio/pulse/audio_manager_pulse.cc
+@@ -141,11 +141,15 @@ AudioParameters AudioManagerPulse::GetPreferredOutputStreamParameters(
+   int buffer_size = kDefaultOutputBufferSize;
+   int bits_per_sample = 16;
+   int input_channels = 0;
++  int sample_rate;
+   if (input_params.IsValid()) {
+     bits_per_sample = input_params.bits_per_sample();
+     channel_layout = input_params.channel_layout();
+     input_channels = input_params.input_channels();
+     buffer_size = std::min(buffer_size, input_params.frames_per_buffer());
++    sample_rate = input_params.sample_rate();
++  } else {
++    sample_rate = GetNativeSampleRate();
+   }
+ 
+   int user_buffer_size = GetUserBufferSize();
+@@ -154,7 +158,7 @@ AudioParameters AudioManagerPulse::GetPreferredOutputStreamParameters(
+ 
+   return AudioParameters(
+       AudioParameters::AUDIO_PCM_LOW_LATENCY, channel_layout, input_channels,
+-      GetNativeSampleRate(), bits_per_sample, buffer_size);
++      sample_rate, bits_per_sample, buffer_size);
+ }
+ 
+ AudioOutputStream* AudioManagerPulse::MakeOutputStream(
+diff --git a/media/audio/pulse/pulse_util.cc b/media/audio/pulse/pulse_util.cc
+index 0a4734b..6a4dad1 100644
+--- a/media/audio/pulse/pulse_util.cc
++++ b/media/audio/pulse/pulse_util.cc
+@@ -289,9 +289,9 @@ bool CreateOutputStream(pa_threaded_mainloop** mainloop,
+       pa_stream_connect_playback(
+           *stream, NULL, &pa_buffer_attributes,
+           static_cast<pa_stream_flags_t>(
+-              PA_STREAM_FIX_RATE | PA_STREAM_INTERPOLATE_TIMING |
+-              PA_STREAM_ADJUST_LATENCY | PA_STREAM_AUTO_TIMING_UPDATE |
+-              PA_STREAM_NOT_MONOTONIC | PA_STREAM_START_CORKED),
++              PA_STREAM_INTERPOLATE_TIMING | PA_STREAM_ADJUST_LATENCY |
++              PA_STREAM_AUTO_TIMING_UPDATE | PA_STREAM_NOT_MONOTONIC |
++              PA_STREAM_START_CORKED),
+           NULL, NULL) == 0,
+       "pa_stream_connect_playback FAILED ");
+ 
+-- 
+1.8.2.2
+
