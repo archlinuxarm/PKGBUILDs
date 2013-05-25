@@ -9,7 +9,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
-pkgver=9.1.2
+pkgver=9.1.3
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
@@ -20,7 +20,7 @@ options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
         #ftp://ftp.freedesktop.org/pub/mesa/9.1/MesaLib-9.1-rc2.tar.bz2 # for RC testing
         LICENSE)
-md5sums=('df2aab86ff4a510ce5b0d074caa0a59f'
+md5sums=('952ccd03547ed72333b64e1746cf8ada'
          'c3e45fe7287bbf8f620c209a872330dc'
          '5c65a0fe315dd347e09b1f2826a1df5a')
 
@@ -39,6 +39,7 @@ build() {
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
     --with-gallium-drivers=swrast \
     --with-dri-drivers=swrast \
+    --with-llvm-shared-libs \
     --enable-gallium-llvm \
     --enable-egl \
     --enable-gallium-egl \
