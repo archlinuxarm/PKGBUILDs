@@ -9,11 +9,11 @@ pkgname=('linux-olinuxino' 'linux-headers-olinuxino')
 _kernelname=${pkgname#linux}
 _basekernel=3.7
 pkgver=${_basekernel}.2
-pkgrel=2
+pkgrel=3
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'elftosb' 'imx-bootlets-olinuxino' 'imx-bootlets-olinuxino-ntsc')
+makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage')
 options=('!strip')
 source=("http://www.kernel.org/pub/linux/kernel/v3.0/linux-${_basekernel}.tar.xz"
         "ftp://ftp.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.bz2"
@@ -21,13 +21,17 @@ source=("http://www.kernel.org/pub/linux/kernel/v3.0/linux-${_basekernel}.tar.xz
         'change-default-console-loglevel.patch'
         '0001-ARM-imx23-olinuxino-Add-spi-support.patch'
         '0001-MXS-imx23-olinuxino-Add-i2c-support.patch'
+        '0001-mmc-mxs-mmc-Add-support-for-non-removable-cards.patch'
+        '0002-ARM-dts-imx23-olinuxino-Set-the-sdcard-as-non-remova.patch'
         '0001-rtl8192cu.patch')
 md5sums=('21223369d682bcf44bcdfe1521095983'
          'b88977838a2a52ff4fb4e82b30726496'
-         '23a7b5a1f8030d8d2358ffd61facde41'
+         '2e55d4387dade59532393a3e882f543f'
          '9d3c56a4b999c8bfbd4018089a62f662'
          '13fc27b36015d5a4bd82ce3e6d9d016e'
          'acc5de524247ec1aff5c9af6a486652f'
+         '8a034a737c554cc4ef99ca3854ad56d5'
+         'ef27d61a159fa9fcba6e7b93e9f630f2'
          '3073241240a0536d53408bd94dd5644a')
 
 build() {
@@ -47,7 +51,9 @@ build() {
   patch -Np1 -i "${srcdir}/0001-ARM-imx23-olinuxino-Add-spi-support.patch"
   patch -Np1 -i "${srcdir}/0001-MXS-imx23-olinuxino-Add-i2c-support.patch"
   patch -Np1 -i "${srcdir}/0001-rtl8192cu.patch"
-
+  patch -Np1 -i "${srcdir}/0001-mmc-mxs-mmc-Add-support-for-non-removable-cards.patch"
+  patch -Np1 -i "${srcdir}/0002-ARM-dts-imx23-olinuxino-Set-the-sdcard-as-non-remova.patch"
+  
   cat "${srcdir}/config" > ./.config
 
   # set extraversion to pkgrel
@@ -80,13 +86,13 @@ build() {
   #yes "" | make config
 
   # build!
-  make ${MAKEFLAGS} zImage modules imx23-olinuxino.dtb
+  make ${MAKEFLAGS} uImage modules imx23-olinuxino.dtb
 }
 
 package_linux-olinuxino() {
   pkgdesc="The Linux Kernel and modules - i.MX233 OLinuXino"
   groups=('base')
-  depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7')
+  depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7' 'uboot-olinuxino')
   optdepends=('crda: to set the correct wireless channels of your country')
   provides=('kernel26' 'linux=${pkgver}')
   conflicts=('kernel26-olinuxino')
@@ -102,24 +108,15 @@ package_linux-olinuxino() {
   mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
 
-  # Append olinuxino DT to zImage
-  cat arch/$KARCH/boot/zImage arch/arm/boot/imx23-olinuxino.dtb > "${pkgdir}/boot/zImage"
-  ln -sf "${pkgdir}/boot/zImage" .
+  # install uImage and DTB
+  cp arch/$KARCH/boot/uImage "${pkgdir}/boot/uImage"
+  cp arch/$KARCH/boot/imx23-olinuxino.dtb "${pkgdir}/boot/imx23-olinuxino.dtb"
 
   # set correct depmod command for install
   sed \
     -e  "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
     -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
     -i "${startdir}/${pkgname}.install"
-
-  # Generate an imx233 boot image
-  msg "Generating PAL sdcard image ..."
-  ln -sf /opt/imx-bootlets-olinuxino
-  elftosb -z -c ./imx-bootlets-olinuxino/linux.bd -o ${pkgdir}/boot/oli-${_kernver}-pal.sb
-
-  msg "Generating NTSC sdcard image ..."
-  ln -sf /opt/imx-bootlets-olinuxino-ntsc
-  elftosb -z -c ./imx-bootlets-olinuxino-ntsc/linux.bd -o ${pkgdir}/boot/oli-${_kernver}-ntsc.sb
 
   # remove build and source links
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
