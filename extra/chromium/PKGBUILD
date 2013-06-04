@@ -11,26 +11,27 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - removed NaCl, not for ARM
 #  - adjusted gyp flags for v7h
+#
+#        moonman <moonman [dot] ca [at] gmail [dot] com>
+#  -added armv6 support
 
-buildarch=4
+buildarch=20
 highmem=1
 
 pkgname=chromium
 pkgver=27.0.1453.93
 pkgrel=3
 pkgdesc="The open-source project behind Google Chrome, an attempt at creating a safer, faster, and more stable browser"
-arch=('i686' 'x86_64')
+arch=('armv6h' 'armv7h')
 url="http://www.chromium.org/"
 license=('BSD')
-depends=('gtk2' 'nss' 'alsa-lib' 'xdg-utils' 'bzip2' 'libevent' 'libxss'
+depends=('gtk2' 'nss' 'alsa-lib' 'ffmpeg' 'xdg-utils' 'bzip2' 'libevent' 'libxss'
          'libgcrypt' 'ttf-font' 'udev' 'dbus' 'flac' 'opus' 'libwebp'
          'speech-dispatcher' 'pciutils' 'libpulse' 'desktop-file-utils'
          'hicolor-icon-theme')
 makedepends=('python2' 'perl' 'gperf' 'yasm' 'mesa' 'libgnome-keyring'
              'elfutils' 'subversion')
 optdepends=('kdebase-kdialog: needed for file dialogs in KDE')
-# Needed for the NaCl toolchain
-[[ $CARCH == x86_64 ]] && makedepends+=('lib32-zlib')
 provides=('chromium-browser')
 conflicts=('chromium-browser')
 backup=('etc/chromium/default')
@@ -44,16 +45,15 @@ source=(http://commondatastorage.googleapis.com/chromium-browser-official/$pkgna
         chromium-27.0.1453.93-fix-crash-when-quickly-dragging-a-new-tab.patch
         chromium-26.0.1410.43-speechd-0.8.patch
         die-sysroot-die.patch)
-sha256sums=('7af8f70745992afdee0196039b5beab1b86b6de7fa70ca4f4a04dc335f034b3f'
+sha256sums=('6dd8c01a4d72acc512652332d67e92ff9bcb3533b621f2b281c30f00ce26ad40'
             '09bfac44104f4ccda4c228053f689c947b3e97da9a4ab6fa34ce061ee83d0322'
             '478340d5760a9bd6c549e19b1b5d1c5b4933ebf5f8cfb2b3e2d70d07443fe232'
             '4999fded897af692f4974f0a3e3bbb215193519918a1fa9b31ed51e74a2dccb9'
             '9875ffcc0e9ae9420876ac66b130b1b017d445a031d43cbe0119793e1fb3781c'
-            '23b04468881642ffdc8457016c8f91df395dfccb4af2ad6b758168180ae070f3'
             'c57d760589af1566469fbba0d85624b53eb07a3077485599f599a226dbd4d2a8'
             'd530f52cb485ff8da035b38ffebe171309a1d8e515040f5e6398ecb286336797'
+            '23b04468881642ffdc8457016c8f91df395dfccb4af2ad6b758168180ae070f3'
             '66705264d9e679a58ed522b4475a06c8a5a4fe52a709c537b1a7d5aa43fb6c84')
-
 prepare() {
   cd "$srcdir/$pkgname-$pkgver"
 
@@ -79,6 +79,7 @@ prepare() {
     -e 's|/usr/bin/python$|&2|g' \
     -e 's|(/usr/bin/python2)\.4$|\1|g' \
     {} +
+
   # There are still a lot of relative calls which need a workaround
   mkdir "$srcdir/python2-path"
   ln -s /usr/bin/python2 "$srcdir/python2-path/python"
@@ -95,6 +96,22 @@ build() {
   # Silence "locally defined but not used" warnings in Chromium and WebKit
   CFLAGS+=' -Wno-unused-local-typedefs'
 
+if [ "$CARCH" == "armv6h" ]; then
+arch_specific_flags="
+    -Darmv7=0 \
+    -Darmv6=1 \
+    -Darm_fpu=vfp \
+    -Darm_thumb=0 \
+    -Dv8_can_use_vfp_instructions=false \
+    -Dv8_can_use_vfp2_instructions=true"
+fi
+
+if [ "$CARCH" == "armv7h" ]; then
+arch_specific_flags="
+    -Darmv7=1 \
+    -Darm_fpu=vfpv3-d16"
+fi
+
   build/gyp_chromium --depth=. \
     -Dwerror= \
     -Dlinux_link_gsettings=1 \
@@ -110,7 +127,7 @@ build() {
     -Dproprietary_codecs=1 \
     -Duse_system_bzip2=1 \
     -Duse_system_flac=1 \
-    -Duse_system_ffmpeg=0 \
+    -Duse_system_ffmpeg=1 \
     -Duse_system_libevent=1 \
     -Duse_system_libjpeg=1 \
     -Duse_system_libpng=1 \
@@ -126,14 +143,13 @@ build() {
     -Ddisable_newlib_untar=1 \
     -Ddisable_sse2=1 \
     -Dtarget_arch=arm \
-    -Darmv7=1 \
     -Darm_neon=0 \
-    -Darm_fpu=vfpv3-d16 \
     -Dlinux_use_tcmalloc=0 \
     -Ddisable_nacl=1 \
     -Dv8_use_arm_eabi_hardfloat=true \
     -Darm_float_abi=hard \
-    -Denable_webrtc=0
+    -Denable_webrtc=0 \
+    ${arch_specific_flags}
 
   make chrome chrome_sandbox BUILDTYPE=Release
 }
@@ -146,7 +162,7 @@ package() {
   install -Dm4755 -o root -g root out/Release/chrome_sandbox \
     "$pkgdir/usr/lib/chromium/chromium-sandbox"
 
-  cp out/Release/{*.pak,libffmpegsumo.so} \
+  cp out/Release/*.pak \
     "$pkgdir/usr/lib/chromium/"
 
   # Allow users to override command-line options
