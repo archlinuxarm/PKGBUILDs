@@ -10,7 +10,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=9.1.3
-pkgrel=1
+pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
              'libvdpau' 'wayland' 'systemd')
@@ -18,19 +18,21 @@ url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
-        #ftp://ftp.freedesktop.org/pub/mesa/9.1/MesaLib-9.1-rc2.tar.bz2 # for RC testing
-        LICENSE)
+        LICENSE
+	CVE-2013-1993.patch)
 md5sums=('952ccd03547ed72333b64e1746cf8ada'
-         'c3e45fe7287bbf8f620c209a872330dc'
-         '5c65a0fe315dd347e09b1f2826a1df5a')
+         '5c65a0fe315dd347e09b1f2826a1df5a'
+         'dc8dad7c9bc6a92bd9c33b27b9da825e')
+
+prepare() {
+    cd ${srcdir}/?esa-*
+
+    # fix CVE-2013-1993 merged upstream
+    patch -Np1 -i ${srcdir}/CVE-2013-1993.patch
+}
 
 build() {
     cd ${srcdir}/?esa-*
-
-    # pick 2 commits from master to
-    # fix a nouveau crash: http://cgit.freedesktop.org/mesa/mesa/commit/?id=17f1cb1d99e66227d1e05925ef937643f5c1089a
-    # and intel kwin slowness http://cgit.freedesktop.org/mesa/mesa/commit/?id=e062a4187d8ea518a39c913ae7562cf1d8ac3205
-    #patch -Np1 -i ${srcdir}/git-fixes.patch
 
     autoreconf -vfi # our automake is far too new for their build system :)
 
