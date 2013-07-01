@@ -22,13 +22,6 @@ source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
 md5sums=('a2c4e25d0e27918bc67f61bae04d0cb8'
          '5c65a0fe315dd347e09b1f2826a1df5a')
 
-prepare() {
-    cd ${srcdir}/?esa-*
-
-    # fix CVE-2013-1993 merged upstream
-    patch -Np1 -i ${srcdir}/CVE-2013-1993.patch
-}
-
 build() {
     cd ${srcdir}/?esa-*
 
