@@ -1,0 +1,87 @@
+# $Id$
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Jonathan Wiersma <archaur at jonw dot org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove numactl from depends, doesn't build on ARM
+
+pkgname=libvirt
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="API for controlling virtualization engines (openvz,kvm,qemu,virtualbox,xen,etc)"
+arch=('i686' 'x86_64')
+url="http://libvirt.org/"
+license=('LGPL')
+depends=('e2fsprogs' 'gnutls' 'iptables' 'libxml2' 'parted' 'polkit' 'python2'
+	 'avahi' 'yajl' 'libpciaccess' 'udev' 'dbus-core' 'libxau' 'libxdmcp' 'libpcap'
+	 'curl' 'libsasl' 'libgcrypt' 'libgpg-error' 'openssl' 'libxcb' 'gcc-libs'
+	 'iproute2' 'libnl' 'libx11' 'audit')
+makedepends=('pkgconfig' 'lvm2' 'linux-api-headers' 'dnsmasq')
+optdepends=('bridge-utils: for briged networking (default)'
+	    'dnsmasq: for NAT/DHCP for guests'
+	    'kvm'
+	    'openbsd-netcat: for remote management over ssh'
+	    'qemu'
+	    'radvd'
+	    'dmidecode'
+	    'ebtables')
+options=('emptydirs' '!libtool')
+backup=('etc/conf.d/libvirtd'
+	'etc/conf.d/libvirtd-guests'
+	'etc/libvirt/libvirtd.conf'
+	'etc/libvirt/libvirt.conf'
+	'etc/libvirt/qemu.conf'
+	'etc/sasl2/libvirt.conf')
+install="libvirt.install"
+source=("http://libvirt.org/sources/$pkgname-$pkgver.tar.gz"
+	libvirtd.conf.d
+	libvirtd-guests.conf.d
+	libvirt.tmpfiles.d)
+md5sums=('f980a84719033e9efca01048da505dfb'
+         '3ed0e24f5b5e25bf553f5427d64915e6'
+         '0a96ed876ffb1fcb9dff5a9b3a609c1e'
+         '020971887442ebbf1b6949e031c8dd3f')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  # python2 fix
+  export PYTHON=`which python2`
+  for file in $(find . -name '*.py' -print); do
+    sed -i 's_#!.*/usr/bin/python_#!/usr/bin/python2_' $file
+    sed -i 's_#!.*/usr/bin/env.*python_#!/usr/bin/env python2_' $file
+  done
+
+  export LDFLAGS=-lX11
+  export RADVD=/usr/bin/radvd
+  [ -f Makefile ] || ./configure --prefix=/usr --libexec=/usr/lib/"$pkgname" --sbindir=/usr/bin \
+	--with-storage-lvm --without-xen --with-udev --without-hal --disable-static \
+	--with-init-script=systemd --with-audit \
+	--with-qemu-user=nobody --with-qemu-group=nobody \
+	--without-netcf --with-interface
+  make
+
+  sed -i 's|/etc/sysconfig/|/etc/conf.d/|' daemon/libvirtd.service tools/libvirt-guests.service
+  sed -i 's|@sbindir@|/usr/bin|g' src/virtlockd.service
+  sed -i 's|#group =.*|group="kvm"|' src/qemu/qemu.conf
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  make DESTDIR="$pkgdir" install
+
+  install -D -m644 "$srcdir"/libvirtd.conf.d "$pkgdir"/etc/conf.d/libvirtd
+  install -D -m644 "$srcdir"/libvirtd-guests.conf.d "$pkgdir"/etc/conf.d/libvirtd-guests
+
+  # systemd stuff
+  install -D -m644 "$srcdir"/libvirt.tmpfiles.d "$pkgdir"/usr/lib/tmpfiles.d/libvirt.conf
+  mv "$pkgdir"/lib/* "$pkgdir"/usr/lib/
+
+  rm -rf \
+	"$pkgdir"/var/run \
+	"$pkgdir"/etc/sysconfig \
+	"$pkgdir"/etc/rc.d/init.d \
+	"$pkgdir"/lib \
+	"$pkgdir"/etc/sysctl.d
+}
