@@ -7,7 +7,7 @@ pkgbase=linux-kirkwood
 pkgname=('linux-kirkwood' 'linux-headers-kirkwood')
 #pkgname=linux-test       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel=3.9.9
+_basekernel=3.10
 pkgver=${_basekernel}
 pkgrel=1
 cryptover=1.6
@@ -15,7 +15,7 @@ bfqver=v6r2
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'bc')
+makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'bc' 'git')
 options=('!strip')
 source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${_basekernel}.tar.bz2"
         'archlinuxarm.patch'
@@ -24,30 +24,42 @@ source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${_basekernel}.tar.bz2
         'mach-types::http://www.arm.linux.org.uk/developer/machines/download.php'
         'change-default-console-loglevel.patch'
         'usb-add-reset-resume-quirk-for-several-webcams.patch'
-	'fix-sdio-kirkwood.patch'
-	'aufs3-3.9.patch.xz'
         "http://download.gna.org/cryptodev-linux/cryptodev-linux-${cryptover}.tar.gz"
-	"http://algo.ing.unimo.it/people/paolo/disk_sched/patches/$(echo $_basekernel |cut -c 1-3).0-${bfqver}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-$(echo $_basekernel | cut -c 1-3).patch"
-	"http://algo.ing.unimo.it/people/paolo/disk_sched/patches/$(echo $_basekernel |cut -c 1-3).0-${bfqver}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-$(echo $_basekernel |cut -c 1-3).patch"
-	"http://algo.ing.unimo.it/people/paolo/disk_sched/patches/$(echo $_basekernel |cut -c 1-3).0-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-$(echo $_basekernel |cut -c 1-3).0.patch")
+	"http://algo.ing.unimo.it/people/paolo/disk_sched/patches/$(echo $_basekernel |cut -c 1-4).0-${bfqver}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-$(echo $_basekernel | cut -c 1-4).patch"
+	"http://algo.ing.unimo.it/people/paolo/disk_sched/patches/$(echo $_basekernel |cut -c 1-4).0-${bfqver}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-$(echo $_basekernel |cut -c 1-4).patch"
+	"http://algo.ing.unimo.it/people/paolo/disk_sched/patches/$(echo $_basekernel |cut -c 1-4).0-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-$(echo $_basekernel |cut -c 1-4).0.patch")
 
-md5sums=('b3f2c24d03acac5d65612632b8c1ba8b'
-         '1cf669d8e55b2a25590f37e8106723f8'
+md5sums=('72d0a9b3e60cd86fabcd3f24b1708944'
+         '7ccce5c1a31ccb4ccfe7dcba3c8a6f4d'
          'f5d3635da03cb45904bedd69b47133de'
-         '990866ef4e1540a40d1a30714b3d8928'
-         '73e81c21600fe1bab1baffa537bb3dbe'
+         'ab09fb2f6ee852f4844af462d1a70ce7'
+         'SKIP'
          '80b2fb500e6811495c6b072d7e6fd112'
          '9b5a265440abf57d2052838f31486a3a'
-         'bf6900bb056ba2b213bd9e23693889ad'
-         '30ed1ba9b6c391e371d022fbcf79f7ed'
          'eade38998313c25fd7934719cdf8a2ea'
-         'fa01a94252d6495786e3a6f6b092ecc2'
-         '3d234367fb89e7b25f08f4c836ba11db'
-         'b404f87a581474a0b8f5c0bc68074e84')
+         'f1a179be96469b27c21d114b55b521cb'
+         'a929da16edbd480d7d8f90a15eb8a548'
+         'b9e7cbbb21bbe08a4baea9f7e8bc8083')
+
 build() {
+msg "Patches"
+msg2 "Getting aufs3 patches and copying into the kernel source tree"
+  git clone --branch aufs$(echo $_basekernel |cut -c 1-4) --depth=1 git://git.code.sf.net/p/aufs/aufs3-standalone
+
+  cp -ru "${srcdir}/aufs3-standalone/Documentation" "${srcdir}/linux-${_basekernel}/"
+  cp -ru "${srcdir}/aufs3-standalone/fs" "${srcdir}/linux-${_basekernel}/"
+  cp -ru "${srcdir}/aufs3-standalone/include/uapi/linux/aufs_type.h" "${srcdir}/linux-${_basekernel}/include/linux/"
+  cp -ru "${srcdir}/aufs3-standalone/include/uapi/linux/aufs_type.h" "${srcdir}/linux-${_basekernel}/include/uapi/linux/"
+
+  #cd into kernel tree
   cd "${srcdir}/linux-${_basekernel}"
 
-msg "Patches:"
+msg2 "Applying aufs3 patches"
+  patch -Np1 -i ../aufs3-standalone/aufs3-kbuild.patch
+  patch -Np1 -i ../aufs3-standalone/aufs3-base.patch
+  patch -Np1 -i ../aufs3-standalone/aufs3-proc_map.patch
+  patch -Np1 -i ../aufs3-standalone/aufs3-standalone.patch
+
 msg2 "Add the USB_QUIRK_RESET_RESUME for several webcams"
   # FS#26528
   patch -Np1 -i "${srcdir}/usb-add-reset-resume-quirk-for-several-webcams.patch"
@@ -58,16 +70,10 @@ msg2 "requested additional support, mach-types"
   patch -Np1 -i "${srcdir}/support.patch"
   cp "${srcdir}/mach-types" arch/arm/tools
 
-msg2 "Add SDIO fix for kirkwoods"
-  patch -Np1 -i "${srcdir}/fix-sdio-kirkwood.patch"
-
-msg2 "Add AUFS3 patches"
-  patch -Np1 -i "${srcdir}/aufs3-3.9.patch"
-
 msg2 "Add BFQ patches"
-  patch -Np1 -i "${srcdir}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-$(echo $_basekernel | cut -c 1-3).patch"
-  patch -Np1 -i "${srcdir}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-$(echo $_basekernel |cut -c 1-3).patch"
-  patch -Np1 -i "${srcdir}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-$(echo $_basekernel |cut -c 1-3).0.patch"  
+  patch -Np1 -i "${srcdir}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-$(echo $_basekernel | cut -c 1-4).patch"
+  patch -Np1 -i "${srcdir}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-$(echo $_basekernel |cut -c 1-4).patch"
+  patch -Np1 -i "${srcdir}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-$(echo $_basekernel |cut -c 1-4).0.patch"  
 
   # add latest fixes from stable queue, if needed
   # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
