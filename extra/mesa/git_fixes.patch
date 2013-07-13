@@ -1,0 +1,476 @@
+From 6194644a49f841488e23ce021e7817ec02927eef Mon Sep 17 00:00:00 2001
+From: Ian Romanick <ian.d.romanick@intel.com>
+Date: Mon, 01 Jul 2013 21:31:03 +0000
+Subject: docs: Add 9.1.4 release md5sums
+
+Signed-off-by: Ian Romanick <ian.d.romanick@intel.com>
+---
+diff --git a/docs/relnotes-9.1.4.html b/docs/relnotes-9.1.4.html
+index 48e421b..fa6fe67 100644
+--- a/docs/relnotes-9.1.4.html
++++ b/docs/relnotes-9.1.4.html
+@@ -30,7 +30,9 @@ because GL_ARB_compatibility is not supported.
+ 
+ <h2>MD5 checksums</h2>
+ <pre>
+-TBD
++a2c4e25d0e27918bc67f61bae04d0cb8  MesaLib-9.1.4.tar.bz2
++8c7e9ce5b05cb2223f0587396dd9dc08  MesaLib-9.1.4.tar.gz
++020459c5793d4279bdcb2daa1f7dd9f6  MesaLib-9.1.4.zip
+ </pre>
+ 
+ <h2>New features</h2>
+--
+cgit v0.9.0.2-2-gbebe
+
+From e94a89de4deeabd0f8347795385b2f098aa35365 Mon Sep 17 00:00:00 2001
+From: Vinson Lee <vlee@freedesktop.org>
+Date: Fri, 01 Feb 2013 07:28:41 +0000
+Subject: swrast: Fix memory leak.
+
+Fixes resource leak defect reported by Coverity.
+
+Signed-off-by: Vinson Lee <vlee@freedesktop.org>
+Reviewed-by: Brian Paul <brianp@vmware.com>
+(cherry picked from commit 985e710c0d1f4f3bbd18448f04e611bd57ae9100)
+---
+diff --git a/src/mesa/drivers/dri/swrast/swrast.c b/src/mesa/drivers/dri/swrast/swrast.c
+index 9638271..b380de3 100644
+--- a/src/mesa/drivers/dri/swrast/swrast.c
++++ b/src/mesa/drivers/dri/swrast/swrast.c
+@@ -363,6 +363,7 @@ swrast_new_renderbuffer(const struct gl_config *visual, __DRIdrawable *dPriv,
+ 	xrb->bpp = 8;
+ 	break;
+     default:
++	free(xrb);
+ 	return NULL;
+     }
+ 
+--
+cgit v0.9.0.2-2-gbebe
+
+From ab159327a7dc2dd41f9887d053d4abb3de69d195 Mon Sep 17 00:00:00 2001
+From: Ian Romanick <ian.d.romanick@intel.com>
+Date: Mon, 10 Jun 2013 17:33:59 +0000
+Subject: glsl: Add a gl_shader_program parameter to _mesa_uniform_{merge,split}_location_offset
+
+This will be used in the next commit.
+
+NOTE: This is a candidate for stable release branches.
+
+Signed-off-by: Ian Romanick <ian.d.romanick@intel.com>
+Reviewed-by: Brian Paul <brianp@vmware.com>
+Reviewed-and-tested-by: Chad Versace <chad.versace@linux.intel.com>
+(cherry picked from commit 5097f358419c067a71e96e39764b3bb0a716bdbb)
+---
+diff --git a/src/mesa/main/uniform_query.cpp b/src/mesa/main/uniform_query.cpp
+index b8335fe..fbbe577 100644
+--- a/src/mesa/main/uniform_query.cpp
++++ b/src/mesa/main/uniform_query.cpp
+@@ -234,7 +234,7 @@ validate_uniform_parameters(struct gl_context *ctx,
+       return false;
+    }
+ 
+-   _mesa_uniform_split_location_offset(location, loc, array_index);
++   _mesa_uniform_split_location_offset(shProg, location, loc, array_index);
+ 
+    if (*loc >= shProg->NumUserUniformStorage) {
+       _mesa_error(ctx, GL_INVALID_OPERATION, "%s(location=%d)",
+diff --git a/src/mesa/main/uniforms.c b/src/mesa/main/uniforms.c
+index d902407..cee57a7 100644
+--- a/src/mesa/main/uniforms.c
++++ b/src/mesa/main/uniforms.c
+@@ -532,7 +532,7 @@ _mesa_GetUniformLocation(GLhandleARB programObj, const GLcharARB *name)
+    if (shProg->UniformStorage[index].block_index != -1)
+       return -1;
+ 
+-   return _mesa_uniform_merge_location_offset(index, offset);
++   return _mesa_uniform_merge_location_offset(shProg, index, offset);
+ }
+ 
+ GLuint GLAPIENTRY
+diff --git a/src/mesa/main/uniforms.h b/src/mesa/main/uniforms.h
+index a12ad9b..853a27c 100644
+--- a/src/mesa/main/uniforms.h
++++ b/src/mesa/main/uniforms.h
+@@ -268,7 +268,8 @@ struct gl_builtin_uniform_desc {
+  * Combine the uniform's base location and the offset
+  */
+ static inline GLint
+-_mesa_uniform_merge_location_offset(unsigned base_location, unsigned offset)
++_mesa_uniform_merge_location_offset(const struct gl_shader_program *prog,
++                                    unsigned base_location, unsigned offset)
+ {
+    return (base_location << 16) | offset;
+ }
+@@ -277,7 +278,8 @@ _mesa_uniform_merge_location_offset(unsigned base_location, unsigned offset)
+  * Separate the uniform base location and parameter offset
+  */
+ static inline void
+-_mesa_uniform_split_location_offset(GLint location, unsigned *base_location,
++_mesa_uniform_split_location_offset(const struct gl_shader_program *prog,
++                                    GLint location, unsigned *base_location,
+ 				    unsigned *offset)
+ {
+    *offset = location & 0xffff;
+diff --git a/src/mesa/state_tracker/st_glsl_to_tgsi.cpp b/src/mesa/state_tracker/st_glsl_to_tgsi.cpp
+index 4286f0e..1e04f64 100644
+--- a/src/mesa/state_tracker/st_glsl_to_tgsi.cpp
++++ b/src/mesa/state_tracker/st_glsl_to_tgsi.cpp
+@@ -3052,7 +3052,7 @@ set_uniform_initializer(struct gl_context *ctx, void *mem_ctx,
+         	"Couldn't find uniform for initializer %s\n", name);
+       return;
+    }
+-   int loc = _mesa_uniform_merge_location_offset(index, offset);
++   int loc = _mesa_uniform_merge_location_offset(shader_program, index, offset);
+ 
+    for (unsigned int i = 0; i < (type->is_array() ? type->length : 1); i++) {
+       ir_constant *element;
+--
+cgit v0.9.0.2-2-gbebe
+
+From 4d12a9c67c850ff2c92f301317bc3fae0bcb448a Mon Sep 17 00:00:00 2001
+From: Ian Romanick <ian.d.romanick@intel.com>
+Date: Mon, 10 Jun 2013 17:35:05 +0000
+Subject: glsl: Add gl_shader_program::UniformLocationBaseScale
+
+This is used by _mesa_uniform_merge_location_offset and
+_mesa_uniform_split_location_offset to determine how the base and offset
+are packed.  Previously, this value was hard coded as (1U<<16) in those
+functions via the shift and mask contained therein.  The value is still
+(1U<<16), but it can be changed in the future.
+
+The next patch dynamically generates this value.
+
+NOTE: This is a candidate for stable release branches.
+
+Signed-off-by: Ian Romanick <ian.d.romanick@intel.com>
+Reviewed-by: Brian Paul <brianp@vmware.com>
+Reviewed-and-tested-by: Chad Versace <chad.versace@linux.intel.com>
+(cherry picked from commit 26d86d26f9f972b19c7040bdb1b1daf48537ef3e)
+---
+diff --git a/src/glsl/link_uniforms.cpp b/src/glsl/link_uniforms.cpp
+index d457e4d..ac726f4 100644
+--- a/src/glsl/link_uniforms.cpp
++++ b/src/glsl/link_uniforms.cpp
+@@ -730,6 +730,7 @@ link_assign_uniform_locations(struct gl_shader_program *prog)
+ 
+    assert(sizeof(prog->SamplerTargets) == sizeof(parcel.targets));
+    memcpy(prog->SamplerTargets, parcel.targets, sizeof(prog->SamplerTargets));
++   prog->UniformLocationBaseScale = (1U<<16);
+ 
+ #ifndef NDEBUG
+    for (unsigned i = 0; i < num_user_uniforms; i++) {
+diff --git a/src/mesa/main/mtypes.h b/src/mesa/main/mtypes.h
+index 23c3a0d..3e440f5 100644
+--- a/src/mesa/main/mtypes.h
++++ b/src/mesa/main/mtypes.h
+@@ -2419,6 +2419,21 @@ struct gl_shader_program
+    unsigned NumUniformBlocks;
+ 
+    /**
++    * Scale factor for the uniform base location
++    *
++    * This is used to generate locations (returned by \c glGetUniformLocation)
++    * of uniforms.  The base location of the uniform is multiplied by this
++    * value, and the array index is added.
++    *
++    * \note
++    * Must be >= 1.
++    *
++    * \sa
++    * _mesa_uniform_merge_location_offset, _mesa_uniform_split_location_offset
++    */
++   unsigned UniformLocationBaseScale;
++
++   /**
+     * Indices into the _LinkedShaders's UniformBlocks[] array for each stage
+     * they're used in, or -1.
+     *
+diff --git a/src/mesa/main/shaderobj.c b/src/mesa/main/shaderobj.c
+index 59daff5..0494320 100644
+--- a/src/mesa/main/shaderobj.c
++++ b/src/mesa/main/shaderobj.c
+@@ -283,6 +283,7 @@ _mesa_clear_shader_program_data(struct gl_context *ctx,
+       ralloc_free(shProg->UniformStorage);
+       shProg->NumUserUniformStorage = 0;
+       shProg->UniformStorage = NULL;
++      shProg->UniformLocationBaseScale = 0;
+    }
+ 
+    if (shProg->UniformHash) {
+diff --git a/src/mesa/main/uniforms.h b/src/mesa/main/uniforms.h
+index 853a27c..421232d 100644
+--- a/src/mesa/main/uniforms.h
++++ b/src/mesa/main/uniforms.h
+@@ -271,7 +271,9 @@ static inline GLint
+ _mesa_uniform_merge_location_offset(const struct gl_shader_program *prog,
+                                     unsigned base_location, unsigned offset)
+ {
+-   return (base_location << 16) | offset;
++   assert(prog->UniformLocationBaseScale >= 0);
++   assert(offset < prog->UniformLocationBaseScale);
++   return (base_location * prog->UniformLocationBaseScale) + offset;
+ }
+ 
+ /**
+@@ -282,8 +284,8 @@ _mesa_uniform_split_location_offset(const struct gl_shader_program *prog,
+                                     GLint location, unsigned *base_location,
+ 				    unsigned *offset)
+ {
+-   *offset = location & 0xffff;
+-   *base_location = location >> 16;
++   *offset = location % prog->UniformLocationBaseScale;
++   *base_location = location / prog->UniformLocationBaseScale;
+ }
+ /*@}*/
+ 
+--
+cgit v0.9.0.2-2-gbebe
+
+From 307a703c759263bb37285b0919721ff2c413fc56 Mon Sep 17 00:00:00 2001
+From: Ian Romanick <ian.d.romanick@intel.com>
+Date: Mon, 10 Jun 2013 17:39:28 +0000
+Subject: glsl: Generate smaller values for uniform locations
+
+Previously we would generate uniform locations as (slot << 16) +
+array_index.  We do this to handle applications that assume the location
+of a[2] will be +1 from the location of a[1].  This resulted in every
+uniform location being at least 0x10000.  The OpenGL 4.3 spec was
+amended to require this behavior, but previous versions did not require
+locations of array (or structure) members be sequential.
+
+We've now encountered two applications that assume uniform values will
+be "small."  As far as we can tell, these applications store the GLint
+returned by glGetUniformLocation in a int16_t or possibly an int8_t.
+
+THIS BEHAVIOR IS NOT GUARANTEED OR IMPLIED BY ANY VERSION OF OpenGL.
+
+Other implementations happen to have both these behaviors (sequential
+array elements and small values) since OpenGL 2.0, so let's just match
+their behavior.
+
+Fixes "3D Bowling" on Android.
+
+NOTE: This is a candidate for stable release branches.
+
+Signed-off-by: Ian Romanick <ian.d.romanick@intel.com>
+Reviewed-by: Brian Paul <brianp@vmware.com>
+Reviewed-and-tested-by: Chad Versace <chad.versace@linux.intel.com>
+(cherry picked from commit cfa3c5ad828f56559a6cc2de299f993b8e748ea4)
+---
+diff --git a/src/glsl/link_uniforms.cpp b/src/glsl/link_uniforms.cpp
+index ac726f4..8e01d2e 100644
+--- a/src/glsl/link_uniforms.cpp
++++ b/src/glsl/link_uniforms.cpp
+@@ -730,7 +730,20 @@ link_assign_uniform_locations(struct gl_shader_program *prog)
+ 
+    assert(sizeof(prog->SamplerTargets) == sizeof(parcel.targets));
+    memcpy(prog->SamplerTargets, parcel.targets, sizeof(prog->SamplerTargets));
+-   prog->UniformLocationBaseScale = (1U<<16);
++
++   /* Determine the size of the largest uniform array queryable via
++    * glGetUniformLocation.  Using this as the location scale guarantees that
++    * there is enough "room" for the array index to be stored in the low order
++    * part of the uniform location.  It also makes the locations be more
++    * tightly packed.
++    */
++   unsigned max_array_size = 1;
++   for (unsigned i = 0; i < num_user_uniforms; i++) {
++      if (uniforms[i].array_elements > max_array_size)
++         max_array_size = uniforms[i].array_elements;
++   }
++
++   prog->UniformLocationBaseScale = max_array_size;
+ 
+ #ifndef NDEBUG
+    for (unsigned i = 0; i < num_user_uniforms; i++) {
+--
+cgit v0.9.0.2-2-gbebe
+
+From 2cfc0072a80cfd9503be7e57a1d8375d64d7eb98 Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <r.sandiford@uk.ibm.com>
+Date: Mon, 17 Jun 2013 16:10:49 +0000
+Subject: st/xlib Fix XIMage bytes-per-pixel calculation
+
+Fixes a crash seen while running gnome on a 16-bit screen over vnc.
+
+NOTE: This is a candidate for stable release branches.
+
+Reviewed-by: Brian Paul <brianp@vmware.com>
+Signed-off-by: Richard Sandiford <rsandifo@linux.vnet.ibm.com>
+(cherry picked from commit 876fefe2ff8901ae4b908cff89ac5dd4324f4fe5)
+---
+diff --git a/src/gallium/state_trackers/glx/xlib/xm_api.c b/src/gallium/state_trackers/glx/xlib/xm_api.c
+index 5c6d6a7..4f99e23 100644
+--- a/src/gallium/state_trackers/glx/xlib/xm_api.c
++++ b/src/gallium/state_trackers/glx/xlib/xm_api.c
+@@ -1392,9 +1392,8 @@ XMesaBindTexImage(Display *dpy, XMesaBuffer drawable, int buffer,
+          return;
+       }
+ 
+-      /* The pipe transfer has a pitch rounded up to the nearest 64 pixels.
+-         We assume 32 bit pixels. */
+-      ximage_stride = w * 4;
++      /* The pipe transfer has a pitch rounded up to the nearest 64 pixels. */
++      ximage_stride = w * ((img->bits_per_pixel + 7) / 8);
+ 
+       for (line = 0; line < h; line++)
+          memcpy(&map[line * tex_xfer->stride],
+--
+cgit v0.9.0.2-2-gbebe
+
+From 8ed60f7f7fb060ccf939328bb03c9714b207236f Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <r.sandiford@uk.ibm.com>
+Date: Mon, 17 Jun 2013 16:13:25 +0000
+Subject: st/xlib: Fix XImage stride calculation
+
+Fixes window skew seen while running gnome on a 16-bit screen over vnc.
+
+NOTE: This is a candidate for stable release branches.
+
+Reviewed-by: Brian Paul <brianp@vmware.com>
+Signed-off-by: Richard Sandiford <rsandifo@linux.vnet.ibm.com>
+(cherry picked from commit c132c2978b02da7140462a633605a0127dfcceb4)
+---
+diff --git a/src/gallium/state_trackers/glx/xlib/xm_api.c b/src/gallium/state_trackers/glx/xlib/xm_api.c
+index 4f99e23..9bfd372 100644
+--- a/src/gallium/state_trackers/glx/xlib/xm_api.c
++++ b/src/gallium/state_trackers/glx/xlib/xm_api.c
+@@ -1366,7 +1366,7 @@ XMesaBindTexImage(Display *dpy, XMesaBuffer drawable, int buffer,
+       enum pipe_format internal_format = res->format;
+       struct pipe_transfer *tex_xfer;
+       char *map;
+-      int line, ximage_stride;
++      int line, byte_width;
+       XImage *img;
+ 
+       internal_format = choose_pixel_format(drawable->xm_visual);
+@@ -1393,12 +1393,12 @@ XMesaBindTexImage(Display *dpy, XMesaBuffer drawable, int buffer,
+       }
+ 
+       /* The pipe transfer has a pitch rounded up to the nearest 64 pixels. */
+-      ximage_stride = w * ((img->bits_per_pixel + 7) / 8);
++      byte_width = w * ((img->bits_per_pixel + 7) / 8);
+ 
+       for (line = 0; line < h; line++)
+          memcpy(&map[line * tex_xfer->stride],
+-                &img->data[line * ximage_stride],
+-                ximage_stride);
++                &img->data[line * img->bytes_per_line],
++                byte_width);
+ 
+       pipe_transfer_unmap(pipe, tex_xfer);
+ 
+--
+cgit v0.9.0.2-2-gbebe
+
+From 5412ae63dca1b1a6c43fccb5bafe56a0cd9c9a88 Mon Sep 17 00:00:00 2001
+From: Kristian Høgsberg <krh@bitplanet.net>
+Date: Tue, 18 Jun 2013 20:53:46 +0000
+Subject: wayland: Handle global_remove event as well
+
+We need to set up a handler for the global_remove event that gets sent
+out when a global gets removed.  Without the handler we end up calling
+a NULL pointer.
+
+https://bugs.freedesktop.org/show_bug.cgi?id=65910
+
+NOTE: This is a candidate for the stable branches.
+
+Signed-off-by: Kristian Høgsberg <krh@bitplanet.net>
+(cherry picked from commit 712269d6744a8849d1d0cf01fa0132d969b79ed4)
+---
+diff --git a/src/egl/drivers/dri2/platform_wayland.c b/src/egl/drivers/dri2/platform_wayland.c
+index 99d8729..e106dc2 100644
+--- a/src/egl/drivers/dri2/platform_wayland.c
++++ b/src/egl/drivers/dri2/platform_wayland.c
+@@ -643,8 +643,15 @@ registry_handle_global(void *data, struct wl_registry *registry, uint32_t name,
+    }
+ }
+ 
++static void
++registry_handle_global_remove(void *data, struct wl_registry *registry,
++			      uint32_t name)
++{
++}
++
+ static const struct wl_registry_listener registry_listener = {
+-	registry_handle_global
++   registry_handle_global,
++   registry_handle_global_remove
+ };
+ 
+ EGLBoolean
+--
+cgit v0.9.0.2-2-gbebe
+
+From cda92f5191cd2ed4782dbdd41143d520857861c9 Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <rsandifo@linux.vnet.ibm.com>
+Date: Tue, 18 Jun 2013 15:41:43 +0000
+Subject: st/dri/sw: Fix pitch calculation in drisw_update_tex_buffer
+
+swrastGetImage rounds the pitch up to 4 bytes for compatibility reasons
+that are explained in drisw_glx.c:bytes_per_line, so drisw_update_tex_buffer
+must do the same.
+
+Fixes window skew seen while running firefox over vnc on a 16-bit screen.
+
+NOTE: This is a candidate for the stable branches.
+
+[ajax: fixed typo in comment]
+
+Reviewed-by: Stéphane Marchesin <marcheu@chromium.org>
+Signed-off-by: Richard Sandiford <rsandifo@linux.vnet.ibm.com>
+(cherry picked from commit 5a0556f061d9db00dd7637433d393beead3b3d85)
+---
+diff --git a/src/gallium/state_trackers/dri/sw/drisw.c b/src/gallium/state_trackers/dri/sw/drisw.c
+index 7a5f797..41f66d5 100644
+--- a/src/gallium/state_trackers/dri/sw/drisw.c
++++ b/src/gallium/state_trackers/dri/sw/drisw.c
+@@ -265,8 +265,9 @@ drisw_update_tex_buffer(struct dri_drawable *drawable,
+    /* Copy the Drawable content to the mapped texture buffer */
+    get_image(dPriv, x, y, w, h, map);
+ 
+-   /* The pipe transfer has a pitch rounded up to the nearest 64 pixels. */
+-   ximage_stride = w * cpp;
++   /* The pipe transfer has a pitch rounded up to the nearest 64 pixels.
++      get_image() has a pitch rounded up to 4 bytes.  */
++   ximage_stride = ((w * cpp) + 3) & -4;
+    for (line = h-1; line; --line) {
+       memmove(&map[line * transfer->stride],
+               &map[line * ximage_stride],
+--
+cgit v0.9.0.2-2-gbebe
+
+From 26f802d0635fc247bbc3ebf6f7e9bf126b6b5e69 Mon Sep 17 00:00:00 2001
+From: Brian Paul <brianp@vmware.com>
+Date: Thu, 31 Jan 2013 00:44:25 +0000
+Subject: svga: check for NaN shader immediates
+
+The svga device doesn't handle them.  Replace with zeros.
+Fixes several piglit tests, such as "glsl-const-builtin-inversesqrt".
+
+Reviewed-by: Reviewed-by: José Fonseca <jfonseca@vmware.com>
+(cherry picked from commit 3cb491534493a52e9a88cb88d31727569afb8167)
+---
+diff --git a/src/gallium/drivers/svga/svga_tgsi_insn.c b/src/gallium/drivers/svga/svga_tgsi_insn.c
+index 36ed008..d439e5b 100644
+--- a/src/gallium/drivers/svga/svga_tgsi_insn.c
++++ b/src/gallium/drivers/svga/svga_tgsi_insn.c
+@@ -2716,8 +2716,10 @@ static boolean svga_emit_immediate( struct svga_shader_emitter *emit,
+    unsigned i;
+ 
+    assert(1 <= imm->Immediate.NrTokens && imm->Immediate.NrTokens <= 5);
+-   for (i = 0; i < imm->Immediate.NrTokens - 1; i++)
+-      value[i] = imm->u[i].Float;
++   for (i = 0; i < imm->Immediate.NrTokens - 1; i++) {
++      float f = imm->u[i].Float;
++      value[i] = util_is_inf_or_nan(f) ? 0.0f : f;
++   }
+ 
+    for ( ; i < 4; i++ )
+       value[i] = id[i];
+--
+cgit v0.9.0.2-2-gbebe
+

@@ -10,7 +10,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=9.1.4
-pkgrel=3
+pkgrel=5
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
              'libvdpau' 'wayland' 'systemd')
@@ -18,9 +18,16 @@ url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
+        git_fixes.patch
         LICENSE)
 md5sums=('a2c4e25d0e27918bc67f61bae04d0cb8'
+         '8ec30e1bd7abe5e8e540df4fa618540f'
          '5c65a0fe315dd347e09b1f2826a1df5a')
+
+prepare() {
+    cd ?esa-*
+    patch -Np1 -i ../git_fixes.patch
+}
 
 build() {
     cd ${srcdir}/?esa-*
@@ -48,7 +55,6 @@ build() {
     --enable-texture-float \
     --enable-xa
     # --help
-    # --with-llvm-shared-libs \ # enabling this would force us to move llvm-amdgpu-snapshot from community to extra, delay it until llvm 3.3 / Mesa 9.2/10.0
 
     make
     # fake installation
