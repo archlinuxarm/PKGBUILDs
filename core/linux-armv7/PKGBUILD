@@ -1,51 +1,42 @@
-# ARMv7 multi-platform kernel and headers
+# ARMv7 multi-platform
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
 
 buildarch=4
 
 pkgbase=linux-armv7
-pkgname=('linux-armv7' 'linux-headers-armv7')
-_kernelname=${pkgname#linux}
-_basekernel=3.10
-pkgver=${_basekernel}.999
-pkgrel=2
-rcnrel=armv7-x2
-rcver=3.11
-rcrel=rc1
+_srcname=linux-3.11-rc2
+_kernelname=${pkgbase#linux}
+_desc="ARMv7 multi-platform"
+pkgver=3.11.0
+pkgrel=1
 arch=('armv7h')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
-source=("http://www.kernel.org/pub/linux/kernel/v3.0/linux-${_basekernel}.tar.xz"
-#       "ftp://ftp.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.bz2"
-        "ftp://ftp.kernel.org/pub/linux/kernel/v3.x/testing/patch-${rcver}-${rcrel}.xz"
-        "http://rcn-ee.net/deb/sid-armhf/v${rcver}.0-${rcrel}-${rcnrel}/patch-${rcver}-${rcrel}-${rcnrel}.diff.gz"
-#        "aufs3-${_basekernel}.patch.xz"
+source=("http://www.kernel.org/pub/linux/kernel/v3.x/testing/${_srcname}.tar.xz"
+        "rcn.patch.gz::http://rcn-ee.net/deb/sid-armhf/v3.11.0-rc2-armv7-x3/patch-3.11-rc2-armv7-x3.diff.gz"
         'config')
-md5sums=('4f25cd5bec5f8d5a7d935b3f2ccb8481'
-         'd790b034867145dd9c5828ed58eaac45'
-         '038ec8914be0a54163fad43e34ccc7d0'
-         'ff2b78fdf66fc75d1ed82e49f760e6b2')
+md5sums=('561448f8e18af681d562db331a3b9c19'
+         '100196788d4251f72b580ed3d56e8341'
+         '47ee18daa25dfbcada72fe0ef7155f61')
 
-build() {
-  cd "${srcdir}/linux-${_basekernel}"
+prepare() {
+  cd "${srcdir}/${_srcname}"
 
-# stable patches
-#  patch -p1 -i "${srcdir}/patch-${pkgver}"
-#  git apply "${srcdir}/patch-${_basekernel}-${rcnrel}.diff"
-
-# testing patches
-  patch -p1 -i "${srcdir}/patch-${rcver}-${rcrel}"
-  git apply "${srcdir}/patch-${rcver}-${rcrel}-${rcnrel}.diff"
+  git apply "${srcdir}/rcn.patch"
 
   cat "${srcdir}/config" > ./.config
 
-  # set extraversion to pkgrel
-  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
+  # add pkgrel to extraversion
+  sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
+}
+
+build() {
+  cd "${srcdir}/${_srcname}"
 
   # get kernel version
   make prepare
@@ -59,7 +50,7 @@ build() {
   # ... or manually edit .config
 
   # Copy back our configuration (use with new kernel version)
-  #cp ./.config ../${_basekernel}.config
+  #cp ./.config ../${pkgbase}.config
 
   ####################
   # stop here
@@ -74,22 +65,22 @@ build() {
   make ${MAKEFLAGS} zImage modules dtbs
 }
 
-package_linux-armv7() {
-  pkgdesc="The Linux Kernel and modules - ARMv7 processors"
-  depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7')
+_package() {
+  pkgdesc="The Linux Kernel and modules - ${_desc}"
+  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' 'kernel26-omap' 'linux=${pkgver}' 'aufs_friendly')
+  provides=('kernel26' 'linux=${pkgver}' 'aufs_friendly')
   conflicts=('linux-omap' 'linux-imx6' 'linux-armada370')
-#  replaces=('linux-omap')
-  backup=("etc/mkinitcpio.d/${pkgname}.preset")
   install=${pkgname}.install
 
-  cd "${srcdir}/linux-${_basekernel}"
+  cd "${srcdir}/${_srcname}"
 
   KARCH=arm
 
   # get kernel version
   _kernver="$(make kernelrelease)"
+  _basekernel=${_kernver%%-*}
+  _basekernel=${_basekernel%.*}
 
   mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/dtbs}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
@@ -122,18 +113,17 @@ package_linux-armv7() {
   mv "$pkgdir/lib" "$pkgdir/usr"
 }
 
-package_linux-headers-armv7() {
-  pkgdesc="Header files and scripts for building modules for linux kernel - ARMv7 processors"
+_package-headers() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - ${_desc}"
   provides=('linux-headers=${pkgver}')
   conflicts=('linux-headers-omap' 'linux-headers-imx6')
-#  replaces=('linux-headers-omap')
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/linux-${_basekernel}"
+  cd "${srcdir}/${_srcname}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -265,3 +255,10 @@ package_linux-headers-armv7() {
   # remove unneeded architectures
   rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
 }
+
+pkgname=("${pkgbase}" "${pkgbase}-headers")
+for _p in ${pkgname[@]}; do
+  eval "package_${_p}() {
+    _package${_p#${pkgbase}}
+  }"
+done
