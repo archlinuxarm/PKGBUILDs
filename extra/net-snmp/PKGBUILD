@@ -1,13 +1,13 @@
-# $Id: PKGBUILD 176934 2013-02-02 19:39:14Z eric $
-# Maintainer: 
+# $Id$
+# Maintainer:
 # Contributor: Dale Blount <dale@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - don't use PCI on v5/v6
+#  - patch for pci issue: ifmib.patch (http://sourceforge.net/p/net-snmp/bugs/2449/)
 
 pkgname=net-snmp
 pkgver=5.7.2
-pkgrel=7
+pkgrel=7.1
 pkgdesc="A suite of applications used to implement SNMP v1, SNMP v2c and SNMP v3 using both IPv4 and IPv6"
 arch=('i686' 'x86_64')
 url="http://www.net-snmp.org/"
@@ -19,21 +19,24 @@ optdepends=('perl-term-readkey: for snmpcheck application'
             'python2: for the python modules')
 options=('!libtool' '!emptydirs' '!makeflags')
 source=(http://downloads.sourceforge.net/${pkgname}/${pkgname}-${pkgver}.tar.gz{,.asc}
-        snmpd.service snmptrapd.service libnl32.patch)
+        snmpd.service snmptrapd.service libnl32.patch ifmib.patch)
 sha1sums=('c493027907f32400648244d81117a126aecd27ee'
           'SKIP'
           '84e32c54d32e6b608747054e04a3ddfe6d6638cc'
           '0244e91c7baa0abebfb5c0560e8ce04c966c5992'
-          '74a9848b95f63378eb1753fc309d2b74de5afb0f')
+          '74a9848b95f63378eb1753fc309d2b74de5afb0f'
+          '405dbbb4df02eb5ee3531c4566cfe2ae12fa04b5')
+
 prepare() {
-  cd "${srcdir}/${pkgname}-${pkgver}"
-  # http://sourceforge.net/tracker/index.php?func=detail&aid=3250304&group_id=12694&atid=112694
+  cd ${pkgname}-${pkgver}
+# http://sourceforge.net/tracker/index.php?func=detail&aid=3250304&group_id=12694&atid=112694
   patch -Np1 -i "$srcdir/libnl32.patch"
+  patch -Np1 -i "$srcdir/ifmib.patch"
   autoreconf -f -i
 }
 
 build() {
-  cd "${pkgname}-${pkgver}"
+  cd ${pkgname}-${pkgver}
   PYTHONPROG=/usr/bin/python2 ./configure --prefix=/usr \
     --sysconfdir=/etc --sbindir=/usr/bin \
     --mandir=/usr/share/man \
@@ -47,18 +50,11 @@ build() {
     --with-mib-modules="host misc/ipfwacc ucd-snmp/diskio tunnel ucd-snmp/dlmod" \
     --with-persistent-directory="/var/net-snmp" \
     --disable-static
-
-  # ALARM: don't use PCI on v5/v6
-  if [ "$CARCH" = "arm" -o "$CARCH" = "armv6h" ]; then
-    sed -i 's/HAVE_PCI_LOOKUP_NAME 1/HAVE_PCI_LOOKUP_NAME 0/' include/net-snmp/net-snmp-config.h
-    sed -i 's/HAVE_PCI_PCI_H 1/HAVE_PCI_PCI_H 0/' include/net-snmp/net-snmp-config.h
-  fi
-
   make NETSNMP_DONT_CHECK_VERSION=1
 }
 
 package() {
-  cd "${pkgname}-${pkgver}"
+  cd ${pkgname}-${pkgver}
   sed -i -e "s:install --basedir=\$\$dir:install --basedir=\$\$dir --root=${pkgdir}:" Makefile
   make DESTDIR="${pkgdir}" INSTALL_PREFIX="${pkgdir}" INSTALLDIRS=vendor install
   install -D -m644 "${srcdir}/snmpd.service" "${pkgdir}/usr/lib/systemd/system/snmpd.service"
