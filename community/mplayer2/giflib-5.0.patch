@@ -1,0 +1,111 @@
+diff --git a/libvo/vo_gif89a.c b/libvo/vo_gif89a.c
+index b808f81..c61d86c 100644
+--- a/libvo/vo_gif89a.c
++++ b/libvo/vo_gif89a.c
+@@ -196,7 +196,11 @@ static int config(uint32_t s_width, uint32_t s_height, uint32_t d_width,
+ 	mp_msg(MSGT_VO, MSGL_ERR, "GIF89a: Some functionality has been disabled.\n");
+ #endif
+ 
++#if GIFLIB_MAJOR > 4
++	new_gif = EGifOpenFileName(gif_filename, 0, NULL);
++#else
+ 	new_gif = EGifOpenFileName(gif_filename, 0);
++#endif
+ 	if (new_gif == NULL) {
+ 		mp_msg(MSGT_VO, MSGL_ERR, "GIF89a: error opening file \"%s\" for output.\n", gif_filename);
+ 		return 1;
+@@ -215,7 +219,11 @@ static int config(uint32_t s_width, uint32_t s_height, uint32_t d_width,
+ 		return 1;
+ 	}
+ 
++#if GIFLIB_MAJOR > 4
++	reduce_cmap = GifMakeMapObject(256, NULL);
++#else
+ 	reduce_cmap = MakeMapObject(256, NULL);
++#endif
+ 	if (reduce_cmap == NULL) {
+ 		free(slice_data); slice_data = NULL;
+ 		free(reduce_data); reduce_data = NULL;
+@@ -267,7 +275,11 @@ static int gif_reduce(int width, int height, uint8_t *src, uint8_t *dst, GifColo
+ 	}
+ 
+ 	R = Ra; G = Ga; B = Ba;
++#if GIFLIB_MAJOR > 4
++	return GifQuantizeBuffer(width, height, &size, R, G, B, dst, colors);
++#else
+ 	return QuantizeBuffer(width, height, &size, R, G, B, dst, colors);
++#endif
+ }
+ 
+ static void flip_page(void)
+@@ -365,8 +377,11 @@ static void uninit(void)
+ 	free(gif_filename);
+ 	free(slice_data);
+ 	free(reduce_data);
++#if GIFLIB_MAJOR > 4
++	if (reduce_cmap != NULL) GifFreeMapObject(reduce_cmap);
++#else
+ 	if (reduce_cmap != NULL) FreeMapObject(reduce_cmap);
+-
++#endif
+ 	// set the pointers back to null.
+ 	new_gif = NULL;
+ 	gif_filename = NULL;
+
+diff --git a/configure b/configure
+index 95a5ae8..d9c826f 100755
+--- a/configure
++++ b/configure
+@@ -3659,6 +3659,7 @@ if test "$_gif" = auto ; then
+   _gif=no
+   for _ld_gif in "-lungif" "-lgif" ; do
+     statement_check gif_lib.h 'QuantizeBuffer(0, 0, 0, 0, 0, 0, 0, 0)' $_ld_gif && _gif=yes && break
++    statement_check gif_lib.h 'GifQuantizeBuffer(0, 0, 0, 0, 0, 0, 0, 0)' $_ld_gif && _gif=yes && break
+   done
+ fi
+
+diff --git a/libmpdemux/demux_gif.c b/libmpdemux/demux_gif.c
+index eee7a85..a764474 100644
+--- a/libmpdemux/demux_gif.c
++++ b/libmpdemux/demux_gif.c
+@@ -44,6 +44,16 @@ typedef struct {
+ 
+ #define GIF_SIGNATURE (('G' << 16) | ('I' << 8) | 'F')
+ 
++static void PrintGifError(errcode)
++{
++  char *Err = GifErrorString(errcode);
++
++  if (Err != NULL)
++    fprintf(stderr, "\nGIF-LIB error: %s.\n", Err);
++  else
++    fprintf(stderr, "\nGIF-LIB undefined error %d.\n", errcode);
++}
++
+ #ifndef CONFIG_GIF_TVT_HACK
+ // not supported by certain versions of the library
+ static int my_read_gif(GifFileType *gif, uint8_t *buf, int len)
+@@ -240,6 +250,7 @@ static demuxer_t* demux_open_gif(demuxer_t* demuxer)
+   gif_priv_t *priv = calloc(1, sizeof(gif_priv_t));
+   sh_video_t *sh_video = NULL;
+   GifFileType *gif = NULL;
++  int GifError;
+ 
+   priv->current_pts = 0;
+   demuxer->seekable = 0; // FIXME
+@@ -254,12 +265,12 @@ static demuxer_t* demux_open_gif(demuxer_t* demuxer)
+   // not read from the beginning of the file and the command will fail.
+   // with this hack enabled, you will lose the ability to stream a GIF.
+   lseek(demuxer->stream->fd, 0, SEEK_SET);
+-  gif = DGifOpenFileHandle(demuxer->stream->fd);
++  gif = DGifOpenFileHandle(demuxer->stream->fd, &GifError);
+ #else
+-  gif = DGifOpen(demuxer->stream, my_read_gif);
++  gif = DGifOpen(demuxer->stream, my_read_gif, &GifError);
+ #endif
+   if (!gif) {
+-    PrintGifError();
++    PrintGifError(GifError);
+     free(priv);
+     return NULL;
+   }
