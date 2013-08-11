@@ -1,0 +1,152 @@
+Description: Use system libcrypto++ if available
+ Rather than always use the included libcrypto++ zipped source, check
+ for and use the system's libcrypto++.
+Author: Jeff Licquia <licquia@debian.org>
+Forwarded: no
+Last-Update: 2013-06-01
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+Index: synergy-1.4.12/CMakeLists.txt
+===================================================================
+--- synergy-1.4.12.orig/CMakeLists.txt	2013-06-02 02:22:35.000000000 +0000
++++ synergy-1.4.12/CMakeLists.txt	2013-06-02 02:22:35.000000000 +0000
+@@ -75,6 +75,7 @@
+ 	include(CheckIncludeFileCXX)
+ 	include(CheckSymbolExists)
+ 	include(CheckCSourceCompiles)
++	include(FindPkgConfig)
+ 
+ 	check_include_file_cxx(istream HAVE_ISTREAM)
+ 	check_include_file_cxx(ostream HAVE_OSTREAM)
+@@ -204,6 +205,8 @@
+ 		check_library_exists("Xi" XISelectEvents "" HAVE_Xi)
+ 		check_library_exists("Xrandr" XRRQueryExtension "" HAVE_Xrandr)
+ 
++		pkg_search_module(CRYPTOPP libcrypto++)
++
+ 		if (HAVE_ICE)
+ 
+ 			# Assume we have SM if we have ICE.
+@@ -241,6 +244,10 @@
+ 			list(APPEND libs Xrandr)
+ 		endif()
+ 
++		if (HAVE_CRYPTOPP)
++			list(APPEND libs CRYPTOPP_LIBRARIES)
++		endif()
++
+ 	endif()
+ 
+         IF(HAVE_Xi)
+Index: synergy-1.4.12/tools/CMakeLists.txt
+===================================================================
+--- synergy-1.4.12.orig/tools/CMakeLists.txt	2013-06-02 02:22:35.000000000 +0000
++++ synergy-1.4.12/tools/CMakeLists.txt	2013-06-02 02:25:44.000000000 +0000
+@@ -13,7 +13,7 @@
+ # You should have received a copy of the GNU General Public License
+ # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 
+-set(cpp_dir cryptopp562)
++set(cpp_dir cryptopp)
+ 
+ file(GLOB cpp_src ${cpp_dir}/*.cpp)
+ 
+@@ -22,14 +22,16 @@
+ 	list(APPEND cpp_src ${cpp_hdr})
+ endif()
+ 
+-file(GLOB cpp_ignore
+-	${cpp_dir}/simple.cpp
+-	${cpp_dir}/strciphr.cpp
+-	${cpp_dir}/polynomi.cpp
+-	${cpp_dir}/eprecomp.cpp
+-	${cpp_dir}/eccrypto.cpp
+-	${cpp_dir}/algebra.cpp)
+-list(REMOVE_ITEM cpp_src ${cpp_ignore})
++if (NOT CRYPTOPP_FOUND)
++	file(GLOB cpp_ignore
++		${cpp_dir}/simple.cpp
++		${cpp_dir}/strciphr.cpp
++		${cpp_dir}/polynomi.cpp
++		${cpp_dir}/eprecomp.cpp
++		${cpp_dir}/eccrypto.cpp
++		${cpp_dir}/algebra.cpp)
++	list(REMOVE_ITEM cpp_src ${cpp_ignore})
++endif()
+ 
+ # if 64-bit windows, compile asm file.
+ if (CMAKE_CL_64)
+@@ -49,16 +51,20 @@
+ endif()
+ 
+ if (UNIX)
+-	add_definitions(-DCRYPTOPP_DISABLE_ASM)
+-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -pipe")
++	if (NOT CRYPTOPP_FOUND)
++		add_definitions(-DCRYPTOPP_DISABLE_ASM)
++		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -pipe")
+ 	
+-	if (APPLE)
+-		if (DARWIN_VERSION GREATER 10)
+-			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-tautological-compare")
++		if (APPLE)
++			if (DARWIN_VERSION GREATER 10)
++				set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-tautological-compare")
++			endif()
++		else()
++			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+ 		endif()
+-	else()
+-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+ 	endif()
+ endif()
+ 
+-add_library(cryptopp STATIC ${cpp_src})
++if (NOT CRYPTOPP_FOUND)
++	add_library(cryptopp STATIC ${cpp_src})
++endif()
+Index: synergy-1.4.12/src/lib/synergy/CCryptoMode.h
+===================================================================
+--- synergy-1.4.12.orig/src/lib/synergy/CCryptoMode.h	2013-06-02 02:22:35.000000000 +0000
++++ synergy-1.4.12/src/lib/synergy/CCryptoMode.h	2013-06-02 02:22:35.000000000 +0000
+@@ -17,9 +17,9 @@
+ 
+ #pragma once
+ 
+-#include <cryptopp562/gcm.h>
+-#include <cryptopp562/modes.h>
+-#include <cryptopp562/aes.h>
++#include <cryptopp/gcm.h>
++#include <cryptopp/modes.h>
++#include <cryptopp/aes.h>
+ #include "ECryptoMode.h"
+ #include "CString.h"
+ 
+Index: synergy-1.4.12/src/lib/synergy/CCryptoStream.h
+===================================================================
+--- synergy-1.4.12.orig/src/lib/synergy/CCryptoStream.h	2013-06-02 02:22:35.000000000 +0000
++++ synergy-1.4.12/src/lib/synergy/CCryptoStream.h	2013-06-02 02:22:35.000000000 +0000
+@@ -20,8 +20,8 @@
+ #include "BasicTypes.h"
+ #include "CStreamFilter.h"
+ #include "CCryptoMode.h"
+-#include <cryptopp562/osrng.h>
+-#include <cryptopp562/sha.h>
++#include <cryptopp/osrng.h>
++#include <cryptopp/sha.h>
+ 
+ class CCryptoOptions;
+ 
+Index: synergy-1.4.12/tools/build/toolchain.py
+===================================================================
+--- synergy-1.4.12.orig/tools/build/toolchain.py	2013-06-01 22:55:47.000000000 +0000
++++ synergy-1.4.12/tools/build/toolchain.py	2013-06-02 02:25:00.000000000 +0000
+@@ -73,7 +73,7 @@
+ 	macSdk = None
+ 	
+ 	# cryptoPP dir with version number
+-	cryptoPPDir = 'cryptopp562'
++	cryptoPPDir = 'cryptopp'
+ 
+ 	win32_generators = {
+ 		1 : Generator('Visual Studio 10'),
