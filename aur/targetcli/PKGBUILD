@@ -1,12 +1,12 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
 pkgname=targetcli
-pkgver=2.0rc1
-pkgrel=3
+pkgver=2.1
+pkgrel=1
 epoch=
 pkgdesc="The targetcli administration shell."
 arch=('any')
 url="http://linux-iscsi.org/wiki/RTSadmin"
-license=('AGPL3')
+license=('Apache')
 groups=()
 depends=('python2-rtslib' 'lio-utils' 'python2-configshell')
 optdepends=()
