@@ -14,7 +14,7 @@ noautobuild=1
 
 pkgname=glibc
 pkgver=2.18
-pkgrel=1
+pkgrel=2
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
 url="http://www.gnu.org/software/libc"
@@ -28,6 +28,8 @@ backup=(etc/gai.conf
 options=('!strip' '!distcc')
 install=glibc.install
 source=(http://ftp.gnu.org/gnu/libc/${pkgname}-${pkgver}.tar.xz{,.sig}
+        glibc-2.18-readdir_r-CVE-2013-4237.patch
+        glibc-2.18-strstr-hackfix.patch
         local-soname-hack.diff
         fix-hf-ld.so.cache.patch
         nscd.service
@@ -36,6 +38,8 @@ source=(http://ftp.gnu.org/gnu/libc/${pkgname}-${pkgver}.tar.xz{,.sig}
         locale-gen)
 md5sums=('88fbbceafee809e82efd52efa1e3c58f'
          'SKIP'
+         '154da6bf5a5248f42a7bf5bf08e01a47'
+         '4441f6dfe7d75ced1fa75e54dd21d36e'
          '589d79041aa767a5179eaa4e2737dd3f'
          'ad8a9af15ab7eeaa23dc7ee85024af9f'
          'd5fab2cd3abea65aa5ae696ea4a47d6b'
@@ -43,8 +47,14 @@ md5sums=('88fbbceafee809e82efd52efa1e3c58f'
          '07ac979b6ab5eeb778d55f041529d623'
          '476e9113489f93b348b21e144b6a8fcf')
 
-build() {
+prepare() {
   cd ${srcdir}/${pkgname}-${pkgver}
+
+  # upstream commit 91ce4085
+  patch -p1 -i $srcdir/glibc-2.18-readdir_r-CVE-2013-4237.patch
+  
+  # hack fix for strstr issues on x86
+  patch -p1 -i $srcdir/glibc-2.18-strstr-hackfix.patch
 
   # ALARM: patch for hard-float ld-linux soname
   if [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]]; then
@@ -52,15 +62,11 @@ build() {
     patch -p1 -i ${srcdir}/fix-hf-ld.so.cache.patch
   fi
 
-  cd ${srcdir}
-  mkdir glibc-build
-  cd glibc-build
+  mkdir ${srcdir}/glibc-build
+}
 
-  if [[ ${CARCH} = "i686" ]]; then
-    # Hack to fix NPTL issues with Xen, only required on 32bit platforms
-    # TODO: make separate glibc-xen package for i686
-    export CFLAGS="${CFLAGS} -mno-tls-direct-seg-refs"
-  fi
+build() {
+  cd ${srcdir}/glibc-build
 
   # ALARM: Specify build host types
   [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=armv5tel-unknown-linux-gnueabi --build=armv5tel-unknown-linux-gnueabi"
