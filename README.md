@@ -55,7 +55,7 @@ access to a non-public interface for getting built packages into the repos.
 ### buildarch
 A bitmask of architectures to build the package for.  This must be set to the
 decimal equivalent of the bitmask (the number in parenthesis). The values can
-be combined (bitwise AND) to select more than one architecture. Without being
+be combined (bitwise OR) to select more than one architecture. Without being
 specified, the package will build for all architectures.
 
 * `0000 0001` (1) = *the default*, package will be built for all architectures
