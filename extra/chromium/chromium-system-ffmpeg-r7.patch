@@ -1,0 +1,115 @@
+--- a/media/filters/ffmpeg_glue.h
++++ b/media/filters/ffmpeg_glue.h
+@@ -28,9 +28,9 @@
+ #include "base/basictypes.h"
+ #include "base/memory/scoped_ptr.h"
+ #include "media/base/media_export.h"
++#include "media/ffmpeg/ffmpeg_common.h"
+ 
+ struct AVFormatContext;
+-struct AVIOContext;
+ 
+ namespace media {
+ 
+--- a/media/ffmpeg/ffmpeg_common.cc.orig	2013-01-17 00:07:51.635057013 +0000
++++ b/media/ffmpeg/ffmpeg_common.cc	2013-01-17 00:15:50.867406811 +0000
+@@ -85,8 +85,10 @@
+       return kCodecGSM_MS;
+     case AV_CODEC_ID_PCM_MULAW:
+       return kCodecPCM_MULAW;
++#ifndef CHROMIUM_OMIT_AV_CODEC_ID_OPUS
+     case AV_CODEC_ID_OPUS:
+       return kCodecOpus;
++#endif
+     default:
+       DVLOG(1) << "Unknown audio CodecID: " << codec_id;
+   }
+@@ -130,8 +132,10 @@
+       return AV_CODEC_ID_GSM_MS;
+     case kCodecPCM_MULAW:
+       return AV_CODEC_ID_PCM_MULAW;
++#ifndef CHROMIUM_OMIT_AV_CODEC_ID_OPUS
+     case kCodecOpus:
+       return AV_CODEC_ID_OPUS;
++#endif
+     default:
+       DVLOG(1) << "Unknown AudioCodec: " << audio_codec;
+   }
+@@ -149,8 +153,10 @@
+       return kCodecMPEG4;
+     case AV_CODEC_ID_VP8:
+       return kCodecVP8;
++#ifndef CHROMIUM_OMIT_AV_CODEC_ID_VP9
+     case AV_CODEC_ID_VP9:
+       return kCodecVP9;
++#endif
+     default:
+       DVLOG(1) << "Unknown video CodecID: " << codec_id;
+   }
+@@ -167,8 +173,10 @@
+       return AV_CODEC_ID_MPEG4;
+     case kCodecVP8:
+       return AV_CODEC_ID_VP8;
++#ifndef CHROMIUM_OMIT_AV_CODEC_ID_VP9
+     case kCodecVP9:
+       return AV_CODEC_ID_VP9;
++#endif
+     default:
+       DVLOG(1) << "Unknown VideoCodec: " << video_codec;
+   }
+--- a/media/filters/ffmpeg_demuxer.cc.orig	2013-05-09 18:04:25.089276403 +0000
++++ b/media/filters/ffmpeg_demuxer.cc	2013-05-09 18:05:16.289599070 +0000
+@@ -111,12 +111,15 @@
+   // Get side data if any. For now, the only type of side_data is VP8 Alpha. We
+   // keep this generic so that other side_data types in the future can be
+   // handled the same way as well.
+-  av_packet_split_side_data(packet.get());
+   int side_data_size = 0;
+-  uint8* side_data = av_packet_get_side_data(
++  uint8* side_data = NULL;
++#ifndef CHROMIUM_OMIT_AV_PKT_DATA_MATROSKA_BLOCKADDITIONAL
++  av_packet_split_side_data(packet.get());
++  side_data = av_packet_get_side_data(
+       packet.get(),
+       AV_PKT_DATA_MATROSKA_BLOCKADDITIONAL,
+       &side_data_size);
++#endif
+ 
+   // If a packet is returned by FFmpeg's av_parser_parse2() the packet will
+   // reference inner memory of FFmpeg.  As such we should transfer the packet
+--- a/media/base/media_posix.cc.orig	2013-05-24 20:59:12.963046035 +0000
++++ b/media/base/media_posix.cc	2013-05-24 20:59:50.593275882 +0000
+@@ -11,12 +11,15 @@
+ #include "base/path_service.h"
+ #include "base/strings/stringize_macros.h"
+ #include "media/ffmpeg/ffmpeg_common.h"
++
++#if !defined(USE_SYSTEM_FFMPEG)
+ #include "third_party/ffmpeg/ffmpeg_stubs.h"
+ 
+ using third_party_ffmpeg::kNumStubModules;
+ using third_party_ffmpeg::kModuleFfmpegsumo;
+ using third_party_ffmpeg::InitializeStubs;
+ using third_party_ffmpeg::StubPathMap;
++#endif
+ 
+ namespace media {
+ namespace internal {
+@@ -46,6 +49,9 @@
+ #endif
+ 
+ bool InitializeMediaLibraryInternal(const base::FilePath& module_dir) {
++#if defined(USE_SYSTEM_FFMPEG)
++  return true;
++#else
+   StubPathMap paths;
+ 
+   // First try to initialize with Chrome's sumo library.
+@@ -61,6 +67,7 @@
+       FILE_PATH_LITERAL(DSO_NAME("avformat", AVFORMAT_VERSION))).value());
+ 
+   return InitializeStubs(paths);
++#endif
+ }
+ 
+ }  // namespace internal
