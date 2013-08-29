@@ -9,17 +9,17 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
-pkgver=9.1.6
+pkgver=9.2.0
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
-             'libvdpau' 'wayland' 'systemd')
+             'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
-source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
+source=(ftp://ftp.freedesktop.org/pub/mesa/9.2/MesaLib-${pkgver}.tar.bz2
         LICENSE)
-md5sums=('443a2a352667294b53d56cb1a74114e9'
+md5sums=('4185b6aae890bc62a964f4b24cc1aca8'
          '5c65a0fe315dd347e09b1f2826a1df5a')
 
 build() {
@@ -32,11 +32,11 @@ build() {
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
     --with-gallium-drivers=swrast \
     --with-dri-drivers=swrast \
+    --with-egl-platforms=x11,drm,wayland \
     --with-llvm-shared-libs \
     --enable-gallium-llvm \
     --enable-egl \
     --enable-gallium-egl \
-    --with-egl-platforms=x11,drm,wayland \
     --enable-shared-glapi \
     --enable-gbm \
     --enable-glx-tls \
@@ -50,14 +50,15 @@ build() {
     # --help
 
     make
+
     # fake installation
-	mkdir $srcdir/fakeinstall
-	make DESTDIR=${srcdir}/fakeinstall install
+    mkdir $srcdir/fakeinstall
+    make DESTDIR=${srcdir}/fakeinstall install
 }
 
 package_mesa() {
   pkgdesc="an open-source implementation of the OpenGL specification"
-  depends=('libdrm' 'libvdpau' 'wayland' 'libxxf86vm' 'libxdamage' 'systemd')
+  depends=('libdrm' 'libvdpau' 'wayland' 'libxxf86vm' 'libxdamage' 'systemd' 'elfutils' 'llvm-libs')
   optdepends=('opengl-man-pages: for the OpenGL API man pages')
   provides=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
   conflicts=('libglapi' 'osmesa' 'libgbm')
