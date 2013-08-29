@@ -1,5 +1,5 @@
 diff -ruN a/arch/arm/boot/dts/kirkwood-ts219.dtsi b/arch/arm/boot/dts/kirkwood-ts219.dtsi
---- a/arch/arm/boot/dts/kirkwood-ts219.dtsi	2013-07-13 12:42:41.000000000 -0600
+--- a/arch/arm/boot/dts/kirkwood-ts219.dtsi	2013-08-20 16:40:47.000000000 -0600
 +++ b/arch/arm/boot/dts/kirkwood-ts219.dtsi	1969-12-31 17:00:00.000000000 -0700
 @@ -1,78 +0,0 @@
 -/include/ "kirkwood.dtsi"
@@ -80,9 +80,637 @@ diff -ruN a/arch/arm/boot/dts/kirkwood-ts219.dtsi b/arch/arm/boot/dts/kirkwood-t
 -		};
 -	};
 -};
+diff -ruN a/arch/arm/mach-kirkwood/bubba3-gpio.c b/arch/arm/mach-kirkwood/bubba3-gpio.c
+--- a/arch/arm/mach-kirkwood/bubba3-gpio.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/bubba3-gpio.c	2013-08-27 03:05:13.196623262 -0600
+@@ -0,0 +1,386 @@
++/*
++ * Excito BUBBA|3 led driver.
++ *
++ * Copyright (C) 2010 Excito Elektronik i Skåne AB
++ * Author: "Tor Krill" <tor@excito.com>
++ *
++ * This program is free software; you can redistribute  it and/or modify it
++ * under  the terms of  the GNU General  Public License as published by the
++ * Free Software Foundation;  either version 2 of the  License, or (at your
++ * option) any later version.
++ *
++ * This driver provides an interface to the GPIO functionality on BUBBA|3
++ */
++
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/gpio.h>
++#include <linux/kernel.h>
++#include <linux/delay.h>
++#include <linux/bubba3.h>
++
++/* Mark this file for ident */
++static char* ver="0.1";
++static char* build=__DATE__ " " __TIME__;
++
++#define DEVNAME "bubbatwo"
++#define LED_DEFAULT_FREQ 0x8000
++
++/* Meta information for this module */
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Tor Krill <tor@excito.com>");
++MODULE_DESCRIPTION("BUBBA|3 led driver");
++
++/* Forwards */
++static int b3_probe(struct platform_device  *dev);
++static int b3_remove(struct platform_device *dev);
++static void b3_led_on(void);
++
++#define MODE_OFF	0
++#define MODE_BLINK	1
++#define MODE_LIT	2
++#define BUZZ_OFF	0
++#define BUZZ_ON		1
++#define LED_BLUE	0
++#define LED_RED		1
++#define LED_GREEN	2
++#define LED_BOOT	3
++#define LED_INSTALL	LED_GREEN
++
++struct b3_stateinfo{
++	u32 mode;
++	u32 freq;
++	u32 buzz;
++	u32 color;
++};
++
++static struct b3_stateinfo b3_data;
++
++static void b3_led_reset(void)
++{
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(1800);
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(1800);
++}
++
++static void b3_led_train_start(void)
++{
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(1800);
++}
++
++static void b3_led_train_end(void)
++{
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(1800);
++}
++
++static void b3_led_color(u32 color){
++	gpio_set_value(B3_FRONT_LED_RED,0);
++	gpio_set_value(B3_FRONT_LED_BLUE,0);
++	gpio_set_value(B3_FRONT_LED_GREEN,0);
++
++	switch(color){
++	case LED_BOOT:
++		gpio_set_value(B3_FRONT_LED_RED,1);
++		gpio_set_value(B3_FRONT_LED_BLUE,1);
++		break;
++	case LED_RED:
++		gpio_set_value(B3_FRONT_LED_RED,1);
++		break;
++	case LED_GREEN:
++		gpio_set_value(B3_FRONT_LED_GREEN,1);
++		break;
++	case LED_BLUE:
++	default:
++		gpio_set_value(B3_FRONT_LED_BLUE,1);
++		break;
++	}
++}
++
++static void b3_led_on(void)
++{
++	b3_led_color(b3_data.color);
++
++	b3_led_reset();
++
++	b3_led_train_start();
++	/* NOOP, pass through mode */
++	b3_led_train_end();
++
++	gpio_set_value(B3_LED_INTERVAL,1);
++}
++
++static void b3_led_off(void)
++{
++	gpio_set_value(B3_FRONT_LED_RED,0);
++	gpio_set_value(B3_FRONT_LED_BLUE,0);
++	gpio_set_value(B3_FRONT_LED_GREEN,0);
++
++	b3_led_reset();
++}
++
++static void b3_buzz_on(void)
++{
++	gpio_set_value(B3_BUZZER_ENABLE,1);
++}
++
++static void b3_buzz_off(void)
++{
++	gpio_set_value(B3_BUZZER_ENABLE,0);
++}
++
++
++static struct platform_device *b3_device;
++
++static struct platform_driver b3_driver = {
++		.driver = {
++				.name = DEVNAME,
++				.owner = THIS_MODULE,
++		},
++		.probe = b3_probe,
++		.remove = b3_remove,
++};
++
++static ssize_t	b3_show_ledmode(struct device *dev, struct device_attribute *attr, char *buffer)
++{
++	ssize_t len = 0;
++	switch(b3_data.mode){
++	case MODE_OFF:
++		len = sprintf (buffer+len, "off");
++		break;
++	case MODE_BLINK:
++		len = sprintf (buffer+len, "blink");
++		break;
++	case MODE_LIT:
++		len = sprintf (buffer+len, "lit");
++		break;
++	default:
++		len = sprintf (buffer+len, "unknown");
++	}
++
++	return len;
++}
++
++static ssize_t b3_store_ledmode(struct device *dev, struct device_attribute *attr,const char *buffer, size_t size)
++{
++
++	if(size<1){
++		return -EINVAL;
++	}
++	/* Do a nasty shortcut here only look at first char */
++	switch(buffer[0]){
++	case 'o':
++		b3_data.mode=MODE_OFF;
++		b3_led_off ();
++		break;
++	case 'b':
++		/* For now we dont allow blink. */
++	case 'l':
++		b3_data.mode=MODE_LIT;
++		b3_led_on ();
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return size;
++}
++
++static ssize_t	b3_show_ledfreq(struct device *dev, struct device_attribute *attr, char *buffer)
++{
++	ssize_t len = 0;
++
++	len = sprintf (buffer+len, "%u", b3_data.freq);
++
++	return len;
++}
++
++static ssize_t b3_store_ledfreq(struct device *dev, struct device_attribute *attr,const char *buffer, size_t size)
++{
++
++	b3_data.freq = simple_strtoul(buffer,NULL,0);
++
++	return size;
++}
++
++static ssize_t	b3_show_buzzer(struct device *dev, struct device_attribute *attr, char *buffer)
++{
++	ssize_t len = 0;
++
++	len = sprintf (buffer+len, "%u", b3_data.buzz);
++
++	return len;
++}
++
++static ssize_t b3_store_buzzer(struct device *dev, struct device_attribute *attr,const char *buffer, size_t size)
++{
++
++	b3_data.buzz = simple_strtoul(buffer,NULL,0);
++
++	b3_data.buzz = (b3_data.buzz>0) ? BUZZ_ON : BUZZ_OFF;
++
++	if(b3_data.buzz==BUZZ_ON){
++		b3_buzz_on();
++	}else{
++		b3_buzz_off();
++	}
++
++	return size;
++}
++
++static ssize_t	b3_show_color(struct device *dev, struct device_attribute *attr, char *buffer)
++{
++	ssize_t len = 0;
++
++	len = sprintf (buffer+len, "%u", b3_data.color);
++
++	return len;
++}
++
++static ssize_t b3_store_color(struct device *dev, struct device_attribute *attr,const char *buffer, size_t size)
++{
++
++	b3_data.color = simple_strtoul(buffer,NULL,0);
++
++	b3_data.color = (b3_data.color>LED_BOOT) ? LED_BOOT : b3_data.color;
++
++	b3_led_color(b3_data.color);
++
++	return size;
++}
++
++static struct gpio bubba_gpios[] = {
++#ifdef CONFIG_BUBBA3_INSTALL
++	{ B3_FRONT_LED_RED, GPIOF_OUT_INIT_LOW, "Red LED"},
++	{ B3_FRONT_LED_BLUE, GPIOF_OUT_INIT_LOW, "Blue LED"},
++	{ B3_FRONT_LED_GREEN, GPIOF_OUT_INIT_HIGH, "Green LED"},
++#else
++	{ B3_FRONT_LED_RED, GPIOF_OUT_INIT_HIGH, "Red LED"},
++	{ B3_FRONT_LED_BLUE, GPIOF_OUT_INIT_HIGH, "Blue LED"},
++	{ B3_FRONT_LED_GREEN, GPIOF_OUT_INIT_LOW, "Green LED"},
++#endif
++	{ B3_LED_INTERVAL, GPIOF_OUT_INIT_HIGH, "LED interval"},
++	{ B3_BUZZER_ENABLE, GPIOF_OUT_INIT_LOW, "Buzzer"}
++};
++
++static int request_ioresources(void)
++{
++
++	if(gpio_request_array(bubba_gpios, ARRAY_SIZE(bubba_gpios))<0){
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++DEVICE_ATTR(ledmode, 0644, b3_show_ledmode, b3_store_ledmode);
++DEVICE_ATTR(ledfreq, 0644, b3_show_ledfreq, b3_store_ledfreq);
++DEVICE_ATTR(buzzer, 0644, b3_show_buzzer, b3_store_buzzer);
++DEVICE_ATTR(color, 0644, b3_show_color, b3_store_color);
++
++static int b3_probe(struct platform_device *dev)
++{
++	int ret=0;
++
++	if(request_ioresources()){
++		return -EINVAL;
++	}
++
++	ret = device_create_file(&b3_device->dev, &dev_attr_ledmode);
++	if(ret){
++		return -EINVAL;
++	}
++
++	ret = device_create_file(&b3_device->dev, &dev_attr_ledfreq);
++	if(ret){
++		device_remove_file(&b3_device->dev, &dev_attr_ledmode);
++		return -EINVAL;
++	}
++
++	ret = device_create_file(&b3_device->dev, &dev_attr_buzzer);
++	if(ret){
++		device_remove_file(&b3_device->dev, &dev_attr_ledfreq);
++		device_remove_file(&b3_device->dev, &dev_attr_ledmode);
++		return -EINVAL;
++	}
++
++	ret = device_create_file(&b3_device->dev, &dev_attr_color);
++	if(ret){
++		device_remove_file(&b3_device->dev, &dev_attr_buzzer);
++		device_remove_file(&b3_device->dev, &dev_attr_ledfreq);
++		device_remove_file(&b3_device->dev, &dev_attr_ledmode);
++		return -EINVAL;
++	}
++
++	b3_data.mode = MODE_LIT;
++	b3_data.freq = LED_DEFAULT_FREQ;
++	b3_data.buzz = BUZZ_OFF;
++#ifdef CONFIG_BUBBA3_INSTALL
++	b3_data.color = LED_INSTALL;
++#else
++	b3_data.color = LED_BOOT;
++#endif
++	return ret;
++}
++
++static int b3_remove(struct platform_device *dev)
++{
++
++	device_remove_file (&b3_device->dev, &dev_attr_ledmode);
++	device_remove_file (&b3_device->dev, &dev_attr_ledfreq);
++	device_remove_file(&b3_device->dev, &dev_attr_buzzer);
++	device_remove_file(&b3_device->dev, &dev_attr_color);
++
++	gpio_free_array(bubba_gpios, ARRAY_SIZE(bubba_gpios));
++	return 0;
++}
++
++static int __init bubba3_init(void){
++        int result;
++
++        result = platform_driver_register(&b3_driver);
++        if (result < 0) {
++                printk(KERN_ERR "bubba3: Failed to register driver\n");
++                return result;
++        }
++
++		b3_device = platform_device_alloc(DEVNAME,-1);
++		platform_device_add(b3_device);
++
++		printk(KERN_INFO "BUBBA3: driver ver %s (build %s) loaded\n",ver,build);
++
++        return result;
++
++}
++
++static void __exit bubba3_cleanup(void){
++
++        platform_device_del(b3_device);
++        platform_driver_unregister(&b3_driver);
++
++        printk(KERN_INFO "bubba3 driver removed\n");
++
++}
++/* register init and cleanup functions */
++module_init(bubba3_init);
++module_exit(bubba3_cleanup);
+diff -ruN a/arch/arm/mach-kirkwood/bubba3-setup.c b/arch/arm/mach-kirkwood/bubba3-setup.c
+--- a/arch/arm/mach-kirkwood/bubba3-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/bubba3-setup.c	2013-08-27 02:48:37.841660422 -0600
+@@ -0,0 +1,234 @@
++/*
++ * arch/arm/mach-kirkwood/bubba3-setup.c
++ * based on
++ * arch/arm/mach-kirkwood/rd88f6281-setup.c
++ *
++ * For Bubba3 miniserver from Excito
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/mtd/physmap.h>
++#include <linux/spi/flash.h>
++#include <linux/spi/spi.h>
++#include <linux/irq.h>
++#include <linux/ata_platform.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/input.h>
++#include <linux/gpio_keys.h>
++#include <linux/bubba3.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <asm/mach/time.h>
++#include <mach/kirkwood.h>
++#include <plat/orion-gpio.h>
++#include <mach/bridge-regs.h>
++#include <plat/time.h>
++#include "common.h"
++#include "mpp.h"
++
++/*****************************************************************************
++ * 2048KB SPI Flash on Boot Device (Numonyx MP25P16)
++ ****************************************************************************/
++
++static struct mtd_partition bubba3_flash_parts[] = {
++	{
++		.name = "u-boot",
++		.size = SZ_512K+SZ_256K,
++		.offset = 0,
++	},
++	{
++		.name = "env",
++		.size = SZ_128K,
++		.offset = MTDPART_OFS_NXTBLK,
++	},
++	{
++		.name = "data",
++		.size = MTDPART_SIZ_FULL,
++		.offset = MTDPART_OFS_NXTBLK,
++	},
++};
++
++static const struct flash_platform_data bubba3_flash = {
++	.type		= "m25p16",
++	.name		= "spi_flash",
++	.parts		= bubba3_flash_parts,
++	.nr_parts	= ARRAY_SIZE(bubba3_flash_parts),
++};
++
++static struct spi_board_info __initdata bubba3_spi_slave_info[] = {
++	{
++		.modalias	= "m25p80",
++		.platform_data	= &bubba3_flash,
++		.irq		= -1,
++		.max_speed_hz	= 40000000,
++		.bus_num	= 0,
++		.chip_select	= 0,
++	},
++};
++
++/*****************************************************************************
++ * GPIO and keys
++ ****************************************************************************/
++
++static struct gpio_keys_button bubba3_buttons[] = {
++	[0] = {
++		.code		= KEY_POWER,
++		.gpio		= B3_POWER_BUTTON,
++		.desc		= "Power button",
++		.active_low	= 1,
++	},
++};
++
++static struct gpio_keys_platform_data bubba3_button_data = {
++	.buttons	= bubba3_buttons,
++	.nbuttons	= ARRAY_SIZE(bubba3_buttons),
++};
++
++static struct platform_device bubba3_gpio_buttons = {
++	.name		= "gpio-keys",
++	.id		= -1,
++	.dev		= {
++		.platform_data 	= &bubba3_button_data,
++	},
++};
++
++
++/*****************************************************************************
++ * Ethernet
++ ****************************************************************************/
++
++static struct mv643xx_eth_platform_data bubba3_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0x08),
++	/* in case a hardcoded MAC address is needed uncomment next line */
++	/* .mac_addr	= {0x00, 0x0c, 0xc6, 0x76, 0x76, 0x2b}, */
++};
++
++static struct mv643xx_eth_platform_data bubba3_ge01_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0x18),
++	/* in case a hardcoded MAC address is needed uncomment next line */
++	/* .mac_addr	= {0x00, 0x0c, 0xc6, 0x76, 0x76, 0x2c}, */
++};
++
++static struct mv_sata_platform_data bubba3_sata_data = {
++	.n_ports	= 2,
++};
++
++/*****************************************************************************
++ * Timer
++ ****************************************************************************/
++
++static unsigned int bubba3_mpp_config[] __initdata = {
++	MPP0_SPI_SCn,
++	MPP1_SPI_MOSI,
++	MPP2_SPI_SCK,
++	MPP3_SPI_MISO,
++	MPP4_NF_IO6,
++	MPP5_NF_IO7,
++	MPP6_SYSRST_OUTn,
++	MPP7_PEX_RST_OUTn,
++	MPP8_TW0_SDA,
++	MPP9_TW0_SCK,
++	MPP10_UART0_TXD,
++	MPP11_UART0_RXD,
++	MPP12_GPO,
++	MPP13_UART1_TXD,
++	MPP14_UART1_RXD,
++	MPP15_SATA0_ACTn,
++	MPP16_SATA1_ACTn,
++	MPP17_SATA0_PRESENTn,
++	MPP18_GPO,
++	MPP19_GPO,
++	MPP20_GE1_TXD0,
++	MPP21_GE1_TXD1,
++	MPP22_GE1_TXD2,
++	MPP23_GE1_TXD3,
++	MPP24_GE1_RXD0,
++	MPP25_GE1_RXD1,
++	MPP26_GE1_RXD2,
++	MPP27_GE1_RXD3,
++	MPP28_GPIO,
++	MPP29_GPIO,
++	MPP30_GE1_RXCTL,
++	MPP31_GE1_RXCLK,
++	MPP32_GE1_TCLKOUT,
++	MPP33_GE1_TXCTL,
++	MPP34_GPIO,
++	MPP35_GPIO,
++	MPP36_GPIO,
++	MPP37_GPIO,
++	MPP38_GPIO,
++	MPP39_GPIO,
++	MPP40_GPIO,
++	MPP41_GPIO,
++	MPP42_GPIO,
++	MPP43_GPIO,
++	MPP44_GPIO,
++	MPP45_GPIO,
++	MPP46_GPIO,
++	MPP47_GPIO,
++	MPP48_GPIO,
++	MPP49_GPIO,
++	0
++};
++
++static void __init bubba3_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	kirkwood_mpp_conf(bubba3_mpp_config);
++
++	kirkwood_uart0_init();
++
++	spi_register_board_info(bubba3_spi_slave_info,
++				ARRAY_SIZE(bubba3_spi_slave_info));
++	kirkwood_spi_init();
++
++	kirkwood_i2c_init();
++
++	platform_device_register(&bubba3_gpio_buttons);
++
++	/* eth0 */
++	kirkwood_ge00_init(&bubba3_ge00_data);
++
++	/* eth1 */
++	if (gpio_request(28, "PHY2 reset") != 0 ||
++		gpio_direction_input(28) != 0) // high-z
++		printk(KERN_ERR "can't deassert GPIO 28 (PHY2 reset)\n");
++	else
++		kirkwood_ge01_init(&bubba3_ge01_data);
++
++	kirkwood_sata_init(&bubba3_sata_data);
++
++	kirkwood_ehci_init();
++
++}
++
++static int __init bubba3_pci_init(void)
++{
++	if (machine_is_bubba3())
++		kirkwood_pcie_init( KW_PCIE0 | KW_PCIE1 );
++
++	return 0;
++}
++subsys_initcall(bubba3_pci_init);
++
++MACHINE_START(BUBBA3, "BUBBA3 Kirkwood based miniserver")
++	/* Maintainer: Tor Krill <tor@excito.com> */
++	.atag_offset	= 0x100,
++	.init_machine	= bubba3_init,
++	.map_io		= kirkwood_map_io,
++	.init_early 	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++        .init_time      = kirkwood_timer_init,
++        .restart        = kirkwood_restart,
++MACHINE_END
 diff -ruN a/arch/arm/mach-kirkwood/common.h b/arch/arm/mach-kirkwood/common.h
---- a/arch/arm/mach-kirkwood/common.h	2013-07-13 12:42:41.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/common.h	2013-07-21 02:07:55.032033705 -0600
+--- a/arch/arm/mach-kirkwood/common.h	2013-08-20 16:40:47.000000000 -0600
++++ b/arch/arm/mach-kirkwood/common.h	2013-08-27 01:49:46.547377928 -0600
 @@ -77,12 +77,6 @@
  static inline void dnskw_init(void) {};
  #endif
@@ -110,8 +738,8 @@ diff -ruN a/arch/arm/mach-kirkwood/common.h b/arch/arm/mach-kirkwood/common.h
  void lsxl_init(void);
  #else
 diff -ruN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/dockstar-setup.c
---- a/arch/arm/mach-kirkwood/dockstar-setup.c	2013-07-13 12:42:41.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/dockstar-setup.c	2013-07-21 02:07:55.042033504 -0600
+--- a/arch/arm/mach-kirkwood/dockstar-setup.c	2013-08-20 16:40:47.000000000 -0600
++++ b/arch/arm/mach-kirkwood/dockstar-setup.c	2013-08-27 01:49:46.547377928 -0600
 @@ -28,6 +28,10 @@
  		.offset = 0,
  		.size = SZ_1M
@@ -157,7 +785,7 @@ diff -ruN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/doc
  
 diff -ruN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/goflexhome-setup.c
 --- a/arch/arm/mach-kirkwood/goflexhome-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/goflexhome-setup.c	2013-07-21 02:07:55.042033504 -0600
++++ b/arch/arm/mach-kirkwood/goflexhome-setup.c	2013-08-27 01:49:46.557377734 -0600
 @@ -0,0 +1,124 @@
 +/*
 + * arch/arm/mach-kirkwood/goflexhome-setup.c
@@ -285,7 +913,7 @@ diff -ruN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/g
 +
 diff -ruN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/goflexnet-setup.c
 --- a/arch/arm/mach-kirkwood/goflexnet-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/goflexnet-setup.c	2013-07-21 02:07:55.042033504 -0600
++++ b/arch/arm/mach-kirkwood/goflexnet-setup.c	2013-08-27 01:49:46.557377734 -0600
 @@ -0,0 +1,177 @@
 +/*
 + * arch/arm/mach-kirkwood/goflexnet-setup.c
@@ -465,8 +1093,8 @@ diff -ruN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/go
 +MACHINE_END
 +
 diff -ruN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/guruplug-setup.c
---- a/arch/arm/mach-kirkwood/guruplug-setup.c	2013-07-13 12:42:41.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/guruplug-setup.c	2013-07-21 02:07:55.042033504 -0600
+--- a/arch/arm/mach-kirkwood/guruplug-setup.c	2013-08-20 16:40:47.000000000 -0600
++++ b/arch/arm/mach-kirkwood/guruplug-setup.c	2013-08-27 01:49:46.557377734 -0600
 @@ -59,22 +59,24 @@
  
  static struct gpio_led guruplug_led_pins[] = {
@@ -498,7 +1126,7 @@ diff -ruN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/gur
  	},
 diff -ruN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/iconnect-setup.c
 --- a/arch/arm/mach-kirkwood/iconnect-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/iconnect-setup.c	2013-07-21 02:07:55.052033323 -0600
++++ b/arch/arm/mach-kirkwood/iconnect-setup.c	2013-08-27 01:49:46.567377540 -0600
 @@ -0,0 +1,204 @@
 +/*
 + * arch/arm/mach-kirkwood/iconnect-setup.c
@@ -706,7 +1334,7 @@ diff -ruN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/ico
 +MACHINE_END
 diff -ruN a/arch/arm/mach-kirkwood/ionics-stratus-setup.c b/arch/arm/mach-kirkwood/ionics-stratus-setup.c
 --- a/arch/arm/mach-kirkwood/ionics-stratus-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/ionics-stratus-setup.c	2013-07-21 02:07:55.052033323 -0600
++++ b/arch/arm/mach-kirkwood/ionics-stratus-setup.c	2013-08-27 01:49:46.567377540 -0600
 @@ -0,0 +1,137 @@
 +/*
 + * arch/arm/mach-kirkwood/ionics-stratus-setup.c
@@ -846,9 +1474,22 @@ diff -ruN a/arch/arm/mach-kirkwood/ionics-stratus-setup.c b/arch/arm/mach-kirkwo
 +	.restart	= kirkwood_restart,
 +MACHINE_END
 diff -ruN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
---- a/arch/arm/mach-kirkwood/Kconfig	2013-07-13 12:42:41.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/Kconfig	2013-07-21 02:19:57.277980464 -0600
-@@ -130,6 +130,66 @@
+--- a/arch/arm/mach-kirkwood/Kconfig	2013-08-20 16:40:47.000000000 -0600
++++ b/arch/arm/mach-kirkwood/Kconfig	2013-08-27 02:50:24.830136703 -0600
+@@ -92,6 +92,12 @@
+ 	  Say 'Y' here if you want your kernel to support the
+ 	  Marvell OpenRD Ultimate Board.
+ 
++config MACH_BUBBA3
++        bool "Bubba3 miniserver"
++        help
++          Say 'Y' here if you want your kernel to support the
++          Bubba3 miniserver.
++
+ config MACH_RD88F6192_NAS
+ 	bool "Marvell RD-88F6192-NAS Reference Board"
+ 	help
+@@ -130,6 +136,66 @@
  	  QNAP TS-410, TS-410U, TS-419P, TS-419P+ and TS-419U Turbo
  	  NAS devices.
  
@@ -915,7 +1556,7 @@ diff -ruN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
  comment "Device tree entries"
  
  config ARCH_KIRKWOOD_DT
-@@ -161,13 +221,6 @@
+@@ -161,13 +227,6 @@
  	  Kirkwood-based D-Link NASes such as DNS-320 & DNS-325,
  	  using Flattened Device Tree.
  
@@ -929,7 +1570,7 @@ diff -ruN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
  config MACH_DREAMPLUG_DT
  	bool "Marvell DreamPlug (Flattened Device Tree)"
  	select ARCH_KIRKWOOD_DT
-@@ -175,13 +228,6 @@
+@@ -175,13 +234,6 @@
  	  Say 'Y' here if you want your kernel to support the
  	  Marvell DreamPlug (Flattened Device Tree).
  
@@ -943,7 +1584,7 @@ diff -ruN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
  config MACH_GURUPLUG_DT
  	bool "Marvell GuruPlug Reference Board (Flattened Device Tree)"
  	select ARCH_KIRKWOOD_DT
-@@ -197,12 +243,6 @@
+@@ -197,12 +249,6 @@
  	  RaidSonic IB-NAS6210 & IB-NAS6220 devices, using
  	  Flattened Device Tree.
  
@@ -956,7 +1597,7 @@ diff -ruN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
  config MACH_INETSPACE_V2_DT
  	bool "LaCie Internet Space v2 NAS (Flattened Device Tree)"
  	select ARCH_KIRKWOOD_DT
-@@ -303,20 +343,6 @@
+@@ -303,20 +349,6 @@
  	  Say 'Y' here if you want your kernel to support the
  	  USI Topkick, using Flattened Device Tree
  
@@ -978,9 +1619,9 @@ diff -ruN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
  
  endif
 diff -ruN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
---- a/arch/arm/mach-kirkwood/Makefile	2013-07-13 12:42:41.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/Makefile	2013-07-21 02:16:26.192088220 -0600
-@@ -18,16 +18,24 @@
+--- a/arch/arm/mach-kirkwood/Makefile	2013-08-20 16:40:47.000000000 -0600
++++ b/arch/arm/mach-kirkwood/Makefile	2013-08-27 02:52:24.530697569 -0600
+@@ -18,16 +18,25 @@
  obj-$(CONFIG_MACH_T5325)		+= t5325-setup.o
  obj-$(CONFIG_MACH_TS219)		+= ts219-setup.o tsx1x-common.o
  obj-$(CONFIG_MACH_TS41X)		+= ts41x-setup.o tsx1x-common.o
@@ -992,8 +1633,9 @@ diff -ruN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
 +obj-$(CONFIG_MACH_NAS6210)		+= nas6210-setup.o
 +obj-$(CONFIG_MACH_TOPKICK)		+= topkick-setup.o
 +obj-$(CONFIG_MACH_IONICS_STRATUS)	+= ionics-stratus-setup.o
-+obj-$(CONFIG_MACH_NSA310)              += nsa310-setup.o
-+obj-$(CONFIG_MACH_NSA320)              += nsa320-setup.o
++obj-$(CONFIG_MACH_BUBBA3)               += bubba3-setup.o bubba3-gpio.o
++obj-$(CONFIG_MACH_NSA310)		+= nsa310-setup.o
++obj-$(CONFIG_MACH_NSA320)		+= nsa320-setup.o
  
  obj-$(CONFIG_ARCH_KIRKWOOD_DT)		+= board-dt.o
  obj-$(CONFIG_MACH_CLOUDBOX_DT)		+= board-ns2.o
@@ -1007,7 +1649,7 @@ diff -ruN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
  obj-$(CONFIG_MACH_INETSPACE_V2_DT)	+= board-ns2.o
  obj-$(CONFIG_MACH_IOMEGA_IX2_200_DT)	+= board-iomega_ix2_200.o
  obj-$(CONFIG_MACH_KM_KIRKWOOD_DT)	+= board-km_kirkwood.o
-@@ -37,8 +45,6 @@
+@@ -37,8 +46,6 @@
  obj-$(CONFIG_MACH_NETSPACE_MAX_V2_DT)	+= board-ns2.o
  obj-$(CONFIG_MACH_NETSPACE_MINI_V2_DT)	+= board-ns2.o
  obj-$(CONFIG_MACH_NETSPACE_V2_DT)	+= board-ns2.o
@@ -1018,7 +1660,7 @@ diff -ruN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
 -obj-$(CONFIG_MACH_TS219_DT)		+= board-ts219.o tsx1x-common.o
 diff -ruN a/arch/arm/mach-kirkwood/nas6210-setup.c b/arch/arm/mach-kirkwood/nas6210-setup.c
 --- a/arch/arm/mach-kirkwood/nas6210-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/nas6210-setup.c	2013-07-21 02:07:55.072032946 -0600
++++ b/arch/arm/mach-kirkwood/nas6210-setup.c	2013-08-27 01:49:46.577377347 -0600
 @@ -0,0 +1,186 @@
 +/*
 + * arch/arm/mach-kirkwood/nas6210-setup.c
@@ -1208,7 +1850,7 @@ diff -ruN a/arch/arm/mach-kirkwood/nas6210-setup.c b/arch/arm/mach-kirkwood/nas6
 +MACHINE_END
 diff -ruN a/arch/arm/mach-kirkwood/nsa310-setup.c b/arch/arm/mach-kirkwood/nsa310-setup.c
 --- a/arch/arm/mach-kirkwood/nsa310-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/nsa310-setup.c	2013-07-21 02:07:55.082032751 -0600
++++ b/arch/arm/mach-kirkwood/nsa310-setup.c	2013-08-27 01:49:46.577377347 -0600
 @@ -0,0 +1,359 @@
 +/*
 + * arch/arm/mach-kirkwood/nsa310-setup.c
@@ -1571,7 +2213,7 @@ diff -ruN a/arch/arm/mach-kirkwood/nsa310-setup.c b/arch/arm/mach-kirkwood/nsa31
 +MACHINE_END
 diff -ruN a/arch/arm/mach-kirkwood/nsa320-setup.c b/arch/arm/mach-kirkwood/nsa320-setup.c
 --- a/arch/arm/mach-kirkwood/nsa320-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/nsa320-setup.c	2013-07-21 02:07:55.082032751 -0600
++++ b/arch/arm/mach-kirkwood/nsa320-setup.c	2013-08-27 01:49:46.577377347 -0600
 @@ -0,0 +1,305 @@
 +/*
 + * arch/arm/mach-kirkwood/nsa320-setup.c
@@ -1880,7 +2522,7 @@ diff -ruN a/arch/arm/mach-kirkwood/nsa320-setup.c b/arch/arm/mach-kirkwood/nsa32
 +MACHINE_END
 diff -ruN a/arch/arm/mach-kirkwood/pogo_e02-setup.c b/arch/arm/mach-kirkwood/pogo_e02-setup.c
 --- a/arch/arm/mach-kirkwood/pogo_e02-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/pogo_e02-setup.c	2013-07-21 02:07:55.082032751 -0600
++++ b/arch/arm/mach-kirkwood/pogo_e02-setup.c	2013-08-27 01:49:46.577377347 -0600
 @@ -0,0 +1,115 @@
 +/*
 + * arch/arm/mach-kirkwood/pogo_e02-setup.c
@@ -1999,7 +2641,7 @@ diff -ruN a/arch/arm/mach-kirkwood/pogo_e02-setup.c b/arch/arm/mach-kirkwood/pog
 +MACHINE_END
 diff -ruN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/pogoplugv4-setup.c
 --- a/arch/arm/mach-kirkwood/pogoplugv4-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/pogoplugv4-setup.c	2013-07-21 02:07:55.082032751 -0600
++++ b/arch/arm/mach-kirkwood/pogoplugv4-setup.c	2013-08-27 01:49:46.587377155 -0600
 @@ -0,0 +1,195 @@
 +/*
 + * arch/arm/mach-kirkwood/pogoplugv4-setup.c
@@ -2197,8 +2839,8 @@ diff -ruN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/p
 +	.restart	= kirkwood_restart,
 +MACHINE_END
 diff -ruN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/sheevaplug-setup.c
---- a/arch/arm/mach-kirkwood/sheevaplug-setup.c	2013-07-13 12:42:41.000000000 -0600
-+++ b/arch/arm/mach-kirkwood/sheevaplug-setup.c	2013-07-21 02:07:55.092032555 -0600
+--- a/arch/arm/mach-kirkwood/sheevaplug-setup.c	2013-08-20 16:40:47.000000000 -0600
++++ b/arch/arm/mach-kirkwood/sheevaplug-setup.c	2013-08-27 01:49:46.587377155 -0600
 @@ -43,7 +43,7 @@
  	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
  };
@@ -2282,7 +2924,7 @@ diff -ruN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/s
  
 diff -ruN a/arch/arm/mach-kirkwood/topkick-setup.c b/arch/arm/mach-kirkwood/topkick-setup.c
 --- a/arch/arm/mach-kirkwood/topkick-setup.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/arch/arm/mach-kirkwood/topkick-setup.c	2013-07-21 02:07:55.092032555 -0600
++++ b/arch/arm/mach-kirkwood/topkick-setup.c	2013-08-27 01:49:46.587377155 -0600
 @@ -0,0 +1,165 @@
 +/*
 + * arch/arm/mach-kirkwood/topkick-setup.c
@@ -2450,8 +3092,8 @@ diff -ruN a/arch/arm/mach-kirkwood/topkick-setup.c b/arch/arm/mach-kirkwood/topk
 +	.restart	= kirkwood_restart,
 +MACHINE_END
 diff -ruN a/arch/arm/plat-orion/common.c b/arch/arm/plat-orion/common.c
---- a/arch/arm/plat-orion/common.c	2013-07-13 12:42:41.000000000 -0600
-+++ b/arch/arm/plat-orion/common.c	2013-07-21 02:07:55.112032164 -0600
+--- a/arch/arm/plat-orion/common.c	2013-08-20 16:40:47.000000000 -0600
++++ b/arch/arm/plat-orion/common.c	2013-08-27 01:49:46.597376964 -0600
 @@ -256,7 +256,9 @@
  /*****************************************************************************
   * GE00
@@ -2464,8 +3106,8 @@ diff -ruN a/arch/arm/plat-orion/common.c b/arch/arm/plat-orion/common.c
  static struct resource orion_ge00_shared_resources[] = {
  	{
 diff -ruN a/drivers/ata/sata_mv.c b/drivers/ata/sata_mv.c
---- a/drivers/ata/sata_mv.c	2013-07-13 12:42:41.000000000 -0600
-+++ b/drivers/ata/sata_mv.c	2013-07-21 02:07:55.122031970 -0600
+--- a/drivers/ata/sata_mv.c	2013-08-20 16:40:47.000000000 -0600
++++ b/drivers/ata/sata_mv.c	2013-08-27 01:49:46.627376388 -0600
 @@ -71,6 +71,7 @@
  #include <scsi/scsi_cmnd.h>
  #include <scsi/scsi_device.h>
@@ -2484,8 +3126,8 @@ diff -ruN a/drivers/ata/sata_mv.c b/drivers/ata/sata_mv.c
  		int using_ncq = ((pp->pp_flags & MV_PP_FLAG_NCQ_EN) != 0);
  		if (want_ncq != using_ncq)
 diff -ruN a/drivers/hwmon/Kconfig b/drivers/hwmon/Kconfig
---- a/drivers/hwmon/Kconfig	2013-07-13 12:42:41.000000000 -0600
-+++ b/drivers/hwmon/Kconfig	2013-07-21 02:07:55.132031776 -0600
+--- a/drivers/hwmon/Kconfig	2013-08-20 16:40:47.000000000 -0600
++++ b/drivers/hwmon/Kconfig	2013-08-27 01:49:46.637376195 -0600
 @@ -1528,6 +1528,19 @@
          help
            Support for the A/D converter on MC13783 and MC13892 PMIC.
@@ -2507,8 +3149,8 @@ diff -ruN a/drivers/hwmon/Kconfig b/drivers/hwmon/Kconfig
  
  comment "ACPI drivers"
 diff -ruN a/drivers/hwmon/Makefile b/drivers/hwmon/Makefile
---- a/drivers/hwmon/Makefile	2013-07-13 12:42:41.000000000 -0600
-+++ b/drivers/hwmon/Makefile	2013-07-21 02:07:55.142031581 -0600
+--- a/drivers/hwmon/Makefile	2013-08-20 16:40:47.000000000 -0600
++++ b/drivers/hwmon/Makefile	2013-08-27 01:49:46.647376003 -0600
 @@ -107,6 +107,7 @@
  obj-$(CONFIG_SENSORS_MAX6650)	+= max6650.o
  obj-$(CONFIG_SENSORS_MAX6697)	+= max6697.o
@@ -2519,7 +3161,7 @@ diff -ruN a/drivers/hwmon/Makefile b/drivers/hwmon/Makefile
  obj-$(CONFIG_SENSORS_NTC_THERMISTOR)	+= ntc_thermistor.o
 diff -ruN a/drivers/hwmon/nsa3xx-hwmon.c b/drivers/hwmon/nsa3xx-hwmon.c
 --- a/drivers/hwmon/nsa3xx-hwmon.c	1969-12-31 17:00:00.000000000 -0700
-+++ b/drivers/hwmon/nsa3xx-hwmon.c	2013-07-21 02:07:55.142031581 -0600
++++ b/drivers/hwmon/nsa3xx-hwmon.c	2013-08-27 01:49:46.647376003 -0600
 @@ -0,0 +1,251 @@
 +/*
 + * drivers/hwmon/nsa3xx-hwmon.c
@@ -2772,9 +3414,20 @@ diff -ruN a/drivers/hwmon/nsa3xx-hwmon.c b/drivers/hwmon/nsa3xx-hwmon.c
 +MODULE_DESCRIPTION("NSA3XX Hardware Monitoring");
 +MODULE_LICENSE("GPL");
 +MODULE_ALIAS("platform:nsa3xx-hwmon");
+diff -ruN a/drivers/leds/trigger/Kconfig b/drivers/leds/trigger/Kconfig
+--- a/drivers/leds/trigger/Kconfig	2013-08-20 16:40:47.000000000 -0600
++++ b/drivers/leds/trigger/Kconfig	2013-08-27 01:49:46.677375426 -0600
+@@ -35,7 +35,6 @@
+ 
+ config LEDS_TRIGGER_IDE_DISK
+ 	bool "LED IDE Disk Trigger"
+-	depends on IDE_GD_ATA
+ 	depends on LEDS_TRIGGERS
+ 	help
+ 	  This allows LEDs to be controlled by IDE disk activity.
 diff -ruN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
---- a/drivers/mmc/core/core.c	2013-07-13 12:42:41.000000000 -0600
-+++ b/drivers/mmc/core/core.c	2013-07-21 02:07:55.172030997 -0600
+--- a/drivers/mmc/core/core.c	2013-08-20 16:40:47.000000000 -0600
++++ b/drivers/mmc/core/core.c	2013-08-27 01:49:46.657375810 -0600
 @@ -785,7 +785,7 @@
  			 */
  			limit_us = 3000000;
@@ -2785,8 +3438,8 @@ diff -ruN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
  		/*
  		 * SDHC cards always use these fixed values.
 diff -ruN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
---- a/drivers/mmc/core/sd.c	2013-07-13 12:42:41.000000000 -0600
-+++ b/drivers/mmc/core/sd.c	2013-07-21 02:07:55.182030803 -0600
+--- a/drivers/mmc/core/sd.c	2013-08-20 16:40:47.000000000 -0600
++++ b/drivers/mmc/core/sd.c	2013-08-27 01:49:46.657375810 -0600
 @@ -355,6 +355,15 @@
  		return -ENOMEM;
  	}
@@ -2804,8 +3457,8 @@ diff -ruN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
  	if (err)
  		goto out;
 diff -ruN a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
---- a/drivers/mmc/host/mvsdio.c	2013-07-13 12:42:41.000000000 -0600
-+++ b/drivers/mmc/host/mvsdio.c	2013-07-21 02:07:55.192030608 -0600
+--- a/drivers/mmc/host/mvsdio.c	2013-08-20 16:40:47.000000000 -0600
++++ b/drivers/mmc/host/mvsdio.c	2013-08-27 01:49:46.667375618 -0600
 @@ -25,6 +25,7 @@
  #include <linux/of_irq.h>
  #include <linux/mmc/host.h>
@@ -2822,9 +3475,54 @@ diff -ruN a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
  
  	cmdreg = MVSD_CMD_INDEX(cmd->opcode);
  
+diff -ruN a/include/linux/bubba3.h b/include/linux/bubba3.h
+--- a/include/linux/bubba3.h	1969-12-31 17:00:00.000000000 -0700
++++ b/include/linux/bubba3.h	2013-08-27 02:33:26.683475583 -0600
+@@ -0,0 +1,41 @@
++/*
++ * (C) Copyright 2010
++ * Excito elektronik i SkÃ¥ne AB <www.excito.com>
++ * by: Tor Krill <tor@excito.com>
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of
++ * the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
++ * MA 02110-1301 USA
++ */
++
++#ifndef __BUBBA3_H
++#define __BUBBA3_H
++
++/*
++ * GPIO definitions
++ */
++#define B3_LED_INTERVAL		(37)
++#define B3_FRONT_LED_GREEN	(38)
++#define B3_POWER_BUTTON		(39)
++#define B3_BUZZER_ENABLE	(40)
++#define B3_FRONT_LED_RED	(41)
++#define B3_FRONT_LED_BLUE	(42)
++#define B3_HW_ID0		(43)
++#define B3_HW_ID1		(44)
++#define B3_HW_ID2		(45)
++#define B3_BUZ_4KHZ		(46)
++
++#endif
 diff -ruN a/include/linux/nsa3xx-hwmon.h b/include/linux/nsa3xx-hwmon.h
 --- a/include/linux/nsa3xx-hwmon.h	1969-12-31 17:00:00.000000000 -0700
-+++ b/include/linux/nsa3xx-hwmon.h	2013-07-21 02:07:55.192030608 -0600
++++ b/include/linux/nsa3xx-hwmon.h	2013-08-27 01:49:46.677375426 -0600
 @@ -0,0 +1,21 @@
 +/*
 + * include/linux/nsa3xx.hwmon.h
@@ -2847,15 +3545,3 @@ diff -ruN a/include/linux/nsa3xx-hwmon.h b/include/linux/nsa3xx-hwmon.h
 +};
 +
 +#endif /* __LINUX_NSA3XX_HWMON_H */
-
-diff -ruN a/drivers/leds/trigger/Kconfig b/drivers/leds/trigger/Kconfig 
---- a/drivers/leds/trigger/Kconfig	2013-08-11 22:49:02.000000000 -0300
-+++ b/drivers/leds/trigger/Kconfig	2013-08-15 06:54:12.124543000 -0300
-@@ -35,7 +35,6 @@
- 
- config LEDS_TRIGGER_IDE_DISK
- 	bool "LED IDE Disk Trigger"
--	depends on IDE_GD_ATA
- 	depends on LEDS_TRIGGERS
- 	help
- 	  This allows LEDs to be controlled by IDE disk activity.
