@@ -10,7 +10,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=9.2.0
-pkgrel=1
+pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
              'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd')
@@ -23,11 +23,11 @@ md5sums=('4185b6aae890bc62a964f4b24cc1aca8'
          '5c65a0fe315dd347e09b1f2826a1df5a')
 
 build() {
-    cd ${srcdir}/?esa-*
+  cd ${srcdir}/?esa-*
 
-    autoreconf -vfi # our automake is far too new for their build system :)
+  autoreconf -vfi # our automake is far too new for their build system :)
 
-    ./configure --prefix=/usr \
+  ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
     --with-gallium-drivers=swrast \
@@ -49,11 +49,11 @@ build() {
     --enable-xa
     # --help
 
-    make
+  make
 
-    # fake installation
-    mkdir $srcdir/fakeinstall
-    make DESTDIR=${srcdir}/fakeinstall install
+  # fake installation
+  mkdir $srcdir/fakeinstall
+  make DESTDIR=${srcdir}/fakeinstall install
 }
 
 package_mesa() {
