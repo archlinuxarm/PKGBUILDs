@@ -9,17 +9,17 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
-pkgver=9.2.0
-pkgrel=2
+pkgver=9.2.1
+pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
              'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
-source=(ftp://ftp.freedesktop.org/pub/mesa/9.2/MesaLib-${pkgver}.tar.bz2
+source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
         LICENSE)
-md5sums=('4185b6aae890bc62a964f4b24cc1aca8'
+md5sums=('dd4c82667d9c19c28a553b12eba3f8a0'
          '5c65a0fe315dd347e09b1f2826a1df5a')
 
 build() {
