@@ -2611,8 +2611,8 @@ diff -ruN a/arch/arm/mach-kirkwood/nsa320-setup.c b/arch/arm/mach-kirkwood/nsa32
 +MACHINE_END
 diff -rupN a/arch/arm/mach-kirkwood/nsa325-setup.c b/arch/arm/mach-kirkwood/nsa325-setup.c
 --- a/arch/arm/mach-kirkwood/nsa325-setup.c      1969-12-31 19:00:00.000000000 -0500
-+++ b/arch/arm/mach-kirkwood/nsa325-setup.c  2013-09-18 23:36:55.430043273 -0400
-@@ -0,0 +1,330 @@
++++ b/arch/arm/mach-kirkwood/nsa325-setup.c  2013-10-03 23:36:55.430043273 -0400
+@@ -0,0 +1,359 @@
 +/*
 + * arch/arm/mach-kirkwood/nsa325-setup.c
 + *
@@ -2629,7 +2629,10 @@ diff -rupN a/arch/arm/mach-kirkwood/nsa325-setup.c b/arch/arm/mach-kirkwood/nsa3
 +#include <linux/mtd/nand.h>
 +#include <linux/mtd/partitions.h>
 +#include <linux/ata_platform.h>
++#include <linux/mv643xx.h>
 +#include <linux/mv643xx_eth.h>
++#include <linux/phy.h>
++#include <linux/marvell_phy.h>
 +#include <linux/i2c.h>
 +#include <linux/gpio.h>
 +#include <linux/gpio_keys.h>
@@ -2853,7 +2856,6 @@ diff -rupN a/arch/arm/mach-kirkwood/nsa325-setup.c b/arch/arm/mach-kirkwood/nsa3
 +       MPP46_GPIO,     /* power button       */
 +       MPP47_GPIO,     /* HDD2 power         */
 +       MPP48_GPIO,     /* power off          */
-+       MPP49_GPIO,     /* power resume clock */
 +       0
 +};
 +
@@ -2877,6 +2879,32 @@ diff -rupN a/arch/arm/mach-kirkwood/nsa325-setup.c b/arch/arm/mach-kirkwood/nsa3
 +/* Parse boot_command_line string nsa325_usb_power=on|off */
 +__setup("nsa325_usb_power=", nsa325_usb_power);
 +
++/* the nsa325 uses the 88E1310S Alaska, and has an MCU attached to the LED[2] via tristate interrupt */
++static int nsa325_phy_fixup(struct phy_device *phydev)
++{
++       int err;
++       int temp;
++       /* go to page 3 */
++       err = phy_write(phydev, 22, 3);
++       if (err < 0)
++           return err;
++       /* read page 3, register 17 */
++       temp = phy_read(phydev, 17);
++       /* clear bit 4, set bit 5 */
++       temp &= ~(1<<4);
++       temp |= (1<<5);
++       /* write page 3, register 17 */
++       err = phy_write(phydev, 17, temp);
++       if (err < 0)
++           return err;
++       /* go to page 0 */
++       err = phy_write(phydev, 22, 0);
++       if (err < 0)
++           return err;
++
++       return 0;
++}
++
 +static void __init nsa325_init(void)
 +{
 +       /*
@@ -2885,15 +2913,16 @@ diff -rupN a/arch/arm/mach-kirkwood/nsa325-setup.c b/arch/arm/mach-kirkwood/nsa3
 +       kirkwood_init();
 +
 +       kirkwood_mpp_conf(nsa325_mpp_config);
-+       /* turn OFF the watchdog */
-+       if (gpio_request(NSA325_GPIO_WATCHDOG, "Watchdog Disable") ||
-+            gpio_direction_output(NSA325_GPIO_WATCHDOG,0))
-+                pr_err("nsa325: failed to disable Watchdog via GPIO\n");
-+       gpio_free(NSA325_GPIO_WATCHDOG);
++
++       /* setup the phy fixup */
++       phy_register_fixup_for_uid(MARVELL_PHY_ID_88E1318S,MARVELL_PHY_ID_MASK,nsa325_phy_fixup);
++       kirkwood_ge00_init(&nsa325_ge00_data);
 +
 +       kirkwood_uart0_init();
 +       kirkwood_nand_init(ARRAY_AND_SIZE(nsa325_nand_parts), 40);
-+       kirkwood_ge00_init(&nsa325_ge00_data);
++
++       /* turn off the watchdog */
++       gpio_set_value(NSA325_GPIO_WATCHDOG, 1);
 +
 +       /* turn on the second drive bay */
 +       if (gpio_request(NSA325_GPIO_HDD2_POWER, "HDD2 Power Enable") ||
