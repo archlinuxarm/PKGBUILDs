@@ -1,9 +1,9 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
 pkgname=lio-utils
 pkgver=4.1
-pkgrel=9
+pkgrel=10
 epoch=
-pkgdesc="a simple low-level configuration tool set for LIO (Target and iSCSI)"
+pkgdesc="deprecated low-level configuration tool set for LIO (Target and iSCSI)"
 arch=('i686' 'x86_64')
 url="http://linux-iscsi.org/wiki/Lio-utils"
 license=('GPL2')

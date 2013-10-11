@@ -1,7 +1,7 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
 pkgname=targetcli
 pkgver=2.1
-pkgrel=1
+pkgrel=2
 epoch=
 pkgdesc="The targetcli administration shell."
 arch=('any')
@@ -19,7 +19,7 @@ md5sums=()
 
 build() {
   if [ ! -e "$pkgname-$pkgver.tgz" ]; then
-    curl -fLC - "http://www.risingtidesystems.com/git/?p=$pkgname.git;a=snapshot;h=95cdcb7dd669d840d14bd099d68fce4dcdc9cc64;sf=tgz" -o "$pkgname-$pkgver.tgz"
+    curl -fLC - "http://www.risingtidesystems.com/git/?p=$pkgname.git;a=snapshot;h=a7c313ce9810a0b178e0e8cfaf5ffc22d8868e30;sf=tgz" -o "$pkgname-$pkgver.tgz"
   fi
   bsdtar -xf "$srcdir/$pkgname-$pkgver.tgz"
   cd "$srcdir/$pkgname"

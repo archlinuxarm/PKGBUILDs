@@ -1,7 +1,7 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
 pkgname=python2-rtslib
 pkgver=2.2
-pkgrel=1
+pkgrel=2
 epoch=
 pkgdesc="RisingTide Systems generic SCSI target API in python"
 arch=('any')
@@ -18,7 +18,7 @@ _pkgname=rtslib
 
 build() {
   if [ ! -e "$_pkgname-$pkgver.tgz" ]; then
-    curl -fLC - "http://www.risingtidesystems.com/git/?p=$_pkgname.git;a=snapshot;h=c4ba14ff21f68e56d6a3a227a0220d1a6b6df958;sf=tgz" -o "$_pkgname-$pkgver.tgz"
+    curl -fLC - "http://www.risingtidesystems.com/git/?p=$_pkgname.git;a=snapshot;h=909a40c908247135f30b27eb5d69b292aeedd0b4;sf=tgz" -o "$_pkgname-$pkgver.tgz"
   fi
   bsdtar -xf "$srcdir/$_pkgname-$pkgver.tgz"
 
