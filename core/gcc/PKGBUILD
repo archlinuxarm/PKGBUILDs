@@ -15,21 +15,22 @@
 noautobuild=1
 
 pkgname=('gcc' 'gcc-libs' 'gcc-fortran' 'gcc-objc' 'gcc-go')
-pkgver=4.8.1
-pkgrel=1
-#_snapshot=4.8-20130502
+pkgver=4.8.2
+pkgrel=3
+#_snapshot=4.8-20130725
 pkgdesc="The GNU Compiler Collection"
 arch=('i686' 'x86_64')
 license=('GPL' 'LGPL' 'FDL' 'custom')
 url="http://gcc.gnu.org"
 makedepends=('binutils>=2.23' 'libmpc' 'cloog' 'doxygen')
 checkdepends=('dejagnu' 'inetutils')
-options=('!libtool' '!emptydirs' '!distcc')
+options=('!emptydirs' '!distcc')
 source=(ftp://gcc.gnu.org/pub/gcc/releases/gcc-${pkgver}/gcc-${pkgver}.tar.bz2
         #ftp://gcc.gnu.org/pub/gcc/snapshots/${_snapshot}/gcc-${_snapshot}.tar.bz2
-        armhf-triplet-trunk.diff)
-md5sums=('3b2386c114cd74185aa3754b58a79304'
-         'bd7330bd41845929f1e0efb3b7d0a060')
+        gcc-4.8-filename-output.patch)
+md5sums=('a3d7d63b9cb6b6ea049469a0c4a43c9d'
+         'bd7330bd41845929f1e0efb3b7d0a060'
+         '40cb437805e2f7a006aa0d0c3098ab0f')
 
 if [ -n "${_snapshot}" ]; then
   _basedir=gcc-${_snapshot}
@@ -48,6 +49,15 @@ prepare() {
   # hack! - some configure tests for header files using "$CPP $CPPFLAGS"
   sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" {libiberty,gcc}/configure
 
+  # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=57653
+  patch -p0 -i ${srcdir}/gcc-4.8-filename-output.patch
+
+  # ALARM: Specify build host types, triplet patch
+  [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=armv5tel-unknown-linux-gnueabi --build=armv5tel-unknown-linux-gnueabi"
+  [[ $CARCH == "armv6h" ]] && CONFIGFLAG="--host=armv6l-unknown-linux-gnueabihf --build=armv6l-unknown-linux-gnueabihf --with-arch=armv6 --with-float=hard --with-fpu=vfp"
+  [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf --with-arch=armv7-a --with-float=hard --with-fpu=vfpv3-d16"
+  [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i "${srcdir}/armhf-triplet-trunk.diff"
+
   mkdir ${srcdir}/gcc-build
 }
 
@@ -58,12 +68,6 @@ build() {
   # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48565
   CFLAGS=${CFLAGS/-pipe/}
   CXXFLAGS=${CXXFLAGS/-pipe/}
-
-  # ALARM: Specify build host types, triplet patch
-  [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=armv5tel-unknown-linux-gnueabi --build=armv5tel-unknown-linux-gnueabi"
-  [[ $CARCH == "armv6h" ]] && CONFIGFLAG="--host=armv6l-unknown-linux-gnueabihf --build=armv6l-unknown-linux-gnueabihf --with-arch=armv6 --with-float=hard --with-fpu=vfp"
-  [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf --with-arch=armv7-a --with-float=hard --with-fpu=vfpv3-d16"
-  [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i "${srcdir}/armhf-triplet-trunk.diff"
 
   ${srcdir}/${_basedir}/configure --prefix=/usr \
       --libdir=/usr/lib --libexecdir=/usr/lib \
@@ -109,7 +113,7 @@ package_gcc-libs()
 
   cd ${srcdir}/gcc-build
   make -j1 -C $CHOST/libgcc DESTDIR=${pkgdir} install-shared
-  for lib in libmudflap libgomp libstdc++-v3/src libitm libsanitizer/asan; do
+  for lib in libmudflap libgomp libstdc++-v3/src libitm; do
     make -j1 -C $CHOST/$lib DESTDIR=${pkgdir} install-toolexeclibLTLIBRARIES
   done
   make -j1 -C $CHOST/libstdc++-v3/po DESTDIR=${pkgdir} install
@@ -135,6 +139,7 @@ package_gcc()
   pkgdesc="The GNU Compiler Collection - C and C++ frontends"
   depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.23' 'libmpc' 'cloog')
   groups=('base-devel')
+  options=('staticlibs')
   install=gcc.install
 
   cd ${srcdir}/gcc-build
@@ -156,6 +161,9 @@ package_gcc()
   rm -f $pkgdir/usr/share/info/{gccgo,gfortran,libgomp,libquadmath,libitm}.info
   rm -f $pkgdir/usr/share/locale/{de,fr}/LC_MESSAGES/libstdc++.mo
   rm -f $pkgdir/usr/share/man/man1/{gccgo,gfortran}.1
+
+  # remove static libraries - note libstdc++.a is needed for the binutils and glibc testsuite
+  rm $pkgdir/usr/lib/lib{asan,gomp,itm,mudflap{,th},quadmath}.a
 
   # many packages expect this symlink
   #install -dm755 ${pkgdir}/lib
@@ -204,6 +212,7 @@ package_gcc-fortran()
 {
   pkgdesc="Fortran front-end for GCC"
   depends=("gcc=$pkgver-$pkgrel")
+  options=('staticlibs' '!emptydirs')
   install=gcc-fortran.install
 
   cd ${srcdir}/gcc-build
@@ -214,12 +223,13 @@ package_gcc-fortran()
   
   ln -s gfortran ${pkgdir}/usr/bin/f95
   
-  # remove files included in gcc-libs or gcc
+  # remove files included in gcc-libs or gcc and unnneeded static lib
   rm -f ${pkgdir}/usr/lib/lib{gfortran,gcc_s}.so*
   rm -f ${pkgdir}/usr/lib/libquadmath.{a,so*}
   rm -f ${pkgdir}/usr/lib/gcc/$CHOST/${pkgver}/{*.o,libgc*}
   rm -f ${pkgdir}/usr/share/info/libquadmath.info
   rm -rf ${pkgdir}/usr/lib/gcc/$CHOST/${pkgver}/include
+  rm ${pkgdir}/usr/lib/libgfortran.a
 
   # Install Runtime Library Exception
   install -Dm644 ${srcdir}/${_basedir}/COPYING.RUNTIME \
@@ -250,12 +260,14 @@ package_gcc-go()
 {
   pkgdesc="Go front-end for GCC"
   depends=("gcc=$pkgver-$pkgrel")
+  options=('staticlibs'  '!emptydirs')
   install=gcc-go.install
 
   cd ${srcdir}/gcc-build
   make -j1 DESTDIR=$pkgdir install-target-libgo
   make -j1 -C gcc DESTDIR=$pkgdir go.install-{common,man,info}
   install -Dm755 gcc/go1 $pkgdir/usr/lib/gcc/$CHOST/$pkgver/go1
+  rm $pkgdir/usr/lib/lib{atomic,go}.a
 
   # Install Runtime Library Exception
   install -Dm644 ${srcdir}/${_basedir}/COPYING.RUNTIME \

@@ -11,24 +11,26 @@ pkgbase=pulseaudio
 pkgname=(pulseaudio libpulse)
 pkgdesc="A featureful, general-purpose sound server"
 pkgver=4.0
-pkgrel=2
+pkgrel=5
 arch=(i686 x86_64)
 url="http://www.freedesktop.org/wiki/Software/PulseAudio"
-license=(GPL LGPL)
+license=(LGPL AGPL3)
 makedepends=(libasyncns libcap attr libxtst libsm libsamplerate libtool rtkit
-             speex tdb systemd dbus avahi bluez4 bluez-libs gconf intltool jack sbc
+             speex tdb systemd dbus avahi bluez bluez-libs gconf intltool jack sbc
              lirc-utils openssl fftw orc json-c gtk3 webrtc-audio-processing
-             check)
+             check git)
 options=(!emptydirs !libtool)
-source=(http://freedesktop.org/software/$pkgbase/releases/$pkgbase-$pkgver.tar.xz
+#source=(http://freedesktop.org/software/$pkgbase/releases/$pkgbase-$pkgver.tar.xz
+source=($pkgbase-$pkgver::git://anongit.freedesktop.org/pulseaudio/pulseaudio#commit=09e88de
         pulseaudio.xinit)
-sha256sums=('35ceb36bb1822fe54f0b5e4863b4f486769fdfb8ff2111f01fd8778928f9cdae'
+sha256sums=('SKIP'
             'a0db6cdc74fbf0ca10e2343c08e1e228f109221c6c0ff91b0bfade5c4bdf03cf')
+
 
 build() {
   cd $pkgbase-$pkgver
 
-  ./configure --prefix=/usr \
+  ./autogen.sh --prefix=/usr \
     --sysconfdir=/etc \
     --libexecdir=/usr/lib \
     --localstatedir=/var \
@@ -49,13 +51,13 @@ package_pulseaudio() {
   depends=("libpulse=$pkgver-$pkgrel" rtkit libltdl speex tdb systemd fftw orc
            libsamplerate webrtc-audio-processing sbc)
   optdepends=('avahi: zeroconf support'
-              'bluez4: bluetooth support'
+              'bluez: bluetooth support'
               'bluez-libs: bluetooth support'
               'gconf: configuration through gconf (paprefs)'
               'jack: jack support'
               'lirc-utils: infra-red support'
               'openssl: RAOP support'
-              'python2-pyqt: Equalizer GUI (qpaeq)')
+              'python-pyqt: Equalizer GUI (qpaeq)')
   backup=(etc/pulse/{daemon.conf,default.pa,system.pa})
   install=pulseaudio.install
 
@@ -67,10 +69,9 @@ package_pulseaudio() {
   sed -e '/autospawn/iautospawn=no' \
       -i "$pkgdir/etc/pulse/client.conf"
 
-  # Speed up pulseaudio shutdown
-  # Lower resample quality, saves CPU
+  # Speed up pulseaudio shutdown so that it exits immediately with
+  # the last user session (module-systemd-login keeps it alive)
   sed -e '/exit-idle-time/iexit-idle-time=0' \
-      -e '/resample-method/iresample-method=speex-float-0' \
       -i "$pkgdir/etc/pulse/daemon.conf"
 
   # Disable cork-request module, can result in e.g. media players unpausing
@@ -78,19 +79,9 @@ package_pulseaudio() {
   sed -e 's|/usr/bin/pactl load-module module-x11-cork-request|#&|' \
       -i "$pkgdir/usr/bin/start-pulseaudio-x11"
 
-  # Make ConsoleKit optional
-  sed -e $'/load-module module-console-kit/{i.nofail\n;a.fail\n;}' \
-      -i "$pkgdir/etc/pulse/default.pa"
-
-  # Python fix
-  sed -i '1s:python$:&2:' "$pkgdir/usr/bin/qpaeq"
-
   install -Dm755 "$srcdir/pulseaudio.xinit" "$pkgdir/etc/X11/xinit/xinitrc.d/pulseaudio"
 
   rm "$pkgdir/etc/dbus-1/system.d/pulseaudio-system.conf"
-
-  # cap is handled in .install
-  chmod 755 "$pkgdir/usr/lib/pulse/proximity-helper"
 
   install -Dm644 shell-completion/pulseaudio-zsh-completion.zsh \
     "$pkgdir/usr/share/zsh/site-functions/_pulseaudio"
@@ -129,6 +120,7 @@ package_libpulse() {
   optdepends=('alsa-plugins: ALSA support'
               'avahi: zeroconf support')
   backup=(etc/pulse/client.conf)
+  license=(LGPL)
 
   mv "$srcdir"/libpulse/* "$pkgdir"
 }

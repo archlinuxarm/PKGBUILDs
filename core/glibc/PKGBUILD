@@ -4,6 +4,8 @@
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
 # NOTE: valgrind requires rebuilt with each major glibc version
 
+# NOTE: adjust version in install script when locale files are updated
+
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 # - Patch for ld-linux-armhf.so.3 transition and symlink ld-linux.so.3
 # - Patch for hard-float ld.so.cache transition
@@ -13,8 +15,8 @@
 noautobuild=1
 
 pkgname=glibc
-pkgver=2.17
-pkgrel=6
+pkgver=2.18
+pkgrel=8
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
 url="http://www.gnu.org/software/libc"
@@ -25,40 +27,58 @@ makedepends=('gcc>=4.7')
 backup=(etc/gai.conf
         etc/locale.gen
         etc/nscd.conf)
-options=('!strip' '!distcc')
+options=('!strip' 'staticlibs' '!distcc')
 install=glibc.install
 source=(http://ftp.gnu.org/gnu/libc/${pkgname}-${pkgver}.tar.xz{,.sig}
-        glibc-2.17-sync-with-linux37.patch
-        glibc-2.17-getaddrinfo-stack-overflow.patch
-        glibc-2.17-regexp-matcher-overrun.patch
+        glibc-2.18-make-4.patch
+        glibc-2.18-readdir_r-CVE-2013-4237.patch
+        glibc-2.18-malloc-corrupt-CVE-2013-4332.patch
+        glibc-2.18-strcoll-CVE-2012-4412+4424.patch
+        glibc-2.18-strstr-hackfix.patch
+        glibc-2.18-ptr-mangle-CVE-2013-4788.patch
         local-soname-hack.diff
         fix-hf-ld.so.cache.patch
         nscd.service
         nscd.tmpfiles
         locale.gen.txt
         locale-gen)
-md5sums=('87bf675c8ee523ebda4803e8e1cec638'
+md5sums=('88fbbceafee809e82efd52efa1e3c58f'
          'SKIP'
-         'fb99380d94598cc76d793deebf630022'
-         '56d5f2c09503a348281a20ae404b7de3'
-         '200acc05961b084ee00dde919e64f82d'
+         'e1883c2d1b01ff73650db5f5bb5a5a52'
+         '154da6bf5a5248f42a7bf5bf08e01a47'
+         'b79561ab9dce900e9bbeaf0d49927c2b'
+         'c7264b99d0f7e51922a4d3126182c40a'
+         '9749ba386b08a8fe53e7ecede9bf2dfb'
+         '4441f6dfe7d75ced1fa75e54dd21d36e'
          '589d79041aa767a5179eaa4e2737dd3f'
          'ad8a9af15ab7eeaa23dc7ee85024af9f'
-         'bccbe5619e75cf1d97312ec3681c605c'
+         'd5fab2cd3abea65aa5ae696ea4a47d6b'
+         'da662ca76e7c8d7efbc7986ab7acea2d'
          '07ac979b6ab5eeb778d55f041529d623'
-         '476e9113489f93b348b21e144b6a8fcf')
+         'b5fd017036fb91199ee76f670da8c15b')
 
-build() {
+prepare() {
   cd ${srcdir}/${pkgname}-${pkgver}
 
-  # combination of upstream commits 318cd0b, b540704 and fc1abbe
-  patch -p1 -i ${srcdir}/glibc-2.17-sync-with-linux37.patch
+  # compatibility with make-4.0 (submitted upstream)
+  patch -p1 -i $srcdir/glibc-2.18-make-4.patch
 
-  # CVE-2013-1914 - upstream commit 1cef1b19
-  patch -p1 -i ${srcdir}/glibc-2.17-getaddrinfo-stack-overflow.patch
+  # upstream commit 91ce4085
+  patch -p1 -i $srcdir/glibc-2.18-readdir_r-CVE-2013-4237.patch
 
-  # CVE-2013-0242 - upstream commit a445af0b
-  patch -p1 -i ${srcdir}/glibc-2.17-regexp-matcher-overrun.patch
+  # upstream commits 1159a193, 55e17aad and b73ed247
+  patch -p1 -i $srcdir/glibc-2.18-malloc-corrupt-CVE-2013-4332.patch
+
+  # upstream commits 1326ba1a, 141f3a77 and 303e567a
+  # https://sourceware.org/ml/libc-alpha/2013-08/msg00394.html
+  # https://sourceware.org/ml/libc-alpha/2013-08/msg00462.html
+  patch -p1 -i $srcdir/glibc-2.18-strcoll-CVE-2012-4412+4424.patch
+
+  # upstream commits c61b4d41 and 0b1f8e35
+  patch -p1 -i $srcdir/glibc-2.18-ptr-mangle-CVE-2013-4788.patch
+  
+  # hack fix for strstr issues on x86
+  patch -p1 -i $srcdir/glibc-2.18-strstr-hackfix.patch
 
   # ALARM: patch for hard-float ld-linux soname
   if [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]]; then
@@ -66,15 +86,11 @@ build() {
     patch -p1 -i ${srcdir}/fix-hf-ld.so.cache.patch
   fi
 
-  cd ${srcdir}
-  mkdir glibc-build
-  cd glibc-build
+  mkdir ${srcdir}/glibc-build
+}
 
-  if [[ ${CARCH} = "i686" ]]; then
-    # Hack to fix NPTL issues with Xen, only required on 32bit platforms
-    # TODO: make separate glibc-xen package for i686
-    export CFLAGS="${CFLAGS} -mno-tls-direct-seg-refs"
-  fi
+build() {
+  cd ${srcdir}/glibc-build
 
   # ALARM: Specify build host types
   [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=armv5tel-unknown-linux-gnueabi --build=armv5tel-unknown-linux-gnueabi"
@@ -98,6 +114,7 @@ build() {
       --enable-kernel=2.6.27 \
       --enable-bind-now --disable-profile \
       --enable-stackguard-randomization \
+      --enable-lock-elision \
       --disable-multi-arch $CONFIGFLAG
 
   # build libraries with hardening disabled
@@ -115,7 +132,7 @@ build() {
 }
 
 check() {
-  # bug to file - the linker commands need to be reordered
+  # the linker commands need to be reordered - fixed in 2.19
   LDFLAGS=${LDFLAGS/--as-needed,/}
 
   cd ${srcdir}/glibc-build
@@ -147,6 +164,11 @@ package() {
   sed -e '1,3d' -e 's|/| |g' -e 's|\\| |g' -e 's|^|#|g' \
     ${srcdir}/glibc-${pkgver}/localedata/SUPPORTED >> ${pkgdir}/etc/locale.gen
 
+  # remove the static libraries that have a shared counterpart
+  cd $pkgdir/usr/lib
+  # note: keep libc, libdl, libm, libpthread for binutils testsuite
+  rm lib{anl,BrokenLocale,crypt,nsl,resolv,rt,util}.a
+
   # ALARM: symlink ld-linux.so.3 for hard-float
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && ln -s /lib/ld-${pkgver}.so ${pkgdir}/usr/lib/ld-linux.so.3
 
@@ -170,14 +192,5 @@ package() {
                       usr/lib/libnss_{compat,db,dns,files,hesiod,nis,nisplus}-*.so \
                       usr/lib/{libdl,libm,libnsl,libresolv,librt,libutil}-*.so \
                       usr/lib/{libmemusage,libpcprofile,libSegFault}.so \
-                      usr/lib/{pt_chown,{audit,gconv}/*.so}
+                      usr/lib/{audit,gconv}/*.so
 }
-md5sums=('87bf675c8ee523ebda4803e8e1cec638'
-         '6db4d1661cf34282755dc90330465f6d'
-         'fb99380d94598cc76d793deebf630022'
-         'fa192d063312907797eb48f59da99588'
-         'dee46cbd2e544a61c263a0af39cc934c'
-         'ad8a9af15ab7eeaa23dc7ee85024af9f'
-         'bccbe5619e75cf1d97312ec3681c605c'
-         '07ac979b6ab5eeb778d55f041529d623'
-         '476e9113489f93b348b21e144b6a8fcf')

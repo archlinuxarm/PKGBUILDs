@@ -11,8 +11,8 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - removed NaCl, not for ARM
 #  - adjusted gyp flags for v7h
-#  - use system ffmpeg, added ffmpeg to depends
 #  - patch to fix webrtc code for non-android ARM
+#  - patch (hack) to fix skia
 #
 #        moonman <moonman [dot] ca [at] gmail [dot] com>
 #  -added armv6 support
@@ -21,7 +21,7 @@ buildarch=20
 highmem=1
 
 pkgname=chromium
-pkgver=28.0.1500.71
+pkgver=30.0.1599.114
 pkgrel=1
 pkgdesc="The open-source project behind Google Chrome, an attempt at creating a safer, faster, and more stable browser"
 arch=('armv6h' 'armv7h')
@@ -30,7 +30,7 @@ license=('BSD')
 depends=('gtk2' 'nss' 'alsa-lib' 'xdg-utils' 'bzip2' 'libevent' 'libxss' 'icu'
          'libgcrypt' 'ttf-font' 'udev' 'dbus' 'flac' 'opus' 'libwebp' 'snappy'
          'speech-dispatcher' 'pciutils' 'libpulse' 'harfbuzz' 'harfbuzz-icu'
-         'desktop-file-utils' 'hicolor-icon-theme' 'ffmpeg')
+         'desktop-file-utils' 'hicolor-icon-theme')
 makedepends=('python2' 'perl' 'gperf' 'yasm' 'mesa' 'libgnome-keyring'
              'elfutils' 'subversion')
 optdepends=('kdebase-kdialog: needed for file dialogs in KDE')
@@ -38,23 +38,23 @@ provides=('chromium-browser')
 conflicts=('chromium-browser')
 backup=('etc/chromium/default')
 install=chromium.install
-#source=(http://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
-source=(https://dev.archlinux.org/~foutrelis/sources/$pkgname/$pkgname-$pkgver.tar.xz{,.sig}
+source=(https://gsdview.appspot.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
+        #https://dev.archlinux.org/~foutrelis/sources/$pkgname/$pkgname-$pkgver.tar.xz{,.sig}
         chromium.desktop
         chromium.default
         chromium.sh
-        chromium-28.0.1500.71-avoid-std-string-copying-in-GetFileNameInWhitelist.patch
-        chromium-system-harfbuzz-r0.patch
-        arm-webrtc-fix.patch)
-#sha256sums=('7b3cbfbb9e5b9d21ffab23d39173611ddb0ba49488795b6db46a62be354518b4'
-sha256sums=('a8a821fb7cf1dc2425ecba6d48be0f771d993179411ba3bcdc71d179ea7ec671'
-            'SKIP'
+        chromium-system-icu-r0.patch
+        arm-webrtc-fix.patch
+        skia.patch
+        v6-ffmpeg.patch)
+sha256sums=('82ff2b54cb6fa9f314098e9905e79d578d97940bab05111a3c0c782217c2b760'
             '09bfac44104f4ccda4c228053f689c947b3e97da9a4ab6fa34ce061ee83d0322'
             '478340d5760a9bd6c549e19b1b5d1c5b4933ebf5f8cfb2b3e2d70d07443fe232'
             '4999fded897af692f4974f0a3e3bbb215193519918a1fa9b31ed51e74a2dccb9'
-            '7c2e448c30677999f524f9513c2f998f3cb15bc6084692cad9c3f310aa813530'
-            '2bc4cf17adac9864f4e832e57247984f28fce171d3699c0fc2c3596d1ab20386'
-            '222ec0db5d40b02e4ebbde8a1f1c5de3f0579e51836be87be138c44f8487d0ce')
+            '9bf164094ff33565f79807ab17cbd1d3f75655383fdaa01bb1a702263174cf09'
+            '222ec0db5d40b02e4ebbde8a1f1c5de3f0579e51836be87be138c44f8487d0ce'
+            '77668a94924c6bce6c48ca78c5cb778c6728bb687b66334b7164d7301a267939'
+            '3fbabcbd512494b529e0a0e17560735887acf2291a74653750f9b29f5d45774d')
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -71,13 +71,14 @@ prepare() {
   # Fix WebRTC for ARM
   patch -Np2 -i "$srcdir/arm-webrtc-fix.patch"
 
-  # Fix deadlock related to the GPU sandbox when tcmalloc isn't used
-  # https://code.google.com/p/chromium/issues/detail?id=255063
-  # https://bugs.gentoo.org/show_bug.cgi?id=471198#c23
-  patch -Np1 -i "$srcdir/chromium-28.0.1500.71-avoid-std-string-copying-in-GetFileNameInWhitelist.patch"
+  # Fix ffmpeg build for armv6
+  [ "$CARCH" == "armv6h" ] && patch -Np1 -i "$srcdir/v6-ffmpeg.patch"
 
-  # Fix build with system harfbuzz (patch from Gentoo)
-  patch -Np1 -i "$srcdir/chromium-system-harfbuzz-r0.patch"
+  # Temp fix for skia
+  patch -Np0 -i "$srcdir/skia.patch"
+
+  # Fix build with system ICU (patch from Gentoo)
+  patch -Np0 -i "$srcdir/chromium-system-icu-r0.patch"
 
   # Use Python 2
   find . -type f -exec sed -i -r \
@@ -126,7 +127,6 @@ fi
     -Dlinux_link_libpci=1
     -Dlinux_link_libspeechd=1
     -Dlinux_link_pulseaudio=1
-    -Dlinux_sandbox_path=/usr/lib/chromium/chromium-sandbox
     -Dlinux_strip_binary=1
     -Dlinux_use_gold_binary=0
     -Dlinux_use_gold_flags=0
@@ -136,7 +136,7 @@ fi
     -Dproprietary_codecs=1
     -Duse_system_bzip2=1
     -Duse_system_flac=1
-    -Duse_system_ffmpeg=1
+    -Duse_system_ffmpeg=0
     -Duse_system_harfbuzz=1
     -Duse_system_icu=1
     -Duse_system_libevent=1
@@ -152,11 +152,11 @@ fi
     -Duse_system_zlib=0
     -Duse_gconf=0
     -Ddisable_glibc=1
-    -Ddisable_newlib_untar=1
     -Ddisable_sse2=1
     -Dtarget_arch=arm
     -Darm_neon=0
     -Dlinux_use_tcmalloc=0
+    -Dlogging_like_official_build=1
     -Ddisable_nacl=1
     -Dv8_use_arm_eabi_hardfloat=true
     -Darm_float_abi=hard
@@ -164,7 +164,7 @@ fi
     ${arch_specific_flags})
 
   build/linux/unbundle/replace_gyp_files.py "${_chromium_conf[@]}"
-  build/gyp_chromium --depth=. "${_chromium_conf[@]}"
+  build/gyp_chromium -f make --depth=. "${_chromium_conf[@]}"
 
   make chrome chrome_sandbox BUILDTYPE=Release
 }
@@ -175,9 +175,9 @@ package() {
   install -D out/Release/chrome "$pkgdir/usr/lib/chromium/chromium"
 
   install -Dm4755 -o root -g root out/Release/chrome_sandbox \
-    "$pkgdir/usr/lib/chromium/chromium-sandbox"
+    "$pkgdir/usr/lib/chromium/chrome-sandbox"
 
-  cp out/Release/*.pak \
+  cp out/Release/{*.pak,libffmpegsumo.so} \
     "$pkgdir/usr/lib/chromium/"
 
   # Allow users to override command-line options

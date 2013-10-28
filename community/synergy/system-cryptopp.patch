@@ -1,0 +1,114 @@
+diff -urN a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt	2013-10-08 04:19:02.000000000 -0600
++++ b/CMakeLists.txt	2013-10-18 17:46:11.290667774 -0600
+@@ -75,6 +75,7 @@
+ 	include(CheckIncludeFileCXX)
+ 	include(CheckSymbolExists)
+ 	include(CheckCSourceCompiles)
++	include(FindPkgConfig)
+ 
+ 	check_include_file_cxx(istream HAVE_ISTREAM)
+ 	check_include_file_cxx(ostream HAVE_OSTREAM)
+@@ -204,6 +205,8 @@
+ 		check_library_exists("Xi" XISelectEvents "" HAVE_Xi)
+ 		check_library_exists("Xrandr" XRRQueryExtension "" HAVE_Xrandr)
+ 
++                pkg_search_module(CRYPTOPP libcrypto++)
++
+ 		if (HAVE_ICE)
+ 
+ 			# Assume we have SM if we have ICE.
+@@ -241,6 +244,10 @@
+ 			list(APPEND libs Xrandr)
+ 		endif()
+ 
++                if (HAVE_CRYPTOPP)
++                        list(APPEND libs CRYPTOPP_LIBRARIES)
++                endif()
++
+ 	endif()
+ 
+         IF(HAVE_Xi)
+diff -urN a/src/lib/io/CCryptoMode.h b/src/lib/io/CCryptoMode.h
+--- a/src/lib/io/CCryptoMode.h	2013-05-30 07:48:08.000000000 -0600
++++ b/src/lib/io/CCryptoMode.h	2013-10-18 17:48:48.300057303 -0600
+@@ -17,9 +17,9 @@
+ 
+ #pragma once
+ 
+-#include <cryptopp562/gcm.h>
+-#include <cryptopp562/modes.h>
+-#include <cryptopp562/aes.h>
++#include <cryptopp/gcm.h>
++#include <cryptopp/modes.h>
++#include <cryptopp/aes.h>
+ #include "ECryptoMode.h"
+ #include "CString.h"
+ 
+diff -urN a/src/lib/io/CCryptoStream.h b/src/lib/io/CCryptoStream.h
+--- a/src/lib/io/CCryptoStream.h	2013-06-29 08:17:49.000000000 -0600
++++ b/src/lib/io/CCryptoStream.h	2013-10-18 17:49:02.250003064 -0600
+@@ -20,8 +20,8 @@
+ #include "BasicTypes.h"
+ #include "CStreamFilter.h"
+ #include "CCryptoMode.h"
+-#include <cryptopp562/osrng.h>
+-#include <cryptopp562/sha.h>
++#include <cryptopp/osrng.h>
++#include <cryptopp/sha.h>
+ 
+ class CCryptoOptions;
+ 
+diff -urN a/tools/build/toolchain.py b/tools/build/toolchain.py
+--- a/tools/build/toolchain.py	2013-08-02 07:21:06.000000000 -0600
++++ b/tools/build/toolchain.py	2013-10-18 17:49:32.674884769 -0600
+@@ -67,7 +67,7 @@
+ 	macSdk = None
+ 	
+ 	# cryptoPP dir with version number
+-	cryptoPPDir = 'cryptopp562'
++	cryptoPPDir = 'cryptopp'
+ 
+ 	win32_generators = {
+ 		1 : Generator('Visual Studio 10'),
+diff -urN a/tools/CMakeLists.txt b/tools/CMakeLists.txt
+--- a/tools/CMakeLists.txt	2013-06-04 12:22:58.000000000 -0600
++++ b/tools/CMakeLists.txt	2013-10-18 17:48:12.140197897 -0600
+@@ -13,7 +13,7 @@
+ # You should have received a copy of the GNU General Public License
+ # along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 
+-set(cryptopp_dir cryptopp562)
++set(cryptopp_dir cryptopp)
+ 
+ # only compile the crypto++ files we need.
+ set(cryptopp_src
+@@ -72,16 +72,20 @@
+ endif()
+ 
+ if (UNIX)
+-	add_definitions(-DCRYPTOPP_DISABLE_ASM)
+-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -pipe")
++        if (NOT CRYPTOPP_FOUND)
++                add_definitions(-DCRYPTOPP_DISABLE_ASM)
++                set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -pipe")
+ 	
+-	if (APPLE)
+-		if (DARWIN_VERSION GREATER 10)
+-			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-tautological-compare")
++                if (APPLE)
++                        if (DARWIN_VERSION GREATER 10)
++                                set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-tautological-compare")
++                        endif()
++                else()
++                        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+ 		endif()
+-	else()
+-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
+ 	endif()
+ endif()
+ 
+-add_library(cryptopp STATIC ${cryptopp_src})
++if (NOT CRYPTOPP_FOUND)
++        add_library(cryptopp STATIC ${cpp_src})
++endif()

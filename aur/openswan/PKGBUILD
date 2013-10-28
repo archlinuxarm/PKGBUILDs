@@ -1,0 +1,46 @@
+# Contributor: xjpvictor Huang <ke [AT] xjpvictor [DOT] info>
+pkgname=openswan
+pkgver=2.6.39
+pkgrel=2
+pkgdesc="Open Source implementation of IPsec for the Linux operating system"
+url="http://www.openswan.org"
+license=('GPL' 'custom')
+arch=('i686' 'x86_64')
+depends=('iproute2>=2.6.8' 'gmp' 'perl')
+optdepends=('python2')
+makedepends=('flex' 'bison')
+conflicts=('ipsec-tools')
+backup=(etc/ipsec.conf \
+        etc/ipsec.d/policies/{block,clear,clear-or-private,private,private-or-clear})
+source=(http://download.openswan.org/openswan/openswan-$pkgver.tar.gz
+        openswan.service)
+
+package() {
+  # Create /etc/rc.d for init script, and license directory
+  mkdir -p $pkgdir/{etc/rc.d,usr/share/licenses/openswan}
+
+  cd $srcdir/openswan-$pkgver
+
+  # Change install paths to Arch defaults
+  sed -i 's|/usr/local|/usr|;s|libexec/ipsec|lib/openswan|;s|)/sbin|)/bin|' Makefile.inc
+
+  make USE_XAUTH=true USE_OBJDIR=true programs || return 1
+  make DESTDIR=$pkgdir install
+
+  # Change permissions in /var
+  chmod 700 $pkgdir/var/run/pluto
+
+  # Copy License
+  cp LICENSE $pkgdir/usr/share/licenses/openswan
+
+  # Install init script
+  install -Dm644 ../openswan.service $pkgdir/usr/lib/systemd/system/openswan.service
+  mkdir $pkgdir/usr/lib/systemd/scripts/
+  mv $pkgdir/etc/rc.d/ipsec $pkgdir/usr/lib/systemd/scripts/ipsec
+  # fix manpages
+  mv $pkgdir/usr/man $pkgdir/usr/share/
+  # fix python2
+  sed -i '1s|python|python2|' $pkgdir/usr/lib/openswan/verify
+}
+md5sums=('199757597f9f776d85752bb0c713b5ed'
+         'd8b465c10838c72e31329d65011002b6')
