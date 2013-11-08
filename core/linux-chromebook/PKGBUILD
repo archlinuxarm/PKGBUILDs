@@ -4,28 +4,26 @@
 buildarch=4
 
 pkgbase=linux-chromebook
-pkgname=("${pkgbase}" "${pkgbase}-samsung" "${pkgbase}-hp")
+pkgname=('linux-chromebook' 'linux-headers-chromebook')
 pkgver=20131105
-_kernelname=${pkgbase#linux}
-_desc="ChromiumOS kernel with ArchLinux ARM tweaks"
+_kernelname=${pkgname#linux}
+pkgdesc="ChromiumOS kernel with ArchLinux ARM tweaks"
 _basever=3.4
 pkgrel=1
 arch=('armv7h')
-url="http://git.chromium.org/gitweb/?p=chromiumos/third_party/kernel.git;a=summary"
+url="https://chromium.googlesource.com/chromiumos/third_party/kernel/+/chromeos-3.4"
 license=('GPL2')
 makedepends=('uboot-mkimage' 'dtc' 'git')
 options=('!strip')
 source=("config"
-        'kernel-snow.its'
-        'kernel-spring.its')
-md5sums=('35c8f119a257c070c13b84b184b00125'
-         '1ee7e0f62516ba3af19022c25636011c'
-         'd3f18ac62c0f83a5060060d8fece3c3f')
+        'kernel.its')
+md5sums=('5e255ae340bad3a32d9f1d1559fe3995'
+         '56f8343875b928b6aa4e83921e5df25f')
 
-_gitroot='https://git.chromium.org/git/chromiumos/third_party/kernel.git'
+_gitroot='https://chromium.googlesource.com/chromiumos/third_party/kernel.git'
 _gitname='chromeos-3.4'
 _gitbranch='chromeos-3.4'
-_gitcommit='e9459bc8'
+_gitcommit='90b982e'
 
 prepare() {
   cd "${srcdir}/"
@@ -47,8 +45,7 @@ prepare() {
   cp "${srcdir}/config" .config
 
   # .its files for FIT Images
-  cp "${srcdir}/kernel-snow.its" arch/arm/boot/kernel-snow.its
-  cp "${srcdir}/kernel-spring.its" arch/arm/boot/kernel-spring.its
+  cp "${srcdir}/kernel.its" arch/arm/boot/kernel.its
 }
 
 build() {
@@ -79,38 +76,15 @@ build() {
 
   # build!
   make ${MAKEFLAGS} zImage modules dtbs
-}
-
-_package-samsung() {
-  pkgdesc="The Linux Kernel - ${_desc} - Samsung Chromebook (Snow)"
-  provides=('linux-chromebook-uImage')
-  conflicts=('linux-chromebook-hp')
-
-  mkdir -p "${pkgdir}/boot"
-  cd "${srcdir}/${_gitname}"
   cd arch/arm/boot
-
-  mkimage -f kernel-snow.its "${pkgdir}/boot/vmlinux.uimg"
+  mkimage -f kernel.its vmlinux.uimg
 }
 
-_package-hp() {
-  pkgdesc="The Linux Kernel - ${_desc} - HP Chromebook 11 (Spring)"
-  provides=('linux-chromebook-uImage')
-  conflicts=('linux-chromebook-samsung')
-
-  mkdir -p "${pkgdir}/boot"
-  cd "${srcdir}/${_gitname}"
-  cd arch/arm/boot
-
-  mkimage -f kernel-spring.its "${pkgdir}/boot/vmlinux.uimg"
-}
-
-_package() {
-  pkgdesc="The Linux Kernel modules - ${_desc}"
-  depends=('coreutils' 'linux-firmware' 'linux-chromebook-uImage')
+package_linux-chromebook() {
+  pkgdesc="The Linux Kernel and modules - ARM Chromebook kernel and modules"
+  depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' 'linux=${pkgver}' 'aufs_friendly')
-  conflicts=('linux-omap' 'linux-imx6' 'linux-armada370')
+  provides=('linux26' "linux=${pkgver}")
   install=${pkgname}.install
 
   cd "${srcdir}/${_gitname}"
@@ -124,6 +98,7 @@ _package() {
 
   mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/dtbs}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
+  cp arch/arm/boot/vmlinux.uimg "${pkgdir}/boot/vmlinux.uimg"
 
   # set correct depmod command for install
   sed \
@@ -151,17 +126,17 @@ _package() {
   mv "$pkgdir/lib" "$pkgdir/usr"
 }
 
-_package-headers() {
-  pkgdesc="Header files and scripts for building modules for Chromebook kernel - ${_desc}"
-  provides=('linux-headers=${pkgver}')
-  conflicts=('linux-headers-omap' 'linux-headers-imx6')
+package_linux-headers-chromebook() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - SAMSUNG ARM Chromebook"
+  provides=("linux-headers=${pkgver}")
+  conflicts=('linux-headers-omap' 'linux-headers-trimslice')
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/${_srcname}"
+  cd "${srcdir}/${_gitname}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -172,17 +147,17 @@ _package-headers() {
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include"
 
   for i in acpi asm-generic config crypto drm generated linux math-emu \
-    media net pcmcia scsi sound trace uapi video xen; do
+    media net pcmcia scsi sound trace video xen; do
     cp -a include/${i} "${pkgdir}/usr/src/linux-${_kernver}/include/"
   done
 
   # copy arch includes for external modules
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH
   cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-mvebu
-  cp -a arch/$KARCH/mach-mvebu/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-mvebu/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-orion
-  cp -a arch/$KARCH/plat-orion/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-orion/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-exynos
+  cp -a arch/$KARCH/mach-exynos/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-exynos/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-samsung
+  cp -a arch/$KARCH/plat-samsung/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-samsung/
 
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
@@ -203,22 +178,13 @@ _package-headers() {
   cp arch/${KARCH}/kernel/asm-offsets.s "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel/"
 
   # add headers for lirc package
-  # pci (Which the chromebook doesn't have
-#  for i in bt8xx cx88 saa7134; do
-#    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
-#    cp -a drivers/media/pci/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
-#  done
-  # usb
-  for i in cpia2 em28xx pwc sn9c102; do
-    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
-    cp -a drivers/media/usb/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
-  done
-  # i2c
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c"
-  cp drivers/media/i2c/*.h  "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
-  for i in cx25840; do
-    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
-    cp -a drivers/media/i2c/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video"
+
+  cp drivers/media/video/*.h  "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/"
+
+  for i in bt8xx cpia2 cx25840 cx88 em28xx et61x251 pwc saa7134 sn9c102; do
+    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/${i}"
+    cp -a drivers/media/video/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/${i}"
   done
 
   # add docbook makefile
@@ -240,29 +206,25 @@ _package-headers() {
   # add dvb headers for external modules
   # in reference to:
   # http://bugs.archlinux.org/task/9912
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-core"
-  cp drivers/media/dvb-core/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-core/"
-  # and...
-  # http://bugs.archlinux.org/task/11194
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
-  cp include/config/dvb/*.h "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-core"
+  cp drivers/media/dvb/dvb-core/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-core/"
 
-  # add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
+# add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
   # in reference to:
   # http://bugs.archlinux.org/task/13146
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
-  cp drivers/media/dvb-frontends/lgdt330x.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
-  cp drivers/media/i2c/msp3400-driver.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+  cp drivers/media/dvb/frontends/lgdt330x.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+  cp drivers/media/video/msp3400-driver.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
 
   # add dvb headers
   # in reference to:
   # http://bugs.archlinux.org/task/20402
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/dvb-usb"
-  cp drivers/media/usb/dvb-usb/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/dvb-usb/"
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends"
-  cp drivers/media/dvb-frontends/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/tuners"
-  cp drivers/media/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/tuners/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-usb"
+  cp drivers/media/dvb/dvb-usb/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-usb/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends"
+  cp drivers/media/dvb/frontends/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners"
+  cp drivers/media/common/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners/"
 
   # add xfs and shmem for aufs building
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs"
@@ -293,9 +255,3 @@ _package-headers() {
   # remove unneeded architectures
   rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
 }
-
-for _p in ${pkgname[@]}; do
-  eval "package_${_p}() {
-    _package${_p#${pkgbase}}
-  }"
-done
