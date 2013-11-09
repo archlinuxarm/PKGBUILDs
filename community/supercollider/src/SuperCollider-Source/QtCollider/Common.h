@@ -1,0 +1,129 @@
+/************************************************************************
+*
+* Copyright 2010 Jakob Leben (jakob.leben@gmail.com)
+*
+* This file is part of SuperCollider Qt GUI.
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 2 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*
+************************************************************************/
+
+#ifndef _SC_QT_COMMON_H
+#define _SC_QT_COMMON_H
+
+#include "debug.h"
+
+#include <QList>
+#include <QVariant>
+#include <QEvent>
+#include <QMutex>
+#include <QWaitCondition>
+#include <QVector>
+
+#include <SCBase.h>
+#include <PyrSymbol.h>
+#include <PyrObject.h>
+
+#include <pthread.h>
+
+extern pthread_mutex_t gLangMutex;
+
+struct VariantList {
+  QList<QVariant> data;
+};
+
+Q_DECLARE_METATYPE( VariantList );
+Q_DECLARE_METATYPE( PyrObject * );
+Q_DECLARE_METATYPE( QVector<double> );
+Q_DECLARE_METATYPE( QVector<int> );
+
+namespace QtCollider {
+
+  enum MetaType {
+    Type_VariantList,
+    Type_Count
+  };
+
+  enum EventType {
+    Event_SCRequest_Input = QEvent::User,
+    Event_SCRequest_Sched,
+    Event_SCRequest_Quit,
+    Event_SCRequest_Recompile,
+    Event_SCRequest_Stop,
+    Event_ScMethodCall,
+    Event_Refresh,
+    Event_Proxy_SetProperty,
+    Event_Proxy_Destroy,
+    Event_Proxy_BringFront,
+    Event_Proxy_SetFocus,
+    Event_Proxy_SetAlwaysOnTop,
+    Event_Proxy_Release
+  };
+
+  enum Synchronicity {
+    Synchronous,
+    Asynchronous
+  };
+
+  inline void lockLang()
+  {
+    qcDebugMsg(2,"locking lang!");
+    pthread_mutex_lock (&gLangMutex);
+    qcDebugMsg(2,"locked");
+  }
+
+  inline void unlockLang()
+  {
+    pthread_mutex_unlock(&gLangMutex);
+    qcDebugMsg(2,"unlocked");
+  }
+
+  void runLang (
+    PyrObjectHdr *receiver,
+    PyrSymbol *method,
+    const QList<QVariant> & args = QList<QVariant>(),
+    PyrSlot *result = 0 );
+
+  int wrongThreadError ();
+
+  QPalette systemPalette();
+
+#define QC_DO_SYMBOLS \
+  QC_DO_SYMBOL(interpretCmdLine); \
+  QC_DO_SYMBOL(interpretPrintCmdLine); \
+  QC_DO_SYMBOL(doFunction); \
+  QC_DO_SYMBOL(doDrawFunc); \
+  QC_DO_SYMBOL(prRelease); \
+  QC_DO_SYMBOL(Rect); \
+  QC_DO_SYMBOL(Point); \
+  QC_DO_SYMBOL(Color); \
+  QC_DO_SYMBOL(Size); \
+  QC_DO_SYMBOL(QPalette); \
+  QC_DO_SYMBOL(QFont); \
+  QC_DO_SYMBOL(QObject); \
+  QC_DO_SYMBOL(QLayout); \
+  QC_DO_SYMBOL(QTreeViewItem); \
+  QC_DO_SYMBOL(Gradient); \
+  QC_DO_SYMBOL(HiliteGradient);
+
+#define QC_DO_SYMBOL(SYM) extern PyrSymbol * sym_##SYM
+QC_DO_SYMBOLS
+#undef QC_DO_SYMBOL
+
+#define SC_SYM( SYM ) QtCollider::sym_##SYM
+#define SC_CLASS( SYM ) SC_SYM(SYM)->u.classobj
+
+}
+
+#endif //_SC_QT_COMMON_H

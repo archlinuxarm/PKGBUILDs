@@ -1,0 +1,102 @@
+class:: Psync
+summary:: synchronise and limit pattern duration
+related:: Classes/Pfindur
+categories:: Streams-Patterns-Events>Patterns>Repetition
+
+Description::
+
+Psync behaves somewhat like link::Classes/Pfindur:: -- it has a teletype::maxdur:: argument that limits the total duration of the event stream.
+
+The difference is in what happens if the event pattern stops on its own before teletype::maxdur:: is reached. If the total duration of the event pattern is shorter than the given maximum duration:
+
+list::
+## Pfindur simply ends: no further time manipulation.
+## Psync inserts a rest to round the total duration up to the nearest multiple of the given teletype::quant::.
+::
+
+table::
+## strong::Pbind's natural duration:: || code::Pfindur(16, Pbind(....)):: strong::behavior:: || code::Psync(Pbind(....), 4, 16):: strong::behavior::
+## 6 beats || Pfindur plays only 6 beats || Psync rounds up to 8 beats (adds a two-beat rest)
+## 18 beats || Pfindur cuts off after 16 beats || Psync cuts off after 16 beats
+::
+
+teletype::maxdur:: may be omitted. If the Pbind stops by itself, the rest will be inserted according to teletype::quant::, but the total duration will be unlimited.
+
+ClassMethods::
+
+method::new
+
+argument::pattern
+a pattern that returns events.
+
+argument::quant
+rounding factor for total duration (effectively a "bar length")
+
+argument::maxdur
+maximum duration
+
+argument::tolerance
+difference threshhold that a pattern must exceed max to be ended.
+
+Examples::
+
+code::
+(
+SynthDef(\help_sinegrain,
+	{ arg out=0, freq=440, sustain=0.05, pan;
+		var env;
+		env = EnvGen.kr(Env.perc(0.01, sustain, 0.3), doneAction:2);
+		Out.ar(out, Pan2.ar(SinOsc.ar(freq, 0, env), pan))
+	}).add;
+)
+
+(
+// a fixed duration pattern:
+
+f = Pbind(
+	\dur, 0.5,
+	\degree, Pn(4,1),
+	\instrument, \help_sinegrain
+);
+
+// this pattern has indetermined length:
+a = Prand([
+	Pbind(
+		\dur, Pseq([0.02, 0.002, 0.1, 0.1],2),
+		\degree, Pseq([9, 7, 5],inf),
+		\instrument, \help_sinegrain
+	),
+	Pbind(
+		\dur, Pseq([1, 0.35],2),
+		\degree, Pseq([0, [2b,5b]],inf),
+		\instrument, \help_sinegrain
+	),
+	Pbind(
+		\dur, Pseq([0.15, 0.25, 1.3],2),
+		\degree, Pseq([2b,4,5b],inf),
+		\instrument, \help_sinegrain
+	)
+]);
+)
+
+Pseq([f, f, a, a], inf).play; // play a sequence
+
+
+// Psync allows to limit the duration of a stream relative to a beat grid
+
+b = Psync(a, 1, 1); // create a sequence of exactly 1 beat elements
+Pseq([f, f, b, b], inf).play;
+
+
+b = Psync(a, 1, 2); // create a sequence of elements of either 1 or 2 beats length
+Pseq([f, f, b, b], inf).play;
+
+(
+b = Psync(a, 2);	// create a sequence of elements with a minimum of 2 beats,
+			// but with undetermined upper limit
+Ppar([
+	Pseq([f, f, b, b], inf), // sequence
+	Pbind(\instrument, \help_sinegrain, \freq, 1000, \sustain, 0.01, \dur, 2) // metronome
+]).play;
+)
+::
