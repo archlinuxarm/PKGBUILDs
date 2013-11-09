@@ -1,4 +1,0 @@
-+ Platform {
-    loadStartupFiles {^this}
-}
-

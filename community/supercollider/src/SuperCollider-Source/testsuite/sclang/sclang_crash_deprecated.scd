@@ -1,2 +1,0 @@
-b = { nil.deprecated};
-b.()
