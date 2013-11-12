@@ -7,43 +7,46 @@ pkgbase=linux-raspberrypi
 pkgname=('linux-raspberrypi' 'linux-headers-raspberrypi')
 # pkgname=linux-custom       # Build kernel with a different name
 _kernelname=${pkgname#linux}
-_basekernel=3.6
-pkgver=${_basekernel}.11
-pkgrel=18
+_basekernel=3.10
+pkgver=${_basekernel}.18
+pkgrel=1
+
 arch=('arm armv6h')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'git' 'python2')
+makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'git' 'python2' 'bc')
 options=('!strip')
 source=('config'
         'change-default-console-loglevel.patch'
         'usb-add-reset-resume-quirk-for-several-webcams.patch'
         'args-uncompressed.txt'
         'boot-uncompressed.txt'
-        'imagetool-uncompressed.py'
-        'https://raspy-juice.googlecode.com/svn/trunk/linux-rtc/0001-rtc-pcf8523.patch'
-        'https://raspy-juice.googlecode.com/svn/trunk/linux-rtc/0002-pcf8523-i2c-register-dt.patch')
+        'imagetool-uncompressed.py')
+
+md5sums=('7488286136ab030185807a8a889fea99'
+         '9d3c56a4b999c8bfbd4018089a62f662'
+         'd00814b57448895e65fbbc800e8a58ba'
+         '9335d1263fd426215db69841a380ea26'
+         'a00e424e2fbb8c5a5f77ba2c4871bed4'
+         '2f82dbe5752af65ff409d737caf11954')
 
 build() {
-  git clone --depth 1 git://github.com/raspberrypi/linux.git
+git clone --depth=1 https://github.com/raspberrypi/linux.git
 
   cd "${srcdir}/linux"
 
-  # add upstream patch
+msg "Patches:"
+  #msg2 "Add upstream patch"
   #patch -p1 -i "${srcdir}/patch-${pkgver}"
 
-  # Add the USB_QUIRK_RESET_RESUME for several webcams
+  msg2 "Add the USB_QUIRK_RESET_RESUME for several webcams"
   # FS#26528
-  patch -Np1 -i "${srcdir}/0001-rtc-pcf8523.patch"
-  patch -Np1 -i "${srcdir}/0002-pcf8523-i2c-register-dt.patch"
-
-  #nxp-pcf8523 RTC patch
   patch -Np1 -i "${srcdir}/usb-add-reset-resume-quirk-for-several-webcams.patch"
 
   # add latest fixes from stable queue, if needed
   # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
 
-  # set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)
+  msg2 "Set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)"
   # remove this when a Kconfig knob is made available by upstream
   # (relevant patch sent upstream: https://lkml.org/lkml/2011/7/26/227)
   patch -Np1 -i "${srcdir}/change-default-console-loglevel.patch"
@@ -55,6 +58,7 @@ build() {
   #sed -ri "s|^(CONFIG_LOCALVERSION=\").*|\1\-ARCH\"|" .config
   cat "${srcdir}/config" > ./.config
 
+msg "Prepare to build"
   # set extraversion to pkgrel
   sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
 
@@ -84,7 +88,7 @@ build() {
 
   #yes "" | make config
 
-  # build!
+ msg "Building!"
   make ${MAKEFLAGS} modules uImage
 }
 
@@ -158,7 +162,7 @@ package_linux-headers-raspberrypi() {
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include"
 
   for i in acpi asm-generic config crypto drm generated linux math-emu \
-    media net pcmcia scsi sound trace video xen; do
+    media net pcmcia scsi sound trace uapi video xen; do
     cp -a include/${i} "${pkgdir}/usr/src/linux-${_kernver}/include/"
   done
 
@@ -187,13 +191,26 @@ package_linux-headers-raspberrypi() {
   cp arch/${KARCH}/kernel/asm-offsets.s "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel/"
 
   # add headers for lirc package
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video"
+#  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/v4l2-core"
 
-  cp drivers/media/video/*.h  "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/"
+ # cp drivers/media/v4l2-core/*.h  "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/v4l2-core/"
 
-  for i in bt8xx cpia2 cx25840 cx88 em28xx pwc saa7134 sn9c102; do
-    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/${i}"
-    cp -a drivers/media/video/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/video/${i}"
+  # pci
+  for i in bt8xx cx88 saa7134; do
+mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
+    cp -a drivers/media/pci/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
+  done
+  # usb
+  for i in cpia2 em28xx pwc sn9c102; do
+mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
+    cp -a drivers/media/usb/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
+  done
+  # i2c
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c"
+  cp drivers/media/i2c/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
+  for i in cx25840; do
+mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
+    cp -a drivers/media/i2c/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
   done
 
   # add docbook makefile
@@ -215,8 +232,8 @@ package_linux-headers-raspberrypi() {
   # add dvb headers for external modules
   # in reference to:
   # http://bugs.archlinux.org/task/9912
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-core"
-  cp drivers/media/dvb/dvb-core/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-core/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-core"
+  cp drivers/media/dvb-core/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-core/"
   # and...
   # http://bugs.archlinux.org/task/11194
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
@@ -225,19 +242,19 @@ package_linux-headers-raspberrypi() {
   # add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
   # in reference to:
   # http://bugs.archlinux.org/task/13146
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
-  cp drivers/media/dvb/frontends/lgdt330x.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
-  cp drivers/media/video/msp3400-driver.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  cp drivers/media/dvb-frontends/lgdt330x.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  #cp drivers/media/i2c/msp3400-driver.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
 
   # add dvb headers
   # in reference to:
   # http://bugs.archlinux.org/task/20402
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-usb"
-  cp drivers/media/dvb/dvb-usb/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-usb/"
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends"
-  cp drivers/media/dvb/frontends/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners"
-  cp drivers/media/common/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/dvb-usb"
+  cp drivers/media/usb/dvb-usb/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/dvb-usb/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends"
+  cp drivers/media/dvb-frontends/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/tuners"
+  cp drivers/media/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/tuners/"
 
   # copy in Kconfig files
   for i in `find . -name "Kconfig*"`; do
@@ -263,12 +280,3 @@ package_linux-headers-raspberrypi() {
   # remove unneeded architectures
   rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
 }
-
-md5sums=('04120f0656f3fa1b98cb058b1cbb8a76'
-         '9d3c56a4b999c8bfbd4018089a62f662'
-         'd00814b57448895e65fbbc800e8a58ba'
-         '9335d1263fd426215db69841a380ea26'
-         'a00e424e2fbb8c5a5f77ba2c4871bed4'
-         '2f82dbe5752af65ff409d737caf11954'
-         'ca74031c9e9bfc9f4a668924dcb37f4c'
-         '1e46f207dcf2dd9392a099a437bb9b3e')
