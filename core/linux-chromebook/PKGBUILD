@@ -1,3 +1,4 @@
+# Samsung/HP Chromebook Kernel
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
 # Maintainer: stratum nine <strata@dropswitch.net>
 
@@ -5,100 +6,114 @@ buildarch=4
 
 pkgbase=linux-chromebook
 pkgname=('linux-chromebook' 'linux-headers-chromebook')
-pkgver=20130813
+pkgver=20131105
 _kernelname=${pkgname#linux}
+pkgdesc="ChromiumOS kernel with ArchLinux ARM tweaks"
 _basever=3.4
 pkgrel=1
-pkgdesc="Chromium OS kernel with ArchLinux ARM tweaks for SAMSUNG ARM Chromebook."
 arch=('armv7h')
-url="http://git.chromium.org/gitweb/?p=chromiumos/third_party/kernel.git;a=summary"
+url="https://chromium.googlesource.com/chromiumos/third_party/kernel/+/chromeos-3.4"
 license=('GPL2')
-makedepends=('uboot-mkimage' 'dtc' 'git')
-source=('config'
+makedepends=('uboot-mkimage' 'dtc')
+options=('!strip')
+_commit=90b982ed9d47345a8f0ed57ce2a28b942188db6d
+source=("https://chromium.googlesource.com/chromiumos/third_party/kernel/+archive/${_commit}.tar.gz"
+	'config'
         'kernel.its')
-md5sums=('9ef2273a0befbc005260ebbaf8b912f7'
-         '1ee7e0f62516ba3af19022c25636011c')
+noextract=("${_commit}.tar.gz")
+md5sums=('fcc4b2d0b0ac8850dff2f6217f293a3c'
+         '5e255ae340bad3a32d9f1d1559fe3995'
+         '56f8343875b928b6aa4e83921e5df25f')
 
-_gitroot='https://git.chromium.org/git/chromiumos/third_party/kernel.git'
-_gitname='chromeos-3.4'
-_gitbranch='chromeos-3.4'
+prepare() {
+  #Set up and extract kernel
+  mkdir -p ${srcdir}/chromeos-${_basever}	
 
-build() {
-  cd "$srcdir"
-  msg "Connecting to GIT server...."
+  tar -xf ${_commit}.tar.gz -C ${srcdir}/chromeos-${_basever}
 
-  if [[ -d "$_gitname" ]]; then
-    cd "$_gitname" && git pull origin
-    msg "The local files are updated."
-  else
-    git clone --depth 1 --branch="${_gitbranch}" "$_gitroot" "$_gitname"
-  fi
-
-  msg "GIT checkout done or server timeout"
-  msg "Starting build..."
-
-  cd "$srcdir/${_gitname}"
+  cd ${srcdir}/chromeos-${_basever}
 
   # Kernel configuration
-  cp "${srcdir}/config" .config 
+  cp "${srcdir}/config" .config
 
-  msg "Get kernel version ..."
-  make prepare
- 
-  msg "Building kernel and modules ..."
-  make uImage modules
-
-  msg "Creating .dtb's ..."
-  make dtbs
-
-  msg "Creating FIT image for nv-U-boot ..."
+  # .its files for FIT Images
   cp "${srcdir}/kernel.its" arch/arm/boot/kernel.its
+}
+
+build() {
+  cd ${srcdir}/chromeos-${_basever}
+
+  # get kernel version
+  make prepare
+
+  # load configuration
+  # Configure the kernel. Replace the line below with one of your choice.
+  #make menuconfig # CLI menu for configuration
+  #make nconfig # new CLI menu for configuration
+  #make xconfig # X-based configuration
+  #make oldconfig # using old config from previous kernel version
+  # ... or manually edit .config
+
+  # Copy back our configuration (use with new kernel version)
+  #cp ./.config ../${pkgbase}.config
+
+  ####################
+  # stop here
+  # this is useful to configure the kernel
+  #msg "Stopping build"
+  #return 1
+  ####################
+
+  #yes "" | make config
+
+  # build!
+  make ${MAKEFLAGS} zImage modules dtbs
   cd arch/arm/boot
-  mkimage -f kernel.its zImage
-  cp -v zImage vmlinux.uimg
+  mkimage -f kernel.its vmlinux.uimg
 }
 
 package_linux-chromebook() {
-  pkgdesc="The Linux Kernel and modules - SAMSUNG ARM Chromebook kernel and modules"
+  pkgdesc="The Linux Kernel and modules - ARM Chromebook kernel and modules"
   depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16')
   optdepends=('crda: to set the correct wireless channels of your country')
   provides=('linux26' "linux=${pkgver}")
   install=${pkgname}.install
 
-  cd "${srcdir}/${_gitname}"
+  cd ${srcdir}/chromeos-${_basever}
 
   KARCH=arm
 
   # get kernel version
   _kernver="$(make kernelrelease)"
+  _basekernel=${_kernver%%-*}
+  _basekernel=${_basekernel%.*}
 
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
+  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/dtbs}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
   cp arch/arm/boot/vmlinux.uimg "${pkgdir}/boot/vmlinux.uimg"
 
   # set correct depmod command for install
   sed \
-    -e "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
-    -e "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
+    -e  "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
+    -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
     -i "${startdir}/${pkgname}.install"
 
   # remove build and source links
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
-
   # remove the firmware
   rm -rf "${pkgdir}/lib/firmware"
-
   # gzip -9 all modules to save 100MB of space
-  find "${pkgdir}" -name '*.ko' | xargs -P 2 -n 1 gzip -9
-
+  find "${pkgdir}" -name '*.ko' |xargs -P 2 -n 1 gzip -9
+  # make room for external modules
+  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
   # add real version for building modules and running depmod from post_install/upgrade
-  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basever}"
-  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basever}/version"
+  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
+  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
 
   # Now we call depmod...
   depmod -b "$pkgdir" -F System.map "$_kernver"
 
-  # move the module tree /lib -> /usr/lib
+  # move module tree /lib -> /usr/lib
   mkdir -p "${pkgdir}/usr"
   mv "$pkgdir/lib" "$pkgdir/usr"
 }
@@ -113,7 +128,7 @@ package_linux-headers-chromebook() {
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/${_gitname}"
+  cd ${srcdir}/chromeos-${_basever}
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
