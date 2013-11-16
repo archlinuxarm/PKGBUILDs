@@ -10,7 +10,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=9.2.3
-pkgrel=1
+pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
              'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd')
@@ -67,6 +67,7 @@ package_mesa() {
   mv -v ${srcdir}/fakeinstall/* ${pkgdir}
   # rename libgl.so to not conflict with blobs - may break gl.pc ?
   mv ${pkgdir}/usr/lib/libGL.so.1.2.0 	${pkgdir}/usr/lib/mesa-libGL.so.1.2.0
+  ln -s mesa-libGL.so.1.2.0 ${pkgdir}/usr/lib/mesa-libGL.so.1
   rm ${pkgdir}/usr/lib/libGL.so{,.1}
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
