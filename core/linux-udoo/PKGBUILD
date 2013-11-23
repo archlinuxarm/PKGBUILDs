@@ -1,61 +1,39 @@
+# i.MX6 UDOO
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
-
-# UDOO kernel and headers
-#  - note: any other kernel packages should include headers for that march
-#  - there will be no v7 kernel26 package, each march will be tagged individually
 
 buildarch=4
 
 pkgbase=linux-udoo
-pkgname=('linux-udoo' 'linux-headers-udoo')
-_kernelname=${pkgname#linux}
-_basekernel=3.0
-pkgver=${_basekernel}.35
-pkgrel=3
+_commit=acca8e0f260f3de326f535b92d6881a9d360cdb3
+_srcname=Kernel_Unico-${_commit}
+_kernelname=${pkgbase#linux}
+_desc="i.MX6 UDOO"
+pkgver=3.0.35
+pkgrel=4
 arch=('armv7h')
-url="http://www.kernel.org/"
+url="https://github.com/UDOOboard/Kernel_Unico"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'git')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'uboot-mkimage')
 options=('!strip')
-source=('config'
-        'change-default-console-loglevel.patch')
-md5sums=('8bfa881b1c992d65c30db1983adca1b9'
-         '9d3c56a4b999c8bfbd4018089a62f662')
+source=("https://github.com/UDOOboard/Kernel_Unico/archive/${_commit}.tar.gz"
+        'config')
+md5sums=('31951fe403dfe8e805366aa48049ed2f'
+         '8dea9810bef5a15a800c83824fcf301b')
 
-__gitroot="git://github.com/UDOOboard/Kernel_Unico.git"
-__gitname="Kernel_Unico"
-__gitbranch="master"
-
-build() {
-  cd "${srcdir}"
-  msg "Connecting to GIT server...."
-
-  if [ -d $__gitname ] ; then
-    cd $__gitname && git pull origin
-    msg "The local files are updated."
-  else
-    git clone --depth 1 --branch=${__gitbranch} $__gitroot
-  fi
-
-  msg "GIT checkout done or server timeout"
-
-  cd "${srcdir}/${__gitname}"
-  
-  #apparently, they forgot to make Mr. Proper the kernel source...
-  make mrproper 
-
-  # set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)
-  # remove this when a Kconfig knob is made available by upstream
-  # (relevant patch sent upstream: https://lkml.org/lkml/2011/7/26/227)
-  patch -Np1 -i "${srcdir}/change-default-console-loglevel.patch"
+prepare() {
+  cd "${srcdir}/${_srcname}"
 
   cat "${srcdir}/config" > ./.config
 
-  # set extraversion to pkgrel
-  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
+  # add pkgrel to extraversion
+  sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
+}
+
+build() {
+  cd "${srcdir}/${_srcname}"
 
   # get kernel version
   make prepare
@@ -69,7 +47,7 @@ build() {
   # ... or manually edit .config
 
   # Copy back our configuration (use with new kernel version)
-  #cp ./.config ../${_basekernel}.config
+  #cp ./.config ../${pkgbase}.config
 
   ####################
   # stop here
@@ -84,21 +62,22 @@ build() {
   make ${MAKEFLAGS} uImage modules
 }
 
-package_linux-udoo() {
-  pkgdesc="The Linux Kernel and modules - UDOO board"
-  depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7')
+_package() {
+  pkgdesc="The Linux Kernel and modules - ${_desc}"
+  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' "linux=${pkgver}")
-  conflicts=('linux-trimslice' 'linux-omap')
-  backup=("etc/mkinitcpio.d/${pkgname}.preset")
+  provides=('kernel26' 'linux=${pkgver}')
+  conflicts=('linux-omap' 'linux-imx6' 'linux-armada370')
   install=${pkgname}.install
 
-  cd "${srcdir}/${__gitname}"
+  cd "${srcdir}/${_srcname}"
 
   KARCH=arm
 
   # get kernel version
   _kernver="$(make kernelrelease)"
+  _basekernel=${_kernver%%-*}
+  _basekernel=${_basekernel%.*}
 
   mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
@@ -130,17 +109,17 @@ package_linux-udoo() {
   mv "$pkgdir/lib" "$pkgdir/usr"
 }
 
-package_linux-headers-udoo() {
-  pkgdesc="Header files and scripts for building modules for linux kernel - i.MX6 processors"
-  provides=("linux-headers=${pkgver}")
-  conflicts=('linux-headers-omap' 'linux-headers-trimslice')
+_package-headers() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - ${_desc}"
+  provides=('linux-headers=${pkgver}')
+  conflicts=('linux-headers-omap' 'linux-headers-imx6')
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/${__gitname}"
+  cd "${srcdir}/${_srcname}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -207,6 +186,33 @@ package_linux-headers-udoo() {
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
   cp net/mac80211/*.h "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
 
+  # add dvb headers for external modules
+  # in reference to:
+  # http://bugs.archlinux.org/task/9912
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-core"
+  cp drivers/media/dvb/dvb-core/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-core/"
+  # and...
+  # http://bugs.archlinux.org/task/11194
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
+  cp include/config/dvb/*.h "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
+
+  # add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
+  # in reference to:
+  # http://bugs.archlinux.org/task/13146
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+  cp drivers/media/dvb/frontends/lgdt330x.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+  cp drivers/media/video/msp3400-driver.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+
+  # add dvb headers
+  # in reference to:
+  # http://bugs.archlinux.org/task/20402
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-usb"
+  cp drivers/media/dvb/dvb-usb/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/dvb-usb/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends"
+  cp drivers/media/dvb/frontends/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb/frontends/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners"
+  cp drivers/media/common/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners/"
+
   # add xfs and shmem for aufs building
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs"
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/mm"
@@ -236,3 +242,10 @@ package_linux-headers-udoo() {
   # remove unneeded architectures
   rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
 }
+
+pkgname=("${pkgbase}" "${pkgbase}-headers")
+for _p in ${pkgname[@]}; do
+  eval "package_${_p}() {
+    _package${_p#${pkgbase}}
+  }"
+done
