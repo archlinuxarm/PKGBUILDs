@@ -13,11 +13,12 @@ highmem=1
 
 pkgbase=qt5
 pkgname=('qt5-base'
+         'qt5-connectivity'
          'qt5-declarative'
          'qt5-doc'
          'qt5-graphicaleffects'
          'qt5-imageformats'
-         'qt5-jsbackend'
+         'qt5-location'
          'qt5-multimedia'
          'qt5-quick1'
          'qt5-quickcontrols'
@@ -30,34 +31,32 @@ pkgname=('qt5-base'
          'qt5-webkit'
          'qt5-x11extras'
          'qt5-xmlpatterns')
-pkgver=5.1.1
-pkgrel=5
+pkgver=5.2.0
+pkgrel=1
 arch=('i686' 'x86_64')
 url='http://qt-project.org/'
 license=('GPL3' 'LGPL' 'FDL' 'custom')
 makedepends=('libxcb' 'xcb-proto' 'xcb-util' 'xcb-util-image' 'xcb-util-wm' 'xcb-util-keysyms'
-            'mesa' 'at-spi2-core' 'alsa-lib' 'gstreamer0.10-base-plugins'
+            'mesa' 'at-spi2-core' 'alsa-lib' 'gstreamer0.10-base-plugins' 'libmng'
             'libjpeg-turbo' 'cups' 'libpulse' 'hicolor-icon-theme' 'desktop-file-utils'
             'postgresql-libs' 'libmariadbclient' 'sqlite' 'unixodbc'
             'python2' 'ruby' 'gperf' 'libxslt' 'libxcomposite' 'fontconfig'
-            'openal' 'gtk2' 'libxkbcommon' 'icu')
+            'openal' 'gtk2' 'libxkbcommon' 'icu' 'python')
 groups=('qt' 'qt5')
 _pkgfqn="qt-everywhere-opensource-src-${pkgver}"
-source=("http://download.qt-project.org/official_releases/qt/5.1/${pkgver}/single/${_pkgfqn}.tar.xz"
+source=("http://download.qt-project.org/official_releases/qt/5.2/${pkgver}/single/${_pkgfqn}.tar.xz"
         'assistant.desktop' 'designer.desktop' 'linguist.desktop' 'qdbusviewer.desktop'
         'use-python2.patch'
-        'deppath_gnu.patch' 'rpi.patch' 'undef_B0.patch'
-        'bison3.patch')
-md5sums=('44a507beebef73eb364b5a2ec7bbe090'
+        'deppath_gnu.patch' 'rpi.patch' 'undef_B0.patch')
+md5sums=('8f60b47ca9461831d940f579ee90517e'
          'b2897dd6a2967bccf8f10e397aafee55'
          '9638a78e502719ef8fe5f8d10d0361a9'
          '188da8f4c87316e730ebf1c6217bf5a0'
          '322b419b16c75d4de0ee7ad0a246caa1'
-         '92831f79144d5cb8121915423ba47575'
+         'a378deccf363bd6079da459c89aff7b9'
          '21e4389ed0dd9c37e7cb48712d3bff91'
          '3f8d2f8fb4e5715f7ce79950fac3c31f'
-         '8a9ba2d990d8840a2114fcffb9f9d2a4'
-         '6b162cd2bc104f0ae83ca039401be7bf')
+         '8a9ba2d990d8840a2114fcffb9f9d2a4')
 
 prepare() {
   cd ${_pkgfqn}
@@ -82,10 +81,6 @@ prepare() {
   sed -i -e "s|#![ ]*/usr/bin/python$|#!/usr/bin/python2|" \
     -e "s|#![ ]*/usr/bin/env python$|#!/usr/bin/env python2|" \
     $(find . -name '*.py')
-
-  # Fix build with bison 3.x
-  cd qtwebkit
-  patch -p1 -i "${srcdir}"/bison3.patch
 }
 
 build() {
@@ -139,19 +134,19 @@ build() {
 package_qt5-base() {
   pkgdesc='A cross-platform application and UI framework'
   depends=('libjpeg-turbo' 'xcb-util-keysyms' 'libgl' 'dbus' 'fontconfig' 'systemd'
-           'xcb-util-wm' 'libxrender' 'libxi' 'sqlite' 'libpng' 'xcb-util-image'
-           'icu' 'qtchooser' 'libxkbcommon')
+           'xcb-util-wm' 'libxrender' 'libxi' 'sqlite' 'xcb-util-image' 'icu'
+           'qtchooser' 'libxkbcommon')
   optdepends=('postgresql-libs: PostgreSQL driver'
               'libmariadbclient: MariaDB driver'
               'unixodbc: ODBC driver')
   conflicts=('qt')
+  options=('staticlibs') #libQt5PlatformSupport builds static only
 
   cd ${_pkgfqn}/qtbase
   make INSTALL_ROOT="${pkgdir}" install
   
-  cd "${srcdir}"
-  install -D -m644 ${_pkgfqn}/qtbase/LGPL_EXCEPTION.txt \
-    ${pkgdir}/usr/share/licenses/${pkgbase}/LGPL_EXCEPTION.txt
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 
   # Fix wrong path in prl files
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
@@ -159,7 +154,7 @@ package_qt5-base() {
 
   # Fix wrong qmake path in pri file
   sed -i "s|${srcdir}/${_pkgfqn}/qtbase|/usr|" \
-    "${pkgdir}"/usr/lib/qt/mkspecs/modules/qt_lib_bootstrap.pri
+    "${pkgdir}"/usr/lib/qt/mkspecs/modules/qt_lib_bootstrap_private.pri
 
   # Useful symlinks
   install -d "${pkgdir}"/usr/bin
@@ -168,9 +163,24 @@ package_qt5-base() {
   done
 }
 
+package_qt5-connectivity() {
+  pkgdesc='A cross-platform application and UI framework (QtBluetooth, QtNfc)'
+  depends=('qt5-declarative')
+
+  cd ${_pkgfqn}/qtconnectivity
+  make INSTALL_ROOT="${pkgdir}" install
+
+  # Fix wrong path in prl files
+  find "${pkgdir}/usr/lib" -type f -name '*.prl' \
+    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
+}
+
 package_qt5-declarative() {
   pkgdesc='A cross-platform application and UI framework (QtQml, QtQuick)'
-  depends=('qt5-jsbackend' 'qt5-xmlpatterns')
+  depends=('qt5-xmlpatterns')
   conflicts=('qt')
 
   cd ${_pkgfqn}/qtdeclarative
@@ -185,6 +195,9 @@ package_qt5-declarative() {
   for b in "${pkgdir}"/usr/lib/qt/bin/*; do
     ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
   done
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-doc() {
@@ -194,23 +207,14 @@ package_qt5-doc() {
   conflicts=('qt-doc')
   replaces=('qt-doc')
   provides=('qt-doc')
-  options=('docs')
+  options=('docs' '!emptydirs')
   groups=()
 
   cd ${_pkgfqn}
   make INSTALL_ROOT="${pkgdir}" install_docs
-}
 
-package_qt5-jsbackend() {
-  pkgdesc='A cross-platform application and UI framework (QtV8)'
-  depends=('qt5-base')
-
-  cd ${_pkgfqn}/qtjsbackend
-  make INSTALL_ROOT="${pkgdir}" install
-
-  # Fix wrong path in prl files
-  find "${pkgdir}/usr/lib" -type f -name '*.prl' \
-    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-xmlpatterns() {
@@ -230,6 +234,9 @@ package_qt5-xmlpatterns() {
   for b in "${pkgdir}"/usr/lib/qt/bin/*; do
     ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
   done
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-translations() {
@@ -239,6 +246,9 @@ package_qt5-translations() {
 
   cd ${_pkgfqn}/qttranslations
   make INSTALL_ROOT="${pkgdir}" install
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-multimedia() {
@@ -252,6 +262,9 @@ package_qt5-multimedia() {
   # Fix wrong path in prl files
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-graphicaleffects() {
@@ -260,6 +273,9 @@ package_qt5-graphicaleffects() {
 
   cd ${_pkgfqn}/qtgraphicaleffects
   make INSTALL_ROOT="${pkgdir}" install
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-imageformats() {
@@ -269,6 +285,24 @@ package_qt5-imageformats() {
 
   cd ${_pkgfqn}/qtimageformats
   make INSTALL_ROOT="${pkgdir}" install
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
+}
+
+package_qt5-location() {
+  pkgdesc='A cross-platform application and UI framework (QtLocation, QtPositioning)'
+  depends=('qt5-declarative')
+
+  cd ${_pkgfqn}/qtlocation
+  make INSTALL_ROOT="${pkgdir}" install
+
+  # Fix wrong path in prl files
+  find "${pkgdir}/usr/lib" -type f -name '*.prl' \
+    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-quick1() {
@@ -288,6 +322,9 @@ package_qt5-quick1() {
   for b in "${pkgdir}"/usr/lib/qt/bin/*; do
     ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
   done
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-quickcontrols() {
@@ -296,6 +333,9 @@ package_qt5-quickcontrols() {
 
   cd ${_pkgfqn}/qtquickcontrols
   make INSTALL_ROOT="${pkgdir}" install
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-script() {
@@ -309,6 +349,9 @@ package_qt5-script() {
   # Fix wrong path in prl files
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-sensors() {
@@ -321,6 +364,9 @@ package_qt5-sensors() {
   # Fix wrong path in prl files
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-serialport() {
@@ -333,6 +379,9 @@ package_qt5-serialport() {
   # Fix wrong path in prl files
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-svg() {
@@ -346,6 +395,9 @@ package_qt5-svg() {
   # Fix wrong path in prl files
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
   
 package_qt5-tools() {
@@ -355,7 +407,7 @@ package_qt5-tools() {
   optdepends=('qt5-doc: documentation')
   install='qt5-tools.install'
   conflicts=('qt')
-  options=('staticlibs') # libQtUiTools builds as static only
+  options=('staticlibs') # libQt5UiTools builds as static only
 
   cd ${_pkgfqn}/qttools
   make INSTALL_ROOT="${pkgdir}" install
@@ -390,11 +442,15 @@ package_qt5-tools() {
   for b in "${pkgdir}"/usr/lib/qt/bin/*; do
     ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
   done
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-webkit() {
   pkgdesc='A cross-platform application and UI framework (QtWebKit)'
-  depends=('qt5-declarative' 'gstreamer0.10-base' 'libxslt' 'libxcomposite' 'qt5-sensors')
+  depends=('qt5-sensors' 'qt5-location' 'gstreamer0.10-base' 'libxslt' 'libxcomposite')
+  license=('GPL3' 'LGPL' 'FDL')
 
   cd ${_pkgfqn}/qtwebkit
   make INSTALL_ROOT="${pkgdir}" install
@@ -417,4 +473,7 @@ package_qt5-x11extras() {
   # Fix wrong path in prl files
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
