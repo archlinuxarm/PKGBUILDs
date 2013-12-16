@@ -23,22 +23,18 @@ arch=('arm' 'armv7h')
 url='https://www.openssl.org'
 license=('custom:BSD')
 depends=('perl')
-if [ "${CARCH}" == 'armv7h' ]; then
-       makedepends=('linux-headers-cubox')
-else
-       makedepends=('linux-headers')
-fi
 optdepends=('ca-certificates')
 options=('!makeflags')
 backup=('etc/ssl/openssl.cnf')
 conflicts=('openssl')
 provides=("openssl=${pkgver}")
-_cryptodev_commit=3c2c17daa8c67e068285c3a28bc32bbc009c4999
+_cryptover=1.6
+
 source=("https://www.openssl.org/source/${_pkgname}-${_ver}.tar.gz"
         'no-rpath.patch'
         'ca-dir.patch'
         'openssl-1.0.1e-fix_pod_syntax-1.patch'
-        'https://raw.github.com/nmav/cryptodev-linux/${_cryptodev_commit}/extras/eng_cryptodev.c'
+        "http://download.gna.org/cryptodev-linux/cryptodev-linux-${_cryptover}.tar.gz"
         'openssl-1.0.1-Check-DTLS_BAD_VER-for-version-number.patch'
         'openssl-1.0.1-e_aes_cbc_hmac_sha1.c-fix-rare-bad-record-mac-on-AES.patch')
 
@@ -46,7 +42,7 @@ md5sums=('66bf6f10f060d561929de96f9dfe5b8c'
          'dc78d3d06baffc16217519242ce92478'
          '3bf51be3a1bbd262be46dc619f92aa90' 
          '88d3bef4bbdc640b0412315d8d347bdf'
-         '25dbe6700a64f825a9c9da7445c33608'
+         'SKIP'
          'ae7848bb152b8834ceff30c8c480d422'
          'c5cc62a47cef72f4e5ad119a88e97ae4')
 
@@ -68,8 +64,12 @@ prepare() {
         # http://rt.openssl.org/Ticket/Display.html?id=3002
         patch -p1 -i $srcdir/openssl-1.0.1-e_aes_cbc_hmac_sha1.c-fix-rare-bad-record-mac-on-AES.patch
 
-	#Replace eng_cryptodev.c with cryptodev version from git
-	cp -u ${srcdir}/eng_cryptodev.c $srcdir/openssl-${_ver}/crypto/engine/
+        #Replace eng_cryptodev.c with cryptodev version
+        cp -u ${srcdir}/cryptodev-linux-${_cryptover}/extras/eng_cryptodev.c ${srcdir}/openssl-${_ver}/crypto/engine/
+
+        #Copy the header file
+        cp -u ${srcdir}/cryptodev-linux-${_cryptover}/crypto/cryptodev.h ${srcdir}/openssl-${_ver}/crypto/
+
 }
 
 build() {
@@ -82,14 +82,13 @@ build() {
 	elif [ "${CARCH}" == 'arm' -o "${CARCH}" == 'armv7h' ]; then
 		openssltarget='linux-armv4'
 	fi
-		_kernel_release="$(uname -r)"
 
 	# mark stack as non-executable: http://bugs.archlinux.org/task/12434
 	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib \
 		-DHAVE_CRYPTODEV -DUSE_CRYPTODEV_DIGESTS -DHASH_MAX_LEN=64 \
 		shared threads zlib \
 		"${openssltarget}" \
-		-Wa,--noexecstack "${CFLAGS} -I/usr/src/linux-${_kernel_release}"
+		-Wa,--noexecstack "${CFLAGS}"
 
 	make depend
 	make
