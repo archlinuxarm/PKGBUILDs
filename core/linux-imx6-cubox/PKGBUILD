@@ -1,4 +1,5 @@
-# Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
+# Maintainer1: Dave Higham <pepedog@archlinuxarm.org>
+# Maintainer2: Kevin Mihelich <kevin@archlinuxarm.org>
 
 # i.MX6 kernel and headers
 #  - note: any other kernel packages should include headers for that march
@@ -6,9 +7,11 @@
 
 buildarch=4
 
-pkgbase=linux-imx6-c1
-pkgname=('linux-imx6-c1' 'linux-headers-imx6-c1')
+pkgbase=linux-imx6-cubox
+pkgname=('linux-imx6-cubox' 'linux-headers-imx6-cubox')
 # pkgname=linux-custom       # Build kernel with a different name
+_commit=da311d2e415b318673b6042bf9b0137bcfcb73b3
+_srcname=linux-imx6-${_commit}
 _kernelname=${pkgname#linux}
 _basekernel=3.0
 pkgver=${_basekernel}.35
@@ -16,50 +19,26 @@ pkgrel=1
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'git')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'uboot-mkimage' 'git')
 options=('!strip')
-source=('config'
-        '0001-SolidRun-i.MX6-based-carrier-one-base.patch'
-        '0002-SolidRun-Carrier-One-board-support.patch'
-        '0003-LVDS-on-LDB_SEP1.patch'
-        '0004-Added-Carrier-One-C1-to-imx6_defconfig.patch'
+
+source=("https://github.com/solidrun/linux-imx6/archive/${_commit}.tar.gz"
+        'config'
         'change-default-console-loglevel.pat')
-md5sums=('2311c0b8a4d976887d7850f217022a8b'
-         '6f7a3a3b8cafe4414344734d9835f89d'
-         '0b73f615bf6302da8466c7ccc85bf71b'
-         '94a48670c8fe1069141a6efa868bcc42'
-         '6986240fd6e9fe1368a7a0408a13d1d1'
+md5sums=('17c0223a6519e8763d216865f19f0ebe'
+         '75f7622723f6b46d6a848662dfd727fa'
          '9d3c56a4b999c8bfbd4018089a62f662')
 
-#git clone git://git.freescale.com/imx/linux-2.6-imx.git -b imx_3.0.35_4.1.0
-#cd linux-2.6-imx.git
-
-
-
-__gitroot="git://git.freescale.com/imx/linux-2.6-imx.git"
-__gitname="linux-2.6-imx"
-__gitbranch="imx_3.0.35_4.1.0"
-
 prepare() {
-  cd "${srcdir}"
-  msg "Connecting to GIT server...."
+  cd "${srcdir}/${_srcname}"
 
-  if [ -d $__gitname ] ; then
-    cd $__gitname && git pull origin
-    msg "The local files are updated."
-  else
-    git clone --depth 1 --branch=${__gitbranch} $__gitroot
-  fi
+  cat "${srcdir}/config" > ./.config
 
-  msg "GIT checkout done or server timeout"
+  # add pkgrel to extraversion
+  sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
 
-  cd "${srcdir}/${__gitname}"
-
-
-# patch -p1 < 00*.patch
-  for _patch in "${srcdir}/"*.patch; do
-    patch -p1 -i "${_patch}"
-  done
+  # don't run depmod on 'make install'. We'll do this ourselves in packaging
+  sed -i '2iexit 0' scripts/depmod.sh
 
   # set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)
   # remove this when a Kconfig knob is made available by upstream
@@ -68,17 +47,8 @@ prepare() {
 
 }
 
-
-
 build() {
-  cd "${srcdir}/${__gitname}"
-  cat "${srcdir}/config" > ./.config
-
-  # set extraversion to pkgrel
-  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
-
-  # don't run depmod on 'make install'. We'll do this ourselves in packaging
-  sed -i '2iexit 0' scripts/depmod.sh
+  cd "${srcdir}/${_srcname}"
 
   # get kernel version
   make prepare
@@ -107,8 +77,8 @@ build() {
   make ${MAKEFLAGS} uImage modules
 }
 
-package_linux-imx6-c1() {
-  pkgdesc="The Linux Kernel and modules - i.MX6 processors for carrier one"
+package_linux-imx6-cubox() {
+  pkgdesc="The Linux Kernel and modules - i.MX6 processors for all cubox-i"
   depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
   provides=('kernel26' "linux=${pkgver}")
@@ -116,7 +86,7 @@ package_linux-imx6-c1() {
   backup=("etc/mkinitcpio.d/${pkgname}.preset")
   install=${pkgname}.install
 
-  cd "${srcdir}/${__gitname}"
+  cd "${srcdir}/${_srcname}"
 
   KARCH=arm
 
@@ -153,8 +123,8 @@ package_linux-imx6-c1() {
   mv "$pkgdir/lib" "$pkgdir/usr"
 }
 
-package_linux-headers-imx6-c1() {
-  pkgdesc="Header files and scripts for building modules for linux kernel - i.MX6 processors"
+package_linux-headers-imx6-cubox() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - i.MX6 cubox-i"
   provides=("linux-headers=${pkgver}")
   conflicts=('linux-headers-omap' 'linux-headers-trimslice')
 
@@ -163,7 +133,8 @@ package_linux-headers-imx6-c1() {
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/${__gitname}"
+  cd "${srcdir}/${_srcname}"
+
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
