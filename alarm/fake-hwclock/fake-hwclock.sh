@@ -3,13 +3,13 @@
 MYSELF=$0
 
 setclock() {
-	echo "Setting hardware clock \n"
+	echo "Setting clock."
 	MYTIME=$(date -r $MYSELF '+%Y-%m-%d %r')
 	date --set="$MYTIME" &>/dev/null
 }
 
 saveclock() {
-	echo "Saving current time \n"
+	echo "Saving current time."
 	touch $MYSELF &>/dev/null
 }
 
