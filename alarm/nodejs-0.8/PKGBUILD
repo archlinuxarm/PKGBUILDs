@@ -1,0 +1,117 @@
+# Maintainer: Thomas Dziedzic < gostrc at gmail >
+# Contributor: James Campos <james.r.campos@gmail.com>
+# Contributor: BlackEagle < ike DOT devolder AT gmail DOT com >
+# Contributor: Dongsheng Cai <dongsheng at moodle dot com>
+# Contributor: Masutu Subric <masutu.arch at googlemail dot com>
+# Contributor: TIanyi Cui <tianyicui@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+# Contributor: Jason Plum <jplum@archlinuxarm.org>
+#  - Older version build for SMILE software stack
+
+buildarch=4
+
+pkgname=nodejs-0.8
+pkgver=0.8.26
+pkgrel=1
+pkgdesc='Evented I/O for V8 javascript'
+arch=('i686' 'x86_64')
+url='http://nodejs.org/'
+license=('MIT')
+makedepends=('python2')
+depends=('python2')
+checkdepends=('curl') # curl used for check()
+optdepends=('openssl: TLS support')
+options=('!emptydirs !strip')
+source=("http://nodejs.org/dist/v${pkgver}/node-v${pkgver}.tar.gz")
+sha256sums=('d873216685774b96139af534ce015077d2c93ddfc4e3596e128853f3c08a5413')
+
+set_flags_for_arm() {
+  if [ "$CARCH" == "arm" ]; then
+    # CXXFLAGS is here to bash it over the head. It has a bad habit.
+    EABI=soft
+    CXXFLAGS="$CXXFLAGS -march=armv5t -mno-unaligned-access" ;
+    GYPFLAGS="-Darmeabi=soft -Dv8_can_use_vfp_instructions=false -Dv8_can_use_unaligned_accesses=false -Darmv7=0"
+    VFP3=off
+    VFP2=off
+  fi
+  if [ "$CARCH" == "armv6h" ]; then
+    EABI=hard
+    GYPFLAGS="-Darmeabi=hard -Dv8_use_arm_eabi_hardfloat=true -Dv8_can_use_vfp3_instructions=false -Dv8_can_use_vfp2_instructions=true -Darm7=0 -Darm_vfp=vfp"
+    VFP3=off
+    VFP2=on
+  fi
+  if [ "$CARCH" == "armv7h" ]; then
+    EABI=hard
+    GYPFLAGS="-Darmeabi=hard -Dv8_use_arm_eabi_hardfloat=true -Dv8_can_use_vfp3_instructions=true -Dv8_can_use_vfp2_instructions=true -Darm7=1"  
+    VFP3=on
+    VFP2=on
+  fi
+  export CXXFLAGS
+  export GYPFLAGS
+}
+
+build() {
+  cd node-v${pkgver}
+
+  msg 'fixing for python2 name'
+  find -type f -exec sed -e 's_^#!/usr/bin/env python$_&2_' -e 's_^\(#!/usr/bin/python2\).[45]$_\1_' -e 's_^#!/usr/bin/python$_&2_' -e "s_'python'_'python2'_" -i {} \;
+  find test -type f -exec sed -e "s|python |python2 |" -i {} \;
+  sed -i "s|python |python2 |" Makefile
+
+  export PYTHON=python2
+
+  set_flags_for_arm
+
+ # short-cutting python=python2 for GYP, as it will only be used here.
+  export PYTHON=python2
+  if [ ! -f "${srcdir}/python" ]; then
+    ln -s `which python2` ${srcdir}/python ;
+  fi
+  PATH="${srcdir}:$PATH";
+  export PATH ;
+
+# we're going to attept to make use of this example
+# https://github.com/joyent/node/issues/2131#issuecomment-3208846
+# https://gist.github.com/1574158   
+
+  ./configure \
+    --prefix=/usr \
+    --without-snapshot \
+    --with-arm-float-abi=$EABI
+#    --shared-v8 \
+#    --shared-v8-libpath=/usr/lib \
+#    --shared-v8-includes=/usr/include 
+#    --shared-openssl \
+
+
+  make 
+}
+
+check() {
+  cd node-v${pkgver}
+
+  make test || true
+}
+
+package() {
+  cd node-v${pkgver}
+
+  # suppress re-compile(with out customized flags) by 'make install'.
+  set_flags_for_arm
+
+  make DESTDIR=${pkgdir} install
+
+  # install docs as per user request
+  install -d ${pkgdir}/usr/share/doc/nodejs
+  cp -r doc/api/* \
+    ${pkgdir}/usr/share/doc/nodejs
+
+  # compress man pages
+  find $pkgdir/usr/lib/node_modules/npm/man -type f | xargs gzip -9
+
+  install -D -m644 LICENSE \
+    ${pkgdir}/usr/share/licenses/nodejs/LICENSE
+}
+
+# vim:set ts=2 sw=2 et:
