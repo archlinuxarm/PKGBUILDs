@@ -10,7 +10,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=10.0.1
-pkgrel=1
+pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'libxxf86vm' 'libxdamage'
              'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd')
@@ -18,9 +18,18 @@ url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
-        LICENSE)
+        LICENSE
+        revert.remove.GLXContextID.typedef.patch)
 md5sums=('0a72ca5b36046a658bf6038326ff32ed'
-         '5c65a0fe315dd347e09b1f2826a1df5a')
+         '5c65a0fe315dd347e09b1f2826a1df5a'
+         '6e49b4dd4ceb7873610f608f74efbaaf')
+
+prepare() {
+  cd ${srcdir}/?esa-*
+
+  # Cherry picked from mesa branch 10.0, this fix wxgtk rebuild (FS#38392)
+  patch -Np1 -i ../revert.remove.GLXContextID.typedef.patch
+}
 
 build() {
   cd ${srcdir}/?esa-*
