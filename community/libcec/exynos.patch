@@ -1,0 +1,1337 @@
+diff -urN a/configure.ac b/configure.ac
+--- a/configure.ac	2013-12-13 08:03:33.000000000 -0700
++++ b/configure.ac	2014-01-09 13:45:12.465563417 -0700
+@@ -57,6 +57,13 @@
+   [TDA995X_CFLAGS="-I$withval/inc"],
+   [TDA995X_CFLAGS="-I\$(abs_top_srcdir)/nxp_hdmi/inc"])
+ 
++## Exynos support
++AC_ARG_ENABLE([exynos],
++  [AS_HELP_STRING([--enable-exynos],
++  [enable support for the Exynos (default is no)])],
++  [use_exynos=$enableval],
++  [use_exynos=no])
++
+ ## Raspberry Pi support
+ AC_ARG_ENABLE([rpi],
+   [AS_HELP_STRING([--enable-rpi],
+@@ -268,6 +275,19 @@
+   features="$features\n  TDA995x support :\t\t\tno"
+ fi
+ 
++## mark Exynos support as available
++if test "x$use_exynos" != "xno"; then
++  AC_DEFINE([HAVE_EXYNOS_API],[1],[Define to 1 to include Exynos support])
++  AM_CONDITIONAL(USE_EXYNOS_API, true)
++  features="$features\n  Exynos support :\t\t\tyes"
++  LIB_INFO="$LIB_INFO 'EXYNOS'"
++  CPPFLAGS="$CPPFLAGS $EXYNOS_CFLAGS"
++else
++  AM_CONDITIONAL(USE_EXYNOS_API, false)
++  features="$features\n  EXYNOS support :\t\t\tno"
++fi
++
++
+ ## check if our build system is complete
+ AC_CHECK_HEADER(algorithm,,AC_MSG_ERROR($msg_required_header_missing))
+ AC_CHECK_HEADER(ctype.h,,AC_MSG_ERROR($msg_required_header_missing))
+diff -urN a/include/cectypes.h b/include/cectypes.h
+--- a/include/cectypes.h	2013-12-13 08:03:33.000000000 -0700
++++ b/include/cectypes.h	2014-01-09 13:45:12.470563354 -0700
+@@ -295,6 +295,16 @@
+ #define CEC_TDA995x_VIRTUAL_COM		"CuBox"
+ 
+ /*!
++ * the path to use for the TDA995x's CEC wire
++ */
++#define CEC_EXYNOS_PATH		"/dev/CEC"
++
++/*!
++ * the name of the virtual COM port to use for the EXYNOS' CEC wire
++ */
++#define CEC_EXYNOS_VIRTUAL_COM		"Exynos"
++
++/*!
+  * Mimimum client version
+  */
+ #define CEC_MIN_LIB_VERSION          2
+@@ -858,7 +868,8 @@
+   ADAPTERTYPE_P8_EXTERNAL      = 0x1,
+   ADAPTERTYPE_P8_DAUGHTERBOARD = 0x2,
+   ADAPTERTYPE_RPI              = 0x100,
+-  ADAPTERTYPE_TDA995x          = 0x200
++  ADAPTERTYPE_TDA995x          = 0x200,
++  ADAPTERTYPE_EXYNOS           = 0x300
+ } cec_adapter_type;
+ 
+ typedef struct cec_menu_language
+diff -urN a/src/lib/adapter/AdapterFactory.cpp b/src/lib/adapter/AdapterFactory.cpp
+--- a/src/lib/adapter/AdapterFactory.cpp	2013-12-13 08:03:33.000000000 -0700
++++ b/src/lib/adapter/AdapterFactory.cpp	2014-01-09 13:45:12.475563291 -0700
+@@ -52,6 +52,11 @@
+ #include "TDA995x/TDA995xCECAdapterCommunication.h"
+ #endif
+ 
++#if defined(HAVE_EXYNOS_API)
++#include "Exynos/ExynosCECAdapterDetection.h"
++#include "Exynos/ExynosCECAdapterCommunication.h"
++#endif
++
+ using namespace std;
+ using namespace CEC;
+ 
+@@ -109,6 +114,19 @@
+   }
+ #endif
+ 
++#if defined(HAVE_EXYNOS_API)
++  if (iAdaptersFound < iBufSize && CExynosCECAdapterDetection::FindAdapter())
++  {
++    snprintf(deviceList[iAdaptersFound].strComPath, sizeof(deviceList[iAdaptersFound].strComPath), CEC_EXYNOS_PATH);
++    snprintf(deviceList[iAdaptersFound].strComName, sizeof(deviceList[iAdaptersFound].strComName), CEC_EXYNOS_VIRTUAL_COM);
++    deviceList[iAdaptersFound].iVendorId = 0;
++    deviceList[iAdaptersFound].iProductId = 0;
++    deviceList[iAdaptersFound].adapterType = ADAPTERTYPE_EXYNOS;
++    iAdaptersFound++;
++  }
++#endif
++
++
+ #if !defined(HAVE_RPI_API) && !defined(HAVE_P8_USB) && !defined(HAVE_TDA995X_API)
+ #error "libCEC doesn't have support for any type of adapter. please check your build system or configuration"
+ #endif
+@@ -123,6 +141,11 @@
+     return new CTDA995xCECAdapterCommunication(m_lib->m_cec);
+ #endif
+ 
++#if defined(HAVE_EXYNOS_API)
++  if (!strcmp(strPort, CEC_EXYNOS_VIRTUAL_COM))
++    return new CExynosCECAdapterCommunication(m_lib->m_cec);
++#endif
++
+ #if defined(HAVE_RPI_API)
+   if (!strcmp(strPort, CEC_RPI_VIRTUAL_COM))
+     return new CRPiCECAdapterCommunication(m_lib->m_cec);
+@@ -132,7 +155,7 @@
+   return new CUSBCECAdapterCommunication(m_lib->m_cec, strPort, iBaudRate);
+ #endif
+ 
+-#if !defined(HAVE_RPI_API) && !defined(HAVE_P8_USB) && !defined(HAVE_TDA995X_API)
++#if !defined(HAVE_RPI_API) && !defined(HAVE_P8_USB) && !defined(HAVE_TDA995X_API) && !defined(HAVE_EXYNOS_API)
+   return NULL;
+ #endif
+ }
+diff -urN a/src/lib/adapter/Exynos/AdapterMessageQueue.h b/src/lib/adapter/Exynos/AdapterMessageQueue.h
+--- a/src/lib/adapter/Exynos/AdapterMessageQueue.h	1969-12-31 17:00:00.000000000 -0700
++++ b/src/lib/adapter/Exynos/AdapterMessageQueue.h	2014-01-09 13:45:12.480563228 -0700
+@@ -0,0 +1,134 @@
++#pragma once
++/*
++ * This file is part of the libCEC(R) library.
++ *
++ * libCEC(R) is Copyright (C) 2011-2013 Pulse-Eight Limited.  All rights reserved.
++ * libCEC(R) is an original work, containing original code.
++ *
++ * libCEC(R) is a trademark of Pulse-Eight Limited.
++ *
++ * This program is dual-licensed; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ *
++ *
++ * Alternatively, you can license this library under a commercial license,
++ * please contact Pulse-Eight Licensing for more information.
++ *
++ * For more information contact:
++ * Pulse-Eight Licensing       <license@pulse-eight.com>
++ *     http://www.pulse-eight.com/
++ *     http://www.pulse-eight.net/
++ */
++
++#include "lib/platform/threads/mutex.h"
++
++namespace CEC
++{
++  using namespace PLATFORM;
++  
++  class CAdapterMessageQueueEntry
++  {
++  public:
++    CAdapterMessageQueueEntry(const cec_command &command)
++       : m_bWaiting(true), m_retval((uint32_t)-1), m_bSucceeded(false)
++    {
++      m_hash = hashValue(
++        uint32_t(command.opcode_set ? command.opcode : CEC_OPCODE_NONE),
++        command.initiator, command.destination);
++    }
++    
++    virtual ~CAdapterMessageQueueEntry(void) {}
++
++    /*!
++     * @brief Query result from worker thread
++     */
++    uint32_t Result() const
++    {
++      return m_retval;
++    }
++    
++    /*!
++     * @brief Signal waiting threads
++     */
++    void Broadcast(void)
++    {
++      CLockObject lock(m_mutex);
++      m_condition.Broadcast();
++    }
++
++    /*!
++     * @brief Signal waiting thread(s) when message matches this entry
++     */
++    bool CheckMatch(uint32_t opcode, cec_logical_address initiator, 
++                    cec_logical_address destination, uint32_t response)
++    {
++      uint32_t hash = hashValue(opcode, initiator, destination);
++      
++      if (hash == m_hash)
++      {
++        CLockObject lock(m_mutex);
++
++        m_retval = response;
++        m_bSucceeded = true;
++        m_condition.Signal();
++        return true;
++      }
++      
++      return false;
++    }
++
++    /*!
++     * @brief Wait for a response to this command.
++     * @param iTimeout The timeout to use while waiting.
++     * @return True when a response was received before the timeout passed, false otherwise.
++     */
++    bool Wait(uint32_t iTimeout)
++    {
++      CLockObject lock(m_mutex);
++      
++      bool bReturn = m_bSucceeded ? true : m_condition.Wait(m_mutex, m_bSucceeded, iTimeout);
++      m_bWaiting = false;
++      return bReturn;
++    }
++
++    /*!
++     * @return True while a thread is waiting for a signal or isn't waiting yet, false otherwise.
++     */
++    bool IsWaiting(void)
++    {
++      CLockObject lock(m_mutex);
++      return m_bWaiting;
++    }
++
++    /*!
++     * @return Hash value for given cec_command
++     */
++    static uint32_t hashValue(uint32_t opcode, 
++                              cec_logical_address initiator,  
++                              cec_logical_address destination)
++    {
++      return 1 | ((uint32_t)initiator << 8) | 
++             ((uint32_t)destination << 16) | ((uint32_t)opcode << 16);
++    }
++    
++  private:    
++    bool                         m_bWaiting;     /**< true while a thread is waiting or when it hasn't started waiting yet */
++    PLATFORM::CCondition<bool>   m_condition;    /**< the condition to wait on */
++    PLATFORM::CMutex             m_mutex;        /**< mutex for changes to this class */
++    uint32_t                     m_hash;
++    uint32_t                     m_retval;
++    bool                         m_bSucceeded;
++  };
++ 
++};
+diff -urN a/src/lib/adapter/Exynos/cec.h b/src/lib/adapter/Exynos/cec.h
+--- a/src/lib/adapter/Exynos/cec.h	1969-12-31 17:00:00.000000000 -0700
++++ b/src/lib/adapter/Exynos/cec.h	2014-01-09 13:45:12.490563102 -0700
+@@ -0,0 +1,11 @@
++#ifndef _LINUX_CEC_H_
++#define _LINUX_CEC_H_
++
++#define CEC_IOC_MAGIC        'c'
++
++/**
++ * CEC device request code to set logical address.
++ */
++#define CEC_IOC_SETLADDR     _IOW(CEC_IOC_MAGIC, 0, unsigned int)
++
++#endif /* _LINUX_CEC_H_ */
+diff -urN a/src/lib/adapter/Exynos/ExynosCECAdapterCommunication.cpp b/src/lib/adapter/Exynos/ExynosCECAdapterCommunication.cpp
+--- a/src/lib/adapter/Exynos/ExynosCECAdapterCommunication.cpp	1969-12-31 17:00:00.000000000 -0700
++++ b/src/lib/adapter/Exynos/ExynosCECAdapterCommunication.cpp	2014-01-09 13:45:44.305161352 -0700
+@@ -0,0 +1,226 @@
++/*
++ * This file is part of the libCEC(R) library.
++ *
++ * libCEC(R) is Copyright (C) 2011-2013 Pulse-Eight Limited.  All rights reserved.
++ * libCEC(R) is an original work, containing original code.
++ *
++ * libCEC(R) is a trademark of Pulse-Eight Limited.
++ *
++ * This program is dual-licensed; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ *
++ *
++ * Alternatively, you can license this library under a commercial license,
++ * please contact Pulse-Eight Licensing for more information.
++ *
++ * For more information contact:
++ * Pulse-Eight Licensing       <license@pulse-eight.com>
++ *     http://www.pulse-eight.com/
++ *     http://www.pulse-eight.net/
++ */
++
++#include "env.h"
++
++#if defined(HAVE_EXYNOS_API)
++#include "ExynosCECAdapterCommunication.h"
++
++#include "lib/CECTypeUtils.h"
++#include "lib/LibCEC.h"
++#include "lib/platform/sockets/cdevsocket.h"
++#include "lib/platform/util/StdString.h"
++#include "lib/platform/util/buffer.h"
++
++extern "C" {
++#include "libcec.h"
++}
++
++using namespace std;
++using namespace CEC;
++using namespace PLATFORM;
++
++#include "AdapterMessageQueue.h"
++
++#define LIB_CEC m_callback->GetLib()
++
++
++CExynosCECAdapterCommunication::CExynosCECAdapterCommunication(IAdapterCommunicationCallback *callback) :
++    IAdapterCommunication(callback),
++    m_bLogicalAddressChanged(false)
++{ 
++  CLockObject lock(m_mutex);
++
++  m_iNextMessage = 0;
++  m_logicalAddresses.Clear();
++}
++
++
++CExynosCECAdapterCommunication::~CExynosCECAdapterCommunication(void)
++{
++  Close();
++
++  CLockObject lock(m_mutex);
++}
++
++
++bool CExynosCECAdapterCommunication::IsOpen(void)
++{
++  return IsInitialised();
++}
++
++    
++bool CExynosCECAdapterCommunication::Open(uint32_t iTimeoutMs, bool UNUSED(bSkipChecks), bool bStartListening)
++{
++  if (CECOpen())
++  {
++    if (!bStartListening || CreateThread())
++        return true;
++  }
++  CECClose();
++  return false;
++}
++
++
++void CExynosCECAdapterCommunication::Close(void)
++{
++  StopThread(0);
++
++  CECClose();
++}
++
++
++std::string CExynosCECAdapterCommunication::GetError(void) const
++{
++  std::string strError(m_strError);
++  return strError;
++}
++
++
++cec_adapter_message_state CExynosCECAdapterCommunication::Write(
++  const cec_command &data, bool &UNUSED(bRetry), uint8_t UNUSED(iLineTimeout), bool UNUSED(bIsReply))
++{
++  uint8_t buffer[CEC_MAX_FRAME_SIZE];
++  uint32_t size = 1;
++  cec_adapter_message_state rc = ADAPTER_MESSAGE_STATE_ERROR;
++
++  if ((size_t)data.parameters.size + data.opcode_set > sizeof(buffer))
++  {
++    LIB_CEC->AddLog(CEC_LOG_ERROR, "%s: data size too large !", __func__);
++    return ADAPTER_MESSAGE_STATE_ERROR;
++  }
++  
++  buffer[0] = (data.initiator << 4) | (data.destination & 0x0f);
++
++  if (data.opcode_set)
++  {
++    buffer[1] = data.opcode;
++    size++;
++
++    memcpy(&buffer[size], data.parameters.data, data.parameters.size);
++    size += data.parameters.size;
++  }
++    
++  if (CECSendMessage(buffer, size) != size)
++    LIB_CEC->AddLog(CEC_LOG_ERROR, "%s: write failed !", __func__);
++  else
++    rc = ADAPTER_MESSAGE_STATE_SENT_ACKED;
++
++  return rc;
++}
++
++
++uint16_t CExynosCECAdapterCommunication::GetFirmwareVersion(void)
++{
++  return 0;
++}
++
++
++cec_vendor_id CExynosCECAdapterCommunication::GetVendorId(void)
++{
++  return cec_vendor_id(0);
++}
++
++
++uint16_t CExynosCECAdapterCommunication::GetPhysicalAddress(void)
++{  
++  return 0x1000;
++}
++
++
++cec_logical_addresses CExynosCECAdapterCommunication::GetLogicalAddresses(void)
++{
++  CLockObject lock(m_mutex);
++
++  return m_logicalAddresses;
++}
++
++
++bool CExynosCECAdapterCommunication::SetLogicalAddresses(const cec_logical_addresses &addresses)
++{
++  unsigned int log_addr = addresses.primary;
++  
++  if (CECSetLogicalAddr(log_addr) == 0)
++  {
++    LIB_CEC->AddLog(CEC_LOG_ERROR, "%s: CECSetLogicalAddr failed !", __func__);
++    return false;
++  }
++  m_logicalAddresses = addresses;
++  m_bLogicalAddressChanged = true;
++  
++  return true;
++}
++
++
++void CExynosCECAdapterCommunication::HandleLogicalAddressLost(cec_logical_address UNUSED(oldAddress))
++{
++  if (CECSetLogicalAddr(CEC_MSG_BROADCAST) == 0)
++  {
++    LIB_CEC->AddLog(CEC_LOG_ERROR, "%s: CECSetLogicalAddr failed !", __func__);
++  }
++}
++
++
++void *CExynosCECAdapterCommunication::Process(void)
++{
++  bool bHandled;
++  uint8_t buffer[CEC_MAX_FRAME_SIZE];
++  uint32_t size;
++  uint32_t opcode, status;
++  cec_logical_address initiator, destination;
++
++  while (!IsStopped())
++  {
++    size = CECReceiveMessage(buffer, CEC_MAX_FRAME_SIZE, 1000000);
++    if ( size > 0)
++    {
++      initiator = cec_logical_address(buffer[0] >> 4);
++      destination = cec_logical_address(buffer[0] & 0x0f);
++      
++        cec_command cmd;
++
++        cec_command::Format(
++          cmd, initiator, destination,
++          ( size > 1 ) ? cec_opcode(buffer[1]) : CEC_OPCODE_NONE);
++
++        for( uint8_t i = 2; i < size; i++ )
++          cmd.parameters.PushBack(buffer[i]);
++
++        if (!IsStopped())
++          m_callback->OnCommandReceived(cmd);
++    }
++  }
++
++  return 0;
++}
++
++#endif	// HAVE_EXYNOS_API
+diff -urN a/src/lib/adapter/Exynos/ExynosCECAdapterCommunication.h b/src/lib/adapter/Exynos/ExynosCECAdapterCommunication.h
+--- a/src/lib/adapter/Exynos/ExynosCECAdapterCommunication.h	1969-12-31 17:00:00.000000000 -0700
++++ b/src/lib/adapter/Exynos/ExynosCECAdapterCommunication.h	2014-01-09 13:45:12.485563165 -0700
+@@ -0,0 +1,108 @@
++#pragma once
++/*
++ * This file is part of the libCEC(R) library.
++ *
++ * libCEC(R) is Copyright (C) 2011-2013 Pulse-Eight Limited.  All rights reserved.
++ * libCEC(R) is an original work, containing original code.
++ *
++ * libCEC(R) is a trademark of Pulse-Eight Limited.
++ *
++ * This program is dual-licensed; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ *
++ *
++ * Alternatively, you can license this library under a commercial license,
++ * please contact Pulse-Eight Licensing for more information.
++ *
++ * For more information contact:
++ * Pulse-Eight Licensing       <license@pulse-eight.com>
++ *     http://www.pulse-eight.com/
++ *     http://www.pulse-eight.net/
++ */
++
++#if defined(HAVE_EXYNOS_API)
++
++#include "lib/platform/threads/mutex.h"
++#include "lib/platform/threads/threads.h"
++#include "lib/platform/sockets/socket.h"
++#include "lib/adapter/AdapterCommunication.h"
++#include <map>
++
++namespace CEC
++{
++  class CAdapterMessageQueueEntry;
++
++  class CExynosCECAdapterCommunication : public IAdapterCommunication, public PLATFORM::CThread
++  {
++  public:
++    /*!
++     * @brief Create a new USB-CEC communication handler.
++     * @param callback The callback to use for incoming CEC commands.
++     */
++    CExynosCECAdapterCommunication(IAdapterCommunicationCallback *callback);
++    virtual ~CExynosCECAdapterCommunication(void);
++
++    /** @name IAdapterCommunication implementation */
++    ///{
++    bool Open(uint32_t iTimeoutMs = CEC_DEFAULT_CONNECT_TIMEOUT, bool bSkipChecks = false, bool bStartListening = true);
++    void Close(void);
++    bool IsOpen(void);
++    std::string GetError(void) const;
++    cec_adapter_message_state Write(const cec_command &data, bool &bRetry, uint8_t iLineTimeout, bool bIsReply);
++
++    bool SetLineTimeout(uint8_t UNUSED(iTimeout)) { return true; }
++    bool StartBootloader(void) { return false; }
++    bool SetLogicalAddresses(const cec_logical_addresses &addresses);
++    cec_logical_addresses GetLogicalAddresses(void);
++    bool PingAdapter(void) { return IsInitialised(); }
++    uint16_t GetFirmwareVersion(void);
++    uint32_t GetFirmwareBuildDate(void) { return 0; }
++    bool IsRunningLatestFirmware(void) { return true; }
++    bool PersistConfiguration(const libcec_configuration & UNUSED(configuration)) { return false; }
++    bool GetConfiguration(libcec_configuration & UNUSED(configuration)) { return false; }
++    std::string GetPortName(void) { return std::string("EXYNOS"); }
++    uint16_t GetPhysicalAddress(void);
++    bool SetControlledMode(bool UNUSED(controlled)) { return true; }
++    cec_vendor_id GetVendorId(void);
++    bool SupportsSourceLogicalAddress(const cec_logical_address address) { return address > CECDEVICE_TV && address <= CECDEVICE_BROADCAST; }
++    cec_adapter_type GetAdapterType(void) { return ADAPTERTYPE_EXYNOS; }
++    uint16_t GetAdapterVendorId(void) const { return 1; }
++    uint16_t GetAdapterProductId(void) const { return 1; }
++    void HandleLogicalAddressLost(cec_logical_address oldAddress);
++    void SetActiveSource(bool UNUSED(bSetTo), bool UNUSED(bClientUnregistered)) {}
++    ///}
++
++    /** @name PLATFORM::CThread implementation */
++    ///{
++    void *Process(void);
++    ///}
++
++  private:
++    bool IsInitialised(void) const { return 1; };
++
++    std::string                 m_strError; /**< current error message */
++
++    bool                        m_bLogicalAddressChanged;
++    cec_logical_addresses       m_logicalAddresses;
++
++    PLATFORM::CMutex            m_mutex;
++    
++    PLATFORM::CMutex            m_messageMutex;
++    uint32_t                    m_iNextMessage;
++    std::map<uint32_t, CAdapterMessageQueueEntry *> m_messages;
++  };
++  
++};
++
++#endif
+diff -urN a/src/lib/adapter/Exynos/ExynosCECAdapterDetection.cpp b/src/lib/adapter/Exynos/ExynosCECAdapterDetection.cpp
+--- a/src/lib/adapter/Exynos/ExynosCECAdapterDetection.cpp	1969-12-31 17:00:00.000000000 -0700
++++ b/src/lib/adapter/Exynos/ExynosCECAdapterDetection.cpp	2014-01-09 13:45:12.490563102 -0700
+@@ -0,0 +1,52 @@
++/*
++ * This file is part of the libCEC(R) library.
++ *
++ * libCEC(R) is Copyright (C) 2011-2013 Pulse-Eight Limited.  All rights reserved.
++ * libCEC(R) is an original work, containing original code.
++ *
++ * libCEC(R) is a trademark of Pulse-Eight Limited.
++ *
++ * This program is dual-licensed; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ *
++ *
++ * Alternatively, you can license this library under a commercial license,
++ * please contact Pulse-Eight Licensing for more information.
++ *
++ * For more information contact:
++ * Pulse-Eight Licensing       <license@pulse-eight.com>
++ *     http://www.pulse-eight.com/
++ *     http://www.pulse-eight.net/
++ */
++
++#include "env.h"
++#include <stdio.h>
++
++#if defined(HAVE_EXYNOS_API)
++#include "ExynosCECAdapterDetection.h"
++
++extern "C" {
++#include "libcec.h"
++}
++
++#define CEC_DEVICE_NAME         "/dev/CEC"
++
++using namespace CEC;
++
++bool CExynosCECAdapterDetection::FindAdapter(void)
++{
++  return access(CEC_DEVICE_NAME, 0) == 0;
++}
++
++#endif
+diff -urN a/src/lib/adapter/Exynos/ExynosCECAdapterDetection.h b/src/lib/adapter/Exynos/ExynosCECAdapterDetection.h
+--- a/src/lib/adapter/Exynos/ExynosCECAdapterDetection.h	1969-12-31 17:00:00.000000000 -0700
++++ b/src/lib/adapter/Exynos/ExynosCECAdapterDetection.h	2014-01-09 13:45:12.490563102 -0700
+@@ -0,0 +1,41 @@
++#pragma once
++/*
++ * This file is part of the libCEC(R) library.
++ *
++ * libCEC(R) is Copyright (C) 2011-2013 Pulse-Eight Limited.  All rights reserved.
++ * libCEC(R) is an original work, containing original code.
++ *
++ * libCEC(R) is a trademark of Pulse-Eight Limited.
++ *
++ * This program is dual-licensed; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ *
++ *
++ * Alternatively, you can license this library under a commercial license,
++ * please contact Pulse-Eight Licensing for more information.
++ *
++ * For more information contact:
++ * Pulse-Eight Licensing       <license@pulse-eight.com>
++ *     http://www.pulse-eight.com/
++ *     http://www.pulse-eight.net/
++ */
++
++namespace CEC
++{
++  class CExynosCECAdapterDetection
++  {
++  public:
++    static bool FindAdapter(void);
++  };
++}
+diff -urN a/src/lib/adapter/Exynos/libcec.c b/src/lib/adapter/Exynos/libcec.c
+--- a/src/lib/adapter/Exynos/libcec.c	1969-12-31 17:00:00.000000000 -0700
++++ b/src/lib/adapter/Exynos/libcec.c	2014-01-09 13:45:38.320237073 -0700
+@@ -0,0 +1,385 @@
++/*
++* Copyright@ Samsung Electronics Co. LTD
++*
++* Licensed under the Apache License, Version 2.0 (the "License");
++* you may not use this file except in compliance with the License.
++* You may obtain a copy of the License at
++*
++*      http://www.apache.org/licenses/LICENSE-2.0
++*
++* Unless required by applicable law or agreed to in writing, software
++* distributed under the License is distributed on an "AS IS" BASIS,
++* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++* See the License for the specific language governing permissions and
++* limitations under the License.
++*/
++
++#include <stdio.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <sys/ioctl.h>
++#include <unistd.h>
++#include <stdlib.h>
++
++#include "libcec.h"
++/* drv. header */
++#include "cec.h"
++
++#define ALOGE(args...) printf(args);
++#define ALOGI(args...) printf(args);
++
++/**
++ * @def CEC_DEVICE_NAME
++ * Defines simbolic name of the CEC device.
++ */
++#define CEC_DEVICE_NAME         "/dev/CEC"
++
++static struct {
++    enum CECDeviceType devtype;
++    unsigned char laddr;
++} laddresses[] = {
++    { CEC_DEVICE_RECODER, 1  },
++    { CEC_DEVICE_RECODER, 2  },
++    { CEC_DEVICE_TUNER,   3  },
++    { CEC_DEVICE_PLAYER,  4  },
++    { CEC_DEVICE_AUDIO,   5  },
++    { CEC_DEVICE_TUNER,   6  },
++    { CEC_DEVICE_TUNER,   7  },
++    { CEC_DEVICE_PLAYER,  8  },
++    { CEC_DEVICE_RECODER, 9  },
++    { CEC_DEVICE_TUNER,   10 },
++    { CEC_DEVICE_PLAYER,  11 },
++};
++
++int CECSetLogicalAddr(unsigned int laddr);
++
++#ifdef CEC_DEBUGGING
++inline static void CECPrintFrame(unsigned char *buffer, unsigned int size);
++#endif
++
++static int fd = -1;
++
++/**
++ * Open device driver and assign CEC file descriptor.
++ *
++ * @return  If success to assign CEC file descriptor, return 1; otherwise, return 0.
++ */
++int CECOpen()
++{
++    int res = 1;
++
++    if (fd != -1)
++        CECClose();
++
++    if ((fd = open(CEC_DEVICE_NAME, O_RDWR)) < 0) {
++        ALOGE("Can't open %s!\n", CEC_DEVICE_NAME);
++        res = 0;
++    }
++
++    return res;
++}
++
++/**
++ * Close CEC file descriptor.
++ *
++ * @return  If success to close CEC file descriptor, return 1; otherwise, return 0.
++ */
++int CECClose()
++{
++    int res = 1;
++
++    if (fd != -1) {
++        if (close(fd) != 0) {
++            ALOGE("close() failed!\n");
++            res = 0;
++        }
++        fd = -1;
++    }
++
++    return res;
++}
++
++/**
++ * Allocate logical address.
++ *
++ * @param paddr   [in] CEC device physical address.
++ * @param devtype [in] CEC device type.
++ *
++ * @return new logical address, or 0 if an arror occured.
++ */
++int CECAllocLogicalAddress(int paddr, enum CECDeviceType devtype)
++{
++    unsigned char laddr = CEC_LADDR_UNREGISTERED;
++    int i = 0;
++
++    if (fd == -1) {
++        ALOGE("open device first!\n");
++        return 0;
++    }
++
++    if (CECSetLogicalAddr(laddr) < 0) {
++        ALOGE("CECSetLogicalAddr() failed!\n");
++        return 0;
++    }
++
++    if (paddr == CEC_NOT_VALID_PHYSICAL_ADDRESS)
++        return CEC_LADDR_UNREGISTERED;
++
++    /* send "Polling Message" */
++    while (i < sizeof(laddresses)/sizeof(laddresses[0])) {
++        if (laddresses[i].devtype == devtype) {
++            unsigned char _laddr = laddresses[i].laddr;
++            unsigned char message = ((_laddr << 4) | _laddr);
++            if (CECSendMessage(&message, 1) != 1) {
++                laddr = _laddr;
++                break;
++            }
++        }
++        i++;
++    }
++
++    if (laddr == CEC_LADDR_UNREGISTERED) {
++        ALOGE("All LA addresses in use!!!\n");
++        return CEC_LADDR_UNREGISTERED;
++    }
++
++    if (CECSetLogicalAddr(laddr) < 0) {
++        ALOGE("CECSetLogicalAddr() failed!\n");
++        return 0;
++    }
++
++    /* broadcast "Report Physical Address" */
++    unsigned char buffer[5];
++    buffer[0] = (laddr << 4) | CEC_MSG_BROADCAST;
++    buffer[1] = CEC_OPCODE_REPORT_PHYSICAL_ADDRESS;
++    buffer[2] = (paddr >> 8) & 0xFF;
++    buffer[3] = paddr & 0xFF;
++    buffer[4] = devtype;
++
++    if (CECSendMessage(buffer, 5) != 5) {
++        ALOGE("CECSendMessage() failed!\n");
++        return 0;
++    }
++
++    return laddr;
++}
++
++/**
++ * Send CEC message.
++ *
++ * @param *buffer   [in] pointer to buffer address where message located.
++ * @param size      [in] message size.
++ *
++ * @return number of bytes written, or 0 if an arror occured.
++ */
++int CECSendMessage(unsigned char *buffer, int size)
++{
++    if (fd == -1) {
++        ALOGE("open device first!\n");
++        return 0;
++    }
++
++    if (size > CEC_MAX_FRAME_SIZE) {
++        ALOGE("size should not exceed %d\n", CEC_MAX_FRAME_SIZE);
++        return 0;
++    }
++
++#if CEC_DEBUGGING
++    ALOGI("CECSendMessage() : ");
++    CECPrintFrame(buffer, size);
++#endif
++
++    return write(fd, buffer, size);
++}
++
++/**
++ * Receive CEC message.
++ *
++ * @param *buffer   [in] pointer to buffer address where message will be stored.
++ * @param size      [in] buffer size.
++ * @param timeout   [in] timeout in microseconds.
++ *
++ * @return number of bytes received, or 0 if an arror occured.
++ */
++int CECReceiveMessage(unsigned char *buffer, int size, long timeout)
++{
++    int bytes = 0;
++    fd_set rfds;
++    struct timeval tv;
++    int retval;
++
++    if (fd == -1) {
++        ALOGE("open device first!\n");
++        return 0;
++    }
++
++    tv.tv_sec = 0;
++    tv.tv_usec = timeout;
++
++    FD_ZERO(&rfds);
++    FD_SET(fd, &rfds);
++
++    retval = select(fd + 1, &rfds, NULL, NULL, &tv);
++
++    if (retval == -1) {
++        return 0;
++    } else if (retval) {
++        bytes = read(fd, buffer, size);
++#if CEC_DEBUGGING
++        ALOGI("CECReceiveMessage() : size(%d)", bytes);
++        if(bytes > 0)
++            CECPrintFrame(buffer, bytes);
++#endif
++    }
++
++    return bytes;
++}
++
++/**
++ * Set CEC logical address.
++ *
++ * @return 1 if success, otherwise, return 0.
++ */
++int CECSetLogicalAddr(unsigned int laddr)
++{
++    if (ioctl(fd, CEC_IOC_SETLADDR, &laddr)) {
++        ALOGE("ioctl(CEC_IOC_SETLA) failed!\n");
++        return 0;
++    }
++
++    return 1;
++}
++
++#if CEC_DEBUGGING
++/**
++ * Print CEC frame.
++ */
++void CECPrintFrame(unsigned char *buffer, unsigned int size)
++{
++    if (size > 0) {
++        int i;
++        ALOGI("fsize: %d ", size);
++        ALOGI("frame: ");
++        for (i = 0; i < size; i++)
++            ALOGI("0x%02x ", buffer[i]);
++
++        ALOGI("\n");
++    }
++}
++#endif
++
++/**
++ * Check CEC message.
++ *
++ * @param opcode   [in] pointer to buffer address where message will be stored.
++ * @param lsrc     [in] buffer size.
++ *
++ * @return 1 if message should be ignored, otherwise, return 0.
++ */
++//TODO: not finished
++int CECIgnoreMessage(unsigned char opcode, unsigned char lsrc)
++{
++    int retval = 0;
++
++    /* if a message coming from address 15 (unregistered) */
++    if (lsrc == CEC_LADDR_UNREGISTERED) {
++        switch (opcode) {
++        case CEC_OPCODE_DECK_CONTROL:
++        case CEC_OPCODE_PLAY:
++            retval = 1;
++        default:
++            break;
++        }
++    }
++
++    return retval;
++}
++
++/**
++ * Check CEC message.
++ *
++ * @param opcode   [in] pointer to buffer address where message will be stored.
++ * @param size     [in] message size.
++ *
++ * @return 0 if message should be ignored, otherwise, return 1.
++ */
++//TODO: not finished
++int CECCheckMessageSize(unsigned char opcode, int size)
++{
++    int retval = 1;
++
++    switch (opcode) {
++    case CEC_OPCODE_REQUEST_ACTIVE_SOURCE:
++        if (size != 1)
++            retval = 0;
++        break;
++    case CEC_OPCODE_SET_SYSTEM_AUDIO_MODE:
++        if (size != 2)
++            retval = 0;
++        break;
++    case CEC_OPCODE_PLAY:
++    case CEC_OPCODE_DECK_CONTROL:
++    case CEC_OPCODE_SET_MENU_LANGUAGE:
++    case CEC_OPCODE_ACTIVE_SOURCE:
++    case CEC_OPCODE_ROUTING_INFORMATION:
++    case CEC_OPCODE_SET_STREAM_PATH:
++        if (size != 3)
++            retval = 0;
++        break;
++    case CEC_OPCODE_FEATURE_ABORT:
++    case CEC_OPCODE_DEVICE_VENDOR_ID:
++    case CEC_OPCODE_REPORT_PHYSICAL_ADDRESS:
++        if (size != 4)
++            retval = 0;
++        break;
++    case CEC_OPCODE_ROUTING_CHANGE:
++        if (size != 5)
++            retval = 0;
++        break;
++    /* CDC - 1.4 */
++    case 0xf8:
++        if (!(size > 5 && size <= 16))
++            retval = 0;
++        break;
++    default:
++        break;
++    }
++
++    return retval;
++}
++
++/**
++ * Check CEC message.
++ *
++ * @param opcode    [in] pointer to buffer address where message will be stored.
++ * @param broadcast [in] broadcast/direct message.
++ *
++ * @return 0 if message should be ignored, otherwise, return 1.
++ */
++//TODO: not finished
++int CECCheckMessageMode(unsigned char opcode, int broadcast)
++{
++    int retval = 1;
++
++    switch (opcode) {
++    case CEC_OPCODE_REQUEST_ACTIVE_SOURCE:
++    case CEC_OPCODE_SET_MENU_LANGUAGE:
++    case CEC_OPCODE_ACTIVE_SOURCE:
++        if (!broadcast)
++            retval = 0;
++        break;
++    case CEC_OPCODE_GIVE_PHYSICAL_ADDRESS:
++    case CEC_OPCODE_DECK_CONTROL:
++    case CEC_OPCODE_PLAY:
++    case CEC_OPCODE_FEATURE_ABORT:
++    case CEC_OPCODE_ABORT:
++        if (broadcast)
++            retval = 0;
++        break;
++    default:
++        break;
++    }
++
++    return retval;
++}
+diff -urN a/src/lib/adapter/Exynos/libcec.h b/src/lib/adapter/Exynos/libcec.h
+--- a/src/lib/adapter/Exynos/libcec.h	1969-12-31 17:00:00.000000000 -0700
++++ b/src/lib/adapter/Exynos/libcec.h	2014-01-09 13:45:12.500562976 -0700
+@@ -0,0 +1,210 @@
++/*
++ * Copyright@ Samsung Electronics Co. LTD
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef _LIBCEC_H_
++#define _LIBCEC_H_
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/** Maximum CEC frame size */
++#define CEC_MAX_FRAME_SIZE                16
++/** Not valid CEC physical address */
++#define CEC_NOT_VALID_PHYSICAL_ADDRESS    0xFFFF
++
++/** CEC broadcast address (as destination address) */
++#define CEC_MSG_BROADCAST        0x0F
++/** CEC unregistered address (as initiator address) */
++#define CEC_LADDR_UNREGISTERED   0x0F
++
++/*
++ * CEC Messages
++ */
++
++//@{
++/** @name Messages for the One Touch Play Feature */
++#define CEC_OPCODE_ACTIVE_SOURCE            0x82
++#define CEC_OPCODE_IMAGE_VIEW_ON            0x04
++#define CEC_OPCODE_TEXT_VIEW_ON             0x0D
++//@}
++
++//@{
++/** @name Messages for the Routing Control Feature */
++#define CEC_OPCODE_INACTIVE_SOURCE          0x9D
++#define CEC_OPCODE_REQUEST_ACTIVE_SOURCE    0x85
++#define CEC_OPCODE_ROUTING_CHANGE           0x80
++#define CEC_OPCODE_ROUTING_INFORMATION      0x81
++#define CEC_OPCODE_SET_STREAM_PATH          0x86
++//@}
++
++//@{
++/** @name Messages for the Standby Feature */
++#define CEC_OPCODE_STANDBY                  0x36
++//@}
++
++//@{
++/** @name Messages for the One Touch Record Feature */
++#define CEC_OPCODE_RECORD_OFF               0x0B
++#define CEC_OPCODE_RECORD_ON                0x09
++#define CEC_OPCODE_RECORD_STATUS            0x0A
++#define CEC_OPCODE_RECORD_TV_SCREEN         0x0F
++//@}
++
++//@{
++/** @name Messages for the Timer Programming Feature */
++#define CEC_OPCODE_CLEAR_ANALOGUE_TIMER     0x33
++#define CEC_OPCODE_CLEAR_DIGITAL_TIMER      0x99
++#define CEC_OPCODE_CLEAR_EXTERNAL_TIMER     0xA1
++#define CEC_OPCODE_SET_ANALOGUE_TIMER       0x34
++#define CEC_OPCODE_SET_DIGITAL_TIMER        0x97
++#define CEC_OPCODE_SET_EXTERNAL_TIMER       0xA2
++#define CEC_OPCODE_SET_TIMER_PROGRAM_TITLE  0x67
++#define CEC_OPCODE_TIMER_CLEARED_STATUS     0x43
++#define CEC_OPCODE_TIMER_STATUS             0x35
++//@}
++
++//@{
++/** @name Messages for the System Information Feature */
++#define CEC_OPCODE_CEC_VERSION              0x9E
++#define CEC_OPCODE_GET_CEC_VERSION          0x9F
++#define CEC_OPCODE_GIVE_PHYSICAL_ADDRESS    0x83
++#define CEC_OPCODE_GET_MENU_LANGUAGE        0x91
++//#define CEC_OPCODE_POLLING_MESSAGE
++#define CEC_OPCODE_REPORT_PHYSICAL_ADDRESS  0x84
++#define CEC_OPCODE_SET_MENU_LANGUAGE        0x32
++//@}
++
++//@{
++/** @name Messages for the Deck Control Feature */
++#define CEC_OPCODE_DECK_CONTROL             0x42
++#define CEC_OPCODE_DECK_STATUS              0x1B
++#define CEC_OPCODE_GIVE_DECK_STATUS         0x1A
++#define CEC_OPCODE_PLAY                     0x41
++//@}
++
++//@{
++/** @name Messages for the Tuner Control Feature */
++#define CEC_OPCODE_GIVE_TUNER_DEVICE_STATUS 0x08
++#define CEC_OPCODE_SELECT_ANALOGUE_SERVICE  0x92
++#define CEC_OPCODE_SELECT_DIGITAL_SERVICE   0x93
++#define CEC_OPCODE_TUNER_DEVICE_STATUS      0x07
++#define CEC_OPCODE_TUNER_STEP_DECREMENT     0x06
++#define CEC_OPCODE_TUNER_STEP_INCREMENT     0x05
++//@}
++
++//@{
++/** @name Messages for the Vendor Specific Commands Feature */
++#define CEC_OPCODE_DEVICE_VENDOR_ID         0x87
++#define CEC_OPCODE_GET_DEVICE_VENDOR_ID     0x8C
++#define CEC_OPCODE_VENDOR_COMMAND           0x89
++#define CEC_OPCODE_VENDOR_COMMAND_WITH_ID   0xA0
++#define CEC_OPCODE_VENDOR_REMOTE_BUTTON_DOWN 0x8A
++#define CEC_OPCODE_VENDOR_REMOVE_BUTTON_UP  0x8B
++//@}
++
++//@{
++/** @name Messages for the OSD Display Feature */
++#define CEC_OPCODE_SET_OSD_STRING           0x64
++//@}
++
++//@{
++/** @name Messages for the Device OSD Transfer Feature */
++#define CEC_OPCODE_GIVE_OSD_NAME            0x46
++#define CEC_OPCODE_SET_OSD_NAME             0x47
++//@}
++
++//@{
++/** @name Messages for the Device Menu Control Feature */
++#define CEC_OPCODE_MENU_REQUEST             0x8D
++#define CEC_OPCODE_MENU_STATUS              0x8E
++#define CEC_OPCODE_USER_CONTROL_PRESSED     0x44
++#define CEC_OPCODE_USER_CONTROL_RELEASED    0x45
++//@}
++
++//@{
++/** @name Messages for the Remote Control Passthrough Feature */
++//@}
++
++//@{
++/** @name Messages for the Power Status Feature */
++#define CEC_OPCODE_GIVE_DEVICE_POWER_STATUS 0x8F
++#define CEC_OPCODE_REPORT_POWER_STATUS      0x90
++//@}
++
++//@{
++/** @name Messages for General Protocol messages */
++#define CEC_OPCODE_FEATURE_ABORT            0x00
++#define CEC_OPCODE_ABORT                    0xFF
++//@}
++
++//@{
++/** @name Messages for the System Audio Control Feature */
++#define CEC_OPCODE_GIVE_AUDIO_STATUS        0x71
++#define CEC_OPCODE_GIVE_SYSTEM_AUDIO_MODE_STATUS 0x7D
++#define CEC_OPCODE_REPORT_AUDIO_STATUS      0x7A
++#define CEC_OPCODE_SET_SYSTEM_AUDIO_MODE    0x72
++#define CEC_OPCODE_SYSTEM_AUDIO_MODE_REQUEST 0x70
++#define CEC_OPCODE_SYSTEM_AUDIO_MODE_STATUS 0x7E
++//@}
++
++//@{
++/** @name Messages for the Audio Rate Control Feature */
++#define CEC_OPCODE_SET_AUDIO_RATE           0x9A
++//@}
++
++//@{
++/** @name CEC Operands */
++
++//TODO: not finished
++
++#define CEC_DECK_CONTROL_MODE_STOP      0x03
++#define CEC_PLAY_MODE_PLAY_FORWARD      0x24
++//@}
++
++/**
++ * @enum CECDeviceType
++ * Type of CEC device
++ */
++enum CECDeviceType {
++    /** TV */
++    CEC_DEVICE_TV,
++    /** Recording Device */
++    CEC_DEVICE_RECODER,
++    /** Tuner */
++    CEC_DEVICE_TUNER,
++    /** Playback Device */
++    CEC_DEVICE_PLAYER,
++    /** Audio System */
++    CEC_DEVICE_AUDIO,
++};
++
++int CECOpen();
++int CECClose();
++int CECAllocLogicalAddress(int paddr, enum CECDeviceType devtype);
++int CECSetLogicalAddr(unsigned int laddr);
++int CECSendMessage(unsigned char *buffer, int size);
++int CECReceiveMessage(unsigned char *buffer, int size, long timeout);
++
++int CECIgnoreMessage(unsigned char opcode, unsigned char lsrc);
++int CECCheckMessageSize(unsigned char opcode, int size);
++int CECCheckMessageMode(unsigned char opcode, int broadcast);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _LIBCEC_H_ */
+diff -urN a/src/lib/Makefile.am b/src/lib/Makefile.am
+--- a/src/lib/Makefile.am	2013-12-13 08:03:33.000000000 -0700
++++ b/src/lib/Makefile.am	2014-01-09 13:45:12.475563291 -0700
+@@ -59,5 +59,11 @@
+                      adapter/TDA995x/TDA995xCECAdapterCommunication.cpp
+ endif
+ 
++## Exynos support
++if USE_EXYNOS_API
++libcec_la_SOURCES += adapter/Exynos/ExynosCECAdapterDetection.cpp \
++                     adapter/Exynos/ExynosCECAdapterCommunication.cpp \
++		     adapter/Exynos/libcec.c
++endif
+ 
+ libcec_la_LDFLAGS = @LIBS_LIBCEC@ -version-info @VERSION@
