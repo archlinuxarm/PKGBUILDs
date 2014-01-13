@@ -22,13 +22,6 @@ source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
 md5sums=('8544c0ab3e438a08b5103421ea15b6d2'
          '5c65a0fe315dd347e09b1f2826a1df5a')
 
-prepare() {
-  cd ${srcdir}/?esa-*
-
-  # Cherry picked from mesa branch 10.0, this fix wxgtk rebuild (FS#38392)
-  patch -Np1 -i ../revert.remove.GLXContextID.typedef.patch
-}
-
 build() {
   cd ${srcdir}/?esa-*
 
