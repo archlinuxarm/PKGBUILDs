@@ -3,59 +3,44 @@
 
 buildarch=4
 
-_mach=sun4i
-_github_user=linux-sunxi
-_github_repo=linux-sunxi
-_github_commitID=9cfbbed3b2b098774b04553843d2f4092b8f7fe8
-pkgbase=linux-${_mach}
-pkgname=("linux-${_mach}" "linux-headers-${_mach}")
-# pkgname=linux-custom       # Build kernel with a different name
+pkgbase=linux-sun4i
+_commit=9cfbbed3b2b098774b04553843d2f4092b8f7fe8
+_srcname=linux-sunxi-${_commit}
 _kernelname=${pkgname#linux}
-_basekernel=3.0
-pkgver=${_basekernel}.75
+_desc="AllWinner A10"
+pkgver=3.4.75
 pkgrel=1
 arch=('armv7h')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage')
+makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'bc' 'kmod' 'inetutils')
 options=('!strip')
-source=('config'
-        'change-default-console-loglevel.patch'
-        "linux.tar.gz::https://github.com/${_github_user}/${_github_repo}/tarball/${_github_commitID}"
+source=("https://github.com/linux-sunxi/linux-sunxi/archive/${_commit}.tar.gz"
+        'config'
         'memset.patch')
-md5sums=('907230d720dab07f7e29c541b5ef2d32'
-         '9d3c56a4b999c8bfbd4018089a62f662'
-         'f90f3b570528cb60027261422f68b841'
+md5sums=('a40190d501993b35b0022889e2f64902'
+         '907230d720dab07f7e29c541b5ef2d32'
          '39be2896f0b968d61a19b33da75ce6e0')
 
-build() {
-  cd ${srcdir}
-  # the github-commit-tarball issue results in this, rename it sanely
-  mv "${_github_user}-${_github_repo}-${_github_commitID:0:7}" linux
-
-  cd linux
+prepare() {
+  cd "${srcdir}/${_srcname}"
 
   # GCC 4.8 memset patch
   patch -p1 -i ../memset.patch
 
-  # add upstream patch
-  #patch -p1 -i "${srcdir}/patch-${pkgver}"
-
-  # add latest fixes from stable queue, if needed
-  # http://git.kernel.org/?p=linux/kernel/git/stable/stable-queue.git
-
-  # set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)
-  # remove this when a Kconfig knob is made available by upstream
-  # (relevant patch sent upstream: https://lkml.org/lkml/2011/7/26/227)
-  patch -Np1 -i "${srcdir}/change-default-console-loglevel.patch"
-
   cat "${srcdir}/config" > ./.config
 
-  # set extraversion to pkgrel
-  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
+  # add pkgrel to extraversion
+  sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
+}
+
+build() {
+  cd "${srcdir}/${_srcname}"
+
+  LDFLAGS=""
 
   # get kernel version
   make prepare
@@ -84,17 +69,16 @@ build() {
   make ${MAKEFLAGS} modules uImage
 }
 
-package_linux-sun4i() {
-  pkgdesc="The Linux Kernel and modules for AllWinner A10"
+_package() {
+  pkgdesc="The Linux Kernel and modules - ${_desc}"
   depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=("kernel26-${_mach}" "linux=${_mach}")
+  provides=("kernel26" "linux=${pkgver}")
   conflicts=('kernel26' 'linux')
-  replaces=('kernel26')
   backup=("etc/mkinitcpio.d/${pkgname}.preset")
   install=${pkgname}.install
 
-  cd "${srcdir}/linux"
+  cd "${srcdir}/${_srcname}"
 
   KARCH=arm
 
@@ -105,7 +89,7 @@ package_linux-sun4i() {
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
   #cd arch/$KARCH/boot/
 
-  cd "${srcdir}/linux"
+  cd "${srcdir}/${_srcname}"
   #cp arch/$KARCH/boot/kernel.img ${pkgdir}/boot/kernel.img
   cp arch/$KARCH/boot/uImage "${pkgdir}/boot/uImage"
 
@@ -135,8 +119,8 @@ package_linux-sun4i() {
   mv "$pkgdir/lib" "$pkgdir/usr"
 }
 
-package_linux-headers-sun4i() {
-  pkgdesc="Header files and scripts for building modules for linux kernel for AllWinner A10"
+_package-headers() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - ${_desc}"
   provides=('kernel26-headers' "linux-headers=${pkgver}")
   conflicts=('kernel26-headers')
   replaces=('kernel26-headers')
@@ -146,7 +130,7 @@ package_linux-headers-sun4i() {
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/linux"
+  cd "${srcdir}/${_srcname}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -166,8 +150,8 @@ package_linux-headers-sun4i() {
   cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
 
   ## YOUR MACH HERE, this is using the $_mach ##
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-${_mach}   
-  cp -a arch/$KARCH/mach-${_mach}/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-${_mach}/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-sun4i   
+  cp -a arch/$KARCH/mach-sun4i/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-sun4i/
 
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
@@ -264,3 +248,10 @@ package_linux-headers-sun4i() {
   # remove unneeded architectures
   rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
 }
+
+pkgname=("${pkgbase}" "${pkgbase}-headers")
+for _p in ${pkgname[@]}; do
+  eval "package_${_p}() {
+    _package${_p#${pkgbase}}
+  }"
+done
