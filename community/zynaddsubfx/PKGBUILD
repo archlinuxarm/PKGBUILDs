@@ -1,0 +1,74 @@
+# $Id$
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Maintainer: SpepS <dreamspepser at yahoo dot it>
+# Contributor: Ionut Biru <ibiru@archlinux.org>
+# Contributor: DonVla <donvla@users.sourceforge.net>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to remove hardcoded sse flags
+
+pkgname=zynaddsubfx
+pkgver=2.4.3
+pkgrel=2
+pkgdesc="Opensource software synthesizer capable of making a countless number of instruments."
+arch=('i686' 'x86_64')
+url="http://zynaddsubfx.sourceforge.net"
+license=('GPL')
+depends=('fltk' 'libgl' 'fftw' 'lash' 'mxml')
+makedepends=('cmake' 'pkgconfig' 'mesa' 'setconf' 'gendesk')
+options=('!emptydirs')
+source=("http://switch.dl.sourceforge.net/sourceforge/$pkgname/ZynAddSubFX-$pkgver.tar.bz2"
+	"$pkgname.svg"
+        '0001-no_sse_generic.patch')
+md5sums=('2e8994cc54e5f1a64b77dfac3baf0d9a'
+         '6f7e9c3ce3947088a10c99c46a65431f'
+         'bb919ffbc606a6cfdfc137776c91c2b8')
+
+prepare() {
+  cd "ZynAddSubFX-$pkgver"
+
+  patch -p1 -i ../0001-no_sse_generic.patch
+}
+
+build() {
+  cd "$srcdir"
+  gendesk $startdir/PKGBUILD
+  setconf "$pkgname.desktop" Icon "$pkgname.svg"
+
+  cd "ZynAddSubFX-$pkgver"
+
+  sed -i '1,1i#include <unistd.h>' src/Nio/NulEngine.cpp
+
+  [ -d build ] || mkdir build && cd build
+  cmake \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DDefaultOutput=jack \
+    -DDefaultInput=jack \
+    -DGuiModule=fltk \
+    ..
+  make
+
+  # build external programs
+  cd ../ExternalPrograms/Spliter && make
+  cd ../Controller && sed -i "s|Box\.h|Box\.H|" ControllerUI.fl && make
+}
+
+package() {
+  cd "$srcdir/ZynAddSubFX-$pkgver/build"
+
+  make DESTDIR="$pkgdir/" install
+
+  # install external programs
+  install -Dm755 ../ExternalPrograms/Spliter/spliter "$pkgdir/usr/bin/spliter"
+  install -Dm755 ../ExternalPrograms/Controller/controller "$pkgdir/usr/bin/controller"
+  install -Dm644 ../ExternalPrograms/Spliter/readme.txt "$pkgdir/usr/share/doc/$pkgname/SPLITER.txt"
+
+  # banks and examples
+  install -d "$pkgdir/usr/share/$pkgname"
+  cp -a ../instruments/banks "$pkgdir/usr/share/$pkgname"
+  cp -a ../instruments/examples "$pkgdir/usr/share/$pkgname"
+
+  # desktop file and icon
+  install -Dm644 "$srcdir/$pkgname.svg" "$pkgdir/usr/share/pixmaps/$pkgname.svg"
+  install -Dm644 "$srcdir/$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
+}
