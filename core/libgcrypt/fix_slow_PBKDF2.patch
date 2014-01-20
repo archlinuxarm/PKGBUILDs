@@ -1,0 +1,75 @@
+From: Milan Broz <gmazyland@gmail.com>
+Date: Mon, 13 Jan 2014 20:30:42 +0000 (+0100)
+Subject: PBKDF2: Use gcry_md_reset to speed up calculation.
+X-Git-Url: http://git.gnupg.org/cgi-bin/gitweb.cgi?p=libgcrypt.git;a=commitdiff_plain;h=ead3a097a9ee5908e562e6ec683707c38191acf3
+
+PBKDF2: Use gcry_md_reset to speed up calculation.
+
+* cipher/kdf.c (_gcry_kdf_pkdf2): Use gcry_md_reset
+to speed up calculation.
+--
+
+Current PBKDF2 implementation uses gcry_md_set_key in every iteration
+which is extremely slow (even in comparison with other implementations).
+
+Use gcry_md_reset instead and set key only once.
+
+With this test program:
+
+  char input[32000], salt[8], key[16];
+  gcry_kdf_derive(input, sizeof(input), GCRY_KDF_PBKDF2,
+                  gcry_md_map_name("sha1"),
+                  salt, sizeof(salt), 100000, sizeof(key), key);
+
+running time without patch:
+  real    0m11.165s
+  user    0m11.136s
+  sys     0m0.000s
+
+and with patch applied
+  real    0m0.230s
+  user    0m0.184s
+  sys     0m0.024s
+
+(The problem was found when cryptsetup started to use gcrypt internal PBKDF2
+and for very long keyfiles unlocking time increased drastically.
+See https://bugzilla.redhat.com/show_bug.cgi?id=1051733)
+
+Signed-off-by: Milan Broz <gmazyland@gmail.com>
+(cherry picked from commit 04cda6b7cc16f3f52c12d9d3e46c56701003496e)
+---
+
+diff --git a/cipher/kdf.c b/cipher/kdf.c
+index 503f068..af0dc48 100644
+--- a/cipher/kdf.c
++++ b/cipher/kdf.c
+@@ -175,19 +175,21 @@ _gcry_kdf_pkdf2 (const void *passphrase, size_t passphraselen,
+       return ec;
+     }
+ 
++  ec = _gcry_md_setkey (md, passphrase, passphraselen);
++  if (ec)
++    {
++      _gcry_md_close (md);
++      xfree (sbuf);
++      return ec;
++    }
++
+   /* Step 3 and 4. */
+   memcpy (sbuf, salt, saltlen);
+   for (lidx = 1; lidx <= l; lidx++)
+     {
+       for (iter = 0; iter < iterations; iter++)
+         {
+-          ec = _gcry_md_setkey (md, passphrase, passphraselen);
+-          if (ec)
+-            {
+-              _gcry_md_close (md);
+-              xfree (sbuf);
+-              return ec;
+-            }
++          _gcry_md_reset (md);
+           if (!iter) /* Compute U_1:  */
+             {
+               sbuf[saltlen]     = (lidx >> 24);
+
