@@ -4,7 +4,7 @@ THISFILE=$0
 
 setclock() {
 	echo "Setting clock."
-	MYTIME=$(date -r $THISFILE '+%Y-%m-%d %r')
+	MYTIME=$(date -r $THISFILE '+%Y-%m-%d %H:%M:%S')
 	date --set="$MYTIME" &>/dev/null
 }
 
