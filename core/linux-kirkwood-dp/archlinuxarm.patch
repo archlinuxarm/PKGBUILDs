@@ -1,0 +1,4697 @@
+diff -ruN a/arch/arm/mach-kirkwood/bubba3-gpio.c b/arch/arm/mach-kirkwood/bubba3-gpio.c
+--- a/arch/arm/mach-kirkwood/bubba3-gpio.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/bubba3-gpio.c	2013-11-08 01:39:48.648006378 -0700
+@@ -0,0 +1,392 @@
++/*
++ * Excito BUBBA|3 led driver.
++ *
++ * Copyright (C) 2010 Excito Elektronik i Skåne AB
++ * Author: "Tor Krill" <tor@excito.com>
++ *
++ * This program is free software; you can redistribute  it and/or modify it
++ * under  the terms of  the GNU General  Public License as published by the
++ * Free Software Foundation;  either version 2 of the  License, or (at your
++ * option) any later version.
++ *
++ * This driver provides an interface to the GPIO functionality on BUBBA|3
++ */
++
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/gpio.h>
++#include <linux/kernel.h>
++#include <linux/delay.h>
++#include <linux/bubba3.h>
++#include <asm/mach-types.h>
++
++/* Mark this file for ident */
++static char* ver="0.1";
++static char* build=__DATE__ " " __TIME__;
++
++#define DEVNAME "bubbatwo"
++#define LED_DEFAULT_FREQ 0x8000
++
++/* Meta information for this module */
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Tor Krill <tor@excito.com>");
++MODULE_DESCRIPTION("BUBBA|3 led driver");
++
++/* Forwards */
++static int b3_probe(struct platform_device  *dev);
++static int b3_remove(struct platform_device *dev);
++static void b3_led_on(void);
++
++#define MODE_OFF	0
++#define MODE_BLINK	1
++#define MODE_LIT	2
++#define BUZZ_OFF	0
++#define BUZZ_ON		1
++#define LED_BLUE	0
++#define LED_RED		1
++#define LED_GREEN	2
++#define LED_BOOT	3
++#define LED_INSTALL	LED_GREEN
++
++struct b3_stateinfo{
++	u32 mode;
++	u32 freq;
++	u32 buzz;
++	u32 color;
++};
++
++static struct b3_stateinfo b3_data;
++
++static void b3_led_reset(void)
++{
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(1800);
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(1800);
++}
++
++static void b3_led_train_start(void)
++{
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(1800);
++}
++
++static void b3_led_train_end(void)
++{
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,1);
++	udelay(10);
++	gpio_set_value(B3_LED_INTERVAL,0);
++	udelay(1800);
++}
++
++static void b3_led_color(u32 color){
++	gpio_set_value(B3_FRONT_LED_RED,0);
++	gpio_set_value(B3_FRONT_LED_BLUE,0);
++	gpio_set_value(B3_FRONT_LED_GREEN,0);
++
++	switch(color){
++	case LED_BOOT:
++		gpio_set_value(B3_FRONT_LED_RED,1);
++		gpio_set_value(B3_FRONT_LED_BLUE,1);
++		break;
++	case LED_RED:
++		gpio_set_value(B3_FRONT_LED_RED,1);
++		break;
++	case LED_GREEN:
++		gpio_set_value(B3_FRONT_LED_GREEN,1);
++		break;
++	case LED_BLUE:
++	default:
++		gpio_set_value(B3_FRONT_LED_BLUE,1);
++		break;
++	}
++}
++
++static void b3_led_on(void)
++{
++	b3_led_color(b3_data.color);
++
++	b3_led_reset();
++
++	b3_led_train_start();
++	/* NOOP, pass through mode */
++	b3_led_train_end();
++
++	gpio_set_value(B3_LED_INTERVAL,1);
++}
++
++static void b3_led_off(void)
++{
++	gpio_set_value(B3_FRONT_LED_RED,0);
++	gpio_set_value(B3_FRONT_LED_BLUE,0);
++	gpio_set_value(B3_FRONT_LED_GREEN,0);
++
++	b3_led_reset();
++}
++
++static void b3_buzz_on(void)
++{
++	gpio_set_value(B3_BUZZER_ENABLE,1);
++}
++
++static void b3_buzz_off(void)
++{
++	gpio_set_value(B3_BUZZER_ENABLE,0);
++}
++
++
++static struct platform_device *b3_device;
++
++static struct platform_driver b3_driver = {
++		.driver = {
++				.name = DEVNAME,
++				.owner = THIS_MODULE,
++		},
++		.probe = b3_probe,
++		.remove = b3_remove,
++};
++
++static ssize_t	b3_show_ledmode(struct device *dev, struct device_attribute *attr, char *buffer)
++{
++	ssize_t len = 0;
++	switch(b3_data.mode){
++	case MODE_OFF:
++		len = sprintf (buffer+len, "off");
++		break;
++	case MODE_BLINK:
++		len = sprintf (buffer+len, "blink");
++		break;
++	case MODE_LIT:
++		len = sprintf (buffer+len, "lit");
++		break;
++	default:
++		len = sprintf (buffer+len, "unknown");
++	}
++
++	return len;
++}
++
++static ssize_t b3_store_ledmode(struct device *dev, struct device_attribute *attr,const char *buffer, size_t size)
++{
++
++	if(size<1){
++		return -EINVAL;
++	}
++	/* Do a nasty shortcut here only look at first char */
++	switch(buffer[0]){
++	case 'o':
++		b3_data.mode=MODE_OFF;
++		b3_led_off ();
++		break;
++	case 'b':
++		/* For now we dont allow blink. */
++	case 'l':
++		b3_data.mode=MODE_LIT;
++		b3_led_on ();
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return size;
++}
++
++static ssize_t	b3_show_ledfreq(struct device *dev, struct device_attribute *attr, char *buffer)
++{
++	ssize_t len = 0;
++
++	len = sprintf (buffer+len, "%u", b3_data.freq);
++
++	return len;
++}
++
++static ssize_t b3_store_ledfreq(struct device *dev, struct device_attribute *attr,const char *buffer, size_t size)
++{
++
++	b3_data.freq = simple_strtoul(buffer,NULL,0);
++
++	return size;
++}
++
++static ssize_t	b3_show_buzzer(struct device *dev, struct device_attribute *attr, char *buffer)
++{
++	ssize_t len = 0;
++
++	len = sprintf (buffer+len, "%u", b3_data.buzz);
++
++	return len;
++}
++
++static ssize_t b3_store_buzzer(struct device *dev, struct device_attribute *attr,const char *buffer, size_t size)
++{
++
++	b3_data.buzz = simple_strtoul(buffer,NULL,0);
++
++	b3_data.buzz = (b3_data.buzz>0) ? BUZZ_ON : BUZZ_OFF;
++
++	if(b3_data.buzz==BUZZ_ON){
++		b3_buzz_on();
++	}else{
++		b3_buzz_off();
++	}
++
++	return size;
++}
++
++static ssize_t	b3_show_color(struct device *dev, struct device_attribute *attr, char *buffer)
++{
++	ssize_t len = 0;
++
++	len = sprintf (buffer+len, "%u", b3_data.color);
++
++	return len;
++}
++
++static ssize_t b3_store_color(struct device *dev, struct device_attribute *attr,const char *buffer, size_t size)
++{
++
++	b3_data.color = simple_strtoul(buffer,NULL,0);
++
++	b3_data.color = (b3_data.color>LED_BOOT) ? LED_BOOT : b3_data.color;
++
++	b3_led_color(b3_data.color);
++
++	return size;
++}
++
++static struct gpio bubba_gpios[] = {
++#ifdef CONFIG_BUBBA3_INSTALL
++	{ B3_FRONT_LED_RED, GPIOF_OUT_INIT_LOW, "Red LED"},
++	{ B3_FRONT_LED_BLUE, GPIOF_OUT_INIT_LOW, "Blue LED"},
++	{ B3_FRONT_LED_GREEN, GPIOF_OUT_INIT_HIGH, "Green LED"},
++#else
++	{ B3_FRONT_LED_RED, GPIOF_OUT_INIT_HIGH, "Red LED"},
++	{ B3_FRONT_LED_BLUE, GPIOF_OUT_INIT_HIGH, "Blue LED"},
++	{ B3_FRONT_LED_GREEN, GPIOF_OUT_INIT_LOW, "Green LED"},
++#endif
++	{ B3_LED_INTERVAL, GPIOF_OUT_INIT_HIGH, "LED interval"},
++	{ B3_BUZZER_ENABLE, GPIOF_OUT_INIT_LOW, "Buzzer"}
++};
++
++static int request_ioresources(void)
++{
++
++	if(gpio_request_array(bubba_gpios, ARRAY_SIZE(bubba_gpios))<0){
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++DEVICE_ATTR(ledmode, 0644, b3_show_ledmode, b3_store_ledmode);
++DEVICE_ATTR(ledfreq, 0644, b3_show_ledfreq, b3_store_ledfreq);
++DEVICE_ATTR(buzzer, 0644, b3_show_buzzer, b3_store_buzzer);
++DEVICE_ATTR(color, 0644, b3_show_color, b3_store_color);
++
++static int b3_probe(struct platform_device *dev)
++{
++	int ret=0;
++
++	if(request_ioresources()){
++		return -EINVAL;
++	}
++
++	ret = device_create_file(&b3_device->dev, &dev_attr_ledmode);
++	if(ret){
++		return -EINVAL;
++	}
++
++	ret = device_create_file(&b3_device->dev, &dev_attr_ledfreq);
++	if(ret){
++		device_remove_file(&b3_device->dev, &dev_attr_ledmode);
++		return -EINVAL;
++	}
++
++	ret = device_create_file(&b3_device->dev, &dev_attr_buzzer);
++	if(ret){
++		device_remove_file(&b3_device->dev, &dev_attr_ledfreq);
++		device_remove_file(&b3_device->dev, &dev_attr_ledmode);
++		return -EINVAL;
++	}
++
++	ret = device_create_file(&b3_device->dev, &dev_attr_color);
++	if(ret){
++		device_remove_file(&b3_device->dev, &dev_attr_buzzer);
++		device_remove_file(&b3_device->dev, &dev_attr_ledfreq);
++		device_remove_file(&b3_device->dev, &dev_attr_ledmode);
++		return -EINVAL;
++	}
++
++	b3_data.mode = MODE_LIT;
++	b3_data.freq = LED_DEFAULT_FREQ;
++	b3_data.buzz = BUZZ_OFF;
++#ifdef CONFIG_BUBBA3_INSTALL
++	b3_data.color = LED_INSTALL;
++#else
++	b3_data.color = LED_BOOT;
++#endif
++	return ret;
++}
++
++static int b3_remove(struct platform_device *dev)
++{
++
++	device_remove_file (&b3_device->dev, &dev_attr_ledmode);
++	device_remove_file (&b3_device->dev, &dev_attr_ledfreq);
++	device_remove_file(&b3_device->dev, &dev_attr_buzzer);
++	device_remove_file(&b3_device->dev, &dev_attr_color);
++
++	gpio_free_array(bubba_gpios, ARRAY_SIZE(bubba_gpios));
++	return 0;
++}
++
++static int __init bubba3_init(void){
++        int result;
++
++        if(!machine_is_bubba3()){
++                return -EINVAL;
++        }
++ 
++
++        result = platform_driver_register(&b3_driver);
++        if (result < 0) {
++                printk(KERN_ERR "bubba3: Failed to register driver\n");
++                return result;
++        }
++
++		b3_device = platform_device_alloc(DEVNAME,-1);
++		platform_device_add(b3_device);
++
++		printk(KERN_INFO "BUBBA3: driver ver %s (build %s) loaded\n",ver,build);
++
++        return result;
++
++}
++
++static void __exit bubba3_cleanup(void){
++
++        platform_device_del(b3_device);
++        platform_driver_unregister(&b3_driver);
++
++        printk(KERN_INFO "bubba3 driver removed\n");
++
++}
++/* register init and cleanup functions */
++module_init(bubba3_init);
++module_exit(bubba3_cleanup);
+diff -ruN a/arch/arm/mach-kirkwood/bubba3-setup.c b/arch/arm/mach-kirkwood/bubba3-setup.c
+--- a/arch/arm/mach-kirkwood/bubba3-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/bubba3-setup.c	2013-11-08 01:39:48.648006378 -0700
+@@ -0,0 +1,234 @@
++/*
++ * arch/arm/mach-kirkwood/bubba3-setup.c
++ * based on
++ * arch/arm/mach-kirkwood/rd88f6281-setup.c
++ *
++ * For Bubba3 miniserver from Excito
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/mtd/physmap.h>
++#include <linux/spi/flash.h>
++#include <linux/spi/spi.h>
++#include <linux/irq.h>
++#include <linux/ata_platform.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/input.h>
++#include <linux/gpio_keys.h>
++#include <linux/bubba3.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <asm/mach/time.h>
++#include <mach/kirkwood.h>
++#include <plat/orion-gpio.h>
++#include <mach/bridge-regs.h>
++#include <plat/time.h>
++#include "common.h"
++#include "mpp.h"
++
++/*****************************************************************************
++ * 2048KB SPI Flash on Boot Device (Numonyx MP25P16)
++ ****************************************************************************/
++
++static struct mtd_partition bubba3_flash_parts[] = {
++	{
++		.name = "u-boot",
++		.size = SZ_512K+SZ_256K,
++		.offset = 0,
++	},
++	{
++		.name = "env",
++		.size = SZ_128K,
++		.offset = MTDPART_OFS_NXTBLK,
++	},
++	{
++		.name = "data",
++		.size = MTDPART_SIZ_FULL,
++		.offset = MTDPART_OFS_NXTBLK,
++	},
++};
++
++static const struct flash_platform_data bubba3_flash = {
++	.type		= "m25p16",
++	.name		= "spi_flash",
++	.parts		= bubba3_flash_parts,
++	.nr_parts	= ARRAY_SIZE(bubba3_flash_parts),
++};
++
++static struct spi_board_info __initdata bubba3_spi_slave_info[] = {
++	{
++		.modalias	= "m25p80",
++		.platform_data	= &bubba3_flash,
++		.irq		= -1,
++		.max_speed_hz	= 40000000,
++		.bus_num	= 0,
++		.chip_select	= 0,
++	},
++};
++
++/*****************************************************************************
++ * GPIO and keys
++ ****************************************************************************/
++
++static struct gpio_keys_button bubba3_buttons[] = {
++	[0] = {
++		.code		= KEY_POWER,
++		.gpio		= B3_POWER_BUTTON,
++		.desc		= "Power button",
++		.active_low	= 1,
++	},
++};
++
++static struct gpio_keys_platform_data bubba3_button_data = {
++	.buttons	= bubba3_buttons,
++	.nbuttons	= ARRAY_SIZE(bubba3_buttons),
++};
++
++static struct platform_device bubba3_gpio_buttons = {
++	.name		= "gpio-keys",
++	.id		= -1,
++	.dev		= {
++		.platform_data 	= &bubba3_button_data,
++	},
++};
++
++
++/*****************************************************************************
++ * Ethernet
++ ****************************************************************************/
++
++static struct mv643xx_eth_platform_data bubba3_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0x08),
++	/* in case a hardcoded MAC address is needed uncomment next line */
++	/* .mac_addr	= {0x00, 0x0c, 0xc6, 0x76, 0x76, 0x2b}, */
++};
++
++static struct mv643xx_eth_platform_data bubba3_ge01_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0x18),
++	/* in case a hardcoded MAC address is needed uncomment next line */
++	/* .mac_addr	= {0x00, 0x0c, 0xc6, 0x76, 0x76, 0x2c}, */
++};
++
++static struct mv_sata_platform_data bubba3_sata_data = {
++	.n_ports	= 2,
++};
++
++/*****************************************************************************
++ * Timer
++ ****************************************************************************/
++
++static unsigned int bubba3_mpp_config[] __initdata = {
++	MPP0_SPI_SCn,
++	MPP1_SPI_MOSI,
++	MPP2_SPI_SCK,
++	MPP3_SPI_MISO,
++	MPP4_NF_IO6,
++	MPP5_NF_IO7,
++	MPP6_SYSRST_OUTn,
++	MPP7_PEX_RST_OUTn,
++	MPP8_TW0_SDA,
++	MPP9_TW0_SCK,
++	MPP10_UART0_TXD,
++	MPP11_UART0_RXD,
++	MPP12_GPO,
++	MPP13_UART1_TXD,
++	MPP14_UART1_RXD,
++	MPP15_SATA0_ACTn,
++	MPP16_SATA1_ACTn,
++	MPP17_SATA0_PRESENTn,
++	MPP18_GPO,
++	MPP19_GPO,
++	MPP20_GE1_TXD0,
++	MPP21_GE1_TXD1,
++	MPP22_GE1_TXD2,
++	MPP23_GE1_TXD3,
++	MPP24_GE1_RXD0,
++	MPP25_GE1_RXD1,
++	MPP26_GE1_RXD2,
++	MPP27_GE1_RXD3,
++	MPP28_GPIO,
++	MPP29_GPIO,
++	MPP30_GE1_RXCTL,
++	MPP31_GE1_RXCLK,
++	MPP32_GE1_TCLKOUT,
++	MPP33_GE1_TXCTL,
++	MPP34_GPIO,
++	MPP35_GPIO,
++	MPP36_GPIO,
++	MPP37_GPIO,
++	MPP38_GPIO,
++	MPP39_GPIO,
++	MPP40_GPIO,
++	MPP41_GPIO,
++	MPP42_GPIO,
++	MPP43_GPIO,
++	MPP44_GPIO,
++	MPP45_GPIO,
++	MPP46_GPIO,
++	MPP47_GPIO,
++	MPP48_GPIO,
++	MPP49_GPIO,
++	0
++};
++
++static void __init bubba3_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	kirkwood_mpp_conf(bubba3_mpp_config);
++
++	kirkwood_uart0_init();
++
++	spi_register_board_info(bubba3_spi_slave_info,
++				ARRAY_SIZE(bubba3_spi_slave_info));
++	kirkwood_spi_init();
++
++	kirkwood_i2c_init();
++
++	platform_device_register(&bubba3_gpio_buttons);
++
++	/* eth0 */
++	kirkwood_ge00_init(&bubba3_ge00_data);
++
++	/* eth1 */
++	if (gpio_request(28, "PHY2 reset") != 0 ||
++		gpio_direction_input(28) != 0) // high-z
++		printk(KERN_ERR "can't deassert GPIO 28 (PHY2 reset)\n");
++	else
++		kirkwood_ge01_init(&bubba3_ge01_data);
++
++	kirkwood_sata_init(&bubba3_sata_data);
++
++	kirkwood_ehci_init();
++
++}
++
++static int __init bubba3_pci_init(void)
++{
++	if (machine_is_bubba3())
++		kirkwood_pcie_init( KW_PCIE0 | KW_PCIE1 );
++
++	return 0;
++}
++subsys_initcall(bubba3_pci_init);
++
++MACHINE_START(BUBBA3, "BUBBA3 Kirkwood based miniserver")
++	/* Maintainer: Tor Krill <tor@excito.com> */
++	.atag_offset	= 0x100,
++	.init_machine	= bubba3_init,
++	.map_io		= kirkwood_map_io,
++	.init_early 	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++        .init_time      = kirkwood_timer_init,
++        .restart        = kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/common.h b/arch/arm/mach-kirkwood/common.h
+--- a/arch/arm/mach-kirkwood/common.h	2013-11-03 16:41:51.000000000 -0700
++++ b/arch/arm/mach-kirkwood/common.h	2013-11-08 01:41:40.952365272 -0700
+@@ -58,13 +58,6 @@
+ void kirkwood_restart(enum reboot_mode, const char *);
+ void kirkwood_clk_init(void);
+ 
+-/* board init functions for boards not fully converted to fdt */
+-#ifdef CONFIG_MACH_MV88F6281GTW_GE_DT
+-void mv88f6281gtw_ge_init(void);
+-#else
+-static inline void mv88f6281gtw_ge_init(void) {};
+-#endif
+-
+ /* early init functions not converted to fdt yet */
+ char *kirkwood_id(void);
+ void kirkwood_l2_init(void);
+diff -ruN a/arch/arm/mach-kirkwood/dockstar-setup.c b/arch/arm/mach-kirkwood/dockstar-setup.c
+--- a/arch/arm/mach-kirkwood/dockstar-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/dockstar-setup.c	2013-11-08 01:39:48.648006378 -0700
+@@ -0,0 +1,115 @@
++/*
++ * arch/arm/mach-kirkwood/dockstar-setup.c
++ *
++ * Seagate FreeAgent DockStar Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/ata_platform.h>
++#include <linux/mtd/partitions.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition dockstar_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "pogoplug",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_32M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_4M
++	}, {
++		.name = "root",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data dockstar_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct gpio_led dockstar_led_pins[] = {
++	{
++		.name			= "status:green:health",
++		.default_trigger	= "default-on",
++		.gpio			= 46,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:orange:fault",
++		.default_trigger	= "none",
++		.gpio			= 47,
++		.active_low		= 1,
++	}
++};
++
++static struct gpio_led_platform_data dockstar_led_data = {
++	.leds		= dockstar_led_pins,
++	.num_leds	= ARRAY_SIZE(dockstar_led_pins),
++};
++
++static struct platform_device dockstar_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &dockstar_led_data,
++	}
++};
++
++static unsigned int dockstar_mpp_config[] __initdata = {
++	MPP29_GPIO,	/* USB Power Enable */
++	MPP46_GPIO,	/* LED Green */
++	MPP47_GPIO,	/* LED Orange */
++	0
++};
++
++static void __init dockstar_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	/* setup gpio pin select */
++	kirkwood_mpp_conf(dockstar_mpp_config);
++
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(dockstar_nand_parts), 25);
++
++	if (gpio_request(29, "USB Power Enable") != 0 ||
++	    gpio_direction_output(29, 1) != 0)
++		pr_err("can't set up GPIO 29 (USB Power Enable)\n");
++	kirkwood_ehci_init();
++
++	kirkwood_ge00_init(&dockstar_ge00_data);
++
++	platform_device_register(&dockstar_leds);
++}
++
++MACHINE_START(DOCKSTAR, "Seagate FreeAgent DockStar")
++	.atag_offset	= 0x100,
++	.init_machine	= dockstar_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time	= kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/goflexhome-setup.c
+--- a/arch/arm/mach-kirkwood/goflexhome-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/goflexhome-setup.c	2013-11-08 01:39:48.648006378 -0700
+@@ -0,0 +1,124 @@
++/*
++ * arch/arm/mach-kirkwood/goflexhome-setup.c
++ *
++ * Seagate GoFlex Home Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/ata_platform.h>
++#include <linux/mtd/partitions.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition goflexhome_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_2M + SZ_4M
++	}, {
++		.name = "root",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data goflexhome_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct mv_sata_platform_data goflexhome_sata_data = {
++	.n_ports	= 1,
++};
++
++static struct gpio_led goflexhome_led_pins[] = {
++	{
++		.name			= "status:green:health",
++		.default_trigger	= "default-on",
++		.gpio			= 46,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:orange:fault",
++		.default_trigger	= "none",
++		.gpio			= 47,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:white:misc",
++		.default_trigger	= "ide-disk",
++		.gpio			= 40,
++		.active_low		= 0,
++	}
++};
++
++static struct gpio_led_platform_data goflexhome_led_data = {
++	.leds		= goflexhome_led_pins,
++	.num_leds	= ARRAY_SIZE(goflexhome_led_pins),
++};
++
++static struct platform_device goflexhome_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &goflexhome_led_data,
++	}
++};
++
++static unsigned int goflexhome_mpp_config[] __initdata = {
++	MPP29_GPIO,	/* USB Power Enable */
++	MPP47_GPIO,	/* LED Orange */
++	MPP46_GPIO,	/* LED Green */
++	MPP40_GPIO,	/* LED White */
++	0
++};
++
++static void __init goflexhome_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	/* setup gpio pin select */
++	kirkwood_mpp_conf(goflexhome_mpp_config);
++
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(goflexhome_nand_parts), 40);
++
++	if (gpio_request(29, "USB Power Enable") != 0 ||
++	    gpio_direction_output(29, 1) != 0)
++		printk(KERN_ERR "can't set up GPIO 29 (USB Power Enable)\n");
++	kirkwood_ehci_init();
++	kirkwood_ge00_init(&goflexhome_ge00_data);
++	kirkwood_sata_init(&goflexhome_sata_data);
++
++	platform_device_register(&goflexhome_leds);
++}
++
++MACHINE_START(GOFLEXHOME, "Seagate GoFlex Home")
++	/* Maintainer: Peter Carmichael <peterjncarm@ovi.com> */
++	.atag_offset	= 0x100,
++	.init_machine	= goflexhome_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time      = kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
++
+diff -ruN a/arch/arm/mach-kirkwood/goflexnet-setup.c b/arch/arm/mach-kirkwood/goflexnet-setup.c
+--- a/arch/arm/mach-kirkwood/goflexnet-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/goflexnet-setup.c	2013-11-08 01:39:48.658006766 -0700
+@@ -0,0 +1,177 @@
++/*
++ * arch/arm/mach-kirkwood/goflexnet-setup.c
++ *
++ * Seagate GoFlex Net Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/ata_platform.h>
++#include <linux/mtd/partitions.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition goflexnet_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_4M
++	}, {
++		.name = "pogoplug",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_32M
++	}, {
++		.name = "root",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data goflexnet_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct mv_sata_platform_data goflexnet_sata_data = {
++	.n_ports	= 2,
++};
++
++static struct gpio_led goflexnet_led_pins[] = {
++	{
++		.name			= "status:green:health",
++		.default_trigger	= "default-on",
++		.gpio			= 46, // 0x4000
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:orange:fault",
++		.default_trigger	= "none",
++		.gpio			= 47, // 0x8000
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:white:left0",
++		.default_trigger	= "none",
++		.gpio			= 42, // 0x0400
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:left1",
++		.default_trigger	= "none",
++		.gpio			= 43, // 0x0800
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:left2",
++		.default_trigger	= "none",
++		.gpio			= 44, // 0x1000
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:left3",
++		.default_trigger	= "none",
++		.gpio			= 45, // 0x2000
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:right0",
++		.default_trigger	= "none",
++		.gpio			= 38, // 0x0040
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:right1",
++		.default_trigger	= "none",
++		.gpio			= 39, // 0x0080
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:right2",
++		.default_trigger	= "none",
++		.gpio			= 40, // 0x0100
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:white:right3",
++		.default_trigger	= "none",
++		.gpio			= 41, // 0x0200
++		.active_low		= 0,
++	}
++};
++
++static struct gpio_led_platform_data goflexnet_led_data = {
++	.leds		= goflexnet_led_pins,
++	.num_leds	= ARRAY_SIZE(goflexnet_led_pins),
++};
++
++static struct platform_device goflexnet_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &goflexnet_led_data,
++	}
++};
++
++static unsigned int goflexnet_mpp_config[] __initdata = {
++	MPP29_GPIO,	/* USB Power Enable */
++	MPP47_GPIO,	/* LED Orange */
++	MPP46_GPIO,	/* LED Green */
++	MPP45_GPIO,	/* LED Left Capacity 3 */
++	MPP44_GPIO,	/* LED Left Capacity 2 */
++	MPP43_GPIO,	/* LED Left Capacity 1 */
++	MPP42_GPIO,	/* LED Left Capacity 0 */
++	MPP41_GPIO,	/* LED Right Capacity 3 */
++	MPP40_GPIO,	/* LED Right Capacity 2 */
++	MPP39_GPIO,	/* LED Right Capacity 1 */
++	MPP38_GPIO,	/* LED Right Capacity 0 */
++	0
++};
++
++static void __init goflexnet_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	/* setup gpio pin select */
++	kirkwood_mpp_conf(goflexnet_mpp_config);
++
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(goflexnet_nand_parts), 40);
++
++	if (gpio_request(29, "USB Power Enable") != 0 ||
++	    gpio_direction_output(29, 1) != 0)
++		printk(KERN_ERR "can't set up GPIO 29 (USB Power Enable)\n");
++	kirkwood_ehci_init();
++	kirkwood_ge00_init(&goflexnet_ge00_data);
++	kirkwood_sata_init(&goflexnet_sata_data);
++
++	platform_device_register(&goflexnet_leds);
++}
++
++MACHINE_START(GOFLEXNET, "Seagate GoFlex Net")
++	/* Maintainer: Peter Carmichael <peterjncarm@ovi.com> */
++	.atag_offset	= 0x100,
++	.init_machine	= goflexnet_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time      = kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
++
+diff -ruN a/arch/arm/mach-kirkwood/guruplug-setup.c b/arch/arm/mach-kirkwood/guruplug-setup.c
+--- a/arch/arm/mach-kirkwood/guruplug-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/guruplug-setup.c	2013-11-08 01:39:48.658006766 -0700
+@@ -0,0 +1,228 @@
++/*
++ * arch/arm/mach-kirkwood/guruplug-setup.c
++ *
++ * Marvell GuruPlug Reference Board Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/mtd/partitions.h>
++#include <linux/ata_platform.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <linux/spi/flash.h>
++#include <linux/spi/spi.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include <linux/platform_data/mmc-mvsdio.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition dreamplug_partitions[] = {
++	{
++		.name	= "u-boot",
++		.size	= SZ_512K,
++		.offset	= 0,
++	}, {
++		.name	= "u-boot env",
++		.size	= SZ_64K,
++		.offset	= SZ_512K + SZ_512K,
++	},
++};
++
++static const struct flash_platform_data dreamplug_spi_slave_data = {
++	.type		= "mx25l1606e",
++	.name		= "spi_flash",
++	.parts		= dreamplug_partitions,
++	.nr_parts	= ARRAY_SIZE(dreamplug_partitions),
++};
++
++static struct spi_board_info __initdata dreamplug_spi_slave_info[] = {
++	{
++		.modalias	= "m25p80",
++		.platform_data	= &dreamplug_spi_slave_data,
++		.irq		= -1,
++		.max_speed_hz	= 50000000,
++		.bus_num	= 0,
++		.chip_select	= 0,
++	},
++};
++
++static struct mtd_partition guruplug_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_4M
++	}, {
++		.name = "root",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data guruplug_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct mv643xx_eth_platform_data guruplug_ge01_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(1),
++};
++
++static struct mv_sata_platform_data guruplug_sata_data = {
++	.n_ports	= 1,
++};
++
++static struct mvsdio_platform_data guruplug_mvsdio_data = {
++	/* unfortunately the CD signal has not been connected */
++	.gpio_card_detect = -1,
++	.gpio_write_protect = -1,
++};
++
++static struct gpio_led guruplug_led_pins[] = {
++	{
++		.name			= "status:red:fault",
++		.default_trigger	= "none",
++		.gpio			= 46,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:green:health",
++		.default_trigger	= "default-on",
++		.gpio			= 47,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:red:wmode",
++		.gpio			= 48,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:green:wmode",
++		.gpio			= 49,
++		.active_low		= 1,
++	},
++};
++
++static struct gpio_led_platform_data guruplug_led_data = {
++	.leds		= guruplug_led_pins,
++	.num_leds	= ARRAY_SIZE(guruplug_led_pins),
++};
++
++static struct platform_device guruplug_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &guruplug_led_data,
++	}
++};
++
++static struct gpio_led dreamplug_led_pins[] = {
++	{
++		.name			= "status:blue:bt",
++		.gpio			= 47,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:green:wifi",
++		.gpio			= 48,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:blue:ap",
++		.gpio			= 49,
++		.active_low		= 1,
++	},
++};
++
++static struct gpio_led_platform_data dreamplug_led_data = {
++	.leds		= dreamplug_led_pins,
++	.num_leds	= ARRAY_SIZE(dreamplug_led_pins),
++};
++
++static unsigned int dreamplug_mpp_config[] __initdata = {
++	MPP0_SPI_SCn,
++	MPP1_SPI_MOSI,
++	MPP2_SPI_SCK,
++	MPP3_SPI_MISO,
++	MPP47_GPIO,	/* Bluetooth LED */
++	MPP48_GPIO,	/* Wifi LED */
++	MPP49_GPIO,	/* Wifi AP LED */
++	0
++};
++
++
++static unsigned int guruplug_mpp_config[] __initdata = {
++	MPP46_GPIO,	/* M_RLED */
++	MPP47_GPIO,	/* M_GLED */
++	MPP48_GPIO,	/* B_RLED */
++	MPP49_GPIO,	/* B_GLED */
++	0
++};
++
++static void __init guruplug_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	if (machine_is_guruplug()) {
++		kirkwood_mpp_conf(guruplug_mpp_config);
++		kirkwood_uart0_init();
++		kirkwood_nand_init(ARRAY_AND_SIZE(guruplug_nand_parts), 25);
++	}
++
++	if (machine_is_dreamplug()) {
++		kirkwood_mpp_conf(dreamplug_mpp_config);
++		kirkwood_uart0_init();
++		spi_register_board_info(dreamplug_spi_slave_info,
++				ARRAY_SIZE(dreamplug_spi_slave_info));
++		kirkwood_spi_init();
++		guruplug_leds.dev.platform_data = &dreamplug_led_data;
++	}
++
++	kirkwood_ehci_init();
++	kirkwood_ge00_init(&guruplug_ge00_data);
++	kirkwood_ge01_init(&guruplug_ge01_data);
++	kirkwood_sata_init(&guruplug_sata_data);
++	kirkwood_sdio_init(&guruplug_mvsdio_data);
++
++	platform_device_register(&guruplug_leds);
++}
++
++#ifdef CONFIG_MACH_GURUPLUG
++MACHINE_START(GURUPLUG, "Marvell GuruPlug Reference Board")
++	/* Maintainer: Siddarth Gore <gores@marvell.com> */
++	.atag_offset	= 0x100,
++	.init_machine	= guruplug_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time	= kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
++#endif
++
++#ifdef CONFIG_MACH_DREAMPLUG
++MACHINE_START(DREAMPLUG, "Marvell DreamPlug Reference Board")
++	/* Maintainer: ? */
++        .atag_offset    = 0x100,
++        .init_machine   = guruplug_init,
++        .map_io         = kirkwood_map_io,
++        .init_early     = kirkwood_init_early,
++        .init_irq       = kirkwood_init_irq,
++        .init_time      = kirkwood_timer_init,
++        .restart        = kirkwood_restart,
++MACHINE_END
++#endif
+diff -ruN a/arch/arm/mach-kirkwood/iconnect-setup.c b/arch/arm/mach-kirkwood/iconnect-setup.c
+--- a/arch/arm/mach-kirkwood/iconnect-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/iconnect-setup.c	2013-11-08 01:39:48.658006766 -0700
+@@ -0,0 +1,204 @@
++/*
++ * arch/arm/mach-kirkwood/iconnect-setup.c
++ *
++ * Iomega iConnect Wireless
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/irq.h>
++#include <linux/mtd/partitions.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/ethtool.h>
++#include <linux/gpio.h>
++#include <linux/gpio_keys.h>
++#include <linux/input.h>
++#include <linux/leds.h>
++#include <linux/i2c.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition iconnect_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_1M + SZ_2M
++	}, {
++		.name = "rootfs",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_32M,
++	}, {
++		.name = "data",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data iconnect_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(11),
++};
++
++static struct gpio_led iconnect_led_pins[] = {
++	{
++		.name			= "iconnect:led_level",
++		.default_trigger	= "default-on",
++		.gpio			= 41,
++	},
++	{
++		.name			= "iconnect:blue:power",
++		.default_trigger	= "default-on",
++		.gpio			= 42,
++	},
++	{
++		.name			= "iconnect:red:power",
++		.gpio			= 43,
++	},
++	{
++		.name			= "iconnect:blue:usb1",
++		.gpio			= 44,
++	},
++	{
++		.name			= "iconnect:blue:usb2",
++		.gpio			= 45,
++	},
++	{
++		.name			= "iconnect:blue:usb3",
++		.gpio			= 46,
++	},
++	{
++		.name			= "iconnect:blue:usb4",
++		.gpio			= 47,
++	},
++	{
++		.name			= "iconnect:blue:otb",
++		.gpio			= 48,
++	},
++};
++
++static struct gpio_led_platform_data iconnect_led_data = {
++	.leds		= iconnect_led_pins,
++	.num_leds	= ARRAY_SIZE(iconnect_led_pins),
++};
++
++static struct platform_device iconnect_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &iconnect_led_data,
++	}
++};
++
++#define ICONNECT_GPIO_KEY_RESET		12
++#define ICONNECT_GPIO_KEY_OTB		35
++
++#define ICONNECT_SW_RESET		0x00
++#define ICONNECT_SW_OTB			0x01
++
++static struct gpio_keys_button iconnect_buttons[] = {
++		{
++		.type		= EV_SW,
++		.code		= ICONNECT_SW_RESET,
++		.gpio		= ICONNECT_GPIO_KEY_RESET,
++		.desc		= "Reset Button",
++		.active_low	= 1,
++		.debounce_interval = 100,
++		}, 
++		{
++		.type		= EV_SW,
++		.code		= ICONNECT_SW_OTB,
++		.gpio		= ICONNECT_GPIO_KEY_OTB,
++		.desc		= "OTB Button",
++		.active_low	= 1,
++		.debounce_interval = 100,
++		},
++};
++
++static struct gpio_keys_platform_data iconnect_button_data = {
++	.buttons	= iconnect_buttons,
++	.nbuttons	= ARRAY_SIZE(iconnect_buttons),
++};
++
++static struct platform_device iconnect_button_device = {
++	.name	   = "gpio-keys",
++	.id	     = -1,
++	.num_resources	= 0,
++	.dev	    =	{
++					.platform_data  = &iconnect_button_data,
++					},
++};
++
++static unsigned int iconnect_mpp_config[] __initdata = {
++	MPP12_GPIO, /*Input for reset button*/
++	MPP35_GPIO, /*Input for OTB button*/
++	MPP41_GPIO,
++	MPP42_GPIO,
++	MPP43_GPIO,
++	MPP44_GPIO,
++	MPP45_GPIO,
++	MPP46_GPIO,
++	MPP47_GPIO,
++	MPP48_GPIO,
++	0
++};
++
++static struct i2c_board_info __initdata iconnect_i2c_rtc = {
++	I2C_BOARD_INFO("lm63", 0x4c),
++};
++
++static void __init iconnect_init(void)
++{
++	u32 dev, rev;
++
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++	kirkwood_mpp_conf(iconnect_mpp_config);
++
++	kirkwood_nand_init(ARRAY_AND_SIZE(iconnect_nand_parts), 40);
++	kirkwood_ehci_init();
++
++	kirkwood_ge00_init(&iconnect_ge00_data);
++	kirkwood_pcie_id(&dev, &rev);
++
++	kirkwood_uart0_init();
++
++	platform_device_register(&iconnect_leds);
++	platform_device_register(&iconnect_button_device);
++	
++	kirkwood_i2c_init();
++	i2c_register_board_info(0, &iconnect_i2c_rtc, 1);
++
++}
++
++static int __init iconnect_pci_init(void)
++{
++	if (machine_is_iconnect())
++		kirkwood_pcie_init(KW_PCIE0);
++
++	return 0;
++}
++subsys_initcall(iconnect_pci_init);
++
++
++MACHINE_START(ICONNECT, "Iomega iConnect Wireless")
++	.atag_offset	= 0x100,
++	.init_machine	= iconnect_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time      = kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/ionics-stratus-setup.c b/arch/arm/mach-kirkwood/ionics-stratus-setup.c
+--- a/arch/arm/mach-kirkwood/ionics-stratus-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/ionics-stratus-setup.c	2013-11-08 01:39:48.658006766 -0700
+@@ -0,0 +1,137 @@
++/*
++ * arch/arm/mach-kirkwood/ionics-stratus-setup.c
++ *
++ * Ionics Stratus Board Setup arcNumber 4184
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/ata_platform.h>
++#include <linux/mtd/partitions.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include <linux/platform_data/mmc-mvsdio.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition ionics_stratus_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_4M
++	}, {
++		.name = "root",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data ionics_stratus_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct mvsdio_platform_data ionics_stratus_mvsdio_data = {
++	/* unfortunately the CD signal has not been connected */
++};
++
++static struct gpio_led ionics_stratus_led_pins[] = {
++	{
++		.name			= "status:green:led1",
++		.default_trigger	= "none",
++		.gpio			= 44,
++		.active_low		= 1,
++	},
++	{
++		.name           	= "status:green:led2",
++		.default_trigger    	= "none",
++		.gpio           	= 40,
++		.active_low     	= 1,
++	},
++	{
++		.name           	= "status:green:led3",
++		.default_trigger	= "default-on",
++		.gpio			= 36,
++		.active_low		= 1,
++	},
++        {
++                .name                   = "status:green:led4",
++                .default_trigger        = "default-on",
++                .gpio                   = 39,
++                .active_low             = 1,
++        },
++
++};
++
++static struct gpio_led_platform_data ionics_stratus_led_data = {
++	.leds		= ionics_stratus_led_pins,
++	.num_leds	= ARRAY_SIZE(ionics_stratus_led_pins),
++};
++
++static struct platform_device ionics_stratus_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++	.platform_data	= &ionics_stratus_led_data,
++	}
++};
++
++static unsigned int ionics_stratus_mpp_config[] __initdata = {
++	MPP21_GPIO,	/* USB PORT 1 Pw Enable */
++	MPP32_GPIO,	/* USB PORT 2 Pw Enable */
++	MPP48_GPIO,	/* WIFI Power Down */
++	MPP49_GPIO,	/* WIFI Host Wakeup */
++	MPP42_GPIO,	/* WIFI MAC Wakeup */
++	MPP44_GPIO,	/* LED 1 */
++	MPP40_GPIO,	/* LED 2 */
++	MPP36_GPIO,	/* LED 3 */
++	MPP39_GPIO,	/* LED 4 */
++	MPP23_GPIO,	/* BTN 1 */
++	MPP37_GPIO,	/* BTN 2 */
++	MPP38_GPIO,	/* BTN 3 */
++	0
++};
++
++static void __init ionics_stratus_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	/* setup gpio pin select */
++	kirkwood_mpp_conf(ionics_stratus_mpp_config);
++
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(ionics_stratus_nand_parts), 25);
++
++	kirkwood_ehci_init();
++
++	kirkwood_ge00_init(&ionics_stratus_ge00_data);
++	kirkwood_sdio_init(&ionics_stratus_mvsdio_data);
++
++	platform_device_register(&ionics_stratus_leds);
++}
++
++MACHINE_START(IONICS_STRATUS, "Ionics Plug Computer Plus - Stratus")
++	/* Maintainer: Mike Brown <mbrown@archlinuxarm.org> */
++	.atag_offset	= 0x100,
++	.init_machine	= ionics_stratus_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time      = kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/Kconfig b/arch/arm/mach-kirkwood/Kconfig
+--- a/arch/arm/mach-kirkwood/Kconfig	2013-11-03 16:41:51.000000000 -0700
++++ b/arch/arm/mach-kirkwood/Kconfig	2013-11-08 01:39:48.688007930 -0700
+@@ -12,6 +12,48 @@
+ 	  Say 'Y' here if you want your kernel to support the
+ 	  LaCie d2 Network v2 NAS.
+ 
++config MACH_DOCKSTAR
++	bool "Seagate FreeAgent DockStar"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Seagate FreeAgent DockStar.
++
++config MACH_ESATA_SHEEVAPLUG
++	bool "Marvell eSATA SheevaPlug Reference Board"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Marvell eSATA SheevaPlug Reference Board.
++
++config MACH_GURUPLUG
++	bool "Marvell GuruPlug Reference Board"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Marvell GuruPlug Reference Board.
++
++config MACH_DREAMPLUG
++	bool "Marvell DreamPlug Reference Board"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Marvell DreamPlug Reference Board.
++
++config MACH_INETSPACE_V2
++	bool "LaCie Internet Space v2 NAS Board"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  LaCie Internet Space v2 NAS.
++
++config MACH_MV88F6281GTW_GE
++	bool "Marvell 88F6281 GTW GE Board"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Marvell 88F6281 GTW GE Board.
++
+ config MACH_NET2BIG_V2
+ 	bool "LaCie 2Big Network v2 NAS Board"
+ 	select KIRKWOOD_LEGACY
+@@ -26,6 +68,20 @@
+ 	  Say 'Y' here if you want your kernel to support the
+ 	  LaCie 5Big Network v2 NAS.
+ 
++config MACH_NETSPACE_MAX_V2
++	bool "LaCie Network Space Max v2 NAS Board"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  LaCie Network Space Max v2 NAS.
++
++config MACH_NETSPACE_V2
++	bool "LaCie Network Space v2 NAS Board"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  LaCie Network Space v2 NAS.
++
+ config MACH_OPENRD
+ 	select KIRKWOOD_LEGACY
+         bool
+@@ -51,6 +107,13 @@
+ 	  Say 'Y' here if you want your kernel to support the
+ 	  Marvell OpenRD Ultimate Board.
+ 
++config MACH_BUBBA3
++        bool "Bubba3 miniserver"
++        select KIRKWOOD_LEGACY
++	help
++          Say 'Y' here if you want your kernel to support the
++          Bubba3 miniserver.
++
+ config MACH_RD88F6192_NAS
+ 	bool "Marvell RD-88F6192-NAS Reference Board"
+ 	select KIRKWOOD_LEGACY
+@@ -65,6 +128,13 @@
+ 	  Say 'Y' here if you want your kernel to support the
+ 	  Marvell RD-88F6281 Reference Board.
+ 
++config MACH_SHEEVAPLUG
++	bool "Marvell SheevaPlug Reference Board"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Marvell SheevaPlug Reference Board.
++
+ config MACH_T5325
+ 	bool "HP t5325 Thin Client"
+ 	select KIRKWOOD_LEGACY
+@@ -88,6 +158,83 @@
+ 	  QNAP TS-410, TS-410U, TS-419P, TS-419P+ and TS-419U Turbo
+ 	  NAS devices.
+ 
++config MACH_GOFLEXNET
++	bool "Seagate GoFlex Net"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Seagate GoFlex Net.
++
++config MACH_GOFLEXHOME
++	bool "Seagate GoFlex Home"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Seagate GoFlex Home.
++
++config MACH_ICONNECT
++	bool "Iomega iConnect Wireless"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Iomega iConnect Wireless.
++
++config MACH_POGOPLUGV4
++	bool "Pogoplug Series 4"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Pogoplug Series 4.
++
++config MACH_POGO_E02
++	bool "CE Pogoplug E02"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  CloudEngines Pogoplug e02.
++
++config MACH_NAS6210
++	bool "RaidSonic ICY BOX IB-NAS6210"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  RaidSonic ICY BOX IB-NAS6210 device.
++
++config MACH_TOPKICK
++	bool "USI Topkick"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  USI Topkick.
++
++config MACH_IONICS_STRATUS
++	bool "Ionics Stratus"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  Ionics Stratus.
++
++config MACH_NSA310
++	bool "ZyXEL NSA310 1-Bay Power Media Server"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  ZyXEL NSA310.
++
++config MACH_NSA320
++	bool "ZyXEL NSA320 2-Bay Power Media Server"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  ZyXel NSA320.
++
++config MACH_NSA325
++	bool "ZyXEL NSA325 2-Bay Power Media Server"
++	select KIRKWOOD_LEGACY
++	help
++	  Say 'Y' here if you want your kernel to support the
++	  ZyXel NSA325.
++
+ comment "Device tree entries"
+ 
+ config ARCH_KIRKWOOD_DT
+diff -ruN a/arch/arm/mach-kirkwood/Makefile b/arch/arm/mach-kirkwood/Makefile
+--- a/arch/arm/mach-kirkwood/Makefile	2013-11-03 16:41:51.000000000 -0700
++++ b/arch/arm/mach-kirkwood/Makefile	2013-11-08 01:39:48.698008319 -0700
+@@ -1,14 +1,35 @@
+ obj-y				+= common.o pcie.o
+ obj-$(CONFIG_KIRKWOOD_LEGACY)	+= irq.o mpp.o
+ obj-$(CONFIG_MACH_D2NET_V2)		+= d2net_v2-setup.o lacie_v2-common.o
++obj-$(CONFIG_MACH_DOCKSTAR)		+= dockstar-setup.o
++obj-$(CONFIG_MACH_ESATA_SHEEVAPLUG)	+= sheevaplug-setup.o
++obj-$(CONFIG_MACH_GURUPLUG)		+= guruplug-setup.o
++obj-$(CONFIG_MACH_DREAMPLUG)		+= guruplug-setup.o
++obj-$(CONFIG_MACH_INETSPACE_V2)		+= netspace_v2-setup.o lacie_v2-common.o
++obj-$(CONFIG_MACH_MV88F6281GTW_GE)	+= mv88f6281gtw_ge-setup.o
+ obj-$(CONFIG_MACH_NET2BIG_V2)		+= netxbig_v2-setup.o lacie_v2-common.o
+ obj-$(CONFIG_MACH_NET5BIG_V2)		+= netxbig_v2-setup.o lacie_v2-common.o
+ obj-$(CONFIG_MACH_OPENRD)		+= openrd-setup.o
++obj-$(CONFIG_MACH_NETSPACE_MAX_V2)	+= netspace_v2-setup.o lacie_v2-common.o
++obj-$(CONFIG_MACH_NETSPACE_V2)		+= netspace_v2-setup.o lacie_v2-common.o
+ obj-$(CONFIG_MACH_RD88F6192_NAS)	+= rd88f6192-nas-setup.o
+ obj-$(CONFIG_MACH_RD88F6281)		+= rd88f6281-setup.o
++obj-$(CONFIG_MACH_SHEEVAPLUG)		+= sheevaplug-setup.o
+ obj-$(CONFIG_MACH_T5325)		+= t5325-setup.o
+ obj-$(CONFIG_MACH_TS219)		+= ts219-setup.o tsx1x-common.o
+ obj-$(CONFIG_MACH_TS41X)		+= ts41x-setup.o tsx1x-common.o
++obj-$(CONFIG_MACH_GOFLEXNET)            += goflexnet-setup.o
++obj-$(CONFIG_MACH_GOFLEXHOME)           += goflexhome-setup.o
++obj-$(CONFIG_MACH_ICONNECT)             += iconnect-setup.o
++obj-$(CONFIG_MACH_POGOPLUGV4)           += pogoplugv4-setup.o
++obj-$(CONFIG_MACH_POGO_E02)             += pogo_e02-setup.o
++obj-$(CONFIG_MACH_NAS6210)              += nas6210-setup.o
++obj-$(CONFIG_MACH_TOPKICK)              += topkick-setup.o
++obj-$(CONFIG_MACH_IONICS_STRATUS)       += ionics-stratus-setup.o
++obj-$(CONFIG_MACH_BUBBA3)               += bubba3-setup.o bubba3-gpio.o
++obj-$(CONFIG_MACH_NSA310)               += nsa310-setup.o
++obj-$(CONFIG_MACH_NSA320)               += nsa320-setup.o
++obj-$(CONFIG_MACH_NSA325)               += nsa325-setup.o
+ 
+ obj-$(CONFIG_ARCH_KIRKWOOD_DT)		+= board-dt.o
+ obj-$(CONFIG_MACH_MV88F6281GTW_GE_DT)	+= board-mv88f6281gtw_ge.o
+diff -ruN a/arch/arm/mach-kirkwood/mv88f6281gtw_ge-setup.c b/arch/arm/mach-kirkwood/mv88f6281gtw_ge-setup.c
+--- a/arch/arm/mach-kirkwood/mv88f6281gtw_ge-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/mv88f6281gtw_ge-setup.c	2013-11-08 01:39:48.698008319 -0700
+@@ -0,0 +1,172 @@
++/*
++ * arch/arm/mach-kirkwood/mv88f6281gtw_ge-setup.c
++ *
++ * Marvell 88F6281 GTW GE Board Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/pci.h>
++#include <linux/irq.h>
++#include <linux/mtd/physmap.h>
++#include <linux/timer.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/ethtool.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <linux/input.h>
++#include <linux/gpio_keys.h>
++#include <linux/spi/flash.h>
++#include <linux/spi/spi.h>
++#include <net/dsa.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <asm/mach/pci.h>
++#include <mach/kirkwood.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mv643xx_eth_platform_data mv88f6281gtw_ge_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_NONE,
++	.speed		= SPEED_1000,
++	.duplex		= DUPLEX_FULL,
++};
++
++static struct dsa_chip_data mv88f6281gtw_ge_switch_chip_data = {
++	.port_names[0]	= "lan1",
++	.port_names[1]	= "lan2",
++	.port_names[2]	= "lan3",
++	.port_names[3]	= "lan4",
++	.port_names[4]	= "wan",
++	.port_names[5]	= "cpu",
++};
++
++static struct dsa_platform_data mv88f6281gtw_ge_switch_plat_data = {
++	.nr_chips	= 1,
++	.chip		= &mv88f6281gtw_ge_switch_chip_data,
++};
++
++static const struct flash_platform_data mv88f6281gtw_ge_spi_slave_data = {
++	.type		= "mx25l12805d",
++};
++
++static struct spi_board_info __initdata mv88f6281gtw_ge_spi_slave_info[] = {
++	{
++		.modalias	= "m25p80",
++		.platform_data	= &mv88f6281gtw_ge_spi_slave_data,
++		.irq		= -1,
++		.max_speed_hz	= 50000000,
++		.bus_num	= 0,
++		.chip_select	= 0,
++	},
++};
++
++static struct gpio_keys_button mv88f6281gtw_ge_button_pins[] = {
++	{
++		.code		= KEY_RESTART,
++		.gpio		= 47,
++		.desc		= "SWR Button",
++		.active_low	= 1,
++	}, {
++		.code		= KEY_WPS_BUTTON,
++		.gpio		= 46,
++		.desc		= "WPS Button",
++		.active_low	= 1,
++	},
++};
++
++static struct gpio_keys_platform_data mv88f6281gtw_ge_button_data = {
++	.buttons	= mv88f6281gtw_ge_button_pins,
++	.nbuttons	= ARRAY_SIZE(mv88f6281gtw_ge_button_pins),
++};
++
++static struct platform_device mv88f6281gtw_ge_buttons = {
++	.name		= "gpio-keys",
++	.id		= -1,
++	.num_resources	= 0,
++	.dev		= {
++		.platform_data	= &mv88f6281gtw_ge_button_data,
++	},
++};
++
++static struct gpio_led mv88f6281gtw_ge_led_pins[] = {
++	{
++		.name		= "gtw:green:Status",
++		.gpio		= 20,
++		.active_low	= 0,
++	}, {
++		.name		= "gtw:red:Status",
++		.gpio		= 21,
++		.active_low	= 0,
++	}, {
++		.name		= "gtw:green:USB",
++		.gpio		= 12,
++		.active_low	= 0,
++	},
++};
++
++static struct gpio_led_platform_data mv88f6281gtw_ge_led_data = {
++	.leds		= mv88f6281gtw_ge_led_pins,
++	.num_leds	= ARRAY_SIZE(mv88f6281gtw_ge_led_pins),
++};
++
++static struct platform_device mv88f6281gtw_ge_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &mv88f6281gtw_ge_led_data,
++	},
++};
++
++static unsigned int mv88f6281gtw_ge_mpp_config[] __initdata = {
++	MPP12_GPO,	/* Status#_USB pin  */
++	MPP20_GPIO,	/* Status#_GLED pin */
++	MPP21_GPIO,	/* Status#_RLED pin */
++	MPP46_GPIO,	/* WPS_Switch pin   */
++	MPP47_GPIO,	/* SW_Init pin      */
++	0
++};
++
++static void __init mv88f6281gtw_ge_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++	kirkwood_mpp_conf(mv88f6281gtw_ge_mpp_config);
++
++	kirkwood_ehci_init();
++	kirkwood_ge00_init(&mv88f6281gtw_ge_ge00_data);
++	kirkwood_ge00_switch_init(&mv88f6281gtw_ge_switch_plat_data, NO_IRQ);
++	spi_register_board_info(mv88f6281gtw_ge_spi_slave_info,
++				ARRAY_SIZE(mv88f6281gtw_ge_spi_slave_info));
++	kirkwood_spi_init();
++	kirkwood_uart0_init();
++	platform_device_register(&mv88f6281gtw_ge_leds);
++	platform_device_register(&mv88f6281gtw_ge_buttons);
++}
++
++static int __init mv88f6281gtw_ge_pci_init(void)
++{
++	if (machine_is_mv88f6281gtw_ge())
++		kirkwood_pcie_init(KW_PCIE0);
++
++	return 0;
++}
++subsys_initcall(mv88f6281gtw_ge_pci_init);
++
++MACHINE_START(MV88F6281GTW_GE, "Marvell 88F6281 GTW GE Board")
++	/* Maintainer: Lennert Buytenhek <buytenh@marvell.com> */
++	.atag_offset	= 0x100,
++	.init_machine	= mv88f6281gtw_ge_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time	= kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/nas6210-setup.c b/arch/arm/mach-kirkwood/nas6210-setup.c
+--- a/arch/arm/mach-kirkwood/nas6210-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/nas6210-setup.c	2013-11-08 01:39:48.708008707 -0700
+@@ -0,0 +1,186 @@
++/*
++ * arch/arm/mach-kirkwood/nas6210-setup.c
++ *
++ * Raidsonic ICYBOX NAS6210 Board Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/mtd/partitions.h>
++#include <linux/ata_platform.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/gpio_keys.h>
++#include <linux/input.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include "common.h"
++#include "mpp.h"
++
++#define NAS6210_GPIO_POWER_OFF	24
++
++static struct mtd_partition nas6210_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = 6*SZ_1M
++	}, {
++		.name = "root",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data nas6210_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(8),
++};
++
++static struct mv_sata_platform_data nas6210_sata_data = {
++	.n_ports	= 2,
++};
++
++static struct gpio_led nas6210_led_pins[] = {
++	{
++		.name			= "status:green:power",
++		.default_trigger	= "default-on",
++		.gpio			= 25,
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:red:power",
++		.default_trigger	= "none",
++		.gpio			= 22,
++		.active_low		= 0,
++	},
++	{
++		.name			= "status:red:usb_copy",
++		.default_trigger	= "none",
++		.gpio			= 27,
++		.active_low		= 0,
++	},
++};
++
++static struct gpio_led_platform_data nas6210_led_data = {
++	.leds		= nas6210_led_pins,
++	.num_leds	= ARRAY_SIZE(nas6210_led_pins),
++};
++
++static struct platform_device nas6210_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &nas6210_led_data,
++	}
++};
++
++static struct gpio_keys_button nas6210_buttons[] = {
++	{
++		.code		= KEY_COPY,
++		.gpio		= 29,
++		.desc		= "USB Copy",
++		.active_low	= 1,
++	},
++	{
++		.code		= KEY_RESTART,
++		.gpio		= 28,
++		.desc		= "Reset",
++		.active_low	= 1,
++	},
++};
++
++static struct gpio_keys_platform_data nas6210_button_data = {
++	.buttons	= nas6210_buttons,
++	.nbuttons	= ARRAY_SIZE(nas6210_buttons),
++};
++
++static struct platform_device nas6210_button_device = {
++	.name		= "gpio-keys",
++	.id		= -1,
++	.num_resources	= 0,
++	.dev		= {
++		.platform_data	= &nas6210_button_data,
++	}
++};
++
++static unsigned int nas6210_mpp_config[] __initdata = {
++	MPP0_NF_IO2,
++	MPP1_NF_IO3,
++	MPP2_NF_IO4,
++	MPP3_NF_IO5,
++	MPP4_NF_IO6,
++	MPP5_NF_IO7,
++	MPP18_NF_IO0,
++	MPP19_NF_IO1,
++ 	MPP22_GPIO,	/* Power LED red */
++	MPP24_GPIO,	/* Power off device */
++	MPP25_GPIO,	/* Power LED green */
++	MPP27_GPIO,	/* USB transfer LED */
++	MPP28_GPIO,	/* Reset button */
++	MPP29_GPIO,	/* USB Copy button */
++	0
++};
++
++static void nas6210_power_off(void)
++{
++	gpio_set_value(NAS6210_GPIO_POWER_OFF, 1);
++}
++
++static void __init nas6210_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++	kirkwood_mpp_conf(nas6210_mpp_config);
++
++	kirkwood_nand_init(ARRAY_AND_SIZE(nas6210_nand_parts), 25);
++	kirkwood_ehci_init();
++	kirkwood_ge00_init(&nas6210_ge00_data);
++	kirkwood_sata_init(&nas6210_sata_data);
++	kirkwood_uart0_init();
++	platform_device_register(&nas6210_leds);
++	platform_device_register(&nas6210_button_device);
++	if (gpio_request(NAS6210_GPIO_POWER_OFF, "power-off") == 0 &&
++	    gpio_direction_output(NAS6210_GPIO_POWER_OFF, 0) == 0)
++		pm_power_off = nas6210_power_off;
++	else
++		pr_err("nas6210: failed to configure power-off GPIO\n");
++}
++
++static int __init nas6210_pci_init(void)
++{
++	if (machine_is_nas6210()) {
++		u32 dev, rev;
++ 
++		kirkwood_pcie_id(&dev, &rev);
++		if (dev == MV88F6282_DEV_ID)
++			kirkwood_pcie_init(KW_PCIE1 | KW_PCIE0);
++		else
++			kirkwood_pcie_init(KW_PCIE0);
++	}
++
++	return 0;
++}
++subsys_initcall(nas6210_pci_init);
++
++MACHINE_START(NAS6210, "RaidSonic ICY BOX IB-NAS6210")
++	/* Maintainer: <gmbnomis at gmail dot com> */
++	.atag_offset	= 0x100,
++	.init_machine	= nas6210_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time      = kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/netspace_v2-setup.c b/arch/arm/mach-kirkwood/netspace_v2-setup.c
+--- a/arch/arm/mach-kirkwood/netspace_v2-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/netspace_v2-setup.c	2013-11-08 01:39:48.708008707 -0700
+@@ -0,0 +1,293 @@
++/*
++ * arch/arm/mach-kirkwood/netspace_v2-setup.c
++ *
++ * LaCie Network Space v2 board setup
++ *
++ * Copyright (C) 2009 Simon Guinot <sguinot@lacie.com>
++ * Copyright (C) 2009 BenoÃ®t Canet <benoit.canet@gmail.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/ata_platform.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/input.h>
++#include <linux/gpio.h>
++#include <linux/gpio_keys.h>
++#include <linux/leds.h>
++#include <linux/gpio-fan.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include <linux/platform_data/leds-kirkwood-ns2.h>
++#include "common.h"
++#include "mpp.h"
++#include "lacie_v2-common.h"
++
++/*****************************************************************************
++ * Ethernet
++ ****************************************************************************/
++
++static struct mv643xx_eth_platform_data netspace_v2_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(8),
++};
++
++/*****************************************************************************
++ * SATA
++ ****************************************************************************/
++
++static struct mv_sata_platform_data netspace_v2_sata_data = {
++	.n_ports	= 2,
++};
++
++/*****************************************************************************
++ * GPIO keys
++ ****************************************************************************/
++
++#define NETSPACE_V2_PUSH_BUTTON		32
++
++static struct gpio_keys_button netspace_v2_buttons[] = {
++	[0] = {
++		.code		= KEY_POWER,
++		.gpio		= NETSPACE_V2_PUSH_BUTTON,
++		.desc		= "Power push button",
++		.active_low	= 0,
++	},
++};
++
++static struct gpio_keys_platform_data netspace_v2_button_data = {
++	.buttons	= netspace_v2_buttons,
++	.nbuttons	= ARRAY_SIZE(netspace_v2_buttons),
++};
++
++static struct platform_device netspace_v2_gpio_buttons = {
++	.name		= "gpio-keys",
++	.id		= -1,
++	.dev		= {
++		.platform_data	= &netspace_v2_button_data,
++	},
++};
++
++/*****************************************************************************
++ * GPIO LEDs
++ ****************************************************************************/
++
++#define NETSPACE_V2_GPIO_RED_LED	12
++
++static struct gpio_led netspace_v2_gpio_led_pins[] = {
++	{
++		.name	= "ns_v2:red:fail",
++		.gpio	= NETSPACE_V2_GPIO_RED_LED,
++	},
++};
++
++static struct gpio_led_platform_data netspace_v2_gpio_leds_data = {
++	.num_leds	= ARRAY_SIZE(netspace_v2_gpio_led_pins),
++	.leds		= netspace_v2_gpio_led_pins,
++};
++
++static struct platform_device netspace_v2_gpio_leds = {
++	.name		= "leds-gpio",
++	.id		= -1,
++	.dev		= {
++		.platform_data	= &netspace_v2_gpio_leds_data,
++	},
++};
++
++/*****************************************************************************
++ * Dual-GPIO CPLD LEDs
++ ****************************************************************************/
++
++#define NETSPACE_V2_GPIO_BLUE_LED_SLOW	29
++#define NETSPACE_V2_GPIO_BLUE_LED_CMD	30
++
++static struct ns2_led netspace_v2_led_pins[] = {
++	{
++		.name	= "ns_v2:blue:sata",
++		.cmd	= NETSPACE_V2_GPIO_BLUE_LED_CMD,
++		.slow	= NETSPACE_V2_GPIO_BLUE_LED_SLOW,
++	},
++};
++
++static struct ns2_led_platform_data netspace_v2_leds_data = {
++	.num_leds	= ARRAY_SIZE(netspace_v2_led_pins),
++	.leds		= netspace_v2_led_pins,
++};
++
++static struct platform_device netspace_v2_leds = {
++	.name		= "leds-ns2",
++	.id		= -1,
++	.dev		= {
++		.platform_data	= &netspace_v2_leds_data,
++	},
++};
++
++/*****************************************************************************
++ * GPIO fan
++ ****************************************************************************/
++
++/* Designed for fan 40x40x16: ADDA AD0412LB-D50 6000rpm@12v */
++static struct gpio_fan_speed netspace_max_v2_fan_speed[] = {
++	{    0,  0 },
++	{ 1500,	15 },
++	{ 1700,	14 },
++	{ 1800,	13 },
++	{ 2100,	12 },
++	{ 3100,	11 },
++	{ 3300,	10 },
++	{ 4300,	 9 },
++	{ 5500,	 8 },
++};
++
++static unsigned netspace_max_v2_fan_ctrl[] = { 22, 7, 33, 23 };
++
++static struct gpio_fan_alarm netspace_max_v2_fan_alarm = {
++	.gpio		= 25,
++	.active_low	= 1,
++};
++
++static struct gpio_fan_platform_data netspace_max_v2_fan_data = {
++	.num_ctrl	= ARRAY_SIZE(netspace_max_v2_fan_ctrl),
++	.ctrl		= netspace_max_v2_fan_ctrl,
++	.alarm		= &netspace_max_v2_fan_alarm,
++	.num_speed	= ARRAY_SIZE(netspace_max_v2_fan_speed),
++	.speed		= netspace_max_v2_fan_speed,
++};
++
++static struct platform_device netspace_max_v2_gpio_fan = {
++	.name	= "gpio-fan",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &netspace_max_v2_fan_data,
++	},
++};
++
++/*****************************************************************************
++ * General Setup
++ ****************************************************************************/
++
++static unsigned int netspace_v2_mpp_config[] __initdata = {
++	MPP0_SPI_SCn,
++	MPP1_SPI_MOSI,
++	MPP2_SPI_SCK,
++	MPP3_SPI_MISO,
++	MPP4_NF_IO6,
++	MPP5_NF_IO7,
++	MPP6_SYSRST_OUTn,
++	MPP7_GPO,		/* Fan speed (bit 1) */
++	MPP8_TW0_SDA,
++	MPP9_TW0_SCK,
++	MPP10_UART0_TXD,
++	MPP11_UART0_RXD,
++	MPP12_GPO,		/* Red led */
++	MPP14_GPIO,		/* USB fuse */
++	MPP16_GPIO,		/* SATA 0 power */
++	MPP17_GPIO,		/* SATA 1 power */
++	MPP18_NF_IO0,
++	MPP19_NF_IO1,
++	MPP20_SATA1_ACTn,
++	MPP21_SATA0_ACTn,
++	MPP22_GPIO,		/* Fan speed (bit 0) */
++	MPP23_GPIO,		/* Fan power */
++	MPP24_GPIO,		/* USB mode select */
++	MPP25_GPIO,		/* Fan rotation fail */
++	MPP26_GPIO,		/* USB device vbus */
++	MPP28_GPIO,		/* USB enable host vbus */
++	MPP29_GPIO,		/* Blue led (slow register) */
++	MPP30_GPIO,		/* Blue led (command register) */
++	MPP31_GPIO,		/* Board power off */
++	MPP32_GPIO,		/* Power button (0 = Released, 1 = Pushed) */
++	MPP33_GPO,		/* Fan speed (bit 2) */
++	0
++};
++
++#define NETSPACE_V2_GPIO_POWER_OFF	31
++
++static void netspace_v2_power_off(void)
++{
++	gpio_set_value(NETSPACE_V2_GPIO_POWER_OFF, 1);
++}
++
++static void __init netspace_v2_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++	kirkwood_mpp_conf(netspace_v2_mpp_config);
++
++	if (machine_is_netspace_max_v2())
++		lacie_v2_hdd_power_init(2);
++	else
++		lacie_v2_hdd_power_init(1);
++
++	kirkwood_ehci_init();
++	kirkwood_ge00_init(&netspace_v2_ge00_data);
++	kirkwood_sata_init(&netspace_v2_sata_data);
++	kirkwood_uart0_init();
++	lacie_v2_register_flash();
++	lacie_v2_register_i2c_devices();
++
++	platform_device_register(&netspace_v2_leds);
++	platform_device_register(&netspace_v2_gpio_leds);
++	platform_device_register(&netspace_v2_gpio_buttons);
++	if (machine_is_netspace_max_v2())
++		platform_device_register(&netspace_max_v2_gpio_fan);
++
++	if (gpio_request(NETSPACE_V2_GPIO_POWER_OFF, "power-off") == 0 &&
++	    gpio_direction_output(NETSPACE_V2_GPIO_POWER_OFF, 0) == 0)
++		pm_power_off = netspace_v2_power_off;
++	else
++		pr_err("netspace_v2: failed to configure power-off GPIO\n");
++}
++
++#ifdef CONFIG_MACH_NETSPACE_V2
++MACHINE_START(NETSPACE_V2, "LaCie Network Space v2")
++	.atag_offset	= 0x100,
++	.init_machine	= netspace_v2_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time	= kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
++#endif
++
++#ifdef CONFIG_MACH_INETSPACE_V2
++MACHINE_START(INETSPACE_V2, "LaCie Internet Space v2")
++	.atag_offset	= 0x100,
++	.init_machine	= netspace_v2_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time	= kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
++#endif
++
++#ifdef CONFIG_MACH_NETSPACE_MAX_V2
++MACHINE_START(NETSPACE_MAX_V2, "LaCie Network Space Max v2")
++	.atag_offset	= 0x100,
++	.init_machine	= netspace_v2_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time	= kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
++#endif
+diff -ruN a/arch/arm/mach-kirkwood/nsa310-setup.c b/arch/arm/mach-kirkwood/nsa310-setup.c
+--- a/arch/arm/mach-kirkwood/nsa310-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/nsa310-setup.c	2013-11-08 01:39:48.708008707 -0700
+@@ -0,0 +1,359 @@
++/*
++ * arch/arm/mach-kirkwood/nsa310-setup.c
++ *
++ * Zyxel NSA-310 Setup, by AA666 and Peeter123
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/input.h>
++#include <linux/delay.h>
++#include <linux/platform_device.h>
++#include <linux/i2c.h>
++#include <linux/irq.h>
++#include <linux/mtd/partitions.h>
++#include <mtd/mtd-abi.h>
++#include <linux/ata_platform.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/mv643xx_i2c.h>
++#include <linux/ethtool.h>
++#include <linux/gpio.h>
++#include <linux/gpio_keys.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include <linux/platform_data/mmc-mvsdio.h>
++#include <plat/orion-gpio.h>
++#include "common.h"
++#include "mpp.h"
++#include <linux/timer.h>
++#include <linux/jiffies.h>
++
++static void nsa310_timerfunc(unsigned long data);
++static DEFINE_TIMER(timer, nsa310_timerfunc, 0, 0);
++
++static struct mtd_partition nsa310_nand_parts[] = {
++  {
++    .name = "uboot",
++    .offset = 0,
++    .size = 0x100000,
++    .mask_flags = MTD_WRITEABLE
++  }, {
++    .name = "uboot_env",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = 0x80000
++  }, {
++    .name = "key_store",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = 0x80000
++  }, {
++    .name = "info",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = 0x80000
++  }, {
++    .name = "etc",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = 0xA00000
++  }, {
++    .name = "kernel_1",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = 0xA00000
++  }, {
++    .name = "rootfs1",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = 0x2FC0000
++  }, {
++    .name = "kernel_2",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = 0xA00000
++  }, {
++    .name = "rootfs2",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = 0x2FC0000
++  },
++};
++
++static struct i2c_board_info __initdata nsa310_i2c_rtc = {
++        I2C_BOARD_INFO("pcf8563", 0x51),
++};
++
++static struct mv643xx_eth_platform_data nsa310_ge00_data = {
++  .phy_addr  = MV643XX_ETH_PHY_ADDR(0),
++  .speed    = SPEED_1000,
++  .duplex    = DUPLEX_FULL,
++};
++
++static struct mv_sata_platform_data nsa310_sata_data = {
++  .n_ports  = 2,
++};
++
++static unsigned int nsa310_mpp_config[] __initdata = {
++  MPP36_GPIO, // Reset button
++  MPP37_GPIO, // Copy button
++  MPP46_GPIO, // Power button
++
++  MPP48_GPIO, // Power Off
++  MPP21_GPIO, // USB Power Off
++
++  MPP28_GPIO, // Sys LED Green
++  MPP29_GPIO, // Sys LED Yellow
++  MPP41_GPIO, // SATA1 LED Green
++  MPP42_GPIO, // SATA1 LED Red
++  MPP12_GPO, // SATA2 LED Green
++  MPP13_GPIO, // SATA2 LED Red
++  MPP39_GPIO, // Copy LED Green
++  MPP40_GPIO, // Copy LED Red
++  MPP15_GPIO, // USB LED Green
++
++  MPP14_GPIO, // MCU Data
++  MPP16_GPIO, // MCU Clk
++  MPP17_GPIO, // MCU Act
++
++  MPP38_GPIO, // VID B0
++  MPP45_GPIO, // VID B1
++
++  MPP44_GPIO, // Buzzer
++  MPP43_GPIO, // HTP
++
++  MPP47_GPIO, // Power Resume Data
++  MPP49_GPIO, // Power Resume Clock
++
++  0
++};
++
++static struct gpio_led nsa310_gpio_led[] = {
++        {
++            .name    = "nsa310:green:System",
++            .default_trigger  = "timer",
++            .gpio    = 28,
++            .active_low    = 0,
++
++        },
++  {
++            .name    = "nsa310:red:System",
++            .default_trigger  = "none",
++            .gpio    = 29,
++            .active_low    = 0,
++        },
++  {
++            .name    = "nsa310:green:SATA1",
++            .default_trigger  = "none",
++            .gpio    = 41,
++            .active_low    = 0,
++        },
++  {
++            .name    = "nsa310:red:SATA1",
++            .default_trigger  = "sata-disk",
++            .gpio    = 42,
++            .active_low    = 0,
++        },
++  {
++            .name    = "nsa310:green:SATA2",
++            .default_trigger  = "none",
++            .gpio    = 12,
++            .active_low    = 0,
++        },
++  {
++            .name    = "nsa310:red:SATA2",
++            .default_trigger  = "none",
++            .gpio    = 13,
++            .active_low    = 0,
++        },
++  {
++            .name    = "nsa310:green:USB",
++            .default_trigger  = "none",
++            .gpio    = 15,
++            .active_low    = 0,
++        },
++        {
++            .name    = "nsa310:green:Copy",
++            .default_trigger  = "none",
++            .gpio    = 39,
++            .active_low    = 0,
++        },
++  {
++            .name    = "nsa310:red:Copy",
++            .default_trigger  = "none",
++            .gpio    = 40,
++            .active_low    = 0,
++        },
++};
++
++
++static int nsa310_gpio_blink_set(unsigned gpio, int state,
++  unsigned long *delay_on, unsigned long *delay_off)
++{
++
++// Use hardware acceleration
++//    if (delay_on && delay_off && !*delay_on && !*delay_off)
++//  *delay_on = *delay_off = 100;
++
++  switch(state) {
++      case GPIO_LED_NO_BLINK_LOW:
++      case GPIO_LED_NO_BLINK_HIGH:
++    orion_gpio_set_blink(gpio, 0);
++    gpio_set_value(gpio, state);
++      break;
++      case GPIO_LED_BLINK:
++    orion_gpio_set_blink(gpio, 1);
++      break;
++  }
++  return 0;
++}
++
++
++static struct gpio_led_platform_data nsa310_led_data = {
++        .leds           = nsa310_gpio_led,
++        .num_leds       = ARRAY_SIZE(nsa310_gpio_led),
++  .gpio_blink_set  = nsa310_gpio_blink_set,
++};
++
++static struct platform_device nsa310_leds = {
++        .name   = "leds-gpio",
++        .id     = -1,
++        .dev    = { .platform_data  = &nsa310_led_data, }
++};
++
++static struct gpio_keys_button nsa310_gpio_keys_button[] = {
++        {
++            .code             = KEY_POWER,
++            .type    = EV_KEY,
++            .gpio             = 46,
++            .desc             = "Power Button",
++            .active_low       = 0,
++            .debounce_interval   = 1000,
++        },
++        {
++            .code             = KEY_COPY,
++            .type    = EV_KEY,
++            .gpio             = 37,
++            .desc             = "USB Copy",
++            .active_low       = 1,
++            .debounce_interval   = 1000,
++        },
++        {
++            .code             = KEY_OPTION,
++            .type    = EV_KEY,
++            .gpio             = 36,
++            .desc             = "Reset",
++            .active_low       = 1,
++            .debounce_interval   = 1000,
++        },
++};
++
++static struct gpio_keys_platform_data nsa310_keys_data = {
++        .buttons        = nsa310_gpio_keys_button,
++        .nbuttons       = ARRAY_SIZE(nsa310_gpio_keys_button),
++};
++
++
++static struct platform_device nsa310_buttons = {
++        .name           = "gpio-keys",
++        .id             = -1,
++        .dev            = { .platform_data  = &nsa310_keys_data, }
++};
++
++static void nsa310_power_off(void)
++{
++//
++//don't work with sysfs
++      printk(KERN_INFO "Activating power off GPIO pin...\n");
++  gpio_set_value(48, 1);
++
++// If machine goes to restart, uncomment next lines for infinite loop
++/*      printk(KERN_INFO "System halted, please turn off power manually\n");
++  gpio_set_value(28, 0);
++  do {
++      mdelay(1000);
++  } while(1);
++*/
++}
++
++static void nsa310_timerfunc(unsigned long data)
++{
++// Activate USB Power
++  if (gpio_request(21, "USB Power") != 0 || gpio_direction_output(21, 1) != 0)
++      printk(KERN_ERR "failed to setup USB power GPIO\n");
++  else
++          printk(KERN_INFO "USB power enabled\n");
++  gpio_free(21);
++}
++
++static void __init nsa310_init(void)
++{
++  u32 dev, rev;
++
++  kirkwood_init();
++
++  kirkwood_mpp_conf(nsa310_mpp_config);
++  kirkwood_nand_init(ARRAY_AND_SIZE(nsa310_nand_parts), 25);
++  kirkwood_ge00_init(&nsa310_ge00_data);
++  kirkwood_pcie_id(&dev, &rev);
++
++  kirkwood_sata_init(&nsa310_sata_data);
++  kirkwood_uart0_init();
++  kirkwood_i2c_init();
++        i2c_register_board_info(0, &nsa310_i2c_rtc, 1);
++
++  platform_device_register(&nsa310_leds);
++  platform_device_register(&nsa310_buttons);
++  
++  kirkwood_ehci_init();
++//  USB Power delay for 20 sec  
++  timer.function = nsa310_timerfunc;
++        timer.data = 0;
++  timer.expires = jiffies + msecs_to_jiffies(20000);
++  add_timer(&timer);
++
++
++/*  Power resume control */
++      gpio_request(49, "Power-clk");
++      gpio_direction_output(49, 1);
++      gpio_request(47, "Power-data");
++// Clear power resume
++//      gpio_direction_output(47, 0);
++// Set power resume
++      gpio_direction_output(47, 1);
++      udelay(1000);
++//      gpio_direction_output(49, 0);
++      gpio_set_value(49, 0);
++// release GPIO?
++//test
++      gpio_free(47);
++      gpio_free(49);
++          printk(KERN_INFO "Power resume enabled\n");
++
++
++// Activate Power-off GPIO
++  if (gpio_request(48, "Power-off") == 0 && gpio_direction_output(48, 0) == 0) {
++//          gpio_free(48);
++            pm_power_off = nsa310_power_off;
++          printk(KERN_INFO "Power-off GPIO enabled\n");
++      } else
++    printk(KERN_ERR "failed to configure Power-off GPIO\n");
++
++};
++
++static int __init nsa310_pci_init(void)
++{
++  if (machine_is_nsa310())
++    kirkwood_pcie_init(KW_PCIE0);
++  return 0;
++}
++
++subsys_initcall(nsa310_pci_init);
++
++MACHINE_START(NSA310, "Zyxel NSA-310")
++  .atag_offset  = 0x100,
++  .init_machine  = nsa310_init,
++  .map_io    = kirkwood_map_io,
++  .init_early    = kirkwood_init_early,
++  .init_irq    = kirkwood_init_irq,
++  .init_time      = kirkwood_timer_init,
++  .restart        = kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/nsa320-setup.c b/arch/arm/mach-kirkwood/nsa320-setup.c
+--- a/arch/arm/mach-kirkwood/nsa320-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/nsa320-setup.c	2013-11-08 01:39:48.718009095 -0700
+@@ -0,0 +1,305 @@
++/*
++ * arch/arm/mach-kirkwood/nsa320-setup.c
++ *
++ * ZyXEL NSA320 2-Bay Power Media Server Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/mtd/nand.h>
++#include <linux/mtd/partitions.h>
++#include <linux/ata_platform.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/i2c.h>
++#include <linux/gpio.h>
++#include <linux/gpio_keys.h>
++#include <linux/leds.h>
++#include <linux/input.h>
++#include <linux/nsa3xx-hwmon.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include <plat/orion-gpio.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition nsa320_nand_parts[] = {
++	{
++		.name = "uboot",
++		.offset = 0,
++		.size = SZ_1M,
++		.mask_flags = MTD_WRITEABLE
++	}, {
++		.name = "uboot_env",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_512K
++	}, {
++		.name = "key_store",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_512K
++	}, {
++		.name = "info",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_512K
++	}, {
++		.name = "etc",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = 10 * SZ_1M
++	}, {
++		.name = "kernel_1",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = 10 * SZ_1M
++	}, {
++		.name = "rootfs1",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = 48 * SZ_1M - SZ_256K
++	}, {
++		.name = "kernel_2",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = 10 * SZ_1M
++	}, {
++		.name = "rootfs2",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = 48 * SZ_1M - SZ_256K
++	},
++};
++
++static struct i2c_board_info __initdata nsa320_i2c_rtc = {
++	I2C_BOARD_INFO("pcf8563", 0x51),
++};
++
++static struct mv643xx_eth_platform_data nsa320_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(1),
++};
++
++static struct mv_sata_platform_data nsa320_sata_data = {
++	.n_ports	= 2,
++};
++
++static struct gpio_keys_button nsa320_button_pins[] = {
++	{
++		.code		= KEY_RESTART,
++		.gpio		= 36,
++		.desc		= "Reset",
++		.active_low	= 1,
++		.debounce_interval	= 1000,
++	}, {
++		.code		= KEY_COPY,
++		.gpio		= 37,
++		.desc		= "Copy",
++		.active_low	= 1,
++		.debounce_interval	= 1000,
++	}, {
++		.code		= KEY_POWER,
++		.gpio		= 46,
++		.desc		= "Power",
++		.active_low	= 0,
++		.debounce_interval	= 1000,
++	},
++};
++
++static struct gpio_keys_platform_data nsa320_button_data = {
++	.buttons	= nsa320_button_pins,
++	.nbuttons	= ARRAY_SIZE(nsa320_button_pins),
++};
++
++static struct platform_device nsa320_buttons = {
++	.name		= "gpio-keys",
++	.id		= -1,
++	.num_resources	= 0,
++	.dev		= {
++		.platform_data	= &nsa320_button_data,
++	},
++};
++
++static struct gpio_led nsa320_led_pins[] = {
++	{
++		.name			= "nsa320:green:hdd2",
++		.default_trigger	= "ide-disk",
++		.gpio			= 12,
++		.active_low		= 0,
++	}, {
++		.name			= "nsa320:red:hdd2",
++		.default_trigger	= "default-off",
++		.gpio			= 13,
++		.active_low		= 0,
++	}, {
++		.name			= "nsa320:green:usb",
++		.default_trigger	= "default-off",
++		.gpio			= 15,
++		.active_low		= 0,
++	}, {
++		.name			= "nsa320:green:sys",
++		.default_trigger	= "default-off",
++		.gpio			= 28,
++		.active_low		= 0,
++	}, {
++		.name			= "nsa320:orange:sys",
++		.default_trigger	= "default-on",
++		.gpio			= 29,
++		.active_low		= 0,
++	}, {
++		.name			= "nsa320:green:copy",
++		.default_trigger	= "default-off",
++		.gpio			= 39,
++		.active_low		= 0,
++	}, {
++		.name			= "nsa320:red:copy",
++		.default_trigger	= "default-off",
++		.gpio			= 40,
++		.active_low		= 0,
++	}, {
++		.name			= "nsa320:green:hdd1",
++		.default_trigger	= "ide-disk",
++		.gpio			= 41,
++		.active_low		= 0,
++	}, {
++		.name			= "nsa320:red:hdd1",
++		.default_trigger	= "default-off",
++		.gpio			= 42,
++		.active_low		= 0,
++	},
++};
++
++static int nsa320_gpio_blink_set(unsigned gpio, int state,
++	unsigned long *delay_on, unsigned long *delay_off)
++{
++	switch(state) {
++		case GPIO_LED_NO_BLINK_LOW:
++		case GPIO_LED_NO_BLINK_HIGH:
++			orion_gpio_set_blink(gpio, 0);
++			gpio_set_value(gpio, state);
++		break;
++		case GPIO_LED_BLINK:
++			orion_gpio_set_blink(gpio, 1);
++		break;
++	}
++	return 0;
++}
++
++static struct gpio_led_platform_data nsa320_led_data = {
++	.leds		= nsa320_led_pins,
++	.num_leds	= ARRAY_SIZE(nsa320_led_pins),
++	.gpio_blink_set	= nsa320_gpio_blink_set,
++};
++
++static struct platform_device nsa320_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &nsa320_led_data,
++	},
++};
++
++static struct nsa3xx_hwmon_platform_data nsa320_hwmon_data = {
++	/* GPIOs connected to Holtek HT46R065 MCU */
++	.act_pin  = 17,
++	.clk_pin  = 16,
++	.data_pin = 14,
++};
++
++static struct platform_device nsa320_hwmon = {
++	.name		= "nsa3xx-hwmon",
++	.id		= -1,
++	.num_resources	= 0,
++	.dev		= {
++		.platform_data	= &nsa320_hwmon_data,
++	},
++};
++
++static unsigned int nsa320_mpp_config[] __initdata = {
++	MPP8_TW0_SDA,	/* PCF8563 RTC chip   */
++	MPP9_TW0_SCK,	/* connected to TWSI  */
++	MPP12_GPO,	/* HDD2 LED (green)   */
++	MPP13_GPIO,	/* HDD2 LED (red)     */
++	MPP14_GPIO,	/* MCU DATA pin (in)  */
++	MPP15_GPIO,	/* USB LED (green)    */
++	MPP16_GPIO,	/* MCU CLK pin (out)  */
++	MPP17_GPIO,	/* MCU ACT pin (out)  */
++	MPP21_GPIO,	/* USB power          */
++	MPP28_GPIO,	/* SYS LED (green)    */
++	MPP29_GPIO,	/* SYS LED (orange)   */
++	MPP36_GPIO,	/* reset button       */
++	MPP37_GPIO,	/* copy button        */
++	MPP38_GPIO,	/* VID B0             */
++	MPP39_GPIO,	/* COPY LED (green)   */
++	MPP40_GPIO,	/* COPY LED (red)     */
++	MPP41_GPIO,	/* HDD1 LED (green)   */
++	MPP42_GPIO,	/* HDD1 LED (red)     */
++	MPP43_GPIO,	/* HTP pin            */
++	MPP44_GPIO,	/* buzzer             */
++	MPP45_GPIO,	/* VID B1             */
++	MPP46_GPIO,	/* power button       */
++	MPP47_GPIO,	/* power resume data  */
++	MPP48_GPIO,	/* power off          */
++	MPP49_GPIO,	/* power resume clock */
++	0
++};
++
++#define NSA320_GPIO_USB_POWER	21
++#define NSA320_GPIO_POWER_OFF	48
++
++static void nsa320_power_off(void)
++{
++	gpio_set_value(NSA320_GPIO_POWER_OFF, 1);
++}
++
++static int __initdata usb_power = 1; /* default "on" */
++
++static int __init nsa320_usb_power(char *str)
++{
++	usb_power = strncmp(str, "off", 3) ? 1 : 0;
++	return 1;
++}
++/* Parse boot_command_line string nsa320_usb_power=on|off */
++__setup("nsa320_usb_power=", nsa320_usb_power);
++
++static void __init nsa320_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	kirkwood_mpp_conf(nsa320_mpp_config);
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(nsa320_nand_parts), 40);
++	kirkwood_ge00_init(&nsa320_ge00_data);
++	kirkwood_sata_init(&nsa320_sata_data);
++
++	platform_device_register(&nsa320_leds);
++	platform_device_register(&nsa320_buttons);
++	platform_device_register(&nsa320_hwmon);
++
++	kirkwood_i2c_init();
++	i2c_register_board_info(0, &nsa320_i2c_rtc, 1);
++
++       if (gpio_request(NSA320_GPIO_USB_POWER, "USB Power Enable") ||
++           gpio_direction_output(NSA320_GPIO_USB_POWER, usb_power))
++               pr_err("nsa320: failed to configure USB power enable GPIO\n");
++       gpio_free(NSA320_GPIO_USB_POWER);
++
++	kirkwood_ehci_init();
++
++	if (gpio_request(NSA320_GPIO_POWER_OFF, "power-off") ||
++	    gpio_direction_output(NSA320_GPIO_POWER_OFF, 0))
++		pr_err("nsa320: failed to configure power-off GPIO\n");
++	else
++		pm_power_off = nsa320_power_off;
++}
++
++MACHINE_START(NSA320, "ZyXEL NSA320 2-Bay Power Media Server")
++	/* Maintainer: Peter Schildmann <linux@schildmann.info> */
++	.atag_offset	= 0x100,
++	.init_machine	= nsa320_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time      = kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/nsa325-setup.c b/arch/arm/mach-kirkwood/nsa325-setup.c
+--- a/arch/arm/mach-kirkwood/nsa325-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/nsa325-setup.c	2013-11-08 01:39:48.718009095 -0700
+@@ -0,0 +1,359 @@
++/*
++ * arch/arm/mach-kirkwood/nsa325-setup.c
++ *
++ * ZyXEL NSA325 2-Bay Power Media Server Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/mtd/nand.h>
++#include <linux/mtd/partitions.h>
++#include <linux/ata_platform.h>
++#include <linux/mv643xx.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/phy.h>
++#include <linux/marvell_phy.h>
++#include <linux/i2c.h>
++#include <linux/gpio.h>
++#include <linux/gpio_keys.h>
++#include <linux/leds.h>
++#include <linux/pci.h>
++#include <linux/input.h>
++#include <linux/nsa3xx-hwmon.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include <plat/orion-gpio.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition nsa325_nand_parts[] = {
++       {
++               .name = "uboot",
++               .offset = 0,
++               .size = SZ_1M,
++               .mask_flags = MTD_WRITEABLE
++       }, {
++               .name = "uboot_env",
++               .offset = MTDPART_OFS_NXTBLK,
++               .size = SZ_512K
++       }, {
++               .name = "key_store",
++               .offset = MTDPART_OFS_NXTBLK,
++               .size = SZ_512K
++       }, {
++               .name = "info",
++               .offset = MTDPART_OFS_NXTBLK,
++               .size = SZ_512K
++       }, {
++               .name = "etc",
++               .offset = MTDPART_OFS_NXTBLK,
++               .size = 10 * SZ_1M
++       }, {
++               .name = "kernel_1",
++               .offset = MTDPART_OFS_NXTBLK,
++               .size = 10 * SZ_1M
++       }, {
++               .name = "rootfs1",
++               .offset = MTDPART_OFS_NXTBLK,
++               .size = 48 * SZ_1M - SZ_256K
++       }, {
++               .name = "kernel_2",
++               .offset = MTDPART_OFS_NXTBLK,
++               .size = 10 * SZ_1M
++       }, {
++               .name = "rootfs2",
++               .offset = MTDPART_OFS_NXTBLK,
++               .size = 48 * SZ_1M - SZ_256K
++       },
++};
++
++static struct i2c_board_info __initdata nsa325_i2c_rtc = {
++       I2C_BOARD_INFO("pcf8563", 0x51),
++};
++
++static struct mv643xx_eth_platform_data nsa325_ge00_data = {
++       .phy_addr       = MV643XX_ETH_PHY_ADDR(1),
++};
++
++static struct mv_sata_platform_data nsa325_sata_data = {
++       .n_ports        = 2,
++};
++
++static struct gpio_keys_button nsa325_button_pins[] = {
++       {
++               .code           = KEY_RESTART,
++               .gpio           = 36,
++               .desc           = "Reset",
++               .active_low     = 1,
++               .debounce_interval      = 1000,
++       }, {
++               .code           = KEY_COPY,
++               .gpio           = 37,
++               .desc           = "Copy",
++               .active_low     = 1,
++               .debounce_interval      = 1000,
++       }, {
++               .code           = KEY_POWER,
++               .gpio           = 46,
++               .desc           = "Power",
++               .active_low     = 0,
++               .debounce_interval      = 1000,
++       },
++};
++
++static struct gpio_keys_platform_data nsa325_button_data = {
++       .buttons        = nsa325_button_pins,
++       .nbuttons       = ARRAY_SIZE(nsa325_button_pins),
++};
++
++static struct platform_device nsa325_buttons = {
++       .name           = "gpio-keys",
++       .id             = -1,
++       .num_resources  = 0,
++       .dev            = {
++               .platform_data  = &nsa325_button_data,
++       },
++};
++
++static struct gpio_led nsa325_led_pins[] = {
++       {
++               .name                   = "nsa325:green:hdd2",
++               .default_trigger        = "ide-disk",
++               .gpio                   = 12,
++               .active_low             = 0,
++       }, {
++               .name                   = "nsa325:red:hdd2",
++               .default_trigger        = "default-off",
++               .gpio                   = 13,
++               .active_low             = 0,
++       }, {
++               .name                   = "nsa325:green:usb",
++               .default_trigger        = "default-off",
++               .gpio                   = 15,
++               .active_low             = 0,
++       }, {
++               .name                   = "nsa325:green:sys",
++               .default_trigger        = "default-off",
++               .gpio                   = 28,
++               .active_low             = 0,
++       }, {
++               .name                   = "nsa325:orange:sys",
++               .default_trigger        = "default-on",
++               .gpio                   = 29,
++               .active_low             = 0,
++       }, {
++               .name                   = "nsa325:green:copy",
++               .default_trigger        = "default-off",
++               .gpio                   = 39,
++               .active_low             = 0,
++       }, {
++               .name                   = "nsa325:red:copy",
++               .default_trigger        = "default-off",
++               .gpio                   = 40,
++               .active_low             = 0,
++       }, {
++               .name                   = "nsa325:green:hdd1",
++               .default_trigger        = "ide-disk",
++               .gpio                   = 41,
++               .active_low             = 0,
++       }, {
++               .name                   = "nsa325:red:hdd1",
++               .default_trigger        = "default-off",
++               .gpio                   = 42,
++               .active_low             = 0,
++       },
++};
++
++static int nsa325_gpio_blink_set(unsigned gpio, int state,
++       unsigned long *delay_on, unsigned long *delay_off)
++{
++       switch(state) {
++               case GPIO_LED_NO_BLINK_LOW:
++               case GPIO_LED_NO_BLINK_HIGH:
++                       orion_gpio_set_blink(gpio, 0);
++                       gpio_set_value(gpio, state);
++               break;
++               case GPIO_LED_BLINK:
++                       orion_gpio_set_blink(gpio, 1);
++               break;
++       }
++       return 0;
++}
++
++static struct gpio_led_platform_data nsa325_led_data = {
++       .leds           = nsa325_led_pins,
++       .num_leds       = ARRAY_SIZE(nsa325_led_pins),
++       .gpio_blink_set = nsa325_gpio_blink_set,
++};
++
++static struct platform_device nsa325_leds = {
++       .name   = "leds-gpio",
++       .id     = -1,
++       .dev    = {
++               .platform_data  = &nsa325_led_data,
++       },
++};
++
++static struct nsa3xx_hwmon_platform_data nsa325_hwmon_data = {
++       /* GPIOs connected to Holtek HT46R065 MCU */
++       .act_pin  = 17,
++       .clk_pin  = 16,
++       .data_pin = 14,
++};
++
++static struct platform_device nsa325_hwmon = {
++       .name           = "nsa3xx-hwmon",
++       .id             = -1,
++       .num_resources  = 0,
++       .dev            = {
++               .platform_data  = &nsa325_hwmon_data,
++       },
++};
++
++static unsigned int nsa325_mpp_config[] __initdata = {
++       MPP8_TW0_SDA,   /* PCF8563 RTC chip   */
++       MPP9_TW0_SCK,   /* connected to TWSI  */
++       MPP12_GPO,      /* HDD2 LED (green)   */
++       MPP13_GPIO,     /* ? HDD2 LED (red) ? */
++       MPP14_GPIO,     /* MCU DATA pin (in)  */
++       MPP15_GPIO,     /* USB LED (green)    */
++       MPP16_GPIO,     /* MCU CLK pin (out)  */
++       MPP17_GPIO,     /* MCU ACT pin (out)  */
++       MPP21_GPIO,     /* USB power          */
++       MPP28_GPIO,     /* SYS LED (green)    */
++       MPP29_GPIO,     /* SYS LED (orange)   */
++       MPP36_GPIO,     /* reset button       */
++       MPP37_GPIO,     /* copy button        */
++       MPP38_GPIO,     /* VID B0             */
++       MPP39_GPIO,     /* COPY LED (green)   */
++       MPP40_GPIO,     /* COPY LED (red)     */
++       MPP41_GPIO,     /* HDD1 LED (green)   */
++       MPP42_GPIO,     /* HDD1 LED (red)     */
++       MPP43_GPIO,     /* HTP pin            */
++       MPP44_GPIO,     /* buzzer             */
++       MPP45_GPIO,     /* VID B1             */
++       MPP46_GPIO,     /* power button       */
++       MPP47_GPIO,     /* HDD2 power         */
++       MPP48_GPIO,     /* power off          */
++       0
++};
++
++#define NSA325_GPIO_WATCHDOG   14
++#define NSA325_GPIO_USB_POWER  21
++#define NSA325_GPIO_HDD2_POWER 47
++#define NSA325_GPIO_POWER_OFF  48
++
++static void nsa325_power_off(void)
++{
++       gpio_set_value(NSA325_GPIO_POWER_OFF, 1);
++}
++
++static int __initdata usb_power = 1; /* default "on" */
++
++static int __init nsa325_usb_power(char *str)
++{
++       usb_power = strncmp(str, "off", 3) ? 1 : 0;
++       return 1;
++}
++/* Parse boot_command_line string nsa325_usb_power=on|off */
++__setup("nsa325_usb_power=", nsa325_usb_power);
++
++/* the nsa325 uses the 88E1310S Alaska, and has an MCU attached to the LED[2] via tristate interrupt */
++static int nsa325_phy_fixup(struct phy_device *phydev)
++{
++       int err;
++       int temp;
++       /* go to page 3 */
++       err = phy_write(phydev, 22, 3);
++       if (err < 0)
++           return err;
++       /* read page 3, register 17 */
++       temp = phy_read(phydev, 17);
++       /* clear bit 4, set bit 5 */
++       temp &= ~(1<<4);
++       temp |= (1<<5);
++       /* write page 3, register 17 */
++       err = phy_write(phydev, 17, temp);
++       if (err < 0)
++           return err;
++       /* go to page 0 */
++       err = phy_write(phydev, 22, 0);
++       if (err < 0)
++           return err;
++
++       return 0;
++}
++
++static void __init nsa325_init(void)
++{
++       /*
++        * Basic setup. Needs to be called early.
++        */
++       kirkwood_init();
++
++       kirkwood_mpp_conf(nsa325_mpp_config);
++
++       /* setup the phy fixup */
++       phy_register_fixup_for_uid(MARVELL_PHY_ID_88E1318S,MARVELL_PHY_ID_MASK,nsa325_phy_fixup);
++       kirkwood_ge00_init(&nsa325_ge00_data);
++
++       kirkwood_uart0_init();
++       kirkwood_nand_init(ARRAY_AND_SIZE(nsa325_nand_parts), 40);
++
++       /* turn off the watchdog */
++       gpio_set_value(NSA325_GPIO_WATCHDOG, 1);
++
++       /* turn on the second drive bay */
++       if (gpio_request(NSA325_GPIO_HDD2_POWER, "HDD2 Power Enable") ||
++           gpio_direction_output(NSA325_GPIO_HDD2_POWER,1))
++               pr_err("nsa325: failed to configure HDD2 power enable GPIO\n");
++       gpio_free(NSA325_GPIO_HDD2_POWER);
++
++       kirkwood_sata_init(&nsa325_sata_data);
++
++       platform_device_register(&nsa325_leds);
++       platform_device_register(&nsa325_buttons);
++       platform_device_register(&nsa325_hwmon);
++
++       kirkwood_i2c_init();
++       i2c_register_board_info(0, &nsa325_i2c_rtc, 1);
++
++       if (gpio_request(NSA325_GPIO_USB_POWER, "USB Power Enable") ||
++           gpio_direction_output(NSA325_GPIO_USB_POWER, usb_power))
++               pr_err("nsa325: failed to configure USB power enable GPIO\n");
++       gpio_free(NSA325_GPIO_USB_POWER);
++
++       kirkwood_ehci_init();
++
++       if (gpio_request(NSA325_GPIO_POWER_OFF, "power-off") ||
++           gpio_direction_output(NSA325_GPIO_POWER_OFF, 0))
++               pr_err("nsa325: failed to configure power-off GPIO\n");
++       else
++               pm_power_off = nsa325_power_off;
++}
++
++static int __init nsa325_pci_init(void)
++{
++        if (machine_is_nsa325())
++                kirkwood_pcie_init(KW_PCIE0);
++
++        return 0;
++}
++subsys_initcall(nsa325_pci_init);
++
++MACHINE_START(NSA325, "ZyXEL NSA325 2-Bay Power Media Server")
++       /* Maintainer: Jason Plum <max@warheads.net> */
++       .atag_offset    = 0x100,
++       .init_machine   = nsa325_init,
++       .map_io         = kirkwood_map_io,
++       .init_early     = kirkwood_init_early,
++       .init_irq       = kirkwood_init_irq,
++       .init_time      = kirkwood_timer_init,
++       .restart        = kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/pogo_e02-setup.c b/arch/arm/mach-kirkwood/pogo_e02-setup.c
+--- a/arch/arm/mach-kirkwood/pogo_e02-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/pogo_e02-setup.c	2013-11-08 01:39:48.718009095 -0700
+@@ -0,0 +1,115 @@
++/*
++ * arch/arm/mach-kirkwood/pogo_e02-setup.c
++ *
++ * CloudEngines Pogoplug E02 support
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/ata_platform.h>
++#include <linux/mtd/partitions.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition pogo_e02_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_4M
++	}, {
++		.name = "pogoplug",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_32M
++	}, {
++		.name = "root",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data pogo_e02_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct gpio_led pogo_e02_led_pins[] = {
++	{
++		.name			= "status:green:health",
++		.default_trigger	= "default-on",
++		.gpio			= 48,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:orange:fault",
++		.default_trigger	= "none",
++		.gpio			= 49,
++		.active_low		= 1,
++	}
++};
++
++static struct gpio_led_platform_data pogo_e02_led_data = {
++	.leds		= pogo_e02_led_pins,
++	.num_leds	= ARRAY_SIZE(pogo_e02_led_pins),
++};
++
++static struct platform_device pogo_e02_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &pogo_e02_led_data,
++	}
++};
++
++static unsigned int pogo_e02_mpp_config[] __initdata = {
++	MPP29_GPIO,	/* USB Power Enable */
++	MPP48_GPIO,	/* LED Green */
++	MPP49_GPIO,	/* LED Orange */
++	0
++};
++
++static void __init pogo_e02_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	/* setup gpio pin select */
++	kirkwood_mpp_conf(pogo_e02_mpp_config);
++
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(pogo_e02_nand_parts), 25);
++
++	if (gpio_request(29, "USB Power Enable") != 0 ||
++	    gpio_direction_output(29, 1) != 0)
++		printk(KERN_ERR "can't set up GPIO 29 (USB Power Enable)\n");
++	kirkwood_ehci_init();
++
++	kirkwood_ge00_init(&pogo_e02_ge00_data);
++
++	platform_device_register(&pogo_e02_leds);
++}
++
++MACHINE_START(POGO_E02, "Pogoplug E02")
++	.atag_offset	= 0x100,
++	.init_machine	= pogo_e02_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time      = kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/pogoplugv4-setup.c b/arch/arm/mach-kirkwood/pogoplugv4-setup.c
+--- a/arch/arm/mach-kirkwood/pogoplugv4-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/pogoplugv4-setup.c	2013-11-08 01:39:48.718009095 -0700
+@@ -0,0 +1,195 @@
++/*
++ * arch/arm/mach-kirkwood/pogoplugv4-setup.c
++ *
++ * Pogoplug Series 4 Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/mtd/partitions.h>
++#include <linux/ata_platform.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/gpio_keys.h>
++#include <linux/leds.h>
++#include <linux/pci.h>
++#include <linux/irq.h>
++#include <linux/spi/flash.h>
++#include <linux/spi/spi.h>
++#include <linux/input.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include <linux/platform_data/mmc-mvsdio.h>
++#include <plat/orion-gpio.h>
++#include "common.h"
++#include "mpp.h"
++
++#define POGOPLUGV4_GPIO_USB_VBUS		10
++
++static struct mtd_partition ppv4_nand_parts[] = {
++	{
++		.name	= "u-boot",
++		.offset	= 0,
++		.size	= 2 * SZ_1M
++	}, {
++		.name	= "uImage",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= 3 * SZ_1M
++	}, {
++		.name	= "uImage2",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= 3 * SZ_1M
++	}, {
++		.name	= "failsafe",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= SZ_8M
++	}, {
++		.name	= "root",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data pogoplugv4_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct mv_sata_platform_data pogoplugv4_sata_data = {
++	.n_ports	= 1,
++};
++
++static struct gpio_keys_button pogoplugv4_button_pins[] = {
++	{
++		.code		= KEY_EJECTCD,
++		.gpio		= 29,
++		.desc		= "Eject Button",
++		.active_low	= 1,
++	},
++};
++
++static struct gpio_keys_platform_data pogoplugv4_button_data = {
++	.buttons	= pogoplugv4_button_pins,
++	.nbuttons	= ARRAY_SIZE(pogoplugv4_button_pins),
++};
++
++static struct platform_device pogoplugv4_buttons = {
++	.name		= "gpio-keys",
++	.id		= -1,   
++	.num_resources  = 0,
++	.dev		= {
++		.platform_data  = &pogoplugv4_button_data,
++	},
++};
++
++static struct gpio_led pogoplugv4_led_pins[] = {
++	{
++		.name			= "status:green:health",
++		.default_trigger	= "default-on",
++		.gpio			= 22,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:red:fault",
++		.default_trigger	= "none",
++		.gpio			= 24,
++		.active_low		= 1,
++	},
++};
++
++static struct gpio_led_platform_data pogoplugv4_led_data = {
++	.leds		= pogoplugv4_led_pins,
++	.num_leds	= ARRAY_SIZE(pogoplugv4_led_pins),
++};
++
++static struct platform_device pogoplugv4_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &pogoplugv4_led_data,
++	}
++};
++
++static struct mvsdio_platform_data ppv4_mvsdio_data = {
++	.gpio_card_detect = 27,
++};
++
++static unsigned int ppv4_mpp_config[] __initdata = {
++	MPP27_GPIO,	/* SD card detect */
++	MPP29_GPIO,	/* Eject button */
++	MPP22_GPIO,	/* Green LED */
++	MPP24_GPIO,	/* Red LED */
++	MPP12_SD_CLK,
++	MPP13_SD_CMD,
++	MPP14_SD_D0,
++	MPP15_SD_D1,
++	MPP16_SD_D2,
++	MPP17_SD_D3,
++	0
++};
++
++static const struct flash_platform_data pogoplugv4_spi_slave_data = {
++	.type		= "m25p05-nonjedec",
++};
++
++static struct spi_board_info __initdata pogoplugv4_spi_slave_info[] = {
++	{
++		.modalias	= "m25p05-nonjedec",
++		.platform_data	= &pogoplugv4_spi_slave_data,
++		.irq		= -1,
++		.max_speed_hz	= 20000000,
++		.bus_num	= 0,
++		.chip_select	= 0,
++	},
++};
++
++static void __init pogoplugv4_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++	kirkwood_mpp_conf(ppv4_mpp_config);
++
++	orion_gpio_set_valid(POGOPLUGV4_GPIO_USB_VBUS, 1);
++	if (gpio_request(POGOPLUGV4_GPIO_USB_VBUS, "USB VBUS") != 0 ||
++	    gpio_direction_output(POGOPLUGV4_GPIO_USB_VBUS, 1) != 0)
++		pr_err("POGOPLUGV4: failed to setup USB VBUS GPIO\n");
++
++	kirkwood_ehci_init();
++	kirkwood_ge00_init(&pogoplugv4_ge00_data);
++	kirkwood_sata_init(&pogoplugv4_sata_data);
++	spi_register_board_info(pogoplugv4_spi_slave_info,
++				ARRAY_SIZE(pogoplugv4_spi_slave_info));
++	kirkwood_spi_init();
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(ppv4_nand_parts), 25);
++	kirkwood_sdio_init(&ppv4_mvsdio_data);
++	platform_device_register(&pogoplugv4_leds);
++	platform_device_register(&pogoplugv4_buttons);
++}
++
++static int __init pogoplugv4_pci_init(void)
++{
++	if (machine_is_pogoplugv4())
++		kirkwood_pcie_init(KW_PCIE0);
++
++	return 0;
++}
++subsys_initcall(pogoplugv4_pci_init);
++
++MACHINE_START(POGOPLUGV4, "Pogoplug V4")
++	/* Maintainer: Kevin Mihelich <kevin@archlinuxarm.org> */
++	.atag_offset	= 0x100,
++	.init_machine	= pogoplugv4_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time      = kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/mach-kirkwood/sheevaplug-setup.c b/arch/arm/mach-kirkwood/sheevaplug-setup.c
+--- a/arch/arm/mach-kirkwood/sheevaplug-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/sheevaplug-setup.c	2013-11-08 01:39:48.728009483 -0700
+@@ -0,0 +1,170 @@
++/*
++ * arch/arm/mach-kirkwood/sheevaplug-setup.c
++ *
++ * Marvell SheevaPlug Reference Board Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/ata_platform.h>
++#include <linux/mtd/partitions.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include <linux/platform_data/mmc-mvsdio.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition sheevaplug_nand_parts[] = {
++	{
++		.name = "u-boot",
++		.offset = 0,
++		.size = SZ_1M
++	}, {
++		.name = "uImage",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = SZ_4M
++	}, {
++		.name = "root",
++		.offset = MTDPART_OFS_NXTBLK,
++		.size = MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data sheevaplug_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct mv_sata_platform_data esata_sheevaplug_sata_data = {
++	.n_ports	= 2,
++};
++
++static struct mvsdio_platform_data sheevaplug_mvsdio_data = {
++	/* unfortunately the CD signal has not been connected */
++};
++
++static struct mvsdio_platform_data esata_sheevaplug_mvsdio_data = {
++	.gpio_write_protect = -1, /* (disable - does not work on 3.9+) MPP44 used as SD write protect */
++	.gpio_card_detect = 47,	  /* MPP47 used as SD card detect */
++};
++
++static struct gpio_led sheevaplug_led_pins[] = {
++	{
++		.name			= "plug:red:misc",
++		.default_trigger	= "none",
++		.gpio			= 46,
++		.active_low		= 1,
++	},
++	{
++		.name           	= "status:green:health",
++		.default_trigger    	= "none",
++		.gpio           	= 48,
++		.active_low     	= 1,
++	},
++	{
++		.name           	= "status:blue:health",
++		.default_trigger	= "default-on",
++		.gpio			= 49,
++		.active_low		= 1,
++	},
++};
++
++static struct gpio_led_platform_data sheevaplug_led_data = {
++	.leds		= sheevaplug_led_pins,
++	.num_leds	= ARRAY_SIZE(sheevaplug_led_pins),
++};
++
++static struct platform_device sheevaplug_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &sheevaplug_led_data,
++	}
++};
++
++static unsigned int sheevaplug_mpp_config[] __initdata = {
++	MPP29_GPIO,	/* USB Power Enable */
++	MPP46_GPIO,	/* LED Red */
++	MPP48_GPIO,	/* LED Green */
++	MPP49_GPIO,	/* LED Blue */
++	0
++};
++
++static unsigned int esata_sheevaplug_mpp_config[] __initdata = {
++	MPP29_GPIO,	/* USB Power Enable */
++	//MPP44_GPIO,	/* SD Write Protect */
++	MPP47_GPIO,	/* SD Card Detect */
++	MPP46_GPIO,	/* LED Red */
++	MPP48_GPIO,	/* LED Green */
++	MPP49_GPIO,	/* LED Blue */
++	0
++};
++
++static void __init sheevaplug_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	/* setup gpio pin select */
++	if (machine_is_esata_sheevaplug())
++		kirkwood_mpp_conf(esata_sheevaplug_mpp_config);
++	else
++		kirkwood_mpp_conf(sheevaplug_mpp_config);
++
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(sheevaplug_nand_parts), 25);
++
++	if (gpio_request(29, "USB Power Enable") != 0 ||
++	    gpio_direction_output(29, 1) != 0)
++		pr_err("can't set up GPIO 29 (USB Power Enable)\n");
++	kirkwood_ehci_init();
++
++	kirkwood_ge00_init(&sheevaplug_ge00_data);
++
++	/* honor lower power consumption for plugs with out eSATA */
++	if (machine_is_esata_sheevaplug())
++		kirkwood_sata_init(&esata_sheevaplug_sata_data);
++
++	/* enable sd wp and sd cd on plugs with esata */
++	if (machine_is_esata_sheevaplug())
++		kirkwood_sdio_init(&esata_sheevaplug_mvsdio_data);
++	else
++		kirkwood_sdio_init(&sheevaplug_mvsdio_data);
++
++	platform_device_register(&sheevaplug_leds);
++}
++
++#ifdef CONFIG_MACH_SHEEVAPLUG
++MACHINE_START(SHEEVAPLUG, "Marvell SheevaPlug Reference Board")
++	/* Maintainer: shadi Ammouri <shadi@marvell.com> */
++	.atag_offset	= 0x100,
++	.init_machine	= sheevaplug_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time	= kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
++#endif
++
++#ifdef CONFIG_MACH_ESATA_SHEEVAPLUG
++MACHINE_START(ESATA_SHEEVAPLUG, "Marvell eSATA SheevaPlug Reference Board")
++	.atag_offset	= 0x100,
++	.init_machine	= sheevaplug_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time	= kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
++#endif
+diff -ruN a/arch/arm/mach-kirkwood/topkick-setup.c b/arch/arm/mach-kirkwood/topkick-setup.c
+--- a/arch/arm/mach-kirkwood/topkick-setup.c	1969-12-31 17:00:00.000000000 -0700
++++ b/arch/arm/mach-kirkwood/topkick-setup.c	2013-11-08 01:39:48.728009483 -0700
+@@ -0,0 +1,165 @@
++/*
++ * arch/arm/mach-kirkwood/topkick-setup.c
++ *
++ * USI Topkick Setup
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/ata_platform.h>
++#include <linux/mtd/nand.h>
++#include <linux/mtd/partitions.h>
++#include <linux/mv643xx_eth.h>
++#include <linux/i2c.h>
++#include <linux/gpio.h>
++#include <linux/leds.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <mach/kirkwood.h>
++#include <linux/platform_data/mmc-mvsdio.h>
++#include "common.h"
++#include "mpp.h"
++
++static struct mtd_partition topkick_nand_parts[] = {
++	{
++		.name	= "u-boot",
++		.offset	= 0,
++		.size	= 0x180000
++	}, {
++		.name	= "u-boot-env",
++		.offset	= 0x180000,
++		.size	= 128 * 1024
++	}, {
++		.name	= "uImage",
++		.offset	= 2 * 1024 * 1024,
++		.size	= 6 * 1024 * 1024
++	}, {
++		.name	= "rootfs",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= MTDPART_SIZ_FULL
++	},
++};
++
++static struct mv643xx_eth_platform_data topkick_ge00_data = {
++	.phy_addr	= MV643XX_ETH_PHY_ADDR(0),
++};
++
++static struct mv_sata_platform_data topkick_sata_data = {
++	.n_ports	= 1,
++};
++
++static struct mvsdio_platform_data topkick_mvsdio_data = {
++	.gpio_card_detect = 47, /* MPP47 used as SD card detect */
++};
++
++
++static struct gpio_led topkick_led_pins[] = {
++	{
++		.name			= "status:blue:disk",
++		.default_trigger	= "none",
++		.gpio			= 21,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:red:fault",
++		.default_trigger	= "none",
++		.gpio			= 37,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:blue:health",
++		.default_trigger	= "default-on",
++		.gpio			= 38,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:green:misc",
++		.default_trigger	= "none",
++		.gpio			= 39,
++		.active_low		= 1,
++	},
++	{
++		.name			= "status:orange:misc",
++		.default_trigger	= "none",
++		.gpio			= 48,
++		.active_low		= 1,
++	},
++};
++
++static struct gpio_led_platform_data topkick_led_data = {
++	.leds		= topkick_led_pins,
++	.num_leds	= ARRAY_SIZE(topkick_led_pins),
++};
++
++static struct platform_device topkick_leds = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &topkick_led_data,
++	}
++};
++
++static unsigned int topkick_mpp_config[] __initdata = {
++	MPP12_SD_CLK,	/* SDIO Clock */
++	MPP13_SD_CMD,	/* SDIO Cmd */
++	MPP14_SD_D0,	/* SDIO Data 0 */
++	MPP15_SD_D1,	/* SDIO Data 1 */
++	MPP16_SD_D2,	/* SDIO Data 2 */
++	MPP17_SD_D3,	/* SDIO Data 3 */
++	MPP21_GPIO,	/* LED Blue SATA */
++	MPP35_GPIO,	/* USB Power Enable */
++	MPP36_GPIO,	/* SATA Power Enable */
++	MPP37_GPIO,	/* LED Red  System */
++	MPP38_GPIO,	/* LED Blue System */
++	MPP39_GPIO,	/* LED Green Misc/WiFi */
++	MPP43_GPIO,	/* WOL Eth WOL */
++	MPP44_GPIO,	/* SW GW Mode */
++	MPP45_GPIO,	/* SW AP Mode */
++	MPP46_GPIO,	/* SW Power Off */
++	MPP47_GPIO,	/* SDIO Detect */
++	MPP48_GPIO,	/* LED Orange Misc/WiFi */
++	0
++};
++
++static void __init topkick_init(void)
++{
++	/*
++	 * Basic setup. Needs to be called early.
++	 */
++	kirkwood_init();
++
++	/* setup gpio pin select */
++	kirkwood_mpp_conf(topkick_mpp_config);
++
++	kirkwood_uart0_init();
++	kirkwood_nand_init(ARRAY_AND_SIZE(topkick_nand_parts), 40);
++
++	if (gpio_request(35, "USB Power Enable") != 0 ||
++	    gpio_direction_output(35, 1) != 0)
++		printk(KERN_ERR "can't set up GPIO 35 (USB Power Enable)\n");
++	if (gpio_request(36, "SATA Power Enable") != 0 ||
++	    gpio_direction_output(36, 1) != 0)
++		printk(KERN_ERR "can't set up GPIO 36 (SATA Power Enable)\n");
++	kirkwood_ge00_init(&topkick_ge00_data);
++	kirkwood_ehci_init();
++	kirkwood_sata_init(&topkick_sata_data);
++	kirkwood_sdio_init(&topkick_mvsdio_data);
++
++	platform_device_register(&topkick_leds);
++}
++
++MACHINE_START(TOPKICK, "USI Topkick")
++	/* Maintainer: Mike Brown <mbrown@archlinuxarm.org> */
++	.atag_offset	= 0x100,
++	.init_machine	= topkick_init,
++	.map_io		= kirkwood_map_io,
++	.init_early	= kirkwood_init_early,
++	.init_irq	= kirkwood_init_irq,
++	.init_time      = kirkwood_timer_init,
++	.restart	= kirkwood_restart,
++MACHINE_END
+diff -ruN a/arch/arm/plat-orion/common.c b/arch/arm/plat-orion/common.c
+--- a/arch/arm/plat-orion/common.c	2013-11-03 16:41:51.000000000 -0700
++++ b/arch/arm/plat-orion/common.c	2013-11-08 01:39:48.788011812 -0700
+@@ -256,7 +256,9 @@
+ /*****************************************************************************
+  * GE00
+  ****************************************************************************/
+-struct mv643xx_eth_shared_platform_data orion_ge00_shared_data;
++struct mv643xx_eth_shared_platform_data orion_ge00_shared_data = {
++	.tx_csum_limit	= 1600,
++};
+ 
+ static struct resource orion_ge00_shared_resources[] = {
+ 	{
+diff -ruN a/drivers/ata/sata_mv.c b/drivers/ata/sata_mv.c
+--- a/drivers/ata/sata_mv.c	2013-11-03 16:41:51.000000000 -0700
++++ b/drivers/ata/sata_mv.c	2013-11-08 01:39:48.868014917 -0700
+@@ -71,6 +71,7 @@
+ #include <scsi/scsi_cmnd.h>
+ #include <scsi/scsi_device.h>
+ #include <linux/libata.h>
++#include <linux/leds.h>
+ 
+ #define DRV_NAME	"sata_mv"
+ #define DRV_VERSION	"1.28"
+@@ -1161,6 +1162,8 @@
+ {
+ 	int want_ncq = (protocol == ATA_PROT_NCQ);
+ 
++	ledtrig_ide_activity();
++
+ 	if (pp->pp_flags & MV_PP_FLAG_EDMA_EN) {
+ 		int using_ncq = ((pp->pp_flags & MV_PP_FLAG_NCQ_EN) != 0);
+ 		if (want_ncq != using_ncq)
+diff -ruN a/drivers/hwmon/Kconfig b/drivers/hwmon/Kconfig
+--- a/drivers/hwmon/Kconfig	2013-11-03 16:41:51.000000000 -0700
++++ b/drivers/hwmon/Kconfig	2013-11-08 01:39:48.928017246 -0700
+@@ -1553,6 +1553,19 @@
+         help
+           Support for the A/D converter on MC13783 and MC13892 PMIC.
+ 
++config SENSORS_NSA3XX
++	tristate "ZyXEL NSA3xx fan speed and temperature sensors"
++	depends on (MACH_NSA310 || MACH_NSA320) && GENERIC_GPIO
++	help
++	  If you say yes here you get support for hardware monitoring
++	  for the ZyXEL NSA3XX Media Servers.
++
++	  The sensor data is taken from a Holtek HT46R065 microcontroller
++	  connected to GPIO lines.
++
++	  This driver can also be built as a module. If so, the module
++	  will be called nsa3xx-hwmon.
++
+ if ACPI
+ 
+ comment "ACPI drivers"
+diff -ruN a/drivers/hwmon/Makefile b/drivers/hwmon/Makefile
+--- a/drivers/hwmon/Makefile	2013-11-03 16:41:51.000000000 -0700
++++ b/drivers/hwmon/Makefile	2013-11-08 01:39:48.928017246 -0700
+@@ -109,6 +109,7 @@
+ obj-$(CONFIG_SENSORS_MAX6650)	+= max6650.o
+ obj-$(CONFIG_SENSORS_MAX6697)	+= max6697.o
+ obj-$(CONFIG_SENSORS_MC13783_ADC)+= mc13783-adc.o
++obj-$(CONFIG_SENSORS_NSA3XX)	+= nsa3xx-hwmon.o
+ obj-$(CONFIG_SENSORS_MCP3021)	+= mcp3021.o
+ obj-$(CONFIG_SENSORS_NCT6775)	+= nct6775.o
+ obj-$(CONFIG_SENSORS_NTC_THERMISTOR)	+= ntc_thermistor.o
+diff -ruN a/drivers/hwmon/nsa3xx-hwmon.c b/drivers/hwmon/nsa3xx-hwmon.c
+--- a/drivers/hwmon/nsa3xx-hwmon.c	1969-12-31 17:00:00.000000000 -0700
++++ b/drivers/hwmon/nsa3xx-hwmon.c	2013-11-08 01:39:48.928017246 -0700
+@@ -0,0 +1,251 @@
++/*
++ * drivers/hwmon/nsa3xx-hwmon.c
++ *
++ * ZyXEL NSA3xx Media Servers
++ * hardware monitoring
++ *
++ * Copyright (C) 2012 Peter Schildmann <linux@schildmann.info>
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License v2 as published by the
++ * Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along with
++ * this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
++ */
++
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/platform_device.h>
++#include <linux/err.h>
++#include <linux/gpio.h>
++#include <linux/hwmon.h>
++#include <linux/hwmon-sysfs.h>
++#include <linux/nsa3xx-hwmon.h>
++#include <linux/slab.h>
++#include <linux/jiffies.h>
++#include <linux/delay.h>
++#include <asm/delay.h>
++
++#define MAGIC_NUMBER 0x55
++
++struct nsa3xx_hwmon {
++	struct platform_device	*pdev;
++	struct device		*classdev;
++	struct mutex		update_lock;	/* lock GPIO operations */
++	unsigned long		last_updated;	/* jiffies */
++	unsigned long		mcu_data;
++};
++
++enum nsa3xx_inputs {
++	NSA3XX_FAN = 1,
++	NSA3XX_TEMP = 0,
++};
++
++static const char *nsa3xx_input_names[] = {
++	[NSA3XX_FAN] = "Chassis Fan",
++	[NSA3XX_TEMP] = "System Temperature",
++};
++
++static unsigned long nsa3xx_hwmon_update(struct device *dev)
++{
++	int i;
++	unsigned long mcu_data;
++	struct nsa3xx_hwmon *hwmon = dev_get_drvdata(dev);
++	struct nsa3xx_hwmon_platform_data *pdata = hwmon->pdev->dev.platform_data;
++
++	mutex_lock(&hwmon->update_lock);
++
++	mcu_data = hwmon->mcu_data;
++
++	if (time_after(jiffies, hwmon->last_updated + (3 * HZ)) || mcu_data == 0) {
++		dev_dbg(dev, "Reading MCU data\n");
++
++		gpio_set_value(pdata->act_pin, 0);
++		msleep(100);
++
++		for (i = 31; i >= 0; i--) {
++			gpio_set_value(pdata->clk_pin, 0);
++			udelay(100);
++
++			gpio_set_value(pdata->clk_pin, 1);
++			udelay(100);
++
++			mcu_data |= gpio_get_value(pdata->data_pin) ? (1 << i) : 0;
++		}
++
++		gpio_set_value(pdata->act_pin, 1);
++
++		if ((mcu_data & 0xff000000) != (MAGIC_NUMBER << 24)) {
++			dev_err(dev, "Failed to read MCU data\n");
++			mcu_data = 0;
++		}
++
++		hwmon->mcu_data = mcu_data;
++		hwmon->last_updated = jiffies;
++	}
++
++	mutex_unlock(&hwmon->update_lock);
++
++	return mcu_data;
++}
++
++static ssize_t show_name(struct device *dev,
++			 struct device_attribute *attr, char *buf)
++{
++	return sprintf(buf, "nsa3xx\n");
++}
++
++static ssize_t show_label(struct device *dev,
++			  struct device_attribute *attr, char *buf)
++{
++	int channel = to_sensor_dev_attr(attr)->index;
++	return sprintf(buf, "%s\n", nsa3xx_input_names[channel]);
++}
++
++static ssize_t show_value(struct device *dev,
++			  struct device_attribute *attr, char *buf)
++{
++	int channel = to_sensor_dev_attr(attr)->index;
++	unsigned long mcu_data = nsa3xx_hwmon_update(dev);
++	unsigned long value = 0;
++	switch(channel) {
++	case NSA3XX_TEMP:
++		value = (mcu_data & 0xffff) * 100;
++		break;
++	case NSA3XX_FAN:
++		value = ((mcu_data & 0xff0000) >> 16) * 100;
++		break;
++	}
++	return sprintf(buf, "%lu\n", value);
++}
++
++static DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
++static SENSOR_DEVICE_ATTR(temp1_label, S_IRUGO, show_label, NULL, NSA3XX_TEMP);
++static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, show_value, NULL, NSA3XX_TEMP);
++static SENSOR_DEVICE_ATTR(fan1_label, S_IRUGO, show_label, NULL, NSA3XX_FAN);
++static SENSOR_DEVICE_ATTR(fan1_input, S_IRUGO, show_value, NULL, NSA3XX_FAN);
++
++static struct attribute *nsa3xx_attributes[] = {
++	&dev_attr_name.attr,
++	&sensor_dev_attr_temp1_label.dev_attr.attr,
++	&sensor_dev_attr_temp1_input.dev_attr.attr,
++	&sensor_dev_attr_fan1_label.dev_attr.attr,
++	&sensor_dev_attr_fan1_input.dev_attr.attr,
++	NULL
++};
++
++static const struct attribute_group nsa3xx_attr_group = {
++	.attrs	= nsa3xx_attributes,
++};
++
++static int nsa3xx_hwmon_request_gpios(struct nsa3xx_hwmon_platform_data *pdata)
++{
++	int ret;
++
++	if ((ret = gpio_request(pdata->act_pin, "act pin")))
++		return ret;
++
++	if ((ret = gpio_request(pdata->clk_pin, "clk pin")))
++		return ret;
++
++	if ((ret = gpio_request(pdata->data_pin, "data pin")))
++		return ret;
++
++	if ((ret = gpio_direction_output(pdata->act_pin, 1)))
++		return ret;
++
++	if ((ret = gpio_direction_output(pdata->clk_pin, 1)))
++		return ret;
++
++	if ((ret = gpio_direction_input(pdata->data_pin)))
++		return ret;
++
++	return 0;
++}
++
++static void nsa3xx_hwmon_free_gpios(struct nsa3xx_hwmon_platform_data *pdata)
++{
++	gpio_free(pdata->act_pin);
++	gpio_free(pdata->clk_pin);
++	gpio_free(pdata->data_pin);
++}
++
++static int nsa3xx_hwmon_probe(struct platform_device *pdev)
++{
++	int ret;
++	struct nsa3xx_hwmon *hwmon;
++	struct nsa3xx_hwmon_platform_data *pdata = pdev->dev.platform_data;
++
++	hwmon = kzalloc(sizeof(struct nsa3xx_hwmon), GFP_KERNEL);
++	if (!hwmon)
++		return -ENOMEM;
++
++	platform_set_drvdata(pdev, hwmon);
++	hwmon->pdev = pdev;
++	hwmon->mcu_data = 0;
++	mutex_init(&hwmon->update_lock);
++
++	ret = sysfs_create_group(&pdev->dev.kobj, &nsa3xx_attr_group);
++	if (ret)
++		goto err;
++
++	hwmon->classdev = hwmon_device_register(&pdev->dev);
++	if (IS_ERR(hwmon->classdev)) {
++		ret = PTR_ERR(hwmon->classdev);
++		goto err_sysfs;
++	}
++
++	ret = nsa3xx_hwmon_request_gpios(pdata);
++	if (ret)
++		goto err_free_gpio;
++
++	dev_info(&pdev->dev, "initialized\n");
++
++	return 0;
++
++err_free_gpio:
++	nsa3xx_hwmon_free_gpios(pdata);
++	hwmon_device_unregister(hwmon->classdev);
++err_sysfs:
++	sysfs_remove_group(&pdev->dev.kobj, &nsa3xx_attr_group);
++err:
++	platform_set_drvdata(pdev, NULL);
++	kfree(hwmon);
++	return ret;
++}
++
++static int nsa3xx_hwmon_remove(struct platform_device *pdev)
++{
++	struct nsa3xx_hwmon *hwmon = platform_get_drvdata(pdev);
++
++	nsa3xx_hwmon_free_gpios(pdev->dev.platform_data);
++	hwmon_device_unregister(hwmon->classdev);
++	sysfs_remove_group(&pdev->dev.kobj, &nsa3xx_attr_group);
++	platform_set_drvdata(pdev, NULL);
++	kfree(hwmon);
++
++	return 0;
++}
++
++static struct platform_driver nsa3xx_hwmon_driver = {
++	.probe = nsa3xx_hwmon_probe,
++	.remove = nsa3xx_hwmon_remove,
++	.driver = {
++		.name = "nsa3xx-hwmon",
++		.owner = THIS_MODULE,
++	},
++};
++
++module_platform_driver(nsa3xx_hwmon_driver);
++
++MODULE_AUTHOR("Peter Schildmann <linux@schildmann.info>");
++MODULE_DESCRIPTION("NSA3XX Hardware Monitoring");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("platform:nsa3xx-hwmon");
+diff -ruN a/drivers/leds/trigger/Kconfig b/drivers/leds/trigger/Kconfig
+--- a/drivers/leds/trigger/Kconfig	2013-11-03 16:41:51.000000000 -0700
++++ b/drivers/leds/trigger/Kconfig	2013-11-08 01:39:48.958018410 -0700
+@@ -35,7 +35,6 @@
+ 
+ config LEDS_TRIGGER_IDE_DISK
+ 	bool "LED IDE Disk Trigger"
+-	depends on IDE_GD_ATA
+ 	depends on LEDS_TRIGGERS
+ 	help
+ 	  This allows LEDs to be controlled by IDE disk activity.
+diff -ruN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+--- a/drivers/mmc/core/core.c	2013-11-03 16:41:51.000000000 -0700
++++ b/drivers/mmc/core/core.c	2013-11-08 01:39:49.008020351 -0700
+@@ -805,7 +805,7 @@
+ 			 */
+ 			limit_us = 3000000;
+ 		else
+-			limit_us = 100000;
++			limit_us = 200000;
+ 
+ 		/*
+ 		 * SDHC cards always use these fixed values.
+diff -ruN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+--- a/drivers/mmc/core/sd.c	2013-11-03 16:41:51.000000000 -0700
++++ b/drivers/mmc/core/sd.c	2013-11-08 01:39:49.008020351 -0700
+@@ -358,6 +358,15 @@
+ 		return -ENOMEM;
+ 	}
+ 
++	/*
++	 * Some SDHC cards, notably those with a Sandisk SD controller
++	 * (also found in Kingston products) need a bit of slack
++	 * before successfully handling the SWITCH command.  So far,
++	 * cards identifying themselves as "SD04G" and "SD08G" are
++	 * affected
++	 */
++	udelay(100);
++
+ 	err = mmc_sd_switch(card, 1, 0, 1, status);
+ 	if (err)
+ 		goto out;
+diff -ruN a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
+--- a/drivers/mmc/host/mvsdio.c	2013-11-03 16:41:51.000000000 -0700
++++ b/drivers/mmc/host/mvsdio.c	2013-11-08 01:39:49.028021127 -0700
+@@ -25,6 +25,7 @@
+ #include <linux/of_irq.h>
+ #include <linux/mmc/host.h>
+ #include <linux/mmc/slot-gpio.h>
++#include <linux/mmc/sd.h>
+ #include <linux/pinctrl/consumer.h>
+ 
+ #include <asm/sizes.h>
+@@ -148,6 +149,7 @@
+ 
+ 	dev_dbg(host->dev, "cmd %d (hw state 0x%04x)\n",
+ 		cmd->opcode, mvsd_read(MVSD_HW_STATE));
++	if (cmd->opcode == SD_SWITCH) mdelay(1); /* Voodoo */
+ 
+ 	cmdreg = MVSD_CMD_INDEX(cmd->opcode);
+ 
+diff -ruN a/include/linux/bubba3.h b/include/linux/bubba3.h
+--- a/include/linux/bubba3.h	1969-12-31 17:00:00.000000000 -0700
++++ b/include/linux/bubba3.h	2013-11-08 01:39:49.028021127 -0700
+@@ -0,0 +1,41 @@
++/*
++ * (C) Copyright 2010
++ * Excito elektronik i SkÃ¥ne AB <www.excito.com>
++ * by: Tor Krill <tor@excito.com>
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of
++ * the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
++ * MA 02110-1301 USA
++ */
++
++#ifndef __BUBBA3_H
++#define __BUBBA3_H
++
++/*
++ * GPIO definitions
++ */
++#define B3_LED_INTERVAL		(37)
++#define B3_FRONT_LED_GREEN	(38)
++#define B3_POWER_BUTTON		(39)
++#define B3_BUZZER_ENABLE	(40)
++#define B3_FRONT_LED_RED	(41)
++#define B3_FRONT_LED_BLUE	(42)
++#define B3_HW_ID0		(43)
++#define B3_HW_ID1		(44)
++#define B3_HW_ID2		(45)
++#define B3_BUZ_4KHZ		(46)
++
++#endif
+diff -ruN a/include/linux/nsa3xx-hwmon.h b/include/linux/nsa3xx-hwmon.h
+--- a/include/linux/nsa3xx-hwmon.h	1969-12-31 17:00:00.000000000 -0700
++++ b/include/linux/nsa3xx-hwmon.h	2013-11-08 01:39:49.028021127 -0700
+@@ -0,0 +1,21 @@
++/*
++ * include/linux/nsa3xx.hwmon.h
++ *
++ * Platform data structure for ZyXEL NSA3xx hwmon driver
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#ifndef __LINUX_NSA3XX_HWMON_H
++#define __LINUX_NSA3XX_HWMON_H
++
++struct nsa3xx_hwmon_platform_data {
++	/* GPIO pins */
++	unsigned act_pin;
++	unsigned clk_pin;
++	unsigned data_pin;
++};
++
++#endif /* __LINUX_NSA3XX_HWMON_H */
