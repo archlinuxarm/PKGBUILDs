@@ -5,13 +5,18 @@
 #  - removed x86_energy_perf_policy build/package, uses x86 asm
 
 pkgbase=linux-tools
-pkgname=('linux-tools-meta'
-         'libtraceevent'
-         'perf'
-         'cpupower'
-         'usbip')
-pkgver=3.12
-pkgrel=2
+pkgname=(
+  'acpidump'
+  'cgroup_event_listener'
+  'cpupower'
+  'libtraceevent'
+  'linux-tools-meta'
+  'perf'
+  'tmon'
+  'usbip'
+)
+pkgver=3.13
+pkgrel=1
 license=('GPL2')
 arch=('i686' 'x86_64')
 url='http://www.kernel.org'
@@ -20,57 +25,62 @@ options=('!strip')
 # kernel source deps
 makedepends=('asciidoc' 'xmlto')
 # perf deps
-makedepends+=('perl' 'python2' 'libnewt' 'elfutils' 'audit' 'libunwind')
+makedepends+=('perl' 'python2' 'libnewt' 'elfutils' 'audit' 'libunwind' 'numactl')
 # cpupower deps
 makedepends+=('pciutils')
 # usbip deps
 makedepends+=('glib2' 'sysfsutils')
+# tmon deps
+makedepends+=('ncurses')
 groups=("$pkgbase")
 source=("http://ftp.kernel.org/pub/linux/kernel/v3.x/linux-$pkgver.tar.xz"
-        "http://ftp.kernel.org/pub/linux/kernel/v3.x/patch-$pkgver.3.xz"
+        #"http://ftp.kernel.org/pub/linux/kernel/v3.x/patch-$pkgver.3.xz"
         'cpupower.default'
         'cpupower.systemd'
         'cpupower.service'
-        'usbipd.service')
-sha256sums=('2e120ec7fde19fa51dc6b6cc11c81860a0775defcad5a5bf910ed9a50e845a02'
-            '22f2f3249e9014693a487c9734dc4142d89ed8bd9e3b2a74128208f5ea7e47d6'
+        'usbipd.service'
+        '01-fix-perf-python.patch')
+# http://www.kernel.org/pub/linux/kernel/v3.x/sha256sums.asc
+sha256sums=('4d5e5eee5f276424c32e9591f1b6c971baedc7b49f28ce03d1f48b1e5d6226a2'
             '4fa509949d6863d001075fa3e8671eff2599c046d20c98bb4a70778595cd1c3f'
             'fbf6e0ce6eb0ef15703fe212958de6ca46e62188900b5e9f9272ed3cc9cfd54e'
             'a89284d0ecb556ca53a66d1c2087b5fd6d0a901ab2769cd3aebb93f4478905dc'
-            '2e187734d8aec58a3046d79883510d779aa93fb3ab20bd3132c1a607ebe5498f')
+            '2e187734d8aec58a3046d79883510d779aa93fb3ab20bd3132c1a607ebe5498f'
+            'fce128f5e0abfa6916d5cb881456d892d1b163b9639166a4c6c1d53e4dc5086a')
 
-#prepare() {
-#  # apply stable patching set
-#  cd linux-$pkgver
-#  patch -N -p1 -i "$srcdir/patch-$pkgver.5"
-#}
- 
+prepare() {
+  cd linux-$pkgver
+  #patch -N -p1 -i "$srcdir/patch-$pkgver.5"
+  patch -N -p1 -i "$srcdir/01-fix-perf-python.patch"
+}
+
 build() {
-  msg2 'Build libtraceevent'
+  msg2 'libtraceevent'
   pushd linux-$pkgver/tools/lib/traceevent
   make
   popd
 
-  msg2 'Build perf'
+  msg2 'perf'
   pushd linux-$pkgver/tools/perf
   make \
     WERROR=0 \
     DESTDIR="$pkgdir/usr" \
     perfexecdir='lib/perf' \
     PYTHON=python2 \
+    PYTHON_CONFIG=python2-config \
     NO_GTK2=1 \
     PERF_VERSION=$pkgver-$pkgrel \
     all man
   popd
 
-  msg2 'Build cpupower'
+  msg2 'cpupower'
   pushd linux-$pkgver/tools/power/cpupower
   # we cannot use --as-needed
-  LDFLAGS=${LDFLAGS:+"$LDFLAGS,--no-as-needed"}
+  #LDFLAGS=${LDFLAGS:+"$LDFLAGS,--no-as-needed"}
   make VERSION=$pkgver-$pkgrel
   popd
 
-  msg2 'Build usbip'
+  msg2 'usbip'
   pushd linux-$pkgver/drivers/staging/usbip/userspace
   # fix missing man page
   sed -i 's/usbip_bind_driver.8//' Makefile.am
@@ -78,12 +88,36 @@ build() {
   ./configure --prefix=/usr --sbindir=/usr/bin
   make
   popd
+
+  msg2 'tmon'
+  pushd linux-$pkgver/tools/thermal/tmon
+  make
+  popd
+
+  msg2 'acpidump'
+  pushd linux-$pkgver/tools/power/acpi
+  make
+  popd
+
+  msg2 'cgroup_event_listener'
+  pushd linux-$pkgver/tools/cgroup
+  make
+  popd
 }
 
 package_linux-tools-meta() {
   pkgdesc='Linux kernel tools meta package'
   groups=()
-  depends=('libtraceevent' 'perf' 'cpupower' 'usbip')
+  depends=(
+    'acpidump'
+    'cgroup_event_listener'
+    'cpupower'
+    'libtraceevent'
+    'linux-tools-meta'
+    'perf'
+    'tmon'
+    'usbip'
+  )
 }
 
 package_libtraceevent() {
@@ -97,7 +131,8 @@ package_libtraceevent() {
 
 package_perf() {
   pkgdesc='Linux kernel performance auditing tool'
-  depends=('perl' 'python2' 'libnewt' 'elfutils' 'audit' 'libunwind' 'binutils')
+  depends=('perl' 'python2' 'libnewt' 'elfutils' 'audit' 'libunwind' 'binutils'
+           'numactl')
 
   cd linux-$pkgver/tools/perf
   make \
@@ -105,6 +140,7 @@ package_perf() {
     DESTDIR="$pkgdir/usr" \
     perfexecdir='lib/perf' \
     PYTHON=python2 \
+    PYTHON_CONFIG=python2-config \
     NO_GTK2=1 \
     PERF_VERSION=$pkgver-$pkgrel \
     install install-man
@@ -148,6 +184,32 @@ package_usbip() {
   printf 'usbip-core\nusbip-host\n' > "$pkgdir/usr/lib/modules-load.d/$pkgname.conf"
   # systemd
   install -Dm 644 usbipd.service "$pkgdir/usr/lib/systemd/system/usbipd.service"
+}
+
+package_tmon() {
+  pkgdesc='Monitoring and Testing Tool for Linux kernel thermal subsystem'
+  depends=('glibc' 'ncurses')
+
+  cd linux-$pkgver/tools/thermal/tmon
+  make install INSTALL_ROOT="$pkgdir"
+}
+
+package_acpidump() {
+  pkgdesc='Dump system ACPI tables to an ASCII file'
+  depends=('glibc')
+  conflicts=('iasl')
+
+  cd linux-$pkgver/tools/power/acpi
+  install -Dm755 acpidump "$pkgdir/usr/bin/acpidump"
+  install -Dm644 acpidump.8 "$pkgdir/usr/share/man/man8/acpidump.8"
+}
+
+package_cgroup_event_listener() {
+  pkgdesc='Simple listener of cgroup events'
+  depends=('glibc')
+
+  cd linux-$pkgver/tools/cgroup
+  install -Dm755 cgroup_event_listener "$pkgdir/usr/bin/cgroup_event_listener"
 }
 
 # vim:set ts=2 sw=2 et:
