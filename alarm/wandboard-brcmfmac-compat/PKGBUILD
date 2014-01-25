@@ -1,0 +1,96 @@
+# Maintainer: CruX <CruX@project-insanity.org>
+
+buildarch=4
+
+pkgname=wandboard-brcmfmac-compat
+pkgdesc="brcmfmac combined with wandboard firmware for ap mode on older kernels (namely 3.0.35)"
+pkgver=3.12.8
+pkgrel=1
+arch=('armv7h')
+install=${pkgname}.install
+url="https://backports.wiki.kernel.org/index.php/Main_Page"
+license=('GPL2' 'custom')
+makedepends=('coccinelle' 'python2' 'git')
+source=('config' 'http://www.wandboard.org/images/downloads/Driver_Release_4329.tgz')
+md5sums=('2b838d33933a74bcf840ca2e64d514a3'
+         '5c98fef2375224597bf1174c7dfccb90')
+
+_kernel_giturl="git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git"
+_kernel_gitbranch="linux-3.12.y"
+_kernel_gitname="$_kernel_gitbranch"
+
+_backports_giturl="git://git.kernel.org/pub/scm/linux/kernel/git/mcgrof/backports.git"
+_backports_gitbranch="$_kernel_gitbranch"
+_backports_gitname="backports-$_backports_gitbranch"
+
+_firmware_packagename="Driver_Release_4329"
+
+
+prepare() {
+  cd "${srcdir}"
+
+  msg2 "Connecting to kernel GIT server..."
+
+  if [[ -d "${_kernel_gitname}" ]]; then
+    cd "${_kernel_gitname}" && git fetch origin ${_kernel_gitbranch}
+    msg2 "The local files are updated."
+  else
+    git clone --no-checkout --branch "${_kernel_gitbranch}" --depth 1 "${_kernel_giturl}" "${_kernel_gitname}"
+  fi
+
+  msg2 "Connecting to backports GIT server..."
+
+  cd "${srcdir}"
+
+  if [[ -d "${_backports_gitname}" ]]; then
+    cd "${_backports_gitname}" && git pull origin ${_backports_gitbranch}
+    msg2 "The local files are updated."
+  else
+    git clone --branch "${_backports_gitbranch}" --depth 1 "${_backports_giturl}" "${_backports_gitname}"
+  fi
+
+  msg2 "GIT checkout done or server timeout."
+}
+
+build() {
+  # save newest commit sha for gentree
+  cd "${srcdir}/${_kernel_gitname}"
+  _kernelrev=$(git rev-parse HEAD)
+
+  msg2 "Generate tree for driver compilation"
+  cd "${srcdir}/${_backports_gitname}"
+  python2.7 gentree.py --git-revision ${_kernelrev} --clean "${srcdir}/${_kernel_gitname}" "${srcdir}/backports-output"
+
+  cd "${srcdir}/backports-output"
+
+  cp "${srcdir}/config" .config
+
+  unset CFLAGS
+
+#  make
+}
+
+
+package() {
+  _kernver=$(uname -r)
+
+  # set correct depmod command for install
+  sed \
+    -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
+    -i "${startdir}/${pkgname}.install"
+
+  cd "${srcdir}/backports-output"
+
+  # install modules
+  for f in 'compat/compat.ko' 'net/wireless/cfg80211.ko' 'drivers/net/wireless/brcm80211/brcmutil/brcmutil.ko' 'drivers/net/wireless/brcm80211/brcmfmac/brcmfmac.ko'; do
+    install -D -m0644 "${f}" "${pkgdir}/usr/lib/modules/${_kernver}/updates/${f}"
+  done
+
+  #install firmware
+  install -D -m0644 "${srcdir}/${_firmware_packagename}/4329_Firmware_and_NVRAM/fw_4329.bin" "${pkgdir}/usr/lib/firmware/brcm/brcmfmac-sdio.bin"
+  install -D -m0644 "${srcdir}/${_firmware_packagename}/4329_Firmware_and_NVRAM/nvram_4329.txt" "${pkgdir}/usr/lib/firmware/brcm/brcmfmac-sdio.txt"
+
+}
+
+
+# vim:set ts=2 sw=2 et:
