@@ -1,31 +1,28 @@
+# ARMv5 based platforms
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
-# Maintainer: Mike Brown <mbrown@archlinuxarm.org>
 
-buildarch=4
+buildarch=2
 
-pkgbase=linux-odroid
-pkgname=('linux-odroid-x' 'linux-odroid-x2' 'linux-odroid-u2' 'linux-headers-odroid')
-_kernelname=${pkgname#linux}
-_basekernel=3.8
-pkgver=${_basekernel}.13.14
-pkgrel=2
-arch=('armv7h')
-url="http://github.com/hardkernel/linux/"
+pkgbase=linux-armv5-test
+_srcname=linux
+_kernelname=${pkgbase#linux}
+_desc="ARMv5 based platforms"
+pkgver=3.13.0
+pkgrel=1
+arch=('arm')
+url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'kmod' 'git' 'inetutils' 'bc')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
-_commit=162ec2e1e61e8ca8dab23acb6c4b1e59d0c40701
-source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
-        'config_x'
-        'config_x2'
-        'config_u2')
-md5sums=('6ba1be2c11ec76b4eced6ae43a7a5518'
-         'f6fc6bd8bb25c1c63a649d3b7c32957a'
-         '26b7f2c2f52f6672dac6d3239da77de2'
-         '059c11909de78246c750963f69dd594a')
+source=("http://www.x386.net/misc/linux-3.13.mvebu.tar.gz"
+        'config')
+md5sums=('587794c64ee027245e5ed6af6a7c99af'
+         'be6a3a3eb9c9dbe82f18afe2ae3588d2')
 
-build() {
-  cd "${srcdir}/linux-${_commit}"
+prepare() {
+  cd "${srcdir}/${_srcname}"
+
+  cat "${srcdir}/config" > ./.config
 
   # add pkgrel to extraversion
   sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
@@ -34,34 +31,66 @@ build() {
   sed -i '2iexit 0' scripts/depmod.sh
 }
 
-package_linux-odroid-x() {
-  pkgdesc="The Linux Kernel and modules - ODROID-X kernel and modules"
+build() {
+  cd "${srcdir}/${_srcname}"
+
+  # get kernel version
+  make prepare
+
+  # load configuration
+  # Configure the kernel. Replace the line below with one of your choice.
+  #make menuconfig # CLI menu for configuration
+  #make nconfig # new CLI menu for configuration
+  #make xconfig # X-based configuration
+  #make oldconfig # using old config from previous kernel version
+  # ... or manually edit .config
+
+  # Copy back our configuration (use with new kernel version)
+  #cp ./.config ../${pkgbase}.config
+
+  ####################
+  # stop here
+  # this is useful to configure the kernel
+  #msg "Stopping build"
+  #return 1
+  ####################
+
+  #yes "" | make config
+
+  # build!
+  make ${MAKEFLAGS} zImage modules dtbs
+}
+
+_package() {
+  pkgdesc="The Linux Kernel and modules - ${_desc}"
   depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' "linux=${pkgver}")
-  conflicts=('linux-odroidx' 'linux-odroid-x-mali' 'linux-odroid-u2' 'linux-odroid-u2-mali' 'linux-odroid-x2')
-  replaces=('linux-odroidx' 'linux-odroid-x-mali')
-  install=${pkgbase}.install
+  provides=('kernel26' 'linux=${pkgver}' 'aufs_friendly')
+  conflicts=('linux-armv5' 'linux-kirkwood' 'linux-kirkwood-dt' 'linux' 'linux-olinuxino')
+  install=${pkgname}.install
 
-  cd "${srcdir}/linux-${_commit}"
-  cat "${srcdir}/config_x" > ./.config
+  cd "${srcdir}/${_srcname}"
 
-  make ${MAKEFLAGS} zImage modules
-  
   KARCH=arm
 
   # get kernel version
   _kernver="$(make kernelrelease)"
+  _basekernel=${_kernver%%-*}
+  _basekernel=${_basekernel%.*}
 
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
+  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/dtbs}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
   cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
+  cp arch/$KARCH/boot/dts/*.dtb "${pkgdir}/boot/dtbs"
+  cp arch/$KARCH/boot/dts/*.dts "${pkgdir}/boot/dtbs"
+  cp arch/$KARCH/boot/dts/*.dtsi "${pkgdir}/boot/dtbs"
 
   # set correct depmod command for install
   sed \
     -e  "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
     -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
-    -i "${startdir}/${pkgbase}.install"
+    -i "${startdir}/${pkgname}.install"
+
   # remove build and source links
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
   # remove the firmware
@@ -82,114 +111,17 @@ package_linux-odroid-x() {
   mv "$pkgdir/lib" "$pkgdir/usr"
 }
 
-package_linux-odroid-x2() {
-  pkgdesc="The Linux Kernel and modules - ODROID-X2 kernel and modules"
-  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
-  optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' "linux=${pkgver}")
-  conflicts=('linux-odroidx' 'linux-odroid-x-mali' 'linux-odroid-u2' 'linux-odroid-u2-mali' 'linux-odroid-x')
-  replaces=('linux-odroidx' 'linux-odroid-x-mali')
-  install=${pkgbase}.install
-
-  cd "${srcdir}/linux-${_commit}"
-  cat "${srcdir}/config_x2" > ./.config
-
-  make ${MAKEFLAGS} zImage modules
-  
-  KARCH=arm
-
-  # get kernel version
-  _kernver="$(make kernelrelease)"
-
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
-  make INSTALL_MOD_PATH="${pkgdir}" modules_install
-  cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
-
-  # set correct depmod command for install
-  sed \
-    -e  "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
-    -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
-    -i "${startdir}/${pkgbase}.install"
-  # remove build and source links
-  rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
-  # remove the firmware
-  rm -rf "${pkgdir}/lib/firmware"
-  # gzip -9 all modules to save 100MB of space
-  find "${pkgdir}" -name '*.ko' |xargs -P 2 -n 1 gzip -9
-  # make room for external modules
-  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
-  # add real version for building modules and running depmod from post_install/upgrade
-  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
-  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
-
-  # Now we call depmod...
-  depmod -b "$pkgdir" -F System.map "$_kernver"
-
-  # move module tree /lib -> /usr/lib
-  mkdir -p "${pkgdir}/usr"
-  mv "$pkgdir/lib" "$pkgdir/usr"
-}
-
-package_linux-odroid-u2() {
-  pkgdesc="The Linux Kernel and modules - ODROID-U2 kernel and modules"
-  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
-  optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' "linux=${pkgver}")
-  conflicts=('linux-odroidx' 'linux-odroid-x' 'linux-odroid-x-mali' 'linux-odroid-u2-mali' 'linux-odroid-x2')
-  replaces=('linux-odroid-u2-mali')
-  install=${pkgbase}.install
-
-  cd "${srcdir}/linux-${_commit}"
-  cat "${srcdir}/config_u2" > ./.config
-
-  make ${MAKEFLAGS} zImage modules
-
-  KARCH=arm
-
-  # get kernel version
-  _kernver="$(make kernelrelease)"
-
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
-  make INSTALL_MOD_PATH="${pkgdir}" modules_install
-  cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
-
-  # set correct depmod command for install
-  sed \
-    -e  "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
-    -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
-    -i "${startdir}/${pkgbase}.install"
-  # remove build and source links
-  rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
-  # remove the firmware
-  rm -rf "${pkgdir}/lib/firmware"
-  # gzip -9 all modules to save 100MB of space
-  find "${pkgdir}" -name '*.ko' |xargs -P 2 -n 1 gzip -9
-  # make room for external modules
-  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
-  # add real version for building modules and running depmod from post_install/upgrade
-  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
-  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
-
-  # Now we call depmod...
-  depmod -b "$pkgdir" -F System.map "$_kernver"
-
-  # move module tree /lib -> /usr/lib
-  mkdir -p "${pkgdir}/usr"
-  mv "$pkgdir/lib" "$pkgdir/usr"
-}
-
-package_linux-headers-odroid() {
-  pkgdesc="Header files and scripts for building modules for linux kernel - ODROID-X/X2/U2"
-  provides=("linux-headers=${pkgver}")
-  conflicts=('linux-headers-odroidx')
-  replaces=('linux-headers-odroidx')
+_package-headers() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - ${_desc}"
+  provides=('linux-headers=${pkgver}')
+  conflicts=('linux-headers-armv5' 'linux-headers-kirkwood' 'linux-headers-kirkwood-dt' 'linux-headers' 'linux-headers-olinuxino')
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/linux-${_commit}"
+  cd "${srcdir}/${_srcname}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -199,7 +131,7 @@ package_linux-headers-odroid() {
 
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include"
 
-  for i in acpi asm-generic config crypto drm generated keys linux math-emu \
+  for i in acpi asm-generic config crypto drm generated linux math-emu \
     media net pcmcia scsi sound trace uapi video xen; do
     cp -a include/${i} "${pkgdir}/usr/src/linux-${_kernver}/include/"
   done
@@ -207,10 +139,10 @@ package_linux-headers-odroid() {
   # copy arch includes for external modules
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH
   cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-exynos
-  cp -a arch/$KARCH/mach-exynos/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-exynos/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-samsung
-  cp -a arch/$KARCH/plat-samsung/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-samsung/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-kirkwood
+  cp -a arch/$KARCH/mach-kirkwood/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-kirkwood/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-orion
+  cp -a arch/$KARCH/plat-orion/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-orion/
 
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
@@ -223,6 +155,10 @@ package_linux-headers-odroid() {
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel"
 
   cp arch/${KARCH}/Makefile "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/"
+
+  if [ "${CARCH}" = "i686" ]; then
+    cp arch/${KARCH}/Makefile_32.cpu "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/"
+  fi
 
   cp arch/${KARCH}/kernel/asm-offsets.s "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel/"
 
@@ -317,3 +253,10 @@ package_linux-headers-odroid() {
   # remove unneeded architectures
   rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
 }
+
+pkgname=("${pkgbase}" "${pkgbase}-headers")
+for _p in ${pkgname[@]}; do
+  eval "package_${_p}() {
+    _package${_p#${pkgbase}}
+  }"
+done
