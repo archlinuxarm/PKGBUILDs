@@ -1,0 +1,94 @@
+# $Id$
+# Maintainer: Felix Yan <felixonmars@gmail.com>
+# Contributor: Sven-Hendrik Haase <sh@lutzhaase.com>
+# Contributor: Thomas Dziedzic < gostrc at gmail >
+# Contributor: Mathias Stearn <mathias@10gen.com>
+# Contributor: Alec Thomas
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - build -j3 (RAM constraints)
+#  - use system v8
+#  - ARM patches
+
+pkgname=mongodb
+pkgver=2.4.9
+pkgrel=1
+pkgdesc='A high-performance, open source, schema-free document-oriented database'
+arch=('i686' 'x86_64')
+url='http://www.mongodb.org'
+license=('AGPL3')
+depends=('boost-libs' 'pcre' 'snappy' 'openssl' 'gperftools' 'v8')
+makedepends=('scons' 'boost' 'readline' 'ncurses' 'libpcap') # 'cyrus-sasl')
+checkdepends=('python2-pymongo')
+optdepends=('libpcap: needed for mongosniff')
+backup=('etc/mongodb.conf')
+install=mongodb.install
+source=("http://downloads.mongodb.org/src/mongodb-src-r${pkgver}.tar.gz"
+        'mongodb.conf' 'mongodb.service' 'removeWerror.patch'
+        '0005-ARM-support-for-ASM-operations-in-MongoDB.patch'
+        '0006-Fix-ARM-alignment-problems.patch')
+
+MAKEFLAGS="-j3"
+
+build() {
+  # fucking mongo aint no fun to package
+  export SCONSFLAGS="$MAKEFLAGS"
+
+  cd mongodb-src-r${pkgver}
+
+  # failed to build with -Werror since 2.4.0
+  patch -Np1 -i "$srcdir/removeWerror.patch"
+
+  patch -Np1 -i ../0005-ARM-support-for-ASM-operations-in-MongoDB.patch
+  patch -Np1 -i ../0006-Fix-ARM-alignment-problems.patch
+
+  scons all \
+    --use-system-boost \
+    --use-system-pcre \
+    --use-system-snappy \
+    --use-system-tcmalloc \
+    --ssl \
+    --sharedclient \
+    --use-system-v8
+    # --use-sasl-client
+}
+
+<<COMMENT
+check() {
+  export SCONSFLAGS="$MAKEFLAGS"
+
+  cd mongodb-src-r${pkgver}
+
+  scons smokeAll --smokedbprefix=$srcdir
+}
+COMMENT
+
+package() {
+  export SCONSFLAGS="$MAKEFLAGS"
+
+  cd mongodb-src-r${pkgver}
+
+  scons install \
+    --use-system-boost \
+    --use-system-pcre \
+    --use-system-snappy \
+    --use-system-tcmalloc \
+    --ssl \
+    --sharedclient \
+    --full \
+    --prefix="$pkgdir/usr" \
+    --use-system-v8
+    # --use-sasl-client
+
+  install -Dm644 "$srcdir/mongodb.conf" "$pkgdir/etc/mongodb.conf"
+  install -Dm644 "$srcdir/mongodb.service" "$pkgdir/usr/lib/systemd/system/mongodb.service"
+  install -dm700 "$pkgdir/var/lib/mongodb"
+  install -dm755 "$pkgdir/var/log/mongodb"
+}
+
+sha512sums=('f9991b30eebdc13e04b553ea9c133f73cb7c0d034ae94e6293a28f3c40e8c93d3e63257e20ff801dfd586a22c95ca52551da8517d0e25534dda62f3ed650aa23'
+            '05dead727d3ea5fe8af1a3c3888693f6b3e2b8cb7f197a5d793352e10d2c524e96c9a5c55ad2e88c1114643a9612ec0b26a2574b48a5260a9b51ec8941461f1c'
+            '177251404b2e818ae2b546fe8b13cb76e348c99e85c7bef22a04b0f07b600fd515a309ede50214f4198594388a6d2b31f46e945b9dae84aabb4dfa13b1123bb9'
+            'e709f76fa71a10d6b72d2eeae65d715e0a0a7e6cb93704114f22db8662d7102de77bd1e6706049351beb159aaa04548cfe4b14fe6ee498a166c5ad54c8275f84'
+            '5e9d181f440aef2527e715116827972a8372b79aa8b22f87e31853adeb19e74f775afe85b7c5015fc4385b5fbdb1b5cf7db9904a2e891806c5541780f6bdbde6'
+            '107f99d1f702ef717dcf85f524dd5937a03a59d3a40967e378fff90e048c3df0fc0c39956dd8a741c65b8758ef512c9046cb864f277b1063a8754588c75a6a11')
