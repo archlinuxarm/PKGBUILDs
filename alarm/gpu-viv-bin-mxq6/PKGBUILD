@@ -1,0 +1,169 @@
+# Maintainer: RaumZeit <raumzeit@gmx.net>
+# Contributor: pepedog at archlinuxarm dot com
+
+buildarch=4
+pkgbase=gpu-viv-bin-mx6q
+pkgver=3.10.9_1.0.0
+_pkgver=${pkgver//_/-}-hfp
+pkgrel=1
+pkgdesc="Freescale proprietary Vivante GPU drivers for i.MX6 Quad SoC"
+
+# filesystem prefix for the include files and license
+_install_prefix=/opt/fsl
+# filesystem prefix for the libraries
+_install_exec_prefix=/opt/fsl
+# filesystem prefix for the samples
+_install_samples_prefix=/opt/fsl
+url="https://community.freescale.com/docs/DOC-95560"
+arch=('armv7h')
+license=('proprietary')
+#depends=('fsl-bsp-kernel=4.1.0' 'fsl-bsp-kernel-headers=4.1.0')
+source=("http://www.freescale.com/lgfiles/NMG/MAD/YOCTO/${pkgbase}-${_pkgver}.bin"
+	"98-galcore.rules"
+	"egl.pc"
+	"egl_x11.pc"
+	"gc_wayland_protocol.pc"
+	"glesv1_cm.pc"
+	"glesv1_cm_x11.pc"
+	"glesv2.pc"
+	"glesv2_x11.pc"
+	"vg.pc"
+	"vg_x11.pc"
+	"wayland-egl.pc"
+	"wayland-viv.pc")
+md5sums=('52f5ebbb6a9b5d0eafdb952246de584e'
+         'ab0afbd747e802f0bc95d31494d3b559'
+         'd56637776b8fa659d7b84f45d006dad2'
+         '24ea66e2601cd3a1729c16e7e4052425'
+         '9a815a054d9a2b94e78addd816fbb8a8'
+         '16055b2e429354d117b9ea5c9d9b29d2'
+         '7ce072e28e78fe9c67cb45d8ef447d85'
+         '45982ac2514c8eb08105f8af427ce5eb'
+         '7bb4eb0db280e9159726adafc8f95d31'
+         '101994c11d92ff4bcd86ea25f3afa0f0'
+         '36962675b16862e33f6d250865b0d6ba'
+         '9e0ce33723aac9e9829a9322e38f6e32'
+         '8994b882eaad8ee95ccb759505bdcf58')
+
+prepare() {
+  cd "${srcdir}"
+  #chmod for execution, library is packed as binary to accept EULA
+  chmod +x ${pkgbase}-${_pkgver}.bin
+  ./${pkgbase}-${_pkgver}.bin --force --auto-accept
+  sed -n '/EOEULA/,/EOEULA/p' ${pkgbase}-${_pkgver}.bin | grep -v EOEULA > LICENSE.$pkgbase
+
+  # adopt the prefix and exec_prefix variables in .pc files
+  sed -i 's#^prefix=/usr#prefix='${_install_prefix}'#' *.pc
+  sed -i 's#^exec_prefix=/usr#exec_prefix='${_install_exec_prefix}'#' *.pc
+}
+
+_package_common() {
+  provides=('gpu-viv-bin-mx6q=4.1.0' 'libegl' 'libgles' 'libgl' 'mesa' 'mesa-libgl')
+  conflicts=('gpu-viv-bin-mx6q')
+  cd "${pkgbase}-${_pkgver}"
+  mkdir -p "${pkgdir}${_install_prefix}/include"  "${pkgdir}${_install_exec_prefix}/lib"
+  cp -r usr/include/* "${pkgdir}${_install_prefix}/include"
+  cd usr/lib
+  cp -r libCLC* libVDK* *GLES* libGL.* libGLSLC* libOpenCL* libOpenVG_* "${pkgdir}${_install_exec_prefix}/lib"
+  mkdir -p "${pkgdir}${_install_prefix}/licenses"
+  cp "${srcdir}/LICENSE.$pkgbase" "$pkgdir${_install_prefix}/licenses"
+  mkdir -p "${pkgdir}/etc/ld.so.conf.d"
+  echo "${_install_prefix}/lib" > "${pkgdir}/etc/ld.so.conf.d/$pkgbase.conf"
+
+  install -D -m0644 "${srcdir}/98-galcore.rules" "${pkgdir}/usr/lib/udev/rules.d/98-galcore.rules"
+
+}
+
+_package_common_post() {
+
+  cd "${pkgdir}${_install_exec_prefix}/lib/"
+
+  mv libGL.so.1.2 libGL.so.1.2.0
+  ln -sf libGL.so.1.2.0 libGL.so.1.2
+  ln -sf libGL.so.1.2.0 libGL.so
+  mv libEGL-${backend}.so libEGL.so.1.0
+  ln -sf libEGL.so.1.0 libEGL.so.1
+  ln -sf libEGL.so.1.0 libEGL.so
+  mv libGAL-${backend}.so libGAL.so
+  mv libVIVANTE-${backend}.so libVIVANTE.so
+
+  ln -sf libOpenVG_3D.so libOpenVG.so
+
+  for backend in wl x11 fb dfb; do
+    find "${pkgdir}${_install_exec_prefix}/lib/" -name "*-$backend.so" -exec rm '{}' ';'
+  done
+
+  find "${pkgdir}${_install_exec_prefix}/lib/" -type f -exec chmod 644 {} \;
+  find "${pkgdir}${_install_prefix}/include/" -type f -exec chmod 644 {} \;
+}
+
+package_gpu-viv-bin-mx6q-fb() {
+  backend=fb
+  _package_common
+  cp -r *-fb* "${pkgdir}${_install_exec_prefix}/lib"
+
+  install -d "${pkgdir}/usr/lib/pkgconfig"
+  install -m0644 "${srcdir}/egl.pc" "${pkgdir}/usr/lib/pkgconfig/egl.pc"
+  install -m0644 "${srcdir}/glesv1_cm.pc" "${pkgdir}/usr/lib/pkgconfig/glesv1_cm.pc"
+  install -m0644 "${srcdir}/glesv2.pc" "${pkgdir}/usr/lib/pkgconfig/glesv2.pc"
+  install -m0644 "${srcdir}/vg.pc" "${pkgdir}/usr/lib/pkgconfig/vg.pc"
+
+
+  _package_common_post
+}
+
+
+package_gpu-viv-bin-mx6q-x11() {
+  backend=x11
+  _package_common
+  cp -r dri "${pkgdir}${_install_exec_prefix}/lib"
+
+  cp -r *-x11* "${pkgdir}${_install_exec_prefix}/lib"
+
+  install -d "${pkgdir}/usr/lib/pkgconfig"
+  install -m0644 "${srcdir}/egl_x11.pc" "${pkgdir}/usr/lib/pkgconfig/egl.pc"
+  install -m0644 "${srcdir}/glesv1_cm_x11.pc" "${pkgdir}/usr/lib/pkgconfig/glesv1_cm.pc"
+  install -m0644 "${srcdir}/glesv2_x11.pc" "${pkgdir}/usr/lib/pkgconfig/glesv2.pc"
+  install -m0644 "${srcdir}/vg_x11.pc" "${pkgdir}/usr/lib/pkgconfig/vg.pc"
+
+# 
+  _package_common_post
+}
+
+package_gpu-viv-bin-mx6q-wl() {
+  backend=wl
+  _package_common
+  cp -r *-wl* "${pkgdir}${_install_exec_prefix}/lib"
+  cp -r *wayland* "${pkgdir}${_install_exec_prefix}/lib"
+
+  install -d "${pkgdir}/usr/lib/pkgconfig"
+  install -m0644 "${srcdir}/egl_x11.pc" "${pkgdir}/usr/lib/pkgconfig/egl.pc"
+  install -m0644 "${srcdir}/glesv1_cm_x11.pc" "${pkgdir}/usr/lib/pkgconfig/glesv1_cm.pc"
+  install -m0644 "${srcdir}/glesv2_x11.pc" "${pkgdir}/usr/lib/pkgconfig/glesv2.pc"
+  install -m0644 "${srcdir}/vg_x11.pc" "${pkgdir}/usr/lib/pkgconfig/vg.pc"
+  install -m0644 "${srcdir}/gc_wayland_protocol.pc" "${pkgdir}/usr/lib/pkgconfig/gc_wayland_protocol.pc"
+  install -m0644 "${srcdir}/wayland-egl.pc" "${pkgdir}/usr/lib/pkgconfig/wayland-egl.pc"
+  install -m0644 "${srcdir}/wayland-viv.pc" "${pkgdir}/usr/lib/pkgconfig/wayland-viv.pc"
+
+  _package_common_post
+}
+
+
+package_gpu-viv-bin-mx6q-dfb() {
+  backend=dfb
+  _package_common
+  cp -r *-dfb* directfb* "${pkgdir}${_install_exec_prefix}/lib"
+  _package_common_post
+}
+
+
+package_gpu-viv-bin-mx6q-samples() {
+  cd "${pkgbase}-${_pkgver}"
+  mkdir -p "${pkgdir}${_install_samples_prefix}/viv_samples"
+  cp -r opt/viv_samples/* "${pkgdir}${_install_samples_prefix}/viv_samples"
+}
+
+
+pkgname=("${pkgbase}-x11" "${pkgbase}-fb" "${pkgbase}-dfb" "${pkgbase}-wl" "${pkgbase}-samples")
+
+# vim:set ts=2 sw=2 et:
