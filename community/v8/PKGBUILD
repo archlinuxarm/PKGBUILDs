@@ -1,0 +1,80 @@
+# $Id$
+# Maintainer: Anatol Pomozov <anatol.pomozov@gmail.com>
+# Contributor:  Bartłomiej Piotrowski <nospam@bpiotrowski.pl>
+# Contributor: Kaiting Chen <kaitocracy@gmail.com>
+# Contributor: tocer <tocer.deng@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - set ARM arch, gyp config flags
+
+pkgname=v8
+# use http://omahaproxy.appspot.com/ to find stable v8 version
+pkgver=3.23.17.13
+pkgrel=1
+pkgdesc='Fast and modern Javascript engine'
+arch=(i686 x86_64)
+url='http://code.google.com/p/v8'
+license=(BSD)
+depends=(readline icu)
+makedepends=(subversion python2)
+# unfortunately https://github.com/$pkgname/$pkgname does not contain all tags
+source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.bz2
+        v8.pc)
+sha256sums=('4b826735d182e9615fd9259e3f5d008c4f53d98c9f3531a6af75f00bd07be0b1'
+            '2b054309df9af9fb2e3e14527e88360b44745649b4866e592fb357ac90935f5d')
+
+[[ "$CARCH" = 'i686' ]]   && ARCH=ia32
+[[ "$CARCH" = 'x86_64' ]] && ARCH=x64
+[[ "$CARCH" = 'arm' ]]    && ARCH=arm && CONFIG="-Darmv7=0 -Darm_neon=0 -Darm_fpu= -Darm_float_abi=soft -Darm_thumb=" && CXXFLAGS="$CXXFLAGS -march=armv5t -mno-unaligned-access"
+[[ "$CARCH" = 'armv6h' ]] && ARCH=arm && CONFIG="-Darmv7=0 -Darm_neon=0 -Darm_fpu=vfp -Darm_float_abi=hard -Darm_thumb="
+[[ "$CARCH" = 'armv7h' ]] && ARCH=arm && CONFIG="-Darmv7=1 -Darm_neon=0 -Darm_fpu=vfpv3-d16 -Darm_float_abi=hard -Darm_thumb="
+
+prepare() {
+  cd v8-$pkgver
+
+  # we do not need icu sources, just one icu.gyp
+  sed -e 's|\bthird_party/icu --revision |--depth=files third_party/icu --revision |' -i Makefile
+  make dependencies
+
+  find build/ test/ tools/ src/ -type f -exec \
+    sed -e 's_^#!/usr/bin/env python$_&2_' \
+        -e 's_^#!/usr/bin/python$_&2_' \
+        -e "s_'python'_'python2'_" -i {} \;
+
+  sed 's/\bpython\b/python2/' -i Makefile build/gyp/gyp
+
+  sed "s/@VERSION@/$pkgver/g" -i "$srcdir/v8.pc"
+}
+
+build() {
+  cd v8-$pkgver
+
+  build/gyp_v8 $CONFIG -Dv8_enable_i18n_support=1 -Duse_system_icu=1 -Dconsole=readline -Dcomponent=shared_library -Dv8_target_arch=$ARCH -Dwerror= --generator-output=out -f make
+
+  make -C out builddir=`pwd`/out/Release BUILDTYPE=Release mksnapshot.$ARCH
+  make -C out builddir=`pwd`/out/Release BUILDTYPE=Release
+}
+
+check() {
+  cd v8-$pkgver
+  # A number of tests are failing. Figure out what happens and then enable tests.
+  # LD_LIBRARY_PATH=out/Release/lib.target tools/run-tests.py --no-presubmit --outdir=out --buildbot --arch=$ARCH --mode=Release # --progress=dots
+}
+
+package() {
+  cd v8-$pkgver
+
+  install -Dm755 out/Release/d8 "$pkgdir"/usr/bin/d8
+  install -Dm755 out/Release/lib.target/libv8.so "$pkgdir"/usr/lib/libv8.so
+
+  # V8 has several header files and ideally if it had its own folder in /usr/include
+  # But doing it here will break all users. Ideally if they use provided pkgconfig file.
+  install -d "$pkgdir"/usr/include
+  install -Dm644 include/*.h "$pkgdir"/usr/include
+
+  install -d "$pkgdir"/usr/lib/pkgconfig
+  install -m644 "$srcdir/v8.pc" "$pkgdir"/usr/lib/pkgconfig
+
+  install -d "$pkgdir"/usr/share/licenses/v8
+  install -m644 LICENSE* "$pkgdir"/usr/share/licenses/v8
+}
