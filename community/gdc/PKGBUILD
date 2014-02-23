@@ -1,0 +1,115 @@
+# Maintainer: Mihails Strasuns <public@dicebot.lv>
+# Contributor: Moritz Maxeiner <moritz@ucworks.org>
+# Contributor: Jerome Berger <jeberger@free.fr>
+# Contributor: Jesus Alvarez <jeezusjr@gmail.com>
+
+# ALARM: Johannes Pfau <johannespfau@gmail.com>
+#  - specifid build host
+#  - replaced bugurl with our GitHub issue page
+
+pkgname=('gdc' 'libgphobos-devel')
+pkgver=4.8.2
+pkgrel=5
+arch=('i686' 'x86_64')
+url="https://github.com/D-Programming-GDC/GDC"
+license=('GPL')
+makedepends=('binutils>=2.23' 'git' 'gcc' 'make' 'perl' 'cloog' 'automake')
+options=('!emptydirs' '!buildflags')
+_snapshot=4.8-20130725
+source=(ftp://gcc.gnu.org/pub/gcc/snapshots/${_snapshot}/gcc-${_snapshot}.tar.bz2
+        gdc::git://github.com/D-Programming-GDC/GDC.git#branch=gdc-4.8
+        folders.diff)
+sha256sums=('e4e2202b15f8ba323f88c65de0e4190b0630a4b2e70b0653526b31e946877ead'
+            'SKIP'
+            '82f1ba0825164a74660bd5008d8f3acae1bacc3271c86475efc1601fe0da73c4')
+
+groups=('dlang' 'dlang-gdc')
+conflicts=('gdc1-bin' 'gdc1-hg' 'gdc-git')
+
+prepare()
+{
+    cd $srcdir/gcc-$_snapshot
+
+    # Do not run fixincludes
+    sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
+
+    echo $pkgver > gcc/BASE-VER
+
+    # hack! - some configure tests for header files using "$CPP $CPPFLAGS"
+    sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" {libiberty,gcc}/configure
+
+    cd $srcdir/gdc
+    git apply $srcdir/folders.diff # fix gdc_include_path
+    ./setup-gcc.sh ../gcc-$_snapshot
+
+    mkdir $srcdir/gcc-build
+}
+
+
+build()
+{
+    # ALARM: Specify build host types
+    [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=armv5tel-unknown-linux-gnueabi --build=armv5tel-unknown-linux-gnueabi"
+    [[ $CARCH == "armv6h" ]] && CONFIGFLAG="--host=armv6l-unknown-linux-gnueabihf --build=armv6l-unknown-linux-gnueabihf --with-arch=armv6 --with-float=hard --with-fpu=vfp"
+    [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf --with-arch=armv7-a --with-float=hard --with-fpu=vfpv3-d16"
+
+    cd ${srcdir}/gcc-build
+
+    ${srcdir}/gcc-$_snapshot/configure --prefix=/usr \
+        --libdir=/usr/lib --libexecdir=/usr/lib \
+        --mandir=/usr/share/man --infodir=/usr/share/info \
+        --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
+        --enable-languages=d \
+        --enable-shared --enable-threads=posix \
+        --with-system-zlib --enable-__cxa_atexit \
+        --disable-libunwind-exceptions --enable-clocale=gnu \
+        --disable-libstdcxx-pch \
+        --enable-gnu-unique-object --enable-linker-build-id \
+        --enable-cloog-backend=isl --disable-cloog-version-check \
+        --enable-lto --enable-gold --enable-ld=default \
+        --enable-plugin --with-plugin-ld=ld.gold \
+        --with-linker-hash-style=gnu --disable-install-libiberty \
+        --disable-multilib --disable-libssp --disable-werror \
+        --disable-nls --disable-bootstrap \
+        --disable-libgomp --disable-libmudflap --disable-libquadmath $CONFIGFLAG
+
+    make 
+}
+
+package_gdc()
+{
+    depends=('gcc' 'binutils')
+    optdepends=('libgphobos-devel: D standard library, GDC version')
+    provides=("d-compiler")
+    pkgdesc="Compiler for D programming language which uses gcc backend (2.064.2 frontend version)"
+ 
+    install -D -m755 $srcdir/gcc-build/gcc/gdc $pkgdir/usr/bin/gdc
+    install -D -m755 $srcdir/gcc-build/gcc/cc1d $pkgdir/usr/lib/gcc/$CHOST/$pkgver/cc1d
+}
+
+package_libgphobos-devel()
+{
+    pkgdesc="Standard library for D programming language, GDC port"
+    provides=("d-runtime" "d-stdlib")
+    options=("staticlibs")
+    depends=('gdc')
+
+    # druntime
+    install -D $srcdir/gdc/libphobos/libdruntime/object.di $pkgdir/usr/include/dlang/gdc/object.di
+    install -D $srcdir/gdc/libphobos/libdruntime/__entrypoint.di ${pkgdir}/usr/include/dlang/gdc/__entrypoint.di
+    cp -r $srcdir/gdc/libphobos/libdruntime/core $pkgdir/usr/include/dlang/gdc/core
+    cp -r $srcdir/gdc/libphobos/libdruntime/gcc $pkgdir/usr/include/dlang/gdc/gcc
+
+    # workaround for auto-generated libbacktrace issue
+	# script needs to be re-written to first call normal gcc instalaltion targets to
+	# avoid such problems in future
+	cp $srcdir/gcc-build/$CHOST/libphobos/libdruntime/gcc/libbacktrace.d $pkgdir/usr/include/dlang/gdc/gcc/
+	rm $pkgdir/usr/include/dlang/gdc/gcc/libbacktrace.d.in
+
+    # phobos
+    cp $srcdir/gdc/libphobos/src/crc32.d ${pkgdir}/usr/include/dlang/gdc/
+    cp -r $srcdir/gdc/libphobos/src/std ${pkgdir}/usr/include/dlang/gdc/std
+    cp -r $srcdir/gdc/libphobos/src/etc ${pkgdir}/usr/include/dlang/gdc/etc
+
+    install -D -m644 $srcdir/gcc-build/$CHOST/libphobos/src/libgphobos2.a $pkgdir/usr/lib/libgphobos2.a
+}
