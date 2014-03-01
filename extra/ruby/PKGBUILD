@@ -1,0 +1,88 @@
+# Maintainer: Thomas Dziedzic <gostrc@gmail.com>
+# Contributor: Allan McRae <allan@archlinux.org>
+# Contributor: John Proctor <jproctor@prium.net>
+# Contributor: Jeramy Rutley <jrutley@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to fix building against readline 6.3
+#  - patch to fix running ruby on v5 (#705)
+
+pkgname=('ruby' 'ruby-docs')
+pkgver=2.1.0
+pkgrel=2.1
+arch=('i686' 'x86_64')
+url='http://www.ruby-lang.org/en/'
+license=('BSD' 'custom')
+# disable ruby tk since 1.9.3 it has caused a segfault on require 'tk'
+# https://bugs.ruby-lang.org/issues/8000
+# wait for upstream to start supporting tk 8.6
+makedepends=('gdbm' 'openssl' 'libffi' 'doxygen' 'graphviz' 'libyaml') # 'tk'
+options=('!emptydirs' '!makeflags' 'staticlibs')
+source=("http://cache.ruby-lang.org/pub/ruby/ruby-${pkgver}.tar.bz2"
+        'gemrc'
+        '0001-Fix-installing-gem-from-file-without-dependencies.patch'
+        'changeset_r45225.diff'
+        '0002-Use-only-unsigned-long-for-rb_serial_t.patch')
+md5sums=('1546eeb763ac7754365664be763a1e8f'
+         '6fb8e7a09955e0f64be3158fb4a27e7a'
+         '61a1507f260866805fc6451c14733b25'
+         '64839e135447accd2e0568c563e12d23'
+         'f6f9c200c5e9afc4d5b21575da4821a2')
+
+build() {
+  cd ruby-${pkgver}
+
+  # fixes https://github.com/rubygems/rubygems/issues/760
+  patch -Np1 -i ${srcdir}/0001-Fix-installing-gem-from-file-without-dependencies.patch
+
+  # fixes https://bugs.ruby-lang.org/issues/9578
+  patch -Np0 -i ../changeset_r45225.diff
+
+  # fixes https://bugs.ruby-lang.org/issues/9507
+  [[ $CARCH == 'arm' ]] && patch -Np1 -i ../0002-Use-only-unsigned-long-for-rb_serial_t.patch
+
+  PKG_CONFIG=/usr/bin/pkg-config ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --enable-shared \
+    --disable-rpath \
+    --with-dbm-type=gdbm_compat
+
+  make
+}
+
+check() {
+  cd ruby-${pkgver}
+
+  make test
+}
+
+package_ruby() {
+  pkgdesc='An object-oriented language for quick and easy programming'
+  depends=('gdbm' 'openssl' 'libffi' 'libyaml')
+  optdepends=('ruby-docs: Ruby documentation') # 'tk: for Ruby/TK'
+  provides=('rubygems' 'rake')
+  conflicts=('rake')
+  backup=('etc/gemrc')
+  install='ruby.install'
+
+  cd ruby-${pkgver}
+
+  make DESTDIR="${pkgdir}" install-nodoc
+
+  install -D -m644 ${srcdir}/gemrc "${pkgdir}/etc/gemrc"
+
+  install -D -m644 COPYING "${pkgdir}/usr/share/licenses/ruby/LICENSE"
+  install -D -m644 BSDL "${pkgdir}/usr/share/licenses/ruby/BSDL"
+}
+
+package_ruby-docs() {
+  pkgdesc='Documentation files for ruby'
+
+  cd ruby-${pkgver}
+
+  make DESTDIR="${pkgdir}" install-doc install-capi
+
+  install -D -m644 COPYING "${pkgdir}/usr/share/licenses/ruby-docs/LICENSE"
+  install -D -m644 BSDL "${pkgdir}/usr/share/licenses/ruby-docs/BSDL"
+}
