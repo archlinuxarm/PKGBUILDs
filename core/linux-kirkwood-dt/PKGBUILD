@@ -1,81 +1,103 @@
 # Maintainer: Mike Staszel <mikestaszel@plugapps.com>
 # Maintainer: Kevin Mihelich <kevin@plugapps.com>
+# Maintainer: Oleg Rakhmanov <orakhmanov@gmail.com>
 
 buildarch=2
 
 pkgbase=linux-kirkwood-dt
-pkgname=('linux-kirkwood-dt' 'linux-headers-kirkwood-dt')
-#pkgname=linux-test       # Build kernel with a different name
-_kernelname=${pkgname#linux}
-_basekernel=3.9_rc2
-pkgver=${_basekernel}
+_kernelname=${pkgbase#linux}
+_desc="Marvell Kirkwood DT"
+pkgver=3.12.8
 pkgrel=3
-cryptover=1.5
+cryptover=1.6
+bfqver=v6r2
+uksmver="0.1.2.2"
+uksmname="v3.12"
+
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('git' 'xmlto' 'docbook-xsl' 'uboot-mkimage' 'bc')
+makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
-source=('support.patch'
+
+source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${pkgver}.tar.xz"
+        'archlinuxarm.patch'
         'config'
+        'mach-types::http://www.arm.linux.org.uk/developer/machines/download.php'
+        'change-default-console-loglevel.patch'
         'usb-add-reset-resume-quirk-for-several-webcams.patch'
-	'rtl871x-arm.patch'
-	'mach-types::http://www.arm.linux.org.uk/developer/machines/download.php'
+        "git://git.code.sf.net/p/aufs/aufs3-standalone#branch=aufs${pkgver%.*}"
         "http://download.gna.org/cryptodev-linux/cryptodev-linux-${cryptover}.tar.gz"
-	"http://algo.ing.unimo.it/people/paolo/disk_sched/patches/3.8.0-v6/0001-block-cgroups-kconfig-build-bits-for-BFQ-v6-3.8.patch"
-        "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/3.8.0-v6/0002-block-introduce-the-BFQ-v6-I-O-sched-for-3.8.patch")
+        "http://kerneldedup.org/download/uksm/${uksmver}/uksm-${uksmver}-for-${uksmname}.patch"
+        "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/${pkgver%.*}.0-${bfqver}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver%.*}.patch"
+        "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/${pkgver%.*}.0-${bfqver}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver%.*}.patch"
+        "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/${pkgver%.*}.0-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver%.*}.0.patch"
+        'aufs-sources-3.12.7-mmap-aufs3.patch')
 
-md5sums=('f5d3635da03cb45904bedd69b47133de'
-         '22606bb1a818cfa81b635b03eda3311f'
-         'd00814b57448895e65fbbc800e8a58ba'
-         'c38fa5f5065be065282887e0a3e2dc63'
-         'd5c4e024aa5843d645faba0ac256f782'
-         '3a4b8d23c1708283e29477931d63ffb8'
-         '03eca1c188c076041f8d74100d55d659'
-         '90b11395c702610bf4b42e72913f23f8')
+md5sums=('bacfc23a07a6fee0d271a4b062862445'
+         'a4580de76f17c7eb8fce9189ed0c414e'
+         'a7a10c814fad35eced1cbe6e767ebfcb'
+         'SKIP'
+         '65d5a4f313310bb2a732d022d51ea7e7'
+         '9b5a265440abf57d2052838f31486a3a'
+         'SKIP'
+         'eade38998313c25fd7934719cdf8a2ea'
+         '57cbf7fa8220461f8a052ea0eb9af779'
+         '2d39966d14fdad1e05679232f97fdb3c'
+         '2965641038a5aae263722b1ba16b971b'
+         '9a55951ee4c3741b61e2e159631b5cf2'
+         '2dd9dae61c1d0eacda41a17bd13e7f7f')
 
-__gitroot="git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git"
-__gitname="linux"
-__gitbranch="v3.9-rc2"
+prepare() {
 
-build() {
-  cd "${srcdir}"
+#Remove after this fix is in the tree
+msg2 "Fixing aufs3 for kernel >=3.12.7"
+  cd "${srcdir}/aufs3-standalone"
+  patch -p1 -i ../aufs-sources-3.12.7-mmap-aufs3.patch
+#Evomer
 
-  msg "Connecting to GIT server..."
-  if [ -d $__gitname ] ; then
-    cd $__gitname && git pull origin
-    msg "The local files are updated."
-  else
-    git clone --depth 1 --branch=${__gitbranch} $__gitroot
-  fi
+  cd "${srcdir}/linux-${pkgver}"
 
-  cd "${srcdir}/${__gitname}"
+msg2 "Copying aufs3 patches into the kernel source tree"
 
-  msg "GIT checkout done or server timeout"
+  cp -ru "${srcdir}/aufs3-standalone/Documentation" "${srcdir}/linux-${pkgver}/"
+  cp -ru "${srcdir}/aufs3-standalone/fs" "${srcdir}/linux-${pkgver}/"
+  cp -ru "${srcdir}/aufs3-standalone/include/uapi/linux/aufs_type.h" "${srcdir}/linux-${pkgver}/include/linux/"
+  cp -ru "${srcdir}/aufs3-standalone/include/uapi/linux/aufs_type.h" "${srcdir}/linux-${pkgver}/include/uapi/linux/"
 
-  # Add the USB_QUIRK_RESET_RESUME for several webcams
+msg2 "Applying aufs3 patches"
+  patch -Np1 -i ../aufs3-standalone/aufs3-kbuild.patch
+  patch -Np1 -i ../aufs3-standalone/aufs3-base.patch
+  patch -Np1 -i ../aufs3-standalone/aufs3-mmap.patch
+  patch -Np1 -i ../aufs3-standalone/aufs3-standalone.patch
+
+msg2 "Add the USB_QUIRK_RESET_RESUME for several webcams"
   # FS#26528
   patch -Np1 -i "${srcdir}/usb-add-reset-resume-quirk-for-several-webcams.patch"
 
-  # Add requested additional support
-  patch -Np1 -i "${srcdir}/support.patch"
-
-  # Full Mach-types table, not technically required for DT kernels...
+msg2 "Add Arch Linux ARM patch for ARMv5te plug computers, mach-types"
+  patch -Np1 -i "${srcdir}/archlinuxarm.patch"
   cp "${srcdir}/mach-types" arch/arm/tools
 
-  # Hack fix for an alignment bug in RTL8712 driver
-  patch -Np1 -i "${srcdir}/rtl871x-arm.patch"
+msg2 "Add UKSM patch"
+  patch -Np1 -i "${srcdir}/uksm-${uksmver}-for-${uksmname}.patch"
 
-  # Add BFQ patches
-  patch -Np1 -i "${srcdir}/0001-block-cgroups-kconfig-build-bits-for-BFQ-v6-3.8.patch"
-  patch -Np1 -i "${srcdir}/0002-block-introduce-the-BFQ-v6-I-O-sched-for-3.8.patch"
+msg2 "Add BFQ patches"
+  patch -Np1 -i "${srcdir}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver%.*}.patch"
+  patch -Np1 -i "${srcdir}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver%.*}.patch"
+  patch -Np1 -i "${srcdir}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver%.*}.0.patch"  
+
   cat "${srcdir}/config" > ./.config
 
-  # set extraversion to pkgrel
-  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
+  # add pkgrel to extraversion
+  sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
+}
+
+build() {
+  cd "${srcdir}/linux-${pkgver}"
 
   # get kernel version
   make prepare
@@ -83,54 +105,57 @@ build() {
   # load configuration
   # Configure the kernel. Replace the line below with one of your choice.
   #make menuconfig # CLI menu for configuration
-  make nconfig # new CLI menu for configuration
+  #make nconfig # new CLI menu for configuration
   #make xconfig # X-based configuration
   #make oldconfig # using old config from previous kernel version
   # ... or manually edit .config
 
   # Copy back our configuration (use with new kernel version)
-  #cp ./.config ../${_basekernel}.config
+  #cp ./.config ../${pkgbase}.config
 
   ####################
   # stop here
   # this is useful to configure the kernel
-  msg "Stopping build"
-  return 1
+  # msg "Stopping build"
+  # return 1
   ####################
 
   #yes "" | make config
 
-  # build!
+msg "Building!"
   make ${MAKEFLAGS} zImage modules
   make dtbs
 
-  # build cryptodev module
+msg "Building cryptodev module"
   cd "${srcdir}/cryptodev-linux-${cryptover}"
-  make KERNEL_DIR="${srcdir}/${__gitname}"
+  make KERNEL_DIR="${srcdir}/linux-${pkgver}"
 }
 
-package_linux-kirkwood-dt() {
-  pkgdesc="The Linux Kernel and modules - Marvell Kirkwood DT"
-  depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7' 'uboot-mkimage' 'uboot-env')
+_package() {
+  pkgdesc="The Linux Kernel and modules - ${_desc}"
+  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7' 'uboot-mkimage' 'uboot-env')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' 'cryptodev_friendly' 'linux=${pkgver}')
-  conflicts=('linux')
+  provides=('kernel26' 'linux=${pkgver}' 'aufs_friendly' 'cryptodev_friendly')
+  conflicts=('linux-kirkwood' 'linux' 'linux-olinuxino')
   install=${pkgname}.install
 
-  cd "${srcdir}/${__gitname}"
+  cd "${srcdir}/linux-${pkgver}"
 
   KARCH=arm
 
   # get kernel version
   _kernver="$(make kernelrelease)"
+  #_basekernel=${_kernver%%-*}
+  #_basekernel=${_basekernel%.*}
+  _basekernel=${pkgver}
 
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/dtb}
+  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/dtbs}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
   cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
-  cp arch/$KARCH/boot/dts/*.dtb "${pkgdir}/boot/dtb/."
-  cp arch/$KARCH/boot/dts/skeleton.dtsi "${pkgdir}/boot/dtb/."
-  cp arch/$KARCH/boot/dts/kirkwood*.dts "${pkgdir}/boot/dtb/."
-  cp arch/$KARCH/boot/dts/kirkwood*.dtsi "${pkgdir}/boot/dtb/."
+  cp arch/$KARCH/boot/dts/*.dtb "${pkgdir}/boot/dtbs/."
+  cp arch/$KARCH/boot/dts/skeleton.dtsi "${pkgdir}/boot/dtbs/."
+  cp arch/$KARCH/boot/dts/kirkwood*.dts "${pkgdir}/boot/dtbs/."
+  cp arch/$KARCH/boot/dts/kirkwood*.dtsi "${pkgdir}/boot/dtbs/."
 
   mkdir -p "${pkgdir}"/usr/local/sbin
   cp scripts/dtc/dtc "${pkgdir}/usr/local/sbin/."
@@ -155,9 +180,9 @@ package_linux-kirkwood-dt() {
 
   # install cryptodev module
   cd "${srcdir}/cryptodev-linux-${cryptover}"
-  make -C "${srcdir}/${__gitname}" INSTALL_MOD_PATH="${pkgdir}" SUBDIRS=`pwd` modules_install
+  make -C "${srcdir}/linux-${pkgver}" INSTALL_MOD_PATH="${pkgdir}" SUBDIRS=`pwd` modules_install
 
-  cd "${srcdir}/${__gitname}"
+  cd "${srcdir}/linux-${pkgver}"
 
   # Now we call depmod...
   depmod -b "$pkgdir" -F System.map "$_kernver"
@@ -167,17 +192,18 @@ package_linux-kirkwood-dt() {
   mv "$pkgdir/lib" "$pkgdir/usr"
 }
 
-package_linux-headers-kirkwood-dt() {
-  pkgdesc="Header files and scripts for building modules for linux kernel - Marvell Kirkwood"
-  provides=('kernel26-headers' 'linux-headers=${pkgver}')
-  conflicts=('kernel26-headers' 'linux-headers')
+_package-headers() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - ${_desc}"
+  provides=('linux-headers=${pkgver}')
+  conflicts=('linux-headers-kirkwood' 'linux-headers' 'linux-headers-olinuxino')
+  replaces=('linux-headers-kirkwood-dt')
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/${__gitname}"
+  cd "${srcdir}/linux-${pkgver}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -186,15 +212,19 @@ package_linux-headers-kirkwood-dt() {
     "${pkgdir}/usr/src/linux-${_kernver}/.config"
 
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include"
-  make headers_install INSTALL_HDR_PATH="${pkgdir}/usr/src/linux-${_kernver}"
+
+  for i in acpi asm-generic config crypto drm generated linux math-emu \
+    media net pcmcia scsi sound trace uapi video xen; do
+    cp -a include/${i} "${pkgdir}/usr/src/linux-${_kernver}/include/"
+  done
 
   # copy arch includes for external modules
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/arm
-  cp -a arch/arm/include ${pkgdir}/usr/src/linux-${_kernver}/arch/arm/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/arm/mach-kirkwood   
-  cp -a arch/arm/mach-kirkwood/include ${pkgdir}/usr/src/linux-${_kernver}/arch/arm/mach-kirkwood/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/arm/plat-orion
-  cp -a arch/arm/plat-orion/include ${pkgdir}/usr/src/linux-${_kernver}/arch/arm/plat-orion/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH
+  cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-kirkwood
+  cp -a arch/$KARCH/mach-kirkwood/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-kirkwood/
+  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-orion
+  cp -a arch/$KARCH/plat-orion/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-orion/
 
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
@@ -204,15 +234,73 @@ package_linux-headers-kirkwood-dt() {
   chmod og-w -R "${pkgdir}/usr/src/linux-${_kernver}/scripts"
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/.tmp_versions"
 
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/arch/arm/kernel"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel"
 
-  cp arch/arm/Makefile "${pkgdir}/usr/src/linux-${_kernver}/arch/arm/"
+  cp arch/${KARCH}/Makefile "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/"
 
-  cp arch/arm/kernel/asm-offsets.s "${pkgdir}/usr/src/linux-${_kernver}/arch/arm/kernel/"
+  cp arch/${KARCH}/kernel/asm-offsets.s "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel/"
+
+  # add headers for lirc package
+  # pci
+  for i in bt8xx cx88 saa7134; do
+    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
+    cp -a drivers/media/pci/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
+  done
+  # usb
+  for i in cpia2 em28xx pwc sn9c102; do
+    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
+    cp -a drivers/media/usb/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
+  done
+  # i2c
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c"
+  cp drivers/media/i2c/*.h  "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
+  for i in cx25840; do
+    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
+    cp -a drivers/media/i2c/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
+  done
 
   # add docbook makefile
   install -D -m644 Documentation/DocBook/Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Documentation/DocBook/Makefile"
+
+  # add dm headers
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/md"
+  cp drivers/md/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/md"
+
+  # add inotify.h
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/linux"
+  cp include/linux/inotify.h "${pkgdir}/usr/src/linux-${_kernver}/include/linux/"
+
+  # add wireless headers
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
+  cp net/mac80211/*.h "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
+
+  # add dvb headers for external modules
+  # in reference to:
+  # http://bugs.archlinux.org/task/9912
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-core"
+  cp drivers/media/dvb-core/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-core/"
+  # and...
+  # http://bugs.archlinux.org/task/11194
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
+  cp include/config/dvb/*.h "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
+
+  # add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
+  # in reference to:
+  # http://bugs.archlinux.org/task/13146
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  cp drivers/media/dvb-frontends/lgdt330x.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  cp drivers/media/i2c/msp3400-driver.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
+
+  # add dvb headers
+  # in reference to:
+  # http://bugs.archlinux.org/task/20402
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/dvb-usb"
+  cp drivers/media/usb/dvb-usb/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/dvb-usb/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends"
+  cp drivers/media/dvb-frontends/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/tuners"
+  cp drivers/media/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/tuners/"
 
   # add xfs and shmem for aufs building
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs"
@@ -240,10 +328,17 @@ package_linux-headers-kirkwood-dt() {
     esac
   done
 
-  # Clean up unneeded files
-  find "${pkgdir}" -name "..install.cmd" -delete
+  # remove unneeded architectures
+  rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
 
   # install cryptodev header
   cd "${srcdir}/cryptodev-linux-${cryptover}"
   install -D crypto/cryptodev.h "${pkgdir}/usr/src/linux-${_kernver}/crypto/cryptodev.h"
 }
+
+pkgname=("${pkgbase}" "${pkgbase}-headers")
+for _p in ${pkgname[@]}; do
+  eval "package_${_p}() {
+    _package${_p#${pkgbase}}
+  }"
+done

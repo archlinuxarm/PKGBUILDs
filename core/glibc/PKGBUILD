@@ -15,88 +15,41 @@
 noautobuild=1
 
 pkgname=glibc
-pkgver=2.18
-pkgrel=11
+pkgver=2.19
+pkgrel=2
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
 url="http://www.gnu.org/software/libc"
 license=('GPL' 'LGPL')
 groups=('base')
-depends=('linux-api-headers>=3.7' 'tzdata' 'filesystem>=2013.01')
-makedepends=('gcc>=4.7')
+depends=('linux-api-headers>=3.13' 'tzdata' 'filesystem>=2013.01')
+makedepends=('gcc>=4.8')
 backup=(etc/gai.conf
         etc/locale.gen
         etc/nscd.conf)
 options=('!strip' 'staticlibs' '!distcc')
 install=glibc.install
 source=(http://ftp.gnu.org/gnu/libc/${pkgname}-${pkgver}.tar.xz{,.sig}
-        glibc-2.18-make-4.patch
-        glibc-2.18-readdir_r-CVE-2013-4237.patch
-        glibc-2.18-malloc-corrupt-CVE-2013-4332.patch
-        glibc-2.18-strcoll-CVE-2012-4412+4424.patch
-        glibc-2.18-scanf-parse-0e-0.patch
-        glibc-2.18-strstr-hackfix.patch
-        glibc-2.18-ptr-mangle-CVE-2013-4788.patch
-        glibc-2.18-getaddrinfo-CVE-2013-4458.patch
-        glibc-2.18-getaddrinfo-assertion.patch
+        glibc-2.18-xattr-compat-hack.patch
         local-soname-hack.diff
-        fix-hf-ld.so.cache.patch
-        nscd.service
-        nscd.tmpfiles
         locale.gen.txt
         locale-gen)
-md5sums=('88fbbceafee809e82efd52efa1e3c58f'
+md5sums=('e26b8cc666b162f999404b03970f14e4'
          'SKIP'
-         'e1883c2d1b01ff73650db5f5bb5a5a52'
-         '154da6bf5a5248f42a7bf5bf08e01a47'
-         'b79561ab9dce900e9bbeaf0d49927c2b'
-         'c7264b99d0f7e51922a4d3126182c40a'
-         '9749ba386b08a8fe53e7ecede9bf2dfb'
-         '71329fccb8eb583fb0d67b55f1e8df68'
-         'd4d86add33f22125777e0ecff06bc9bb'
-         '01d19fe9b2aea489cf5651530e0369f2'
-         '4441f6dfe7d75ced1fa75e54dd21d36e'
-         '589d79041aa767a5179eaa4e2737dd3f'
-         'ad8a9af15ab7eeaa23dc7ee85024af9f'
-         'd5fab2cd3abea65aa5ae696ea4a47d6b'
-         'da662ca76e7c8d7efbc7986ab7acea2d'
+         '7ca96c68a37f2a4ab91792bfa0160a24'
+         '905370139382428ef2b97b247c0970bf'
          '07ac979b6ab5eeb778d55f041529d623'
-         'b5fd017036fb91199ee76f670da8c15b')
+         '476e9113489f93b348b21e144b6a8fcf')
 
 prepare() {
   cd ${srcdir}/${pkgname}-${pkgver}
 
-  # compatibility with make-4.0 (submitted upstream)
-  patch -p1 -i $srcdir/glibc-2.18-make-4.patch
-
-  # upstream commit 91ce4085
-  patch -p1 -i $srcdir/glibc-2.18-readdir_r-CVE-2013-4237.patch
-
-  # upstream commits 1159a193, 55e17aad and b73ed247
-  patch -p1 -i $srcdir/glibc-2.18-malloc-corrupt-CVE-2013-4332.patch
-
-  # upstream commits 1326ba1a, 141f3a77 and 303e567a
-  patch -p1 -i $srcdir/glibc-2.18-strcoll-CVE-2012-4412+4424.patch
-
-  # upstream commits c61b4d41 and 0b1f8e35
-  patch -p1 -i $srcdir/glibc-2.18-ptr-mangle-CVE-2013-4788.patch
-
-  # upstream commit 7cbcdb36
-  patch -p1 -i $srcdir/glibc-2.18-getaddrinfo-CVE-2013-4458.patch
-
-  # upstream commit 894f3f10
-  patch -p1 -i $srcdir/glibc-2.18-getaddrinfo-assertion.patch
-
-  # upstream commit a4966c61
-  patch -p1 -i $srcdir/glibc-2.18-scanf-parse-0e-0.patch
-  
-  # hack fix for strstr issues on x86
-  patch -p1 -i $srcdir/glibc-2.18-strstr-hackfix.patch
+  # hack fix for {linux,sys}/xattr.h incompatibility
+  patch -p1 -i $srcdir/glibc-2.18-xattr-compat-hack.patch
 
   # ALARM: patch for hard-float ld-linux soname
   if [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]]; then
     patch -p1 -i ${srcdir}/local-soname-hack.diff
-    patch -p1 -i ${srcdir}/fix-hf-ld.so.cache.patch
   fi
 
   mkdir ${srcdir}/glibc-build
@@ -117,6 +70,9 @@ build() {
   # remove hardening options for building libraries
   CFLAGS=${CFLAGS/-fstack-protector/}
   CPPFLAGS=${CPPFLAGS/-D_FORTIFY_SOURCE=2/}
+
+  # enable unwinding tables so that gdb can unwind the standard functions
+  CFLAGS+=" -funwind-tables"
 
   ${srcdir}/${pkgname}-${pkgver}/configure --prefix=/usr \
       --libdir=/usr/lib --libexecdir=/usr/lib \
@@ -165,8 +121,8 @@ package() {
   install -dm755 ${pkgdir}/usr/lib/{locale,systemd/system,tmpfiles.d}
 
   install -m644 ${srcdir}/${pkgname}-${pkgver}/nscd/nscd.conf ${pkgdir}/etc/nscd.conf
-  install -m644 ${srcdir}/nscd.service ${pkgdir}/usr/lib/systemd/system
-  install -m644 ${srcdir}/nscd.tmpfiles ${pkgdir}/usr/lib/tmpfiles.d/nscd.conf
+  install -m644 ${srcdir}/${pkgname}-${pkgver}/nscd/nscd.service ${pkgdir}/usr/lib/systemd/system
+  install -m644 ${srcdir}/${pkgname}-${pkgver}/nscd/nscd.tmpfiles ${pkgdir}/usr/lib/tmpfiles.d/nscd.conf
 
   install -m644 ${srcdir}/${pkgname}-${pkgver}/posix/gai.conf ${pkgdir}/etc/gai.conf
 
@@ -178,8 +134,9 @@ package() {
     ${srcdir}/glibc-${pkgver}/localedata/SUPPORTED >> ${pkgdir}/etc/locale.gen
 
   # remove the static libraries that have a shared counterpart
-  # note: keep libc, libdl, libm, libpthread for binutils testsuite
-  rm $pkgdir/usr/lib/lib{anl,BrokenLocale,crypt,nsl,resolv,rt,util}.a
+  # libc, libdl, libm and libpthread are required for toolchain testsuites
+  # in addition libcrypt appears widely required
+  rm $pkgdir/usr/lib/lib{anl,BrokenLocale,nsl,resolv,rt,util}.a
 
   # ALARM: symlink ld-linux.so.3 for hard-float
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && ln -s /lib/ld-${pkgver}.so ${pkgdir}/usr/lib/ld-linux.so.3

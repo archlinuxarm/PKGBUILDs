@@ -1,0 +1,91 @@
+# Maintainer:  Kevin Mihelich <kevin@archlinuxarm.org>
+# Contributor: WarheadsSE <max@warheads.net>
+
+# older v8 for mongodb
+
+pkgname=v8-3.16
+_pkgname=v8
+pkgver=3.16.8.1
+pkgrel=2
+pkgdesc='Fast and modern javascript engine'
+arch=('i686' 'x86_64')
+url='http://code.google.com/p/v8'
+license=('BSD')
+depends=('gcc-libs')
+makedepends=('subversion' 'python2')
+provides=("v8=${pkgver}")
+conflicts=('v8')
+source=(http://commondatastorage.googleapis.com/chromium-browser-official/$_pkgname-$pkgver.tar.bz2
+        v8.common.gypi.patch)
+sha256sums=('b99ffa913e8f00b8fdb3b58cadf2addbbf60549a5be8d12a6c0b7095a36ac7e0'
+            '774afb77874c04c5890173f553c6f6da83b3b848e1e6286f2af453163733420a')
+
+prepare() {
+  cd $_pkgname-$pkgver
+#  _source="http://v8.googlecode.com/svn/tags/${pkgver}"
+#  svn checkout "$_source" "${srcdir}/v8-${pkgver}"
+
+  cd "${srcdir}/${_pkgname}-${pkgver}"
+
+if [ "$CARCH" == "arm" ]; then
+   # we need to override the arch (last one will be used) because
+   # v8 thinks armv5te can use unaligned.. the kirkwood can't!
+   # There is still a bug in the V8::internals::string
+   CXXFLAGS="$CXXFLAGS -march=armv5t -mno-unaligned-access" ;
+   GYPFLAGS="-Darmeabi=soft -Dv8_can_use_vfp_instructions=false -Dv8_can_use_unaligned_accesses=false -Darmv7=0"
+   VFP3=off
+   VFP2=off
+fi
+if [ "$CARCH" == "armv6h" ]; then
+   GYPFLAGS="-Darmeabi=hard -Dv8_use_arm_eabi_hardfloat=true -Dv8_can_use_vfp_instructions=false -Dv8_can_use_vfp2_instructions=true -Darmv7=0 -Darm_fpu=vfp"
+   VFP3=off
+   VFP2=on
+   patch -p1 -i ../v8.common.gypi.patch
+fi
+if [ "$CARCH" == "armv7h" ]; then
+   GYPFLAGS="-Darmeabi=hard -Dv8_use_arm_eabi_hardfloat=true -Dv8_can_use_vfp_instructions=true -Dv8_can_use_vfp2_instructions=true -Darmv7=1 -Darm_fpu=vfpv3-d16"
+   VFP3=on
+   VFP2=on
+fi
+  export GYPFLAGS
+  export CXXFLAGS ;
+
+  # short-cutting python=python2 for GYP, as it will only be used here.
+  export PYTHON=python2
+  if [ ! -f "${srcdir}/python" ]; then
+    ln -s `which python2` ${srcdir}/python ;
+  fi
+  PATH="${srcdir}:$PATH";
+  export PATH ;
+}
+
+build() {
+  cd $_pkgname-$pkgver
+  # gets gyp
+  make dependencies
+  # make arm.release & arm.debug = just arm
+  make arm.release library=shared snapshot=off vfp3=$VFP3 vfp=$VFP2 werror=no
+  # eo build
+
+  cd $srcdir && cp -r $_pkgname-$pkgver d8-static-$pkgver
+  cd d8-static-$pkgver
+  make arm.release library=static snapshot=off vfp3=$VFP3 vfp=$VFP2 werror=no
+}
+
+# seperated to possibly split v8-debug in the future.
+package (){
+  cd "${srcdir}/${_pkgname}-${pkgver}"
+  
+  find include -type f \
+    -exec install -Dm644 {} ${pkgdir}/usr/{} \;
+  rm -rf ${pkgdir}/usr/include/.svn
+  
+  # these barf, need updated.
+  # src/v8-3.11.10/out/arm.release/d8
+  # src/v8-3.11.10/out/arm.release/lib.target/libv8.so
+  install -Dm755 $srcdir/d8-static-$pkgver/out/arm.release/d8 $pkgdir/usr/bin/d8
+  install -Dm755 out/arm.release/lib.target/libv8.so "${pkgdir}/usr/lib/libv8.so"
+
+  install -d ${pkgdir}/usr/share/licenses/v8
+  install -m644 LICENSE* ${pkgdir}/usr/share/licenses/v8
+}

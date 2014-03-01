@@ -1,16 +1,16 @@
 #!/bin/bash
 
-MYSELF=$0
+THISFILE=$0
 
 setclock() {
 	echo "Setting clock."
-	MYTIME=$(date -r $MYSELF '+%Y-%m-%d %r')
+	MYTIME=$(date -r $THISFILE '+%Y-%m-%d %H:%M:%S')
 	date --set="$MYTIME" &>/dev/null
 }
 
 saveclock() {
 	echo "Saving current time."
-	touch $MYSELF &>/dev/null
+	touch $THISFILE &>/dev/null
 }
 
 case "$1" in
@@ -21,7 +21,7 @@ case "$1" in
 		saveclock
 		;;
 	*)
-		echo "Usage: $MYSELF {set|save}"
+		echo "Usage: $THISFILE {set|save}"
 		exit 1
 		;;
 esac

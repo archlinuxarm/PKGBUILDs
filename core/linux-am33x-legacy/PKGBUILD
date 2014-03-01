@@ -9,27 +9,27 @@ pkgname=('linux-am33x-legacy' 'linux-headers-am33x-legacy')
 _kernelname=${pkgname#linux}
 _basekernel=3.8
 pkgver=${_basekernel}.13
-pkgrel=13
-bonerel=30
+pkgrel=16
+bonerel=40
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'git' 'inetutils')
+makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'kmod' 'git' 'inetutils')
 options=('!strip')
 source=("ftp://ftp.kernel.org/pub/linux/kernel/v3.x/linux-${_basekernel}.tar.xz"
         "ftp://ftp.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.bz2"
-        "rcn-ee.diff.gz::http://rcn-ee.net/deb/sid-armhf/v${pkgver}-bone${bonerel}/patch-${pkgver}-bone${bonerel}.diff.gz"
+        "http://rcn-ee.net/deb/sid-armhf/v${pkgver}-bone${bonerel}/patch-${pkgver}-bone${bonerel}.diff.gz"
         'config'
         'change-default-console-loglevel.patch'
         'aufs3-3.8.patch.xz')
 md5sums=('1c738edfc54e7c65faeb90c436104e2f'
          '412da22dabe4d7fcb78b3c14e53cd892'
-         'e057d8e5e840ddebe52b2d7830027269'
-         'a124d34e6a5264a096b190f6bc6fb83c'
+         '6f2fd139a31c62c7e718fd6a02fae008'
+         '17a28940b697d913f6d2fca230b5bacd'
          '9d3c56a4b999c8bfbd4018089a62f662'
          'd819af0969e0726cbf9ae6be5e044a75')
 
-build() {
+prepare() {
   cd "${srcdir}/linux-${_basekernel}"
 
   patch -p1 -i "${srcdir}/patch-${pkgver}"
@@ -40,7 +40,7 @@ build() {
   patch -Np1 -i "${srcdir}/change-default-console-loglevel.patch"
 
   # ALARM patches
-  git apply "${srcdir}/rcn-ee.diff"
+  git apply "${srcdir}/patch-${pkgver}-bone${bonerel}.diff"
   patch -Np1 -i "${srcdir}/aufs3-3.8.patch"
 
   cat "${srcdir}/config" > ./.config
@@ -48,11 +48,15 @@ build() {
   # accept any new stuff in the kernel
   #yes "" | make config
 
-  # set extraversion to pkgrel
-  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
+  # add pkgrel to extraversion
+  sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
+}
+
+build() {
+  cd "${srcdir}/linux-${_basekernel}"
 
   # get kernel version
   make prepare
@@ -108,7 +112,7 @@ package_linux-am33x-legacy() {
   # remove build and source links
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
   # remove the firmware
-  rm -rf "${pkgdir}/lib/firmware"
+  rm -rf "${pkgdir}"/lib/firmware/*
   # gzip -9 all modules to save 100MB of space
   find "${pkgdir}" -name '*.ko' |xargs -P 2 -n 1 gzip -9
   # make room for external modules
@@ -116,6 +120,8 @@ package_linux-am33x-legacy() {
   # add real version for building modules and running depmod from post_install/upgrade
   mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
   echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
+  # copy beaglebone cape dtbo's
+  cp firmware/*.dtbo "${pkgdir}/lib/firmware"
 
   # Now we call depmod...
   depmod -b "$pkgdir" -F System.map "$_kernver"

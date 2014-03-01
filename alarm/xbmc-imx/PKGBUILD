@@ -1,0 +1,129 @@
+
+# Contributor tomasgroth at yahoo.dk
+# Contributor WarheadsSE <max@warheads.net>
+# Maintainer CruX <CruX@project-insanity.org>
+# Contributor: pepedog at archlinuxarm dot com
+
+buildarch=4
+
+pkgname=xbmc-imx-git
+pkgver=13.20140226
+pkgrel=1
+pkgdesc="A software media player and entertainment hub for digital media for the Wandboard"
+arch=('armv7h')
+url="http://xbmc.org"
+license=('GPL' 'custom')
+depends=('fribidi' 'lzo2' 'smbclient' 'libtiff' 'libpng' 'libcdio' 'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd' 'sdl_image' 'python2' 'libass' 'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 'libbluray' 'libnfs' 'afpfs-ng' 'libshairport' 'avahi' 'bluez-libs' 'tinyxml' 'libplist' 'swig' 'taglib' 'libxslt' 'libfslvpuwrap=3.10.9_1.0.0' 'gpu-viv-bin-mx6q-fb=3.10.9_1.0.0' 'libcec-imx6' 'linux-headers-imx6-cubox' )
+makedepends=('boost' 'cmake' 'gperf' 'nasm' 'zip' 'udisks' 'upower' 'git' 'autoconf' 'java-runtime-headless')
+optdepends=(
+  'lirc: remote controller support'
+  'udisks: automount external drives'
+  'upower: used to trigger suspend functionality'
+  'unrar: access compressed files without unpacking them'
+)
+provides=("xbmc")
+conflicts=("xbmc")
+install="xbmc.install"
+source=('xbmc.service')
+
+md5sums=('36780e43d432c488259d9a899b1bcb28')
+
+# master branch of xbmc-imx6 organization. Modified by Stephan "wolgar" Rafin, Chris "koying" Browet, Rudi "rudi-warped" Ihle and smallint
+_gitname="xbmc"
+_gitroot="git://github.com/xbmc-imx6"
+_gitbranch="master"
+
+_prefix=/usr
+
+prepare() {
+  cd "${srcdir}"
+
+
+  msg2 "Connecting to GIT server..."
+  
+  if [[ -d "${_gitname}" ]]; then
+     cd "${_gitname}" && git pull origin "$_gitbranch"
+     msg2 "The local files are updated."
+  else
+     git clone --branch ${_gitbranch} --depth 1 "${_gitroot}/${_gitname}"
+  fi
+  
+  msg2 "GIT checkout done or server timeout." 
+
+
+  cd "${srcdir}/${_gitname}"
+
+  # fix lsb_release dependency
+  sed -i -e 's:/usr/bin/lsb_release -d:cat /etc/arch-release:' xbmc/utils/SystemInfo.cpp
+
+  # fix samba4 libsmbclient.h location
+  sed -e 's/\(#include \)<libsmbclient\.h>/\1<samba-4.0\/libsmbclient\.h>/g' \
+    -i xbmc/filesystem/SmbFile.cpp \
+    -i xbmc/filesystem/SMBDirectory.cpp
+}
+
+build() {
+  cd "${srcdir}/${_gitname}"
+
+  # Bootstrapping XBMC
+  ./bootstrap
+
+  _kernel_release="$(pacman -Q linux-headers-imx6-cubox | grep -Eo "[^\ ]+$")"
+
+
+  # dirty: copy headers from kernel as we need those but apart from that want to use the ones in /usr/include 
+  KERNELSRC=/usr/src/linux-${_kernel_release}
+  mkdir -p linux-includes/include/linux
+  for f in mxcfb.h mxc_v4l2.h; do
+    cp "${KERNELSRC}/include/linux/${f}" linux-includes/include/linux/
+  done
+
+  # Configuring XBMC
+  export PYTHON_VERSION=2  # external python v2
+  INCLUDES="-I${srcdir}/${_gitname}/linux-includes/include -I/opt/fsl/include" 
+  export CFLAGS="-Ofast -mfloat-abi=hard -mfpu=vfpv3-d16 -mtls-dialect=gnu -march=armv7-a -mtune=cortex-a9 -pipe -fstack-protector --param=ssp-buffer-size=4 -D_FORTIFY_SOURCE=2 $INCLUDES -Wl,-rpath,/opt/fsl/lib -L/opt/fsl/lib"
+  export CPPFLAGS="-Ofast -mfloat-abi=hard -mfpu=vfpv3-d16 -mtls-dialect=gnu -march=armv7-a -mtune=cortex-a9 -fstack-protector --param=ssp-buffer-size=4 -D_FORTIFY_SOURCE=2 $INCLUDES -Wl,-rpath,/opt/fsl/lib -L/opt/fsl/lib"
+  export CXXFLAGS="-Ofast -mfloat-abi=hard -mfpu=vfpv3-d16 -mtls-dialect=gnu -march=armv7-a -mtune=cortex-a9 -fstack-protector --param=ssp-buffer-size=4 -D_FORTIFY_SOURCE=2 $INCLUDES -Wl,-rpath,/opt/fsl/lib -L/opt/fsl/lib"
+  export LDFLAGS="$LDFLAGS -L/opt/fsl/lib"
+  ./configure --prefix=$_prefix --exec-prefix=$_prefix  \
+   --disable-gl --enable-gles --disable-x11 --disable-sdl \
+  --enable-optimizations --disable-external-libraries --disable-goom --disable-hal \
+  --disable-pulse --disable-vaapi --disable-vdpau --disable-xrandr --enable-airplay \
+  --enable-avahi --enable-libbluray --enable-dvdcss --disable-debug --disable-joystick --disable-mid \
+  --enable-nfs --disable-profiling --disable-projectm --enable-rsxs --enable-rtmp --disable-vaapi \
+  --disable-external-ffmpeg --enable-optical-drive --enable-codec=imxvpu --enable-libcec
+
+  make
+}
+
+package() {
+  cd "${srcdir}/${_gitname}"
+  # Running make install
+  make DESTDIR="${pkgdir}" install
+
+  # run feh with python2
+  sed -i -e 's/python/python2/g' ${pkgdir}${_prefix}/bin/xbmc
+
+  # Remove checks that don't apply to the i.MX6 SoC
+  head -n 171 "${pkgdir}${_prefix}/share/xbmc/FEH.py" > "${pkgdir}${_prefix}/share/xbmc/FEH.py.new"
+  mv "${pkgdir}${_prefix}/share/xbmc/FEH.py.new"  "${pkgdir}${_prefix}/share/xbmc/FEH.py"
+
+  # lsb_release fix
+  sed -i -e 's/which lsb_release > \/dev\/null/\[ -f \/etc\/arch-release ]/g' "${pkgdir}${_prefix}/bin/xbmc"
+  sed -i -e "s/lsb_release -a 2> \/dev\/null | sed -e 's\/\^\/    \/'/cat \/etc\/arch-release/g" "${pkgdir}${_prefix}/bin/xbmc"
+
+  # Tools
+  install -D -m 0755 "${srcdir}/${_gitname}/tools/TexturePacker/TexturePacker" "${pkgdir}${_prefix}/share/xbmc/"
+
+  # Licenses
+  install -d -m 0755 "${pkgdir}${_prefix}/share/licenses/${pkgname}"
+  for licensef in LICENSE.GPL copying.txt; do
+    mv "${pkgdir}${_prefix}/share/doc/xbmc/${licensef}" "${pkgdir}${_prefix}/share/licenses/${pkgname}"
+  done
+
+  # systemd stuff
+  install -Dm0644 $srcdir/xbmc.service $pkgdir/usr/lib/systemd/system/xbmc.service
+
+}
+
+# vim:set ts=2 sw=2 et:

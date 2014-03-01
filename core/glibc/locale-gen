@@ -4,53 +4,39 @@ set -e
 
 LOCALEGEN=/etc/locale.gen
 LOCALES=/usr/share/i18n/locales
-unset POSIXLY_CORRECT
+if [ -n "$POSIXLY_CORRECT" ]; then
+  unset POSIXLY_CORRECT
+fi
 
-[ -s "$LOCALEGEN" ] || exit 0
+
+[ -f $LOCALEGEN -a -s $LOCALEGEN ] || exit 0;
 
 # Remove all old locale dir and locale-archive before generating new
 # locale data.
-rm -rf /usr/lib/locale/*
+rm -rf /usr/lib/locale/* || true
 
 umask 022
 
-gen() {
-	local locale=$1
-	local charset=$2
-	local input=
-
-	if [ -z "$locale" ] || [ -z "$charset" ]; then
-		echo "error: Bad entry '$locale $charset'"
-		return
-	fi
-
-	printf '  %s.%s\n' "$(echo "$locale" | sed 's/\([^.\@]*\).*/\1/')" "$charset"
-
-	if [ -f "$LOCALES/$locale" ]; then
-		input=$locale
-	else
-		input=$(echo $locale | sed 's/\([^.]*\)[^@]*\(.*\)/\1\2/')
-	fi
-
-	localedef -i "$input" -c -f "$charset" -A /usr/share/locale/locale.alias "$locale"
+is_entry_ok() {
+  if [ -n "$locale" -a -n "$charset" ] ; then
+    true
+  else
+    echo "error: Bad entry '$locale $charset'"
+    false
+  fi
 }
 
-maxjobs=$(grep -c processor /proc/cpuinfo 2>/dev/null || echo 1)
 echo "Generating locales..."
 while read locale charset; do \
-	case $locale in
-		\#*|'')
-			continue
-			;;
-	esac
-	gen "$locale" "$charset" &
-
-	# keep no more than $maxjobs jobs in flight
-	while [ $(jobs | wc -l) -ge $maxjobs ]; do
-		sleep 0.25
-		jobs >/dev/null
-	done
+	case $locale in \#*) continue;; "") continue;; esac; \
+	is_entry_ok || continue
+	echo -n "  `echo $locale | sed 's/\([^.\@]*\).*/\1/'`"; \
+	echo -n ".$charset"; \
+	echo -n `echo $locale | sed 's/\([^\@]*\)\(\@.*\)*/\2/'`; \
+	echo -n '...'; \
+        if [ -f $LOCALES/$locale ]; then input=$locale; else \
+        input=`echo $locale | sed 's/\([^.]*\)[^@]*\(.*\)/\1\2/'`; fi; \
+	localedef -i $input -c -f $charset -A /usr/share/locale/locale.alias $locale; \
+	echo ' done'; \
 done < $LOCALEGEN
-wait
-
 echo "Generation complete."
