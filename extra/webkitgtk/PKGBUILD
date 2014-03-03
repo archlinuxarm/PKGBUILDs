@@ -5,41 +5,67 @@
 #  - re-enabled --disable-silent-rules, needed for v5 and v6 to build
 #  - use --disable-jit for v5, uses incompatible ARM assembly
 
-pkgname=webkitgtk
+pkgbase=webkitgtk
+pkgname=(webkitgtk webkitgtk2)
 pkgver=2.2.5
-pkgrel=1
+pkgrel=2
 pkgdesc="GTK+ Web content engine library"
 arch=(i686 x86_64)
 url="http://webkitgtk.org/"
 license=(custom)
-depends=(libxt libxslt sqlite libsoup enchant libgl geoclue gtk3 gst-plugins-base-libs
+depends=(libxt libxslt sqlite libsoup enchant libgl geoclue gst-plugins-base-libs
          libsecret libwebp harfbuzz-icu)
-makedepends=(gtk2 gperf gobject-introspection python mesa ruby gtk-doc)
-optdepends=('gtk2: Netscape plugin support')
-provides=("webkitgtk3=${pkgver}" "libwebkit3=${pkgver}")
-conflicts=(webkitgtk3 libwebkit3)
-replaces=(webkitgtk3 libwebkit3)
-options=(!libtool !emptydirs)
-source=(http://webkitgtk.org/releases/$pkgname-${pkgver}.tar.xz)
+makedepends=(gtk3 gtk2 gperf gobject-introspection python mesa ruby gtk-doc)
+options=(!emptydirs)
+source=(http://webkitgtk.org/releases/$pkgbase-${pkgver}.tar.xz)
 sha256sums=('c710994a1ed0ec78f746a05ae7dc65369ed56d7475f0de576ca7a73ad9c6e670')
 
-build() {
-  cd $pkgname-$pkgver
+prepare() {
+  mkdir build-gtk{,2}
+}
+
+_build() (
+  _ver="$1"; shift
+  cd build-${_ver}
 
   [[ $CARCH == 'arm' ]] && CONFIG='--disable-jit'
 
-  ./configure --prefix=/usr \
-    --libexecdir=/usr/lib/$pkgname \
-    --enable-introspection --disable-silent-rules $CONFIG
+  ../$pkgbase-$pkgver/configure --prefix=/usr \
+    --libexecdir=/usr/lib/webkit${_ver} \
+    --enable-introspection \
+    "$@" $CONFIG
 
   # https://bugzilla.gnome.org/show_bug.cgi?id=655517
   sed -i 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
 
   make all stamp-po
+)
+
+build() {
+  _build gtk --enable-gtk-doc
+  _build gtk2 --disable-webkit2 --with-gtk=2.0
 }
 
-package() {
-  cd $pkgname-$pkgver
-  make -j1 DESTDIR="$pkgdir" install
-  install -Dm644 Source/WebKit/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+package_webkitgtk() {
+  depends+=(gtk3)
+  optdepends=('gtk2: Netscape plugin support')
+  provides=("webkitgtk3=${pkgver}" "libwebkit3=${pkgver}")
+  conflicts=(webkitgtk3 libwebkit3)
+  replaces=(webkitgtk3 libwebkit3)
+
+  make -C build-gtk -j1 DESTDIR="$pkgdir" install
+  install -Dm644 $pkgbase-$pkgver/Source/WebKit/LICENSE \
+    "$pkgdir/usr/share/licenses/webkitgtk/LICENSE"
+}
+
+package_webkitgtk2() {
+  pkgdesc+=" for GTK2"
+  depends+=(gtk2)
+  provides=("libwebkit=${pkgver}")
+  conflicts=(libwebkit)
+  replaces=(libwebkit)
+
+  make -C build-gtk2 -j1 DESTDIR="$pkgdir" install
+  install -Dm644 $pkgbase-$pkgver/Source/WebKit/LICENSE \
+    "$pkgdir/usr/share/licenses/webkitgtk2/LICENSE"
 }
