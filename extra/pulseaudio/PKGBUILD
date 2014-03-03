@@ -10,38 +10,34 @@
 pkgbase=pulseaudio
 pkgname=(pulseaudio libpulse)
 pkgdesc="A featureful, general-purpose sound server"
-pkgver=4.0
-pkgrel=6
+pkgver=5.0
+pkgrel=1
 arch=(i686 x86_64)
 url="http://www.freedesktop.org/wiki/Software/PulseAudio"
 license=(LGPL AGPL3)
 makedepends=(libasyncns libcap attr libxtst libsm libsamplerate libtool rtkit
-             speex tdb systemd dbus avahi bluez bluez-libs gconf intltool jack sbc
-             lirc-utils openssl fftw orc json-c gtk3 webrtc-audio-processing
+             speex tdb systemd dbus avahi bluez bluez-libs gconf intltool jack2-dbus sbc
+             lirc-utils openssl xenstore fftw orc json-c gtk3 webrtc-audio-processing
              check git)
-options=(!emptydirs !libtool)
-#source=(http://freedesktop.org/software/$pkgbase/releases/$pkgbase-$pkgver.tar.xz
-source=($pkgbase-$pkgver::git://anongit.freedesktop.org/pulseaudio/pulseaudio#commit=09e88de
-        pulseaudio.xinit)
-sha256sums=('SKIP'
-            'a0db6cdc74fbf0ca10e2343c08e1e228f109221c6c0ff91b0bfade5c4bdf03cf')
+options=(!emptydirs)
+source=(http://freedesktop.org/software/$pkgbase/releases/$pkgbase-$pkgver.tar.xz)
+sha256sums=('99c13a8b1249ddbd724f195579df79484e9af6418cecf6a15f003a7f36caf939')
 
 prepare() {
   cd $pkgbase-$pkgver
-  # ABI break https://bugs.freedesktop.org/show_bug.cgi?id=71047
-  git revert -n 16886bb b98a2e1
 }
 
 build() {
   cd $pkgbase-$pkgver
 
-  ./autogen.sh --prefix=/usr \
+  ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --libexecdir=/usr/lib \
     --localstatedir=/var \
     --with-udev-rules-dir=/usr/lib/udev/rules.d \
     --with-database=tdb \
     --disable-tcpwrap \
+    --disable-bluez4 \
     --disable-rpath \
     --disable-default-build-tests \
     --disable-neon-opt
@@ -53,26 +49,23 @@ build() {
 }
 
 package_pulseaudio() {
-  depends=("libpulse=$pkgver-$pkgrel" rtkit libltdl speex tdb systemd fftw orc
+  depends=("libpulse=$pkgver-$pkgrel" rtkit libltdl speex tdb fftw orc
            libsamplerate webrtc-audio-processing sbc)
-  optdepends=('avahi: zeroconf support'
-              'bluez: bluetooth support'
-              'bluez-libs: bluetooth support'
-              'gconf: configuration through gconf (paprefs)'
-              'jack: jack support'
-              'lirc-utils: infra-red support'
-              'openssl: RAOP support'
-              'python-pyqt: Equalizer GUI (qpaeq)')
+  optdepends=('pulseaudio-alsa: ALSA configuration (recommended)'
+              'avahi: zeroconf publishing and discovery'
+              'bluez: Bluetooth'
+              'bluez-libs: Bluetooth'
+              'gconf: paprefs configuration'
+              'jack2-dbus: JACK support'
+              'lirc-utils: IR control'
+              'openssl: RAOP (AirPlay) output'
+              'python-pyqt4: Equalizer GUI (qpaeq)'
+              'xenstore: Xen paravirtual output')
   backup=(etc/pulse/{daemon.conf,default.pa,system.pa})
-  install=pulseaudio.install
 
   cd $pkgbase-$pkgver
   make -j1 DESTDIR="$pkgdir" install \
     bashcompletiondir=/usr/share/bash-completion/completions
-
-  # Disable autospawn by default
-  sed -e '/autospawn/iautospawn=no' \
-      -i "$pkgdir/etc/pulse/client.conf"
 
   # Speed up pulseaudio shutdown so that it exits immediately with
   # the last user session (module-systemd-login keeps it alive)
@@ -83,8 +76,6 @@ package_pulseaudio() {
   # when there's a Skype call incoming
   sed -e 's|/usr/bin/pactl load-module module-x11-cork-request|#&|' \
       -i "$pkgdir/usr/bin/start-pulseaudio-x11"
-
-  install -Dm755 "$srcdir/pulseaudio.xinit" "$pkgdir/etc/X11/xinit/xinitrc.d/pulseaudio"
 
   rm "$pkgdir/etc/dbus-1/system.d/pulseaudio-system.conf"
 
@@ -121,7 +112,7 @@ package_pulseaudio() {
 
 package_libpulse() {
   pkgdesc="$pkgdesc (client library)"
-  depends=(dbus libasyncns libcap libxtst libsm libsndfile json-c)
+  depends=(dbus libasyncns libcap libxtst libsm libsndfile json-c systemd)
   optdepends=('alsa-plugins: ALSA support'
               'avahi: zeroconf support')
   backup=(etc/pulse/client.conf)
