@@ -10,7 +10,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=10.1.0
-pkgrel=2
+pkgrel=4
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm'  'libxdamage' 'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd')
@@ -66,13 +66,11 @@ package_mesa() {
   replaces=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
 
   mv -v ${srcdir}/fakeinstall/* ${pkgdir}
-  # rename libgl/EGL/glesv*.so to not conflict with blobs - may break .pc files ?
-  mv ${pkgdir}/usr/lib/libGL.so.1.2.0 		${pkgdir}/usr/lib/mesa-libGL.so.1.2.0
-  mv ${pkgdir}/usr/lib/libEGL.so.1.0.0 		${pkgdir}/usr/lib/mesa-libEGL.so.1.0.0
-  mv ${pkgdir}/usr/lib/libGLESv1_CM.so.1.1.0 	${pkgdir}/usr/lib/mesa-libGLESv1_CM.so.1.1.0
-  mv ${pkgdir}/usr/lib/libGLESv2.so.2.0.0 	${pkgdir}/usr/lib/mesa-libGLESv2.so.2.0.0
-
-  rm ${pkgdir}/usr/lib/lib{GL,EGL,GLESv1_CM,GLESv2}.so*
+  install -m755 -d ${pkgdir}/usr/lib/mesa
+  # move libgl/EGL/glesv*.so to not conflict with blobs - may break .pc files ?
+  mv -v ${pkgdir}/usr/lib/libGL.so* 	${pkgdir}/usr/lib/mesa/
+  mv -v ${pkgdir}/usr/lib/libEGL.so* 	${pkgdir}/usr/lib/mesa/
+  mv -v ${pkgdir}/usr/lib/libGLES*.so*	${pkgdir}/usr/lib/mesa/
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa/"
@@ -88,18 +86,21 @@ package_mesa-libgl() {
   install -m755 -d "${pkgdir}/usr/lib/xorg/modules/extensions"
   ln -s libglx.xorg "${pkgdir}/usr/lib/xorg/modules/extensions/libglx.so"
 
-  ln -s mesa-libGL.so.1.2.0 	    ${pkgdir}/usr/lib/libGL.so
-  ln -s mesa-libGL.so.1.2.0         ${pkgdir}/usr/lib/libGL.so.1
-  ln -s mesa-libGL.so.1.2.0         ${pkgdir}/usr/lib/libGL.so.1.2.0
-  ln -s mesa-libEGL.so.1.0.0        ${pkgdir}/usr/lib/libEGL.so
-  ln -s mesa-libEGL.so.1.0.0        ${pkgdir}/usr/lib/libEGL.so.1
-  ln -s mesa-libEGL.so.1.0.0        ${pkgdir}/usr/lib/libEGL.so.1.0.0
-  ln -s mesa-libGLESv1_CM.so.1.1.0  ${pkgdir}/usr/lib/libGLESv1_CM.so
-  ln -s mesa-libGLESv1_CM.so.1.1.0  ${pkgdir}/usr/lib/libGLESv1_CM.so.1
-  ln -s mesa-libGLESv1_CM.so.1.1.0  ${pkgdir}/usr/lib/libGLESv1_CM.so.1.1.0
-  ln -s mesa-libGLESv2.so.2.0.0     ${pkgdir}/usr/lib/libGLESv2.so
-  ln -s mesa-libGLESv2.so.2.0.0     ${pkgdir}/usr/lib/libGLESv2.so.2
-  ln -s mesa-libGLESv2.so.2.0.0     ${pkgdir}/usr/lib/libGLESv2.so.2.0.0
+  ln -s /usr/lib/mesa/libGL.so.1.2.0 ${pkgdir}/usr/lib/libGL.so.1.2.0
+  ln -s libGL.so.1.2.0	             ${pkgdir}/usr/lib/libGL.so.1
+  ln -s libGL.so.1.2.0               ${pkgdir}/usr/lib/libGL.so
+
+  ln -s /usr/lib/mesa/libEGL.so.1.0.0 ${pkgdir}/usr/lib/libEGL.so.1.0.0
+  ln -s libEGL.so.1.0.0	              ${pkgdir}/usr/lib/libEGL.so.1
+  ln -s libEGL.so.1.0.0               ${pkgdir}/usr/lib/libEGL.so
+
+  ln -s /usr/lib/mesa/libGLESv1_CM.so.1.1.0 ${pkgdir}/usr/lib/libGLESv1_CM.so.1.1.0
+  ln -s libGLESv1_CM.so.1.1.0	            ${pkgdir}/usr/lib/libGLESv1_CM.so.1
+  ln -s libGLESv1_CM.so.1.1.0               ${pkgdir}/usr/lib/libGLESv1_CM.so
+
+  ln -s /usr/lib/mesa/libGLESv2.so.2.0.0 ${pkgdir}/usr/lib/libGLESv2.so.2.0.0
+  ln -s libGLESv2.so.2.0.0               ${pkgdir}/usr/lib/libGLESv2.so.2
+  ln -s libGLESv2.so.2.0.0               ${pkgdir}/usr/lib/libGLESv2.so
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa-libgl"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa-libgl/"
