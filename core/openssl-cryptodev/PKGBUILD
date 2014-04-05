@@ -14,16 +14,16 @@ buildarch=6
 
 pkgname=openssl-cryptodev
 _pkgname=openssl
-_ver=1.0.1f
+_ver=1.0.1e
 # use a pacman compatible version scheme
 pkgver=${_ver/[a-z]/.${_ver//[0-9.]/}}
 #pkgver=$_ver
-pkgrel=1
+pkgrel=5
 pkgdesc='The Open Source toolkit for Secure Sockets Layer and Transport Layer Security'
 arch=('arm' 'armv7h')
 url='https://www.openssl.org'
 license=('custom:BSD')
-depends=('zlib' 'perl')
+depends=('perl')
 optdepends=('ca-certificates')
 options=('!makeflags')
 backup=('etc/ssl/openssl.cnf')
@@ -34,66 +34,79 @@ _cryptover=1.6
 source=("https://www.openssl.org/source/${_pkgname}-${_ver}.tar.gz"
         'no-rpath.patch'
         'ca-dir.patch'
+        'openssl-1.0.1e-fix_pod_syntax-1.patch'
         "http://download.gna.org/cryptodev-linux/cryptodev-linux-${_cryptover}.tar.gz"
-        'openssl-1.0.1f-perl-5.18.patch')
-md5sums=('f26b09c028a0541cab33da697d522b25'
+        'openssl-1.0.1-Check-DTLS_BAD_VER-for-version-number.patch'
+        'openssl-1.0.1-e_aes_cbc_hmac_sha1.c-fix-rare-bad-record-mac-on-AES.patch')
+
+md5sums=('66bf6f10f060d561929de96f9dfe5b8c'
          'dc78d3d06baffc16217519242ce92478'
-         '3bf51be3a1bbd262be46dc619f92aa90'
+         '3bf51be3a1bbd262be46dc619f92aa90' 
+         '88d3bef4bbdc640b0412315d8d347bdf'
          'eade38998313c25fd7934719cdf8a2ea'
-         'ea2a61c8bd43788d81d98f1ac36c98ac')
+         'ae7848bb152b8834ceff30c8c480d422'
+         'c5cc62a47cef72f4e5ad119a88e97ae4')
 
 prepare() {
-  cd $srcdir/${_pkgname}-$_ver
+        cd $srcdir/${_pkgname}-$_ver
 
-  # remove rpath: http://bugs.archlinux.org/task/14367
-  patch -p0 -i $srcdir/no-rpath.patch
-  # set ca dir to /etc/ssl by default
-  patch -p0 -i $srcdir/ca-dir.patch
+        # remove rpath: http://bugs.archlinux.org/task/14367
+        patch -p0 -i $srcdir/no-rpath.patch
+        # set ca dir to /etc/ssl by default
+        patch -p0 -i $srcdir/ca-dir.patch
 
-  patch -p1 -i $srcdir/openssl-1.0.1f-perl-5.18.patch
+        patch -p1 -i $srcdir/openssl-1.0.1e-fix_pod_syntax-1.patch
 
-  #Replace eng_cryptodev.c with cryptodev version
-  cp -u ${srcdir}/cryptodev-linux-${_cryptover}/extras/eng_cryptodev.c ${srcdir}/openssl-${_ver}/crypto/engine/
+        # OpenSSL 1.0.0k, 1.0.1.d, 1.0.1e fail handshake with DTLS1_BAD_VER
+        # http://rt.openssl.org/Ticket/Display.html?id=2984
+        patch -p1 -i $srcdir/openssl-1.0.1-Check-DTLS_BAD_VER-for-version-number.patch
 
-  #Copy the header file
-  cp -u ${srcdir}/cryptodev-linux-${_cryptover}/crypto/cryptodev.h ${srcdir}/openssl-${_ver}/crypto/
+        # Communication problems with 1.0.1e
+        # http://rt.openssl.org/Ticket/Display.html?id=3002
+        patch -p1 -i $srcdir/openssl-1.0.1-e_aes_cbc_hmac_sha1.c-fix-rare-bad-record-mac-on-AES.patch
+
+        #Replace eng_cryptodev.c with cryptodev version
+        cp -u ${srcdir}/cryptodev-linux-${_cryptover}/extras/eng_cryptodev.c ${srcdir}/openssl-${_ver}/crypto/engine/
+
+        #Copy the header file
+        cp -u ${srcdir}/cryptodev-linux-${_cryptover}/crypto/cryptodev.h ${srcdir}/openssl-${_ver}/crypto/
 
 }
 
 build() {
-  cd $srcdir/${_pkgname}-$_ver
+	cd $srcdir/${_pkgname}-$_ver
 
-  if [ "${CARCH}" == 'x86_64' ]; then
-    openssltarget='linux-x86_64'
-  elif [ "${CARCH}" == 'i686' ]; then
-    openssltarget='linux-elf'
-  elif [ "${CARCH}" == 'arm' -o "${CARCH}" == 'armv7h' ]; then
-    openssltarget='linux-armv4'
-  fi
+	if [ "${CARCH}" == 'x86_64' ]; then
+		openssltarget='linux-x86_64'
+	elif [ "${CARCH}" == 'i686' ]; then
+		openssltarget='linux-elf'
+	elif [ "${CARCH}" == 'arm' -o "${CARCH}" == 'armv7h' ]; then
+		openssltarget='linux-armv4'
+	fi
 
-  # mark stack as non-executable: http://bugs.archlinux.org/task/12434
-  ./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib \
-    -DHAVE_CRYPTODEV -DUSE_CRYPTODEV_DIGESTS -DHASH_MAX_LEN=64 \
-    shared threads zlib \
-    "${openssltarget}" \
-    "-Wa,--noexecstack ${CPPFLAGS} ${CFLAGS} ${LDFLAGS}"
+	# mark stack as non-executable: http://bugs.archlinux.org/task/12434
+	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib \
+		-DHAVE_CRYPTODEV -DUSE_CRYPTODEV_DIGESTS -DHASH_MAX_LEN=64 \
+		shared threads zlib \
+		"${openssltarget}" \
+		-Wa,--noexecstack "${CFLAGS}"
 
-  make depend
-  make
+	make depend
+	make
 }
 
 check() {
-  cd $srcdir/$_pkgname-$_ver
-  # the test fails due to missing write permissions in /etc/ssl
-  # revert this patch for make test
-  patch -p0 -R -i $srcdir/ca-dir.patch
-  #make test
-  patch -p0 -i $srcdir/ca-dir.patch
+	cd $srcdir/$_pkgname-$_ver
+	# the test fails due to missing write permissions in /etc/ssl
+	# revert this patch for make test
+	patch -p0 -R -i $srcdir/ca-dir.patch
+#	make test
+	patch -p0 -i $srcdir/ca-dir.patch
 }
 
 package() {
-  depends=('cryptodev_friendly')
-  cd $srcdir/$_pkgname-$_ver
-  make INSTALL_PREFIX=$pkgdir MANDIR=/usr/share/man MANSUFFIX=ssl install
-  install -D -m644 LICENSE $pkgdir/usr/share/licenses/$_pkgname/LICENSE
+	depends=('cryptodev_friendly')
+	cd $srcdir/$_pkgname-$_ver
+	make INSTALL_PREFIX=$pkgdir MANDIR=/usr/share/man MANSUFFIX=ssl install
+	install -D -m644 LICENSE $pkgdir/usr/share/licenses/$_pkgname/LICENSE
 }
