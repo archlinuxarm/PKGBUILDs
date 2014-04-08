@@ -4,53 +4,58 @@
 buildarch=4
 
 pkgbase=linux-armv7
-_srcname=linux-3.13
+_srcname=linux-3.14
 _kernelname=${pkgbase#linux}
 _desc="ARMv7 multi-platform"
-pkgver=3.13.6
-pkgrel=3
-rcnrel=armv7-x11
+pkgver=3.14.0
+pkgrel=1
+rcnrel=armv7-x3
 arch=('armv7h')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-mkimage')
 options=('!strip')
 source=("http://www.kernel.org/pub/linux/kernel/v3.x/${_srcname}.tar.xz"
-        "http://www.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.xz"
+        #"http://www.kernel.org/pub/linux/kernel/v3.x/patch-${pkgver}.xz"
         "http://rcn-ee.net/deb/sid-armhf/v${pkgver}-${rcnrel}/patch-${pkgver%.0}-${rcnrel}.diff.gz"
-        "git://git.code.sf.net/p/aufs/aufs3-standalone#branch=aufs${_srcname#linux-}"
+        "git://git.code.sf.net/p/aufs/aufs3-standalone#branch=aufs${pkgver%.*}"
         '0001-atags-add-support-for-marvell-uboot.patch'
         '0002-atags-retrieve-mac-addresses.patch'
-        '0003-squelch-rt2800usb-messages.patch'
-        'smile.patch'
-        'mmc.patch'
+        '0003-smileplug-devicetree.patch'
+        '0004-emmc-timing-fix.patch'
+        '0005-squelch-rt2800usb-messages.patch'
+        'mvneta.patch::https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/patch/drivers/net/ethernet/marvell/mvneta.c?id=e3a8786c10e75903f1269474e21fe8cb49c3a670'
         'config')
-md5sums=('0ecbaf65c00374eb4a826c2f9f37606f'
-         'a9b131a589a176b4c437b8ca4557b85e'
-         '1b4a2bd6224093a770a82b87900b75b7'
+md5sums=('b621207b3f6ecbb67db18b13258f8ea8'
+         'dfbdf4de6e5918a5076966edf641c867'
          'SKIP'
          '3ad860d0d6daedc82091ea29c9730b95'
          '02cce6b8f88c4392f552b14d0bf2e71c'
-         '8609ac79ba99320692c50481aabc6ed2'
-         '15482d66eaaf0237f0cc6a61f36365b3'
+         '0a0c5691aea2503cd0c503cb50244f48'
          '911bffe9c261ca5b91dd0a083d99e81f'
-         '4a75e2a8d76455756753841eb269e977')
+         '8609ac79ba99320692c50481aabc6ed2'
+         '1986ba8f945dbf4f9a3c94761b713336'
+         'e627fcb463807e40986dbe284b50048d')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
   # add upstream patch
-  patch -p1 -i ../patch-${pkgver}
+  #patch -p1 -i ../patch-${pkgver}
+
+  # Revert commit e3a8786c10e75903f1269474e21fe8cb49c3a670
+  # This fixes mvneta ethernet on Armada 370
+  patch -Rp1 -i ../mvneta.patch
 
   # RCN patch
   git apply ../patch-${pkgver%.0}-${rcnrel}.diff
 
-  # mvebu patches
+  # ALARM patches
   patch -p1 -i ../0001-atags-add-support-for-marvell-uboot.patch
   patch -p1 -i ../0002-atags-retrieve-mac-addresses.patch
-  patch -p1 -i ../0003-squelch-rt2800usb-messages.patch
-  patch -p1 -i ../smile.patch
-  patch -p1 -i ../mmc.patch
+  patch -p1 -i ../0003-smileplug-devicetree.patch
+  patch -p1 -i ../0004-emmc-timing-fix.patch
+  patch -p1 -i ../0005-squelch-rt2800usb-messages.patch
 
   # AUFS patches
   cp -ru "${srcdir}/aufs3-standalone/Documentation" .
@@ -107,7 +112,7 @@ _package() {
   depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
   provides=('kernel26' "linux=${pkgver}" 'aufs_friendly')
-  conflicts=('linux-omap' 'linux-imx6' 'linux-armada370' 'linux-wandboard')
+  conflicts=('linux')
   replaces=('linux-mvebu')
   install=${pkgname}.install
 
@@ -154,133 +159,110 @@ _package() {
 _package-headers() {
   pkgdesc="Header files and scripts for building modules for linux kernel - ${_desc}"
   provides=("linux-headers=${pkgver}")
-  conflicts=('linux-headers-omap' 'linux-headers-imx6' 'linux-wandboard-headers')
+  conflicts=('linux-headers')
   replaces=('linux-mvebu-headers')
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
-  cd "${pkgdir}/usr/lib/modules/${_kernver}"
-  ln -sf ../../../src/linux-${_kernver} build
-
   cd "${srcdir}/${_srcname}"
   install -D -m644 Makefile \
-    "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
+    "${pkgdir}/usr/lib/modules/${_kernver}/build/Makefile"
   install -D -m644 kernel/Makefile \
-    "${pkgdir}/usr/src/linux-${_kernver}/kernel/Makefile"
+    "${pkgdir}/usr/lib/modules/${_kernver}/build/kernel/Makefile"
   install -D -m644 .config \
-    "${pkgdir}/usr/src/linux-${_kernver}/.config"
+    "${pkgdir}/usr/lib/modules/${_kernver}/build/.config"
 
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/include"
 
-  for i in acpi asm-generic config crypto drm generated linux math-emu \
+  for i in acpi asm-generic config crypto drm generated keys linux math-emu \
     media net pcmcia scsi sound trace uapi video xen; do
-    cp -a include/${i} "${pkgdir}/usr/src/linux-${_kernver}/include/"
+    cp -a include/${i} "${pkgdir}/usr/lib/modules/${_kernver}/build/include/"
   done
 
   # copy arch includes for external modules
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH
-  cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-omap2
-  cp -a arch/$KARCH/mach-omap2/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-omap2/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-omap
-  cp -a arch/$KARCH/plat-omap/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-omap/
+  mkdir -p ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH
+  cp -a arch/$KARCH/include ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/
+  mkdir -p ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/mach-omap2
+  cp -a arch/$KARCH/mach-omap2/include ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/mach-omap2/
+  mkdir -p ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/mach-mvebu
+  cp -a arch/$KARCH/mach-mvebu/include ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/mach-mvebu/
+  mkdir -p ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/plat-omap
+  cp -a arch/$KARCH/plat-omap/include ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/plat-omap/
 
   # copy files necessary for later builds, like nvidia and vmware
-  cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
-  cp -a scripts "${pkgdir}/usr/src/linux-${_kernver}"
+  cp Module.symvers "${pkgdir}/usr/lib/modules/${_kernver}/build"
+  cp -a scripts "${pkgdir}/usr/lib/modules/${_kernver}/build"
 
   # fix permissions on scripts dir
-  chmod og-w -R "${pkgdir}/usr/src/linux-${_kernver}/scripts"
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/.tmp_versions"
+  chmod og-w -R "${pkgdir}/usr/lib/modules/${_kernver}/build/scripts"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/.tmp_versions"
 
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/arch/${KARCH}/kernel"
 
-  cp arch/${KARCH}/Makefile "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/"
+  cp arch/${KARCH}/Makefile "${pkgdir}/usr/lib/modules/${_kernver}/build/arch/${KARCH}/"
 
-  if [ "${CARCH}" = "i686" ]; then
-    cp arch/${KARCH}/Makefile_32.cpu "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/"
-  fi
-
-  cp arch/${KARCH}/kernel/asm-offsets.s "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel/"
-
-  # add headers for lirc package
-  # pci
-  for i in bt8xx cx88 saa7134; do
-    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
-    cp -a drivers/media/pci/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
-  done
-  # usb
-  for i in cpia2 em28xx pwc sn9c102; do
-    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
-    cp -a drivers/media/usb/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
-  done
-  # i2c
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c"
-  cp drivers/media/i2c/*.h  "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
-  for i in cx25840; do
-    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
-    cp -a drivers/media/i2c/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
-  done
+  cp arch/${KARCH}/kernel/asm-offsets.s "${pkgdir}/usr/lib/modules/${_kernver}/build/arch/${KARCH}/kernel/"
 
   # add docbook makefile
   install -D -m644 Documentation/DocBook/Makefile \
-    "${pkgdir}/usr/src/linux-${_kernver}/Documentation/DocBook/Makefile"
+    "${pkgdir}/usr/lib/modules/${_kernver}/build/Documentation/DocBook/Makefile"
 
   # add dm headers
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/md"
-  cp drivers/md/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/md"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/md"
+  cp drivers/md/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/md"
 
   # add inotify.h
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/linux"
-  cp include/linux/inotify.h "${pkgdir}/usr/src/linux-${_kernver}/include/linux/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/include/linux"
+  cp include/linux/inotify.h "${pkgdir}/usr/lib/modules/${_kernver}/build/include/linux/"
 
   # add wireless headers
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
-  cp net/mac80211/*.h "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/net/mac80211/"
+  cp net/mac80211/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/net/mac80211/"
 
   # add dvb headers for external modules
   # in reference to:
   # http://bugs.archlinux.org/task/9912
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-core"
-  cp drivers/media/dvb-core/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-core/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-core"
+  cp drivers/media/dvb-core/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-core/"
   # and...
   # http://bugs.archlinux.org/task/11194
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
-  cp include/config/dvb/*.h "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/include/config/dvb/"
+  cp include/config/dvb/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/include/config/dvb/"
 
   # add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
   # in reference to:
   # http://bugs.archlinux.org/task/13146
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
-  cp drivers/media/dvb-frontends/lgdt330x.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
-  cp drivers/media/i2c/msp3400-driver.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-frontends/"
+  cp drivers/media/dvb-frontends/lgdt330x.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-frontends/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/i2c/"
+  cp drivers/media/i2c/msp3400-driver.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/i2c/"
 
   # add dvb headers
   # in reference to:
   # http://bugs.archlinux.org/task/20402
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/dvb-usb"
-  cp drivers/media/usb/dvb-usb/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/dvb-usb/"
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends"
-  cp drivers/media/dvb-frontends/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/tuners"
-  cp drivers/media/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/tuners/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/usb/dvb-usb"
+  cp drivers/media/usb/dvb-usb/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/usb/dvb-usb/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-frontends"
+  cp drivers/media/dvb-frontends/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-frontends/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/tuners"
+  cp drivers/media/tuners/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/tuners/"
 
   # add xfs and shmem for aufs building
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs"
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/mm"
-  cp fs/xfs/xfs_sb.h "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs/xfs_sb.h"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/fs/xfs"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/mm"
+  cp fs/xfs/xfs_sb.h "${pkgdir}/usr/lib/modules/${_kernver}/build/fs/xfs/xfs_sb.h"
 
   # copy in Kconfig files
-  for i in `find . -name "Kconfig*"`; do
-    mkdir -p "${pkgdir}"/usr/src/linux-${_kernver}/`echo ${i} | sed 's|/Kconfig.*||'`
-    cp ${i} "${pkgdir}/usr/src/linux-${_kernver}/${i}"
+  for i in $(find . -name "Kconfig*"); do
+    mkdir -p "${pkgdir}"/usr/lib/modules/${_kernver}/build/`echo ${i} | sed 's|/Kconfig.*||'`
+    cp ${i} "${pkgdir}/usr/lib/modules/${_kernver}/build/${i}"
   done
 
-  chown -R root.root "${pkgdir}/usr/src/linux-${_kernver}"
-  find "${pkgdir}/usr/src/linux-${_kernver}" -type d -exec chmod 755 {} \;
+  chown -R root.root "${pkgdir}/usr/lib/modules/${_kernver}/build"
+  find "${pkgdir}/usr/lib/modules/${_kernver}/build" -type d -exec chmod 755 {} \;
 
   # strip scripts directory
-  find "${pkgdir}/usr/src/linux-${_kernver}/scripts" -type f -perm -u+w 2>/dev/null | while read binary ; do
+  find "${pkgdir}/usr/lib/modules/${_kernver}/build/scripts" -type f -perm -u+w 2>/dev/null | while read binary ; do
     case "$(file -bi "${binary}")" in
       *application/x-sharedlib*) # Libraries (.so)
         /usr/bin/strip ${STRIP_SHARED} "${binary}";;
@@ -292,7 +274,7 @@ _package-headers() {
   done
 
   # remove unneeded architectures
-  rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
+  rm -rf "${pkgdir}"/usr/lib/modules/${_kernver}/build/arch/{alpha,arc,arm26,arm64,avr32,blackfin,c6x,cris,frv,h8300,hexagon,ia64,m32r,m68k,m68knommu,metag,mips,microblaze,mn10300,openrisc,parisc,powerpc,ppc,s390,score,sh,sh64,sparc,sparc64,tile,unicore32,um,v850,x86,xtensa}
 }
 
 _package-smileplug() {
