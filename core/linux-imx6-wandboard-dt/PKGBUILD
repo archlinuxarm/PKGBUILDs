@@ -4,45 +4,41 @@
 buildarch=4
 
 pkgbase=linux-imx6-wandboard-dt
-commit=778d5569e4109e6c8ac1d2fc447f98d722969edc
-_srcname=linux-wandboard_imx_3.10.17_1.0.0_beta
+_commit=4a8ad4e16bbc17be82e95ffcd4241e21d441efbd
+_srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="i.MX6 Wandboard"
 pkgver=3.10.17
-pkgrel=5
-rcnrel=wand6
+pkgrel=6
 arch=('armv7h')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-mkimage')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
-source=("https://github.com/wandboard-org/linux/archive/wandboard_imx_3.10.17_1.0.0_beta.zip"
-        'config'
-	'fix-static-noise.patch')
-
-md5sums=('544cacb64a0a721a2df58ceedd367cfe'
-         'a335dd395460320d6c07fdfcb9efe0a3'
-         '8fd33b21538f41c605da7e990fc99ce2')
+source=("https://github.com/wandboard-org/linux/archive/${_commit}.tar.gz"
+	'fix-static-noise.patch'
+        'config')
+md5sums=('0c16c05ca4a44396b581079aa267c66e'
+         '8fd33b21538f41c605da7e990fc99ce2'
+         'fb1e187c803f0d38439c91c4e8b7578a')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
   cat "${srcdir}/config" > ./.config
 
+  # fix static noise on hdmi and spdif
+  patch -l -p0 <../fix-static-noise.patch
+
   # add pkgrel to extraversion
   sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
-
-  # fix static noise on hdmi and spdif
-  patch -l -p0 <../fix-static-noise.patch
 }
 
 build() {
   cd "${srcdir}/${_srcname}"
-
-  LDFLAGS=""
 
   # get kernel version
   make prepare
@@ -76,7 +72,7 @@ _package() {
   depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
   provides=('kernel26' "linux=${pkgver}")
-  conflicts=('linux-imx6' 'linux-armv7')
+  conflicts=('linux')
   install=${pkgname}.install
 
   cd "${srcdir}/${_srcname}"
@@ -125,7 +121,7 @@ _package() {
 _package-headers() {
   pkgdesc="Header files and scripts for building modules for linux kernel - ${_desc}"
   provides=("linux-headers=${pkgver}" "linux-headers-imx6-fsl=${pkgver}")
-  conflicts=('linux-headers-omap' 'linux-headers-trimslice')
+  conflicts=('linux-headers')
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
@@ -133,7 +129,6 @@ _package-headers() {
   ln -sf ../../../src/linux-${_kernver} build
 
   cd "${srcdir}/${_srcname}"
-
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -144,7 +139,7 @@ _package-headers() {
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include"
 
   for i in acpi asm-generic config crypto drm generated linux math-emu \
-    media net pcmcia scsi sound trace video xen; do
+    media net pcmcia scsi sound trace uapi video xen; do
     cp -a include/${i} "${pkgdir}/usr/src/linux-${_kernver}/include/"
   done
 
@@ -173,13 +168,22 @@ _package-headers() {
   cp arch/${KARCH}/kernel/asm-offsets.s "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel/"
 
   # add headers for lirc package
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/video"
-
-  cp drivers/video/*.h  "${pkgdir}/usr/src/linux-${_kernver}/drivers/video/"
-
-  for i in cpia2 pwc sn9c102; do
+  # pci
+  for i in bt8xx cx88 saa7134; do
+    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
+    cp -a drivers/media/pci/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/pci/${i}"
+  done
+  # usb
+  for i in cpia2 em28xx pwc sn9c102; do
     mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
     cp -a drivers/media/usb/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
+  done
+  # i2c
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c"
+  cp drivers/media/i2c/*.h  "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
+  for i in cx25840; do
+    mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
+    cp -a drivers/media/i2c/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/${i}"
   done
 
   # add docbook makefile
@@ -208,6 +212,13 @@ _package-headers() {
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
   cp include/config/dvb/*.h "${pkgdir}/usr/src/linux-${_kernver}/include/config/dvb/"
 
+  # add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
+  # in reference to:
+  # http://bugs.archlinux.org/task/13146
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  cp drivers/media/dvb-frontends/lgdt330x.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/dvb-frontends/"
+  cp drivers/media/i2c/msp3400-driver.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/i2c/"
+
   # add dvb headers
   # in reference to:
   # http://bugs.archlinux.org/task/20402
@@ -223,11 +234,9 @@ _package-headers() {
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/mm"
   cp fs/xfs/xfs_sb.h "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs/xfs_sb.h"
 
-
   #make uapi headers, some of them are needed for vpu/ipu usage
   mkdir -p "${srcdir}/headers"
   make headers_install ARCH=$KARCH INSTALL_HDR_PATH="${srcdir}/headers"
-
 
   # copy freescale specific headers to /usr/include/linux
   mkdir -p "${pkgdir}/usr/include/linux"
