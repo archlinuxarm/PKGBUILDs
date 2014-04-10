@@ -7,7 +7,7 @@
 
 pkgname=libvirt
 pkgver=1.2.3
-pkgrel=1
+pkgrel=3
 pkgdesc="API for controlling virtualization engines (openvz,kvm,qemu,virtualbox,xen,etc)"
 arch=('i686' 'x86_64')
 url="http://libvirt.org/"
@@ -71,19 +71,24 @@ md5sums=('ad1602a2fcc3609c83b885a28f3eecbd'
 
 prepare() {
   cd "$srcdir/$pkgname-$pkgver"
-#  patch -p1 <"$srcdir/FS#38546.patch"
-}
 
-build() {
-  cd "$srcdir/$pkgname-$pkgver"
-
-  # python2 fix
-  export PYTHON=`which python2`
   for file in $(find . -name '*.py' -print); do
     sed -i 's_#!.*/usr/bin/python_#!/usr/bin/python2_' $file
     sed -i 's_#!.*/usr/bin/env.*python_#!/usr/bin/env python2_' $file
   done
 
+  sed -i 's|/sysconfig/|/conf.d/|g' \
+    daemon/libvirtd.service.in \
+    tools/{libvirt-guests.service,libvirt-guests.sh,virt-pki-validate}.in \
+    src/locking/virtlockd.service.in
+  sed -i 's|@sbindir@|/usr/bin|g' src/locking/virtlockd.service.in
+  sed -i 's|#group =.*|group="kvm"|' src/qemu/qemu.conf
+}
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  export PYTHON=`which python2`
   export LDFLAGS=-lX11
   export RADVD=/usr/bin/radvd
   [ -f Makefile ] || ./configure --prefix=/usr --libexec=/usr/lib/"$pkgname" --sbindir=/usr/bin \
@@ -92,10 +97,6 @@ build() {
 	--with-qemu-user=nobody --with-qemu-group=nobody \
 	--without-netcf --with-interface --with-lxc
   make
-
-  sed -i 's|/etc/sysconfig/|/etc/conf.d/|' daemon/libvirtd.service tools/libvirt-guests.service
-  sed -i 's|@sbindir@|/usr/bin|g' src/virtlockd.service
-  sed -i 's|#group =.*|group="kvm"|' src/qemu/qemu.conf
 }
 
 package() {
@@ -105,15 +106,10 @@ package() {
 
   install -D -m644 "$srcdir"/libvirtd.conf.d "$pkgdir"/etc/conf.d/libvirtd
   install -D -m644 "$srcdir"/libvirtd-guests.conf.d "$pkgdir"/etc/conf.d/libvirt-guests
-
-  # systemd stuff
   install -D -m644 "$srcdir"/libvirt.tmpfiles.d "$pkgdir"/usr/lib/tmpfiles.d/libvirt.conf
-#  mv "$pkgdir"/lib/* "$pkgdir"/usr/lib/
 
   rm -rf \
 	"$pkgdir"/var/run \
 	"$pkgdir"/etc/sysconfig \
-	"$pkgdir"/etc/rc.d/init.d \
-	"$pkgdir"/lib \
-	"$pkgdir"/etc/sysctl.d
+	"$pkgdir"/etc/rc.d
 }
