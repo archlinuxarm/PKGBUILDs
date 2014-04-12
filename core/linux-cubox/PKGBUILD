@@ -1,59 +1,51 @@
+# Cubox (Marvell Armada 510)
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
-# Maintainer: Dave ... <pepdog@archlinuxarm.org>
 
 buildarch=4
 
 pkgbase=linux-cubox
-pkgname=('linux-cubox' 'linux-headers-cubox')
-_kernelname=${pkgname#linux}
-_basekernel=3.5
-pkgver=${_basekernel}.7
-pkgrel=12
-cryptover=1.5
-arch=('arm')
+_commit=fe7ce0bd92eea85840ee0d77990e245a63315c94
+_srcname=linux-${_commit}
+_kernelname=${pkgbase#linux}
+_desc="Cubox (Marvell Armada 510)"
+pkgver=3.5.7
+pkgrel=13
+cryptover=1.6
+arch=('armv7h')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'git' 'python2')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'uboot-mkimage')
 options=('!strip')
-source=('config'
-        'change-default-console-loglevel.patch'
+source=("https://github.com/vDorst/linux/archive/${_commit}.tar.gz"
         "http://download.gna.org/cryptodev-linux/cryptodev-linux-${cryptover}.tar.gz"
-        'Kirkwood_SPDIF.conf')
-md5sums=('a522af6db2f2428a48eec5d1418d1756'
-         '9d3c56a4b999c8bfbd4018089a62f662'
-         '3a4b8d23c1708283e29477931d63ffb8'
-         'a746383e6ce46bcecb662acb3ac21b3f')
+        'memset.patch'
+        'Kirkwood_SPDIF.conf'
+        'config')
+md5sums=('d41f1f1689640fd56bf0fa1bb0aa3907'
+         'eade38998313c25fd7934719cdf8a2ea'
+         '39be2896f0b968d61a19b33da75ce6e0'
+         'a746383e6ce46bcecb662acb3ac21b3f'
+         '275d7ab26362b27d45de1e54c0cd99b8')
 
-__gitroot="git://github.com/vDorst/linux.git"
-__gitname="linux"
-
-build() {
-  cd "${srcdir}"
-  msg "Connecting to GIT server...."
-
-  if [ -d $__gitname ] ; then
-    cd $__gitname && git pull origin
-    msg "The local files are updated."
-  else
-    git clone --depth 1 $__gitroot
-  fi
-
-  msg "GIT checkout done or server timeout"
-
-  cd "${srcdir}/${__gitname}"
-
-  # set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)
-  # remove this when a Kconfig knob is made available by upstream
-  # (relevant patch sent upstream: https://lkml.org/lkml/2011/7/26/227)
-  patch -Np1 -i "${srcdir}/change-default-console-loglevel.patch"
+prepare() {
+  cd "${srcdir}/${_srcname}"
 
   cat "${srcdir}/config" > ./.config
 
-  # set extraversion to pkgrel
-  sed -ri "s|^(EXTRAVERSION =).*|\1 -${pkgrel}|" Makefile
+  # Fix build with GCC 4.8
+  patch -p1 -i ../memset.patch
+
+  # add pkgrel to extraversion
+  sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
+}
+
+build() {
+  cd "${srcdir}/${_srcname}"
+
+  LDFLAGS=""
 
   # get kernel version
   make prepare
@@ -67,7 +59,7 @@ build() {
   # ... or manually edit .config
 
   # Copy back our configuration (use with new kernel version)
-  #cp ./.config ../${pkgver}.config
+  #cp ./.config ../${pkgbase}.config
 
   ####################
   # stop here
@@ -78,32 +70,32 @@ build() {
 
   #yes "" | make config
 
-  # build!
-  make ${MAKEFLAGS} modules uImage
+  # build
+  make ${MAKEFLAGS} uImage modules
 
   # build cryptodev module
   cd "${srcdir}/cryptodev-linux-${cryptover}"
-  make KERNEL_DIR="${srcdir}/${__gitname}"
+  make KERNEL_DIR="${srcdir}/${_srcname}"
 }
 
-package_linux-cubox() {
-  pkgdesc="The Linux Kernel and modules for the Cubox"
-  depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7')
+_package() {
+  pkgdesc="The Linux Kernel and modules - ${_desc}"
+  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26-cubox' 'linux=${pkgver}' 'cryptodev_friendly')
-  conflicts=('kernel26' 'linux')
-  replaces=('kernel26')
-  backup=("etc/mkinitcpio.d/${pkgname}.preset")
+  provides=('kernel26' "linux=${pkgver}" 'cryptodev_friendly')
+  conflicts=('linux')
   install=${pkgname}.install
-  cd "${srcdir}/${__gitname}"
+
+  cd "${srcdir}/${_srcname}"
 
   KARCH=arm
 
   # get kernel version
   _kernver="$(make kernelrelease)"
+  _basekernel=${_kernver%%-*}
+  _basekernel=${_basekernel%.*}
 
   mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
-  cd "${srcdir}/linux"
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
   cp arch/$KARCH/boot/uImage "${pkgdir}/boot/uImage"
 
@@ -120,16 +112,15 @@ package_linux-cubox() {
   # gzip -9 all modules to save 100MB of space
   find "${pkgdir}" -name '*.ko' |xargs -P 2 -n 1 gzip -9
   # make room for external modules
-  ln -s "../extramodules-${pkgver}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
+  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
   # add real version for building modules and running depmod from post_install/upgrade
-  mkdir -p "${pkgdir}/lib/modules/extramodules-${pkgver}-${_kernelname:-ARCH}"
-  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${pkgver}-${_kernelname:-ARCH}/version"
+  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
+  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
 
   # install cryptodev module
   cd "${srcdir}/cryptodev-linux-${cryptover}"
-  make -C "${srcdir}/${__gitname}" INSTALL_MOD_PATH="${pkgdir}" SUBDIRS=`pwd` modules_install
-
-  cd "${srcdir}/${__gitname}"
+  make -C "${srcdir}/${_srcname}" INSTALL_MOD_PATH="${pkgdir}" SUBDIRS=`pwd` modules_install
+  cd "${srcdir}/${_srcname}"
 
   # Now we call depmod...
   depmod -b "$pkgdir" -F System.map "$_kernver"
@@ -142,18 +133,17 @@ package_linux-cubox() {
     "${pkgdir}/usr/share/alsa/cards/Kirkwood_SPDIF.conf"
 }
 
-package_linux-headers-cubox() {
-  pkgdesc="Header files and scripts for building modules for linux kernel for the Cubox"
-  provides=('kernel26-headers' 'linux-headers=${pkgver}')
-  conflicts=('kernel26-headers')
-  replaces=('kernel26-headers')
+_package-headers() {
+  pkgdesc="Header files and scripts for building modules for linux kernel - ${_desc}"
+  provides=("linux-headers=${pkgver}")
+  conflicts=('linux-headers')
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/${__gitname}"
+  cd "${srcdir}/${_srcname}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
@@ -168,7 +158,7 @@ package_linux-headers-cubox() {
     cp -a include/${i} "${pkgdir}/usr/src/linux-${_kernver}/include/"
   done
 
-   # copy arch includes for external modules
+  # copy arch includes for external modules
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH
   cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
   mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-dove   
@@ -254,6 +244,11 @@ package_linux-headers-cubox() {
   mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners"
   cp drivers/media/common/tuners/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/common/tuners/"
 
+  # add xfs and shmem for aufs building
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs"
+  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/mm"
+  cp fs/xfs/xfs_sb.h "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs/xfs_sb.h"
+
   # install cryptodev header
   install -Dm644 "${srcdir}/cryptodev-linux-${cryptover}/crypto/cryptodev.h" \
     "${pkgdir}/usr/src/linux-${_kernver}/crypto/cryptodev.h"
@@ -283,3 +278,9 @@ package_linux-headers-cubox() {
   rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
 }
 
+pkgname=("${pkgbase}" "${pkgbase}-headers")
+for _p in ${pkgname[@]}; do
+  eval "package_${_p}() {
+    _package${_p#${pkgbase}}
+  }"
+done
