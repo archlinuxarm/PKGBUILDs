@@ -36,7 +36,7 @@ Steps to reproduce | A **detailed** guide on how to successfully reproduce the p
 * Pull requests should have a title that gives the package name the PR is for, and a short description about the PR.
 * The body of the PR should contain a **detailed** description of what changes are being introduced, and most importantly, *why* this PR should be merged.
 * PRs must be for a single package only.  A PR addressing multiple packages without merit risks having a delayed merge or being closed.
-* Ensure your PR addresses two of the most common problems:
+* Ensure your PR addresses three of the most common problems:
   * Correctly update the pkgver or pkgrel of the package (see below).
   * Update the checksums if external files have been added or modified.
   * Is the package only for specific architectures?  Set the `buildarch` variable (see [the README](https://github.com/archlinuxarm/PKGBUILDs/blob/master/README.md))
