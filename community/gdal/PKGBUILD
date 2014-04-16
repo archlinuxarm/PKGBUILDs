@@ -1,0 +1,79 @@
+# $Id$
+# Maintainer: Jaroslav Lichtblau <dragonlord@aur.archlinux.org>
+# Contributor: dibblethewrecker dibblethewrecker.at.jiwe.dot.org
+# Contributor: William Rea <sillywilly@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - drop poppler, currently breaks build
+#  - use uname in path in removing rpath in packaging
+
+pkgname=gdal
+pkgver=1.10.1
+pkgrel=2
+pkgdesc="A translator library for raster geospatial data formats"
+arch=('i686' 'x86_64')
+url="http://www.gdal.org/"
+license=('custom')
+depends=('curl' 'geos' 'giflib' 'hdf5' 'libgeotiff' 'libjpeg' 'libpng' 'libspatialite' 'libtiff' 'netcdf' 'python2' 'python2-numpy' 'cfitsio' 'sqlite' 'libmariadbclient' 'postgresql-libs')
+makedepends=('perl' 'swig' 'chrpath' 'doxygen')
+optdepends=('postgresql: postgresql database support'
+            'mariadb: mariadb database support'
+            'perl:  perl binding support'
+            'swig:  perl binding support')
+changelog=$pkgname.changelog
+source=(http://download.osgeo.org/${pkgname}/${pkgver}/${pkgname}-${pkgver}.tar.gz
+        gdal-1.5.1-python-install.patch)
+sha256sums=('9984f0314c0bd831eb59fb646c2bc5e13cf1378be4f51499045166cbe62be6ea'
+            '55a0a961b2d1caddf80f18b6763a96690b0b6443fbd5a0c89e29503ded3bcea6')
+
+prepare() {
+  cd "${srcdir}/$pkgname-$pkgver"
+  patch -Np0 -i "${srcdir}/gdal-1.5.1-python-install.patch"
+
+# python2 fixes
+  sed -i 's_python python1.5_python2 python python1.5_' configure
+  for file in swig/python/{,osgeo/,samples/,scripts/}*.py; do
+      sed -i 's_#!/usr/bin/env python_#!/usr/bin/env python2_' $file
+  done
+
+# Fix mandir
+  sed -i "s|^mandir=.*|mandir='\${prefix}/share/man'|" configure
+}
+
+build() {
+  cd "${srcdir}/$pkgname-$pkgver"
+  export CFLAGS="$CFLAGS -fno-strict-aliasing"
+
+# bug 23654
+  export LDFLAGS="$LDFLAGS -Wl,--as-needed" 
+
+  ./configure --prefix=/usr --with-netcdf --with-libtiff --with-sqlite3 \
+              --with-geotiff --with-mysql --with-python --with-curl \
+              --with-hdf5 --with-perl --with-geos --with-png --with-spatialite
+
+# workaround for bug #13646
+  sed -i 's/PY_HAVE_SETUPTOOLS=1/PY_HAVE_SETUPTOOLS=/g' ./GDALmake.opt
+  sed -i 's/EXE_DEP_LIBS/KILL_EXE_DEP_LIBS/' apps/GNUmakefile
+
+  make
+  make man
+}
+
+package () {
+  cd "${srcdir}/$pkgname-$pkgver"
+  make DESTDIR="${pkgdir}" install
+  make DESTDIR="${pkgdir}" install-man
+
+# install license
+  install -D -m644 LICENSE.TXT "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+
+#FS15477 clean up junks
+  rm -f "${pkgdir}"/usr/bin/*.dox
+  rm -f "${pkgdir}"/usr/share/man/man1/_build_gdal_src_gdal-${pkgver}_apps_.1
+
+# Remove RPATH
+  chrpath --delete "${pkgdir}"/usr/lib/perl5/$(uname -m)-linux-thread-multi/auto/Geo/OSR/OSR.so
+  chrpath --delete "${pkgdir}"/usr/lib/perl5/$(uname -m)-linux-thread-multi/auto/Geo/OGR/OGR.so
+  chrpath --delete "${pkgdir}"/usr/lib/perl5/$(uname -m)-linux-thread-multi/auto/Geo/GDAL/GDAL.so
+  chrpath --delete "${pkgdir}"/usr/lib/perl5/$(uname -m)-linux-thread-multi/auto/Geo/GDAL/Const/Const.so
+}
