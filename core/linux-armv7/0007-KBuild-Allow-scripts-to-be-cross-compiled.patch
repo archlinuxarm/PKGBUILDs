@@ -1,0 +1,213 @@
+From 09b8f74473630cb265c950cb5e31f3e3f0dbe4ae Mon Sep 17 00:00:00 2001
+From: John Rigby <john.rigby@linaro.org>
+Date: Tue, 10 Jan 2012 12:01:41 -0700
+Subject: [PATCH] KBuild: Allow scripts/* to be cross compiled
+
+Cross compiling the binaries in scripts/* is not possible
+because various makefiles assume that $(obj)/whatever is
+executable on the build host.
+
+This patch introduces a new variable called KBUILD_SCRIPTROOT
+that points to script/binaries to use while cross compiling.
+
+Usage:
+
+Build scripts for the build host:
+	make O=path/to/buildhost/buildscripts \
+		silentoldconfig prepare scripts
+Then cross build script for target:
+	make O=path/to/target/buildscripts \
+		HOSTCC=$CROSS_COMPILE \
+		KBUILD_SCRIPTROOT=path/to/buildhost/buildscripts
+		silentoldconfig prepare scripts
+
+This patch does not use KBUILD_SCRIPTROOT for all script invocations
+it only redefines the following if KBUILD_SCRIPTROOT is defined.
+
+scripts/Makefile.build
+	scripts/basic/fixdep --> $(KBUILD_SCRIPTROOT)/scripts/basic/fixdep
+
+scripts/kconfig/Makefile
+	$(obj)/conf --> $(KBUILD_SCRIPTROOT)/scripts/kconfig/conf
+
+scripts/mod/Makefile
+	$(obj)mk_elfconfig --> $(KBUILD_SCRIPTROOT)/scripts/mod/mk_elfconfig
+
+Signed-off-by: John Rigby <john.rigby@linaro.org>
+---
+ scripts/Kbuild.include   |  6 +++++-
+ scripts/Makefile.build   |  6 +++++-
+ scripts/kconfig/Makefile | 30 ++++++++++++++++++------------
+ scripts/mod/Makefile     | 10 ++++++++--
+ 4 files changed, 36 insertions(+), 16 deletions(-)
+
+diff --git a/scripts/Kbuild.include b/scripts/Kbuild.include
+index 547e15d..09aa90c 100644
+--- a/scripts/Kbuild.include
++++ b/scripts/Kbuild.include
+@@ -222,11 +222,15 @@ if_changed = $(if $(strip $(any-prereq) $(arg-check)),                       \
+ 	$(echo-cmd) $(cmd_$(1));                                             \
+ 	echo 'cmd_$@ := $(make-cmd)' > $(dot-target).cmd)
+ 
++ifeq ($(KBUILD_SCRIPTROOT),)
++KBUILD_SCRIPTROOT=.
++endif
++
+ # Execute the command and also postprocess generated .d dependencies file.
+ if_changed_dep = $(if $(strip $(any-prereq) $(arg-check) ),                  \
+ 	@set -e;                                                             \
+ 	$(echo-cmd) $(cmd_$(1));                                             \
+-	scripts/basic/fixdep $(depfile) $@ '$(make-cmd)' > $(dot-target).tmp;\
++	$(KBUILD_SCRIPTROOT)/scripts/basic/fixdep $(depfile) $@ '$(make-cmd)' > $(dot-target).tmp;\
+ 	rm -f $(depfile);                                                    \
+ 	mv -f $(dot-target).tmp $(dot-target).cmd)
+ 
+diff --git a/scripts/Makefile.build b/scripts/Makefile.build
+index d5d859c..de35192 100644
+--- a/scripts/Makefile.build
++++ b/scripts/Makefile.build
+@@ -291,13 +291,17 @@ cmd_record_mcount = 						\
+ 	fi;
+ endif
+ 
++ifeq ($(KBUILD_SCRIPTROOT),)
++KBUILD_SCRIPTROOT=.
++endif
++
+ define rule_cc_o_c
+ 	$(call echo-cmd,checksrc) $(cmd_checksrc)			  \
+ 	$(call echo-cmd,cc_o_c) $(cmd_cc_o_c);				  \
+ 	$(cmd_modversions)						  \
+ 	$(call echo-cmd,record_mcount)					  \
+ 	$(cmd_record_mcount)						  \
+-	scripts/basic/fixdep $(depfile) $@ '$(call make-cmd,cc_o_c)' >    \
++	$(KBUILD_SCRIPTROOT)/scripts/basic/fixdep $(depfile) $@ '$(call make-cmd,cc_o_c)' >    \
+ 	                                              $(dot-target).tmp;  \
+ 	rm -f $(depfile);						  \
+ 	mv -f $(dot-target).tmp $(dot-target).cmd
+diff --git a/scripts/kconfig/Makefile b/scripts/kconfig/Makefile
+index 844bc9d..c58f912 100644
+--- a/scripts/kconfig/Makefile
++++ b/scripts/kconfig/Makefile
+@@ -14,6 +14,12 @@ endif
+ # We need this, in case the user has it in its environment
+ unexport CONFIG_
+ 
++ifdef KBUILD_SCRIPTROOT
++CONF = $(KBUILD_SCRIPTROOT)/scripts/kconfig/conf
++else
++CONF = $(obj)/conf
++endif
++
+ xconfig: $(obj)/qconf
+ 	$< $(Kconfig)
+ 
+@@ -23,31 +29,31 @@ gconfig: $(obj)/gconf
+ menuconfig: $(obj)/mconf
+ 	$< $(Kconfig)
+ 
+-config: $(obj)/conf
++config: $(CONF)
+ 	$< --oldaskconfig $(Kconfig)
+ 
+ nconfig: $(obj)/nconf
+ 	$< $(Kconfig)
+ 
+-oldconfig: $(obj)/conf
++oldconfig: $(CONF)
+ 	$< --$@ $(Kconfig)
+ 
+-silentoldconfig: $(obj)/conf
++silentoldconfig: $(CONF)
+ 	$(Q)mkdir -p include/generated
+ 	$< --$@ $(Kconfig)
+ 
+-localyesconfig localmodconfig: $(obj)/streamline_config.pl $(obj)/conf
++localyesconfig localmodconfig: $(obj)/streamline_config.pl $(CONF)
+ 	$(Q)mkdir -p include/generated
+ 	$(Q)perl $< --$@ $(srctree) $(Kconfig) > .tmp.config
+ 	$(Q)if [ -f .config ]; then 					\
+ 			cmp -s .tmp.config .config ||			\
+ 			(mv -f .config .config.old.1;			\
+ 			 mv -f .tmp.config .config;			\
+-			 $(obj)/conf --silentoldconfig $(Kconfig);	\
++			 $(CONF) --silentoldconfig $(Kconfig);	\
+ 			 mv -f .config.old.1 .config.old)		\
+ 	else								\
+ 			mv -f .tmp.config .config;			\
+-			$(obj)/conf --silentoldconfig $(Kconfig);	\
++			$(CONF) --silentoldconfig $(Kconfig);	\
+ 	fi
+ 	$(Q)rm -f .tmp.config
+ 
+@@ -76,24 +82,24 @@ update-po-config: $(obj)/kxgettext $(obj)/gconf.glade.h
+ 
+ PHONY += allnoconfig allyesconfig allmodconfig alldefconfig randconfig
+ 
+-allnoconfig allyesconfig allmodconfig alldefconfig randconfig: $(obj)/conf
++allnoconfig allyesconfig allmodconfig alldefconfig randconfig: $(CONF)
+ 	$< --$@ $(Kconfig)
+ 
+ PHONY += listnewconfig olddefconfig oldnoconfig savedefconfig defconfig
+ 
+-listnewconfig olddefconfig: $(obj)/conf
++listnewconfig olddefconfig: $(CONF)
+ 	$< --$@ $(Kconfig)
+ 
+ # oldnoconfig is an alias of olddefconfig, because people already are dependent
+ # on its behavior(sets new symbols to their default value but not 'n') with the
+ # counter-intuitive name.
+-oldnoconfig: $(obj)/conf
++oldnoconfig: $(CONF)
+ 	$< --olddefconfig $(Kconfig)
+ 
+-savedefconfig: $(obj)/conf
++savedefconfig: $(CONF)
+ 	$< --$@=defconfig $(Kconfig)
+ 
+-defconfig: $(obj)/conf
++defconfig: $(CONF)
+ ifeq ($(KBUILD_DEFCONFIG),)
+ 	$< --defconfig $(Kconfig)
+ else
+@@ -101,7 +107,7 @@ else
+ 	$(Q)$< --defconfig=arch/$(SRCARCH)/configs/$(KBUILD_DEFCONFIG) $(Kconfig)
+ endif
+ 
+-%_defconfig: $(obj)/conf
++%_defconfig: $(CONF)
+ 	$(Q)$< --defconfig=arch/$(SRCARCH)/configs/$@ $(Kconfig)
+ 
+ # Help text used by make help
+diff --git a/scripts/mod/Makefile b/scripts/mod/Makefile
+index c11212f..8967d55 100644
+--- a/scripts/mod/Makefile
++++ b/scripts/mod/Makefile
+@@ -1,6 +1,12 @@
+ hostprogs-y	:= modpost mk_elfconfig
+ always		:= $(hostprogs-y) empty.o
+ 
++ifdef KBUILD_SCRIPTROOT
++MKELFCONFIG = $(KBUILD_SCRIPTROOT)/scripts/mod/mk_elfconfig
++else
++MKELFCONFIG = $(obj)/mk_elfconfig
++endif
++
+ modpost-objs	:= modpost.o file2alias.o sumversion.o
+ 
+ devicetable-offsets-file := devicetable-offsets.h
+@@ -40,9 +46,9 @@ $(obj)/modpost.o $(obj)/file2alias.o $(obj)/sumversion.o: $(obj)/elfconfig.h
+ $(obj)/file2alias.o: $(obj)/$(devicetable-offsets-file)
+ 
+ quiet_cmd_elfconfig = MKELF   $@
+-      cmd_elfconfig = $(obj)/mk_elfconfig < $< > $@
++      cmd_elfconfig = $(MKELFCONFIG) < $< > $@
+ 
+-$(obj)/elfconfig.h: $(obj)/empty.o $(obj)/mk_elfconfig FORCE
++$(obj)/elfconfig.h: $(obj)/empty.o $(MKELFCONFIG) FORCE
+ 	$(call if_changed,elfconfig)
+ 
+ targets += elfconfig.h
+-- 
+1.9.2
+
