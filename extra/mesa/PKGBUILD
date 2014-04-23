@@ -6,11 +6,12 @@
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
 #  - Build v7h with -O1 instead of -O2
 #  - Removed libgles, libegl and khrplatform-devel from conflicts for marvell-libgfx compatibility.
+#  - Moved .pc files to mesa-libgl that referencing libraries in mesa-libgl
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=10.1.1
-pkgrel=1
+pkgrel=1.1
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm'  'libxdamage' 'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd')
@@ -72,6 +73,9 @@ package_mesa() {
   mv -v ${pkgdir}/usr/lib/libEGL.so* 	${pkgdir}/usr/lib/mesa/
   mv -v ${pkgdir}/usr/lib/libGLES*.so*	${pkgdir}/usr/lib/mesa/
 
+  # remove .pc files that refer to libraries packaged in mesa-libgl
+  rm ${pkgdir}/usr/lib/pkgconfig/{gl,gles{v1_cm,v2},egl}.pc
+
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa/"
 }
@@ -101,6 +105,10 @@ package_mesa-libgl() {
   ln -s /usr/lib/mesa/libGLESv2.so.2.0.0 ${pkgdir}/usr/lib/libGLESv2.so.2.0.0
   ln -s libGLESv2.so.2.0.0               ${pkgdir}/usr/lib/libGLESv2.so.2
   ln -s libGLESv2.so.2.0.0               ${pkgdir}/usr/lib/libGLESv2.so
+
+  # install .pc files
+  install -m755 -d "${pkgdir}/usr/lib/pkgconfig"
+  install -m644 ${srcdir}/?esa-*/src/{mesa/gl.pc,mapi/{es1api/glesv1_cm.pc,es2api/glesv2.pc},egl/main/egl.pc} "${pkgdir}/usr/lib/pkgconfig"
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa-libgl"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa-libgl/"
