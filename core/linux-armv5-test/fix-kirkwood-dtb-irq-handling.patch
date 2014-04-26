@@ -1,0 +1,128 @@
+mvsdio reports method of card detection with dev_notice, while for
+removable cards it may be sane, for non-removable cards it is not.
+Also, as the user cannot do anything about it, silence the message
+by reducing it from dev_notice to dev_dbg.
+
+Signed-off-by: Sebastian Hesselbarth <sebastian.hesselbarth@gmail.com>
+---
+Cc: Nicolas Pitre <nico@fluxnic.net>
+Cc: Chris Ball <cjb@laptop.org>
+Cc: Thomas Petazzoni <thomas.petazzoni@free-electrons.com>
+Cc: Jason Cooper <jason@lakedaemon.net>
+Cc: Andrew Lunn <andrew@lunn.ch>
+Cc: linux-mmc@vger.kernel.org
+Cc: linux-arm-kernel@lists.infradead.org
+Cc: linux-kernel@vger.kernel.org
+---
+ drivers/mmc/host/mvsdio.c |    5 ++---
+ 1 files changed, 2 insertions(+), 3 deletions(-)
+diff --git a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
+index 25f51be..d17b399 100644
+--- a/drivers/mmc/host/mvsdio.c
++++ b/drivers/mmc/host/mvsdio.c
+@@ -816,10 +816,9 @@ static int __init mvsd_probe(struct platform_device *pdev)
+ 		goto out;
+ 
+ 	if (!(mmc->caps & MMC_CAP_NEEDS_POLL))
+-		dev_notice(&pdev->dev, "using GPIO for card detection\n");
++		dev_dbg(&pdev->dev, "using GPIO for card detection\n");
+ 	else
+-		dev_notice(&pdev->dev,
+-			   "lacking card detect (fall back to polling)\n");
++		dev_dbg(&pdev->dev, "lacking card detect, fall back to polling\n");
+ 	return 0;
+ 
+ out:
+-- 
+1.7.2.5
+
+Non-DT irq handlers were working through irq causes from most-significant
+to least-significant bit, while DT irqchip driver does it the other way
+round. This revealed some more HW issues on Kirkwood peripheral IP, where
+spurious sdio irqs can happen although IP's irq enable registers are all
+zero. Although, not directly related with the described issue, reverse
+irq bit handling back to original order by replacing ffs() with fls().
+
+Signed-off-by: Sebastian Hesselbarth <sebastian.hesselbarth@gmail.com>
+---
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Jason Cooper <jason@lakedaemon.net>
+Cc: Andrew Lunn <andrew@lunn.ch>
+Cc: Russell King <linux@arm.linux.org.uk>
+Cc: linux-arm-kernel@lists.infradead.org
+Cc: linux-kernel@vger.kernel.org
+---
+ drivers/irqchip/irq-orion.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+diff --git a/drivers/irqchip/irq-orion.c b/drivers/irqchip/irq-orion.c
+index e51d400..de30d5c 100644
+--- a/drivers/irqchip/irq-orion.c
++++ b/drivers/irqchip/irq-orion.c
+@@ -42,7 +42,7 @@ __exception_irq_entry orion_handle_irq(struct pt_regs *regs)
+ 		u32 stat = readl_relaxed(gc->reg_base + ORION_IRQ_CAUSE) &
+ 			gc->mask_cache;
+ 		while (stat) {
+-			u32 hwirq = ffs(stat) - 1;
++			u32 hwirq = __fls(stat);
+ 			u32 irq = irq_find_mapping(orion_irq_domain,
+ 						   gc->irq_base + hwirq);
+ 			handle_IRQ(irq, regs);
+@@ -116,7 +116,7 @@ static void orion_bridge_irq_handler(unsigned int irq, struct irq_desc *desc)
+ 		   gc->mask_cache;
+ 
+ 	while (stat) {
+-		u32 hwirq = ffs(stat) - 1;
++		u32 hwirq = __fls(stat);
+ 
+ 		generic_handle_irq(irq_find_mapping(d, gc->irq_base + hwirq));
+ 		stat &= ~(1 << hwirq);
+-- 
+1.7.2.5
+
+SDIO controllers found on Marvell Kirkwood SoCs seem to cause a late,
+spurious irq although all interrupts have been disabled. This irq
+doesn't do any harm, neither to HW nor driver. To avoid some
+"unexpected irq" warning later, we workaround above issue by bailing
+out of irq handler early, if we didn't expect any.
+
+Signed-off-by: Sebastian Hesselbarth <sebastian.hesselbarth@gmail.com>
+---
+Cc: Nicolas Pitre <nico@fluxnic.net>
+Cc: Chris Ball <cjb@laptop.org>
+Cc: Thomas Petazzoni <thomas.petazzoni@free-electrons.com>
+Cc: Jason Cooper <jason@lakedaemon.net>
+Cc: Andrew Lunn <andrew@lunn.ch>
+Cc: linux-mmc@vger.kernel.org
+Cc: linux-arm-kernel@lists.infradead.org
+Cc: linux-kernel@vger.kernel.org
+---
+ drivers/mmc/host/mvsdio.c |   15 +++++++++++++++
+ 1 files changed, 15 insertions(+), 0 deletions(-)
+diff --git a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
+index 06c5b0b..25f51be 100644
+--- a/drivers/mmc/host/mvsdio.c
++++ b/drivers/mmc/host/mvsdio.c
+@@ -354,6 +354,21 @@ static irqreturn_t mvsd_irq(int irq, void *dev)
+ 		intr_status, mvsd_read(MVSD_NOR_INTR_EN),
+ 		mvsd_read(MVSD_HW_STATE));
+ 
++	/*
++	 * It looks like, SDIO IP can issue one late, spurious irq
++	 * although all irqs should be disabled. To work around this,
++	 * bail out early, if we didn't expect any irqs to occur.
++	 */
++	if (!mvsd_read(MVSD_NOR_INTR_EN) && !mvsd_read(MVSD_ERR_INTR_EN)) {
++		dev_dbg(host->dev,
++			"spurious irq detected intr 0x%04x intr_en 0x%04x erri 0x%04x erri_en 0x%04x\n",
++			mvsd_read(MVSD_NOR_INTR_STATUS),
++			mvsd_read(MVSD_NOR_INTR_EN),
++			mvsd_read(MVSD_ERR_INTR_STATUS),
++			mvsd_read(MVSD_ERR_INTR_EN));
++		return IRQ_HANDLED;
++	}
++
+ 	spin_lock(&host->lock);
+ 
+ 	/* PIO handling, if needed. Messy business... */
+-- 
+1.7.2.5
