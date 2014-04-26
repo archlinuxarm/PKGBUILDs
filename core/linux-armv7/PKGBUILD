@@ -25,6 +25,7 @@ source=("http://www.kernel.org/pub/linux/kernel/v3.x/${_srcname}.tar.xz"
         '0004-emmc-timing-fix.patch'
         '0005-squelch-rt2800usb-messages.patch'
         '0006-Bluetooth-allocate-static-minor-for-vhci.patch'
+        '0007-KBuild-Allow-scripts-to-be-cross-compiled.patch'
         'mvneta.patch::https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/patch/drivers/net/ethernet/marvell/mvneta.c?id=e3a8786c10e75903f1269474e21fe8cb49c3a670'
         'config')
 md5sums=('b621207b3f6ecbb67db18b13258f8ea8'
@@ -37,6 +38,7 @@ md5sums=('b621207b3f6ecbb67db18b13258f8ea8'
          '911bffe9c261ca5b91dd0a083d99e81f'
          '8609ac79ba99320692c50481aabc6ed2'
          '1b276abe16d14e133f3f28d9c9e6bd68'
+         '808f0747e4334d9cf79d6be47b5a60c8'
          '1986ba8f945dbf4f9a3c94761b713336'
          'c55cdca16f3fdc8c9faa2323b080812c')
 
@@ -60,6 +62,7 @@ prepare() {
   patch -p1 -i ../0004-emmc-timing-fix.patch
   patch -p1 -i ../0005-squelch-rt2800usb-messages.patch
   patch -p1 -i ../0006-Bluetooth-allocate-static-minor-for-vhci.patch
+  patch -p1 -i ../0007-KBuild-Allow-scripts-to-be-cross-compiled.patch
 
   # AUFS patches
   cp -ru "${srcdir}/aufs3-standalone/Documentation" .
@@ -72,13 +75,23 @@ prepare() {
   patch -Np1 -i ../aufs3-standalone/aufs3-mmap.patch
   patch -Np1 -i ../aufs3-standalone/aufs3-standalone.patch
 
-  cat "${srcdir}/config" > ./.config
-
   # add pkgrel to extraversion
   sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
+
+  if [ -n "$CROSS_COMPILE" ] ; then
+    # make scripts for the target arch
+    mkdir -p scripts-host scripts-target
+    cat "${srcdir}/config" > ./scripts-host/.config
+    make ${MAKEFLAGS} O=$(pwd)/scripts-host prepare scripts
+    cp scripts-host/.config scripts-target/.config
+    make ${MAKEFLAGS} O=$(pwd)/scripts-target HOSTCC=${CROSS_COMPILE}gcc \
+    KBUILD_SCRIPTROOT=$(pwd)/scripts-host prepare scripts
+  fi
+
+  cat "${srcdir}/config" > ./.config
 }
 
 build() {
@@ -195,7 +208,9 @@ _package-headers() {
 
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers "${pkgdir}/usr/lib/modules/${_kernver}/build"
-  cp -a scripts "${pkgdir}/usr/lib/modules/${_kernver}/build"
+  [ -z "$CROSS_COMPILE" ] && _scripts=scripts || _scripts=scripts-target
+  cp -a ${_scripts}/scripts "${pkgdir}/usr/lib/modules/${_kernver}/build"
+
 
   # fix permissions on scripts dir
   chmod og-w -R "${pkgdir}/usr/lib/modules/${_kernver}/build/scripts"
@@ -266,14 +281,15 @@ _package-headers() {
   find "${pkgdir}/usr/lib/modules/${_kernver}/build" -type d -exec chmod 755 {} \;
 
   # strip scripts directory
+  [ -z "$CROSS_COMPILE" ] && _strip=/usr/bin/strip || _strip=$(dirname "$CROSS_COMPILE")/strip
   find "${pkgdir}/usr/lib/modules/${_kernver}/build/scripts" -type f -perm -u+w 2>/dev/null | while read binary ; do
     case "$(file -bi "${binary}")" in
       *application/x-sharedlib*) # Libraries (.so)
-        /usr/bin/strip ${STRIP_SHARED} "${binary}";;
+        $_strip ${STRIP_SHARED} "${binary}";;
       *application/x-archive*) # Libraries (.a)
-        /usr/bin/strip ${STRIP_STATIC} "${binary}";;
+        $_strip ${STRIP_STATIC} "${binary}";;
       *application/x-executable*) # Binaries
-        /usr/bin/strip ${STRIP_BINARIES} "${binary}";;
+        $_strip ${STRIP_BINARIES} "${binary}";;
     esac
   done
 
