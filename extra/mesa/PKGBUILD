@@ -11,7 +11,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=10.1.1
-pkgrel=1.1
+pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm'  'libxdamage' 'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd')
@@ -35,11 +35,12 @@ build() {
     --with-dri-drivers=swrast \
     --with-egl-platforms=x11,drm,wayland \
     --with-llvm-shared-libs \
-    --enable-gallium-llvm \
     --enable-egl \
-    --enable-gallium-egl \
-    --enable-shared-glapi \
+    --disable-gallium-egl \
     --enable-gbm \
+    --enable-gallium-gbm \
+    --enable-gallium-llvm \
+    --enable-shared-glapi \
     --enable-glx-tls \
     --enable-dri \
     --enable-glx \
