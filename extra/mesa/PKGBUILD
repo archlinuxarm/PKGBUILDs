@@ -10,7 +10,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
-pkgver=10.1.2
+pkgver=10.1.3
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
@@ -20,7 +20,7 @@ license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
         LICENSE)
-md5sums=('28b60d15ac9f364da1e0155911eaf44e'
+md5sums=('ba6dbe2b9cab0b4de840c996b9b6a3ad'
          '5c65a0fe315dd347e09b1f2826a1df5a')
 
 build() {
