@@ -1,0 +1,43 @@
+flash_uboot() {
+  if [[ ! -e /dev/mtd0 ]]; then
+    echo '>> Error: /dev/mtd0 does not exist.'
+    return
+  fi
+  # set up config for fw_printenv/setenv
+  echo '/dev/mtd0 0xc0000 0x20000 0x20000' > /etc/fw_env.config
+  # save MAC address
+  mac=$(fw_printenv | grep ethaddr | cut -d= -f2)
+  if [[ $mac == '' ]]; then
+    echo '>> Error: Could not find MAC address from current U-Boot.'
+    return
+  fi
+  # flash U-Boot
+  flash_erase /dev/mtd0 0 4
+  flash_erase /dev/mtd0 0xc0000 1
+  nandwrite /dev/mtd0 /boot/uboot-goflexnet.kwb
+  nandwrite -s 0xc0000 /dev/mtd0 /boot/uboot-goflexnet.env
+  # set MAC address
+  fw_setenv ethaddr ${mac}
+}
+
+ask_uboot() {
+  echo "A new U-Boot version needs to be flashed to NAND."
+  echo "Do you want to do this now? [y|N]"
+  read -r shouldwe
+  if [[ $shouldwe =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    flash_uboot
+  else
+    echo "You can do this later by re-installing uboot-goflexnet."
+  fi
+}
+
+## arg 1:  the new package version
+post_install() {
+  ask_uboot
+}
+
+## arg 1:  the new package version
+## arg 2:  the old package version
+post_upgrade() {
+  ask_uboot
+}
