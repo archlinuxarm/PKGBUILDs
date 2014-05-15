@@ -58,7 +58,7 @@ endif
 
 ifeq "$(BuildFlavour)" "perf-llvm"
 
-SRC_HC_OPTS     = -O -H64m -fllvm
+SRC_HC_OPTS     = -O -H64m -fllvm -optc-mlong-calls
 GhcStage1HcOpts = -O -fllvm
 GhcStage2HcOpts = -O2 -fllvm
 GhcHcOpts       = -Rghc-timing
