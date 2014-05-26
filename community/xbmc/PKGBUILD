@@ -18,11 +18,11 @@ _prefix=/usr
 pkgname=xbmc
 pkgver=13.0
 _codename=Gotham_r2
-pkgrel=3
+pkgrel=5
 pkgdesc="A software media player and entertainment hub for digital media"
 arch=('i686' 'x86_64')
 url="http://xbmc.org"
-license=('GPL' 'custom')
+license=('GPL2')
 depends=(
 'avahi' 'ffmpeg' 'hicolor-icon-theme' 'libcdio' 'libmad' 'libmicrohttpd'
 'libmpeg2' 'libmysqlclient' 'libsamplerate' 'libssh' 'libxrandr' 'libxslt'
@@ -45,24 +45,31 @@ optdepends=(
 'unrar: access compressed files without unpacking them'
 'xorg-xinit: autostart xbmc'
 'udisks: automount external drives'
-'upower: used to trigger power management functionality'
+'upower: display battery level'
 )
 install="${pkgname}.install"
 source=("xbmc-$pkgver.tar.gz::https://github.com/xbmc/xbmc/archive/$pkgver-$_codename.tar.gz"
         'xbmc.service'
         'polkit.rules'
         'enable-external-ffmpeg.patch'
-        '0001-rtmp-check-m_rtmp-for-non-NULL-fixes-crashes-with-mi.patch')
+        '0001-rtmp-check-m_rtmp-for-non-NULL-fixes-crashes-with-mi.patch'
+        '0001-make-sure-applications-xbmc.desktop-does-nt-have-exe.patch')
 sha256sums=('663b99f3e196ead51d90f06ccfa864b4e5ade385dfc5972acb0f854d525f2903'
             'f83097388e6c9b301cac78de95cf1797d4aaa11e4021734c28d643320e76d919'
             '4ea78374a08e13a64dcf6a424b111b8bfc11de03ed5829744fc6d9b5fc1ec96e'
             '0239e33e87292c7340ed2092f2b5f1e82f5e283b1f763fb125b3aee78f50c355'
-            '4d643f1bc5a0f9a6bba36c8c2c2d220351acb58172c57d86417b67c02d39fa2b')
+            '4d643f1bc5a0f9a6bba36c8c2c2d220351acb58172c57d86417b67c02d39fa2b'
+            '5f5fe2932050265ad71c82b5d23efe5eaf7b2b3a152bdc6da66675cfb655fabe')
 
 prepare() {
   cd "$srcdir/xbmc-$pkgver-$_codename"
   patch -p1 -i "$srcdir/enable-external-ffmpeg.patch"
   patch -p1 -i "$srcdir/0001-rtmp-check-m_rtmp-for-non-NULL-fixes-crashes-with-mi.patch"
+  patch -p1 -i "$srcdir/0001-make-sure-applications-xbmc.desktop-does-nt-have-exe.patch"
+
+  find -type f -name *.py -exec sed 's|^#!.*python$|#!/usr/bin/python2|' -i "{}" +
+  sed 's|^#!.*python$|#!/usr/bin/python2|' -i tools/depends/native/rpl-native/rpl
+  sed 's/python/python2/' -i tools/Linux/xbmc.sh.in
 }
 
 build() {
@@ -114,12 +121,7 @@ package() {
   # Running make install
   make DESTDIR="$pkgdir" install
 
-  # Python2
-  sed 's/python/python2/g' -i \
-    "$pkgdir"/usr/{bin/xbmc,share/xbmc/addons/service.xbmc.versioncheck/service.py}
-
   # Tools
-  #install -D -m 0755 "${srcdir}/xbmc-$pkgver-$_codename/xbmc-xrandr" "${pkgdir}${_prefix}/share/xbmc/xbmc-xrandr"
   # Stupid TexturePacker does not exist.
   #install -D -m 0755 "${srcdir}/xbmc-$pkgver-$_codename/tools/TexturePacker/TexturePacker" "${pkgdir}${_prefix}/share/xbmc/"
 
@@ -134,6 +136,10 @@ package() {
   install -Dm0644 "$srcdir/xbmc.service" "$pkgdir/usr/lib/systemd/system/xbmc.service"
 
   # install polkit rules
-  install -dm700 "$pkgdir/user/share/polkit-1/rules.d"
-  install -Dm0644 "$srcdir/polkit.rules" "$pkgdir/user/share/polkit-1/rules.d/10-xbmc.rules"
+  install -dm700 "$pkgdir/usr/share/polkit-1/rules.d"
+  install -Dm0644 "$srcdir/polkit.rules" "$pkgdir/usr/share/polkit-1/rules.d/10-xbmc.rules"
+
+  # XBMC user home
+  install -dm 700 "${pkgdir}"/var/lib/xbmc
+  chown 420:420 "${pkgdir}"/var/lib/xbmc
 }
