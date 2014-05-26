@@ -1,0 +1,49 @@
+commit 9a8426ae2ed35ac900b89a623618fc158d24ee6a
+Author: Tomáš Trnka <tomastrnka@gmx.com>
+Date:   Sun May 25 16:12:36 2014 +0200
+
+    Revert "Avoid unnecessary automounting in KDiskFreeSpaceInfo::freeSpaceInfo"
+    
+    This reverts commit 6246e99b43f3d1a9e15d563fbb5e173ed50ba5e5.
+    
+    It breaks KIO on CIFS mounts as the check for automounts copied over
+    from frameworks/kfileitem.cpp isDirectoryMounted() apparently matches
+    CIFS as well (and for some weird reason KIO checks for available space
+    before trying to copy files).
+    
+    We'll probably have to return to v1 of the abovementioned commit, i.e.
+    checking for "autofs" explicitly. However, more testing is apparently
+    necessary to avoid further nasty surprises.
+    
+    REVIEW: 117044
+    BUG: 334776
+    FIXED-IN: 4.13.2
+
+diff --git a/kio/kfile/kdiskfreespaceinfo.cpp b/kio/kfile/kdiskfreespaceinfo.cpp
+index 5c1fa72..f11eb09 100644
+--- a/kio/kfile/kdiskfreespaceinfo.cpp
++++ b/kio/kfile/kdiskfreespaceinfo.cpp
+@@ -33,7 +33,6 @@
+ #include <QtCore/QDir>
+ #include <windows.h>
+ #else
+-#include <QtCore/QFileInfo>
+ #include <sys/statvfs.h>
+ #endif
+ 
+@@ -131,15 +130,6 @@ KDiskFreeSpaceInfo KDiskFreeSpaceInfo::freeSpaceInfo( const QString& path )
+ #else
+     struct statvfs statvfs_buf;
+ 
+-    // Ignore autofs mountpoints as statvfs would trigger (expensive) automounting
+-    // This also matches "special" filesystems like /proc where free space has no meaning
+-    if (mp) {
+-        QFileInfo fi(info.d->mountPoint);
+-        if (fi.isDir() && fi.size() == 0) {
+-            return info;
+-        }
+-    }
+-
+     // Prefer mountPoint if available, so that it even works with non-existing files.
+     const QString pathArg = info.d->mountPoint.isEmpty() ? path : info.d->mountPoint;
+     if (!statvfs(QFile::encodeName(pathArg).constData(), &statvfs_buf)) {
