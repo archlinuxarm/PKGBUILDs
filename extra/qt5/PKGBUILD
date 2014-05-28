@@ -14,6 +14,7 @@ pkgname=('qt5-base'
          'qt5-connectivity'
          'qt5-declarative'
          'qt5-doc'
+         'qt5-enginio'
          'qt5-graphicaleffects'
          'qt5-imageformats'
          'qt5-location'
@@ -27,10 +28,11 @@ pkgname=('qt5-base'
          'qt5-tools'
          'qt5-translations'
          'qt5-webkit'
+         'qt5-websockets'
          'qt5-x11extras'
          'qt5-xmlpatterns')
-pkgver=5.2.1
-pkgrel=4
+pkgver=5.3.0
+pkgrel=3
 arch=('i686' 'x86_64')
 url='http://qt-project.org/'
 license=('GPL3' 'LGPL' 'FDL' 'custom')
@@ -39,22 +41,24 @@ makedepends=('libxcb' 'xcb-proto' 'xcb-util' 'xcb-util-image' 'xcb-util-wm' 'xcb
             'libjpeg-turbo' 'cups' 'libpulse' 'hicolor-icon-theme' 'desktop-file-utils'
             'postgresql-libs' 'libmariadbclient' 'sqlite' 'unixodbc'
             'python2' 'ruby' 'gperf' 'libxslt' 'libxcomposite' 'fontconfig'
-            'openal' 'gtk2' 'libxkbcommon' 'icu' 'python')
+            'openal' 'gtk2' 'libxkbcommon-x11' 'python' 'mtdev' 'harfbuzz' 'icu')
 groups=('qt' 'qt5')
 _pkgfqn="qt-everywhere-opensource-src-${pkgver}"
-source=("http://download.qt-project.org/official_releases/qt/5.2/${pkgver}/single/${_pkgfqn}.tar.xz"
+source=("http://download.qt-project.org/official_releases/qt/5.3/${pkgver}/single/${_pkgfqn}.tar.xz"
         'assistant.desktop' 'designer.desktop' 'linguist.desktop' 'qdbusviewer.desktop'
         'use-python2.patch'
         'rpi.patch'
-        'qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch')
-md5sums=('0c8d2aa45f38be9c3f7c9325eb059d9d'
+        'qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch'
+        'QTBUG-39047.patch')
+md5sums=('f00ac7930e3b1b2b364dedcd15acc142'
          'b2897dd6a2967bccf8f10e397aafee55'
          '9638a78e502719ef8fe5f8d10d0361a9'
          '188da8f4c87316e730ebf1c6217bf5a0'
          '322b419b16c75d4de0ee7ad0a246caa1'
          'a378deccf363bd6079da459c89aff7b9'
          'd7992d2309194c42a7d47b86010d13d7'
-         'd9eb94a6cf4f178a7d77d6b8a9280ee2')
+         'd9eb94a6cf4f178a7d77d6b8a9280ee2'
+         '819813c53ab11b2341baf54afbc37e37')
 
 prepare() {
   cd ${_pkgfqn}
@@ -84,6 +88,9 @@ prepare() {
   sed -i -e "s|#![ ]*/usr/bin/python$|#!/usr/bin/python2|" \
     -e "s|#![ ]*/usr/bin/env python$|#!/usr/bin/env python2|" \
     $(find . -name '*.py')
+
+  cd qtdeclarative
+  patch -p1 -i "${srcdir}"/QTBUG-39047.patch
 }
 
 build() {
@@ -110,6 +117,8 @@ build() {
     -no-rpath \
     -optimized-qmake \
     -dbus-linked \
+    -system-harfbuzz \
+    -journald \
     -reduce-relocations \
     -no-sse2 \
     -no-sse3 \
@@ -138,10 +147,14 @@ package_qt5-base() {
   pkgdesc='A cross-platform application and UI framework'
   depends=('libjpeg-turbo' 'xcb-util-keysyms' 'libgl' 'dbus' 'fontconfig' 'systemd'
            'xcb-util-wm' 'libxrender' 'libxi' 'sqlite' 'xcb-util-image' 'icu'
-           'qtchooser' 'libxkbcommon')
+           'qtchooser')
   optdepends=('postgresql-libs: PostgreSQL driver'
               'libmariadbclient: MariaDB driver'
-              'unixodbc: ODBC driver')
+              'unixodbc: ODBC driver'
+              'mtdev: evdev plugin'
+              'libxkbcommon-x11: xcb plugin'
+              'libsm: xcb plugin'
+              'gtk2: GTK2 plugin')
   conflicts=('qt')
   options=('staticlibs') #libQt5PlatformSupport builds static only
 
@@ -167,7 +180,7 @@ package_qt5-base() {
 }
 
 package_qt5-connectivity() {
-  pkgdesc='A cross-platform application and UI framework (QtBluetooth, QtNfc)'
+  pkgdesc='Provides access to Bluetooth hardware'
   depends=('qt5-declarative')
 
   cd ${_pkgfqn}/qtconnectivity
@@ -182,8 +195,8 @@ package_qt5-connectivity() {
 }
 
 package_qt5-declarative() {
-  pkgdesc='A cross-platform application and UI framework (QtQml, QtQuick)'
-  depends=('qt5-xmlpatterns')
+  pkgdesc='Classes for QML and JavaScript languages'
+  depends=('qt5-xmlpatterns' 'libxkbcommon-x11')
   conflicts=('qt')
 
   cd ${_pkgfqn}/qtdeclarative
@@ -220,8 +233,23 @@ package_qt5-doc() {
     "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
+package_qt5-enginio() {
+  pkgdesc='A Backend-as-a-Service solution to ease the backend development for connected and data-driven application'
+  depends=('qt5-declarative')
+
+  cd ${_pkgfqn}/qtenginio
+  make INSTALL_ROOT="${pkgdir}" install
+
+  # Fix wrong path in prl files
+  find "${pkgdir}/usr/lib" -type f -name '*.prl' \
+    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
+}
+
 package_qt5-xmlpatterns() {
-  pkgdesc='A cross-platform application and UI framework (QtXmlPatterns)'
+  pkgdesc='Support for XPath, XQuery, XSLT and XML schema validation'
   depends=('qt5-base')
   conflicts=('qt')
 
@@ -255,7 +283,7 @@ package_qt5-translations() {
 }
 
 package_qt5-multimedia() {
-  pkgdesc='A cross-platform application and UI framework (QtMultimedia)'
+  pkgdesc='Classes for audio, video, radio and camera functionality'
   depends=('qt5-declarative' 'libpulse' 'gstreamer0.10-base' 'openal')
   conflicts=('qt')
 
@@ -271,7 +299,7 @@ package_qt5-multimedia() {
 }
 
 package_qt5-graphicaleffects() {
-  pkgdesc='A cross-platform application and UI framework (QtGraphicalEffects)'
+  pkgdesc='Graphical effects for use with Qt Quick 2'
   depends=('qt5-declarative')
 
   cd ${_pkgfqn}/qtgraphicaleffects
@@ -282,8 +310,8 @@ package_qt5-graphicaleffects() {
 }
 
 package_qt5-imageformats() {
-  pkgdesc='A cross-platform application and UI framework (Images plugins)'
-  depends=('qt5-base' 'libtiff' 'libmng')
+  pkgdesc='Plugins for additional image formats: TIFF, MNG, TGA, WBMP'
+  depends=('qt5-base' 'jasper' 'libmng')
   conflicts=('qt')
 
   cd ${_pkgfqn}/qtimageformats
@@ -294,7 +322,7 @@ package_qt5-imageformats() {
 }
 
 package_qt5-location() {
-  pkgdesc='A cross-platform application and UI framework (QtLocation, QtPositioning)'
+  pkgdesc='Provides access to position, satellite and area monitoring classes'
   depends=('qt5-declarative')
 
   cd ${_pkgfqn}/qtlocation
@@ -309,7 +337,7 @@ package_qt5-location() {
 }
 
 package_qt5-quick1() {
-  pkgdesc='A cross-platform application and UI framework (QtDeclarative)'
+  pkgdesc='Qt Declarative is provided for Qt 4 compatibility'
   depends=('qt5-webkit' 'qt5-script')
   conflicts=('qt')
 
@@ -331,7 +359,7 @@ package_qt5-quick1() {
 }
 
 package_qt5-quickcontrols() {
-  pkgdesc='A cross-platform application and UI framework (QtQuick)'
+  pkgdesc='Reusable Qt Quick based UI controls to create classic desktop-style user interfaces'
   depends=('qt5-declarative')
 
   cd ${_pkgfqn}/qtquickcontrols
@@ -342,7 +370,7 @@ package_qt5-quickcontrols() {
 }
 
 package_qt5-script() {
-  pkgdesc='A cross-platform application and UI framework (QtScript)'
+  pkgdesc='Classes for making Qt applications scriptable. Provided for Qt 4.x compatibility'
   depends=('qt5-base')
   conflicts=('qt')
 
@@ -358,7 +386,7 @@ package_qt5-script() {
 }
 
 package_qt5-sensors() {
-  pkgdesc='A cross-platform application and UI framework (QtSensors)'
+  pkgdesc='Provides access to sensor hardware and motion gesture recognition'
   depends=('qt5-declarative')
 
   cd ${_pkgfqn}/qtsensors
@@ -373,7 +401,7 @@ package_qt5-sensors() {
 }
 
 package_qt5-serialport() {
-  pkgdesc='A cross-platform application and UI framework (QtSerialPort)'
+  pkgdesc='Provides access to hardware and virtual serial ports'
   depends=('qt5-base')
   
   cd ${_pkgfqn}/qtserialport
@@ -388,7 +416,7 @@ package_qt5-serialport() {
 }
 
 package_qt5-svg() {
-  pkgdesc='A cross-platform application and UI framework (QtSvg)'
+  pkgdesc='Classes for displaying the contents of SVG files'
   depends=('qt5-base')
   conflicts=('qt')
 
@@ -451,7 +479,7 @@ package_qt5-tools() {
 }
 
 package_qt5-webkit() {
-  pkgdesc='A cross-platform application and UI framework (QtWebKit)'
+  pkgdesc='Classes for a WebKit2 based implementation and a new QML API'
   depends=('qt5-sensors' 'qt5-location' 'gst-plugins-base' 'libxslt' 'libxcomposite')
   license=('GPL3' 'LGPL' 'FDL')
 
@@ -466,8 +494,21 @@ package_qt5-webkit() {
   perl -pi -e "s, -L${srcdir}/?\S+,,g" "${pkgdir}"/usr/lib/pkgconfig/Qt5WebKit.pc
 }
 
+package_qt5-websockets() {
+  pkgdesc='Provides WebSocket communication compliant with RFC 6455'
+  depends=('qt5-declarative')
+  license=('LGPL')
+
+  cd ${_pkgfqn}/qtwebsockets
+  make INSTALL_ROOT="${pkgdir}" install
+
+  # Fix wrong path in prl files
+  find "${pkgdir}/usr/lib" -type f -name '*.prl' \
+    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+}
+
 package_qt5-x11extras() {
-  pkgdesc='A cross-platform application and UI framework (QtX11Extras)'
+  pkgdesc='Provides platform-specific APIs for X11'
   depends=('qt5-base')
   
   cd ${_pkgfqn}/qtx11extras
