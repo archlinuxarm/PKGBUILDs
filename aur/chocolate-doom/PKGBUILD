@@ -1,21 +1,21 @@
 # Maintainer: Mike Swanson <mikeonthecomputer@gmail.com>
 
-_pkgname=chocolate-doom # for the individual package functions
-# The AUR can be annoying too.
-pkgname=chocolate-doom
-true && pkgname=(chocolate-{doom,heretic,hexen,strife,common})
+pkgname=(chocolate-{doom,heretic,hexen,strife,common})
+_pkgname=${pkgname[0]}
+pkgdesc="Historically-accurate Doom, Heretic, Hexen, and Strife ports."
 pkgver=2.0.0
-pkgrel=3
+pkgrel=4
 arch=('i686' 'x86_64')
 url="http://www.chocolate-doom.org/"
 license=('GPL2')
+depends=('libsamplerate' 'sdl_mixer' 'sdl_net')
 makedepends=('autoconf' 'python')
 install=chocolate-doom.install
-source=(http://chocolate-doom.org/downloads/${pkgver}/chocolate-doom-${pkgver}.tar.gz)
+source=(http://chocolate-doom.org/downloads/${pkgver}/${_pkgname}-${pkgver}.tar.gz)
 sha256sums=('85c58b77dad933013253b453ef01907492b4719acd56cf8cb6c76f4a361ab60c')
 
 build() {
-  cd "${pkgname[0]}-${pkgver}"
+  cd "${_pkgname}-${pkgver}"
 
   # Change binary dir from /usr/games to /usr/bin
   sed 's|/games|/bin|g' -i src{,/setup}/Makefile.am
@@ -46,7 +46,7 @@ package_chocolate-common() {
 }
 
 package_chocolate-doom() {
-  pkgdesc="Doom port accurately reproducing the original v1.9 EXEs."
+  pkgdesc="Doom port accurately reproducing the original DOS EXEs."
   depends=(${depends[@]} 'chocolate-common')
 
   cd "${_pkgname}-${pkgver}"
@@ -64,7 +64,7 @@ package_chocolate-doom() {
 }
 
 package_chocolate-heretic() {
-  pkgdesc="Heretic port accurately reproducing the original v1.3 EXE."
+  pkgdesc="Heretic port accurately reproducing the original DOS EXEs."
   depends=(${depends[@]} 'chocolate-common')
 
   cd "${_pkgname}-${pkgver}"
@@ -82,7 +82,7 @@ package_chocolate-heretic() {
 }
 
 package_chocolate-hexen() {
-  pkgdesc="Hexen port accurately reproducing the original v1.1 EXE."
+  pkgdesc="Hexen port accurately reproducing the original DOS EXEs."
   depends=(${depends[@]} 'chocolate-common')
 
   cd "${_pkgname}-${pkgver}"
@@ -100,7 +100,7 @@ package_chocolate-hexen() {
 }
 
 package_chocolate-strife() {
-  pkgdesc="Strife port accurately reproducing the original v1.31 EXE."
+  pkgdesc="Strife port accurately reproducing the original DOS EXEs."
   depends=(${depends[@]} 'chocolate-common')
 
   cd "${_pkgname}-${pkgver}"
@@ -116,7 +116,3 @@ package_chocolate-strife() {
   rm -f man/man?/chocolate-{doom,heretic,hexen,setup,server}* \
     man/man5/{default,heretic,hexen}.cfg*
 }
-
-# More AUR workaround.
-pkgdesc="Doom, Heretic, Hexen, Strife port accurately reproducing the originals."
-depends=('libsamplerate' 'sdl_mixer' 'sdl_net')
