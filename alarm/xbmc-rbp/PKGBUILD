@@ -1,48 +1,50 @@
 # Contributor tomasgroth at yahoo.dk
 # Contributor WarheadsSE <max@warheads.net>
-# Contributor Romzetron <asromzek@gmail.com>
-pkgname=xbmc-rbp
-pkgver=12.3
-pkgrel=1
+# Contributor Holzhaus <holthuis.jan@googlemail.com>
+
 buildarch=16
 
+pkgname=xbmc-rbp
+pkgver=13.0
+_codename=Gotham_r2
+pkgrel=1
 pkgdesc="A software media player and entertainment hub for digital media for the Raspberry Pi"
 arch=('armv6h')
 url="http://xbmc.org"
 license=('GPL' 'custom')
-depends=('hicolor-icon-theme' 'fribidi' 'lzo2' 'smbclient' 'libtiff' 'libva' 'libpng' 'libcdio' 'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd' 'sdl_image' 'python2' 'libass' 'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 'xorg-xdpyinfo' 'libbluray' 'libnfs' 'afpfs-ng' 'libshairport' 'avahi' 'bluez-libs' 'tinyxml' 'raspberrypi-firmware' 'libcec' 'libplist' 'swig' 'taglib')
-
-makedepends=('boost' 'cmake' 'gperf' 'nasm' 'zip' 'udisks' 'upower' 'git' 'autoconf' 'jdk7-openjdk')
+depends=('hicolor-icon-theme' 'fribidi' 'lzo2' 'smbclient' 'libtiff' 'libva' 'libpng' 'libcdio' 'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd' 'sdl_image' 'python2' 'libass' 'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 'xorg-xdpyinfo' 'libbluray' 'libnfs' 'afpfs-ng' 'libshairport' 'avahi' 'bluez-libs' 'tinyxml' 'raspberrypi-firmware' 'libcec' 'libplist' 'swig' 'taglib' 'libxslt' 'shairplay-git')
+makedepends=('boost' 'cmake' 'gperf' 'nasm' 'zip' 'udisks' 'upower' 'git' 'autoconf' 'java-environment')
 optdepends=(
   'lirc: remote controller support'
   'udisks: automount external drives'
   'upower: used to trigger power management functionality'
-  'unrar: access compressed files without unpacking them'
-)
+  'unrar: access compressed files without unpacking them')
+
 provides=("xbmc")
 conflicts=("xbmc")
 install="xbmc.install"
-source=("http://mirrors.xbmc.org/releases/source/xbmc-${pkgver}.tar.gz" 
-	"xbmc-ae04d99-321-texturepacker-hostflags-and-rework.patch"
-	"polkit.rules"
-	"xbmc.service")
+source=("xbmc-$pkgver.tar.gz::https://github.com/xbmc/xbmc/archive/$pkgver-$_codename.tar.gz"
+        'xbmc.service'
+        'polkit.rules'
+        'panasonicCEC.patch')
 
-md5sums=('7ae385ebf8e5cfcb917393235e6efbdb'
-         'fc6a925a09ba1b13d84daf1121b42ab9'
-         '02f7951824ee13103344f36009c0ef2a'
-         '4e28664d3e0df08e08dba5b09a855ced')
+sha256sums=('663b99f3e196ead51d90f06ccfa864b4e5ade385dfc5972acb0f854d525f2903'
+            '189804742290946424a401163e351f5158bfd1b71e5b86b864589254b13f9571'
+            '4ea78374a08e13a64dcf6a424b111b8bfc11de03ed5829744fc6d9b5fc1ec96e'
+            '554140506063a85000d7072a961bb02514969e58b38a466aa120e9fb668a1863')
+
 _prefix=/usr
 
 prepare() {
-  # Fix source directory name.
-  mv "${srcdir}/xbmc-${pkgver}-Frodo" "${srcdir}/xbmc-${pkgver}"
-  cd "${srcdir}/xbmc-${pkgver}"
+  cd "$srcdir/xbmc-$pkgver-$_codename"
 
   # fix lsb_release dependency
   sed -i -e 's:/usr/bin/lsb_release -d:cat /etc/arch-release:' xbmc/utils/SystemInfo.cpp
-
-  # Patch to fix TexturePacker build.
-  patch -i ${srcdir}/xbmc-ae04d99-321-texturepacker-hostflags-and-rework.patch -p1
+ 
+  # Suppress double keys within 250ms for some Panasonic TVs
+  # https://github.com/chbmuc/xbmc/commit/6e5822d4fe648abbd575cf77ced943a1461e9ae5
+  # http://archlinuxarm.org/forum/viewtopic.php?f=31&t=6376&start=10
+  patch -Np1 -i ${srcdir}/panasonicCEC.patch
 
   # fix samba4 libsmbclient.h location
   sed -e 's/\(#include \)<libsmbclient\.h>/\1<samba-4.0\/libsmbclient\.h>/g' \
@@ -50,9 +52,8 @@ prepare() {
     -i xbmc/filesystem/SMBDirectory.cpp
 }
 
-
 build() {
-  cd "${srcdir}/xbmc-${pkgver}"
+  cd "$srcdir/xbmc-$pkgver-$_codename"
 
   # Bootstrapping XBMC
   ./bootstrap
@@ -60,46 +61,60 @@ build() {
   # Configuring XBMC
   export PYTHON_VERSION=2  # external python v2
   # we need to compile for armv6 instead of armv5 to avoid problems compiling assembler code
-  export CFLAGS="-O3 -mcpu=arm1176jzf-s -mtune=arm1176jzf-s -mfloat-abi=hard -mfpu=vfp -mabi=aapcs-linux -pipe -fstack-protector --param=ssp-buffer-size=4 -D_FORTIFY_SOURCE=2 -I/opt/vc/include/ -I/opt/vc/include/IL -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux"
-  export CXXFLAGS="-O3 -mcpu=arm1176jzf-s -mtune=arm1176jzf-s -mfloat-abi=hard -mfpu=vfp -mabi=aapcs-linux -fstack-protector --param=ssp-buffer-size=4 -D_FORTIFY_SOURCE=2 -I/opt/vc/include/ -I/opt/vc/include/IL -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux"
+  export CFLAGS="-Ofast -mcpu=arm1176jzf-s -mtune=arm1176jzf-s -fexcess-precision=fast -mfloat-abi=hard \
+                 -mfpu=vfp -mabi=aapcs-linux -pipe -fstack-protector --param=ssp-buffer-size=4 -D_FORTIFY_SOURCE=1 \
+                 -I/opt/vc/include/ -I/opt/vc/include/IL -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux"
+  export CXXFLAGS="-Ofast -mcpu=arm1176jzf-s -mtune=arm1176jzf-s -fexcess-precision=fast -mfloat-abi=hard -mfpu=vfp \
+                   -mabi=aapcs-linux -fstack-protector --param=ssp-buffer-size=4 -D_FORTIFY_SOURCE=1 \
+                   -I/opt/vc/include/ -I/opt/vc/include/IL -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux"
   export LDFLAGS="$LDFLAGS -L/opt/vc/lib"
-#  export MAKEFLAGS="-j1"
-
-./configure --prefix=$_prefix --exec-prefix=$_prefix  \
+  export MAKEFLAGS="-j1"
+ 
+  ./configure --prefix=$_prefix --exec-prefix=$_prefix  \
+  --with-platform=raspberry-pi \
   --disable-gl \
   --enable-gles \
-  --disable-sdl \
   --disable-x11 \
-  --disable-xrandr \
-  --disable-openmax \
-  --disable-joystick \
-  --disable-debug \
-  --disable-crystalhd \
-  --disable-vtbdecoder \
+  --disable-sdl \
+  --enable-optimizations \
+  --disable-external-libraries \
+  --disable-goom \
+  --disable-hal \
+  --disable-pulse \
   --disable-vaapi \
   --disable-vdpau \
-  --disable-pulse \
-  --disable-projectm \
-  --with-platform=raspberry-pi \
-  --enable-optimizations \
-  --enable-libcec \
-  --enable-dvdcss \
-  --enable-optical-drive \
+  --disable-xrandr \
+  --enable-airplay \
+  --enable-airtunes \
+  --disable-alsa \
+  --enable-avahi \
   --enable-libbluray \
+  --enable-dvdcss \
+  --disable-debug \
+  --disable-joystick \
+  --disable-mid \
+  --enable-nfs \
+  --disable-profiling \
+  --disable-projectm \
+  --enable-rsxs \
+  --enable-rtmp \
+  --disable-vaapi \
+  --disable-vdadecoder \
+  --disable-external-ffmpeg \
+  --enable-optical-drive \
   --enable-player=omxplayer
-
   make
 }
 
 package() {
-  cd "${srcdir}/xbmc-${pkgver}"
+  cd "$srcdir/xbmc-$pkgver-$_codename"
   # Running make install
   make DESTDIR="${pkgdir}" install
 
   # run feh with python2
   sed -i -e 's/python/python2/g' ${pkgdir}${_prefix}/bin/xbmc
 
-  # Remove checks that doesn't apply to the raspberry pi
+  # Remove checks that don't apply to the raspberry pi
   head -n 171 "${pkgdir}${_prefix}/share/xbmc/FEH.py" > "${pkgdir}${_prefix}/share/xbmc/FEH.py.new"
   mv "${pkgdir}${_prefix}/share/xbmc/FEH.py.new"  "${pkgdir}${_prefix}/share/xbmc/FEH.py"
 
@@ -108,7 +123,7 @@ package() {
   sed -i -e "s/lsb_release -a 2> \/dev\/null | sed -e 's\/\^\/    \/'/cat \/etc\/arch-release/g" "${pkgdir}${_prefix}/bin/xbmc"
 
   # Tools
-  install -D -m 0755 "${srcdir}/xbmc-${pkgver}/tools/TexturePacker/TexturePacker" "${pkgdir}${_prefix}/share/xbmc/"
+  install -D -m 0755 "${srcdir}/xbmc-${pkgver}-${_codename}/tools/TexturePacker/TexturePacker" "${pkgdir}${_prefix}/share/xbmc/"
 
   # Licenses
   install -d -m 0755 "${pkgdir}${_prefix}/share/licenses/${pkgname}"
