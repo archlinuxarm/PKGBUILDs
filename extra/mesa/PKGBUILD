@@ -49,7 +49,6 @@ build() {
     --enable-gles1 \
     --enable-gles2 \
     --enable-texture-float \
-    --enable-xa \
     --enable-dri3 \
     --enable-omx \
     --with-clang-libdir=/usr/lib
