@@ -10,17 +10,18 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
-pkgver=10.1.4
+pkgver=10.2.1
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
-             'libxshmfence' 'libxxf86vm'  'libxdamage' 'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd')
+             'libxshmfence' 'libxxf86vm'  'libxdamage' 'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd'
+             'libomxil-bellagio' 'libclc' 'clang')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
         LICENSE)
-md5sums=('6fddee101f49b7409cd29994c34ddee7'
+md5sums=('093f9b5d077e5f6061dcd7b01b7aa51a'
          '5c65a0fe315dd347e09b1f2826a1df5a')
 
 build() {
@@ -34,7 +35,7 @@ build() {
     --with-gallium-drivers=swrast \
     --with-dri-drivers=swrast \
     --with-egl-platforms=x11,drm,wayland \
-    --with-llvm-shared-libs \
+    --enable-llvm-shared-libs \
     --enable-egl \
     --disable-gallium-egl \
     --enable-gbm \
@@ -49,7 +50,9 @@ build() {
     --enable-gles2 \
     --enable-texture-float \
     --enable-xa \
-    --enable-dri3
+    --enable-dri3 \
+    --enable-omx \
+    --with-clang-libdir=/usr/lib
     # --help
 
   make
