@@ -1,0 +1,99 @@
+diff --git a/ld/emultempl/elf32.em b/ld/emultempl/elf32.em
+index 9a2fe89..13f86f0 100644
+--- a/ld/emultempl/elf32.em
++++ b/ld/emultempl/elf32.em
+@@ -1480,6 +1480,8 @@ gld${EMULATION_NAME}_before_allocation (void)
+   const char *rpath;
+   asection *sinterp;
+   bfd *abfd;
++  struct elf_link_hash_entry *ehdr_start = NULL;
++  struct bfd_link_hash_entry ehdr_start_save;
+ 
+   if (is_elf_hash_table (link_info.hash))
+     {
+@@ -1504,6 +1506,16 @@ gld${EMULATION_NAME}_before_allocation (void)
+              _bfd_elf_link_hash_hide_symbol (&link_info, h, TRUE);
+              if (ELF_ST_VISIBILITY (h->other) != STV_INTERNAL)
+                h->other = (h->other & ~ELF_ST_VISIBILITY (-1)) | STV_HIDDEN;
++	     /* Don't leave the symbol undefined.  Undefined hidden
++		symbols typically won't have dynamic relocations, but
++		we most likely will need dynamic relocations for
++		__ehdr_start if we are building a PIE or shared
++		library.  */
++	     ehdr_start = h;
++	     ehdr_start_save = h->root;
++	     h->root.type = bfd_link_hash_defined;
++	     h->root.u.def.section = bfd_abs_section_ptr;
++	     h->root.u.def.value = 0;
+            }
+        }
+ 
+@@ -1620,6 +1632,14 @@ ${ELF_INTERPRETER_SET_DEFAULT}
+ 
+   if (!bfd_elf_size_dynsym_hash_dynstr (link_info.output_bfd, &link_info))
+     einfo ("%P%F: failed to set dynamic section sizes: %E\n");
++
++  if (ehdr_start != NULL)
++    {
++      /* If we twiddled __ehdr_start to defined earlier, put it back
++	 as it was.  */
++      ehdr_start->root.type = ehdr_start_save.type;
++      ehdr_start->root.u = ehdr_start_save.u;
++    }
+ }
+ 
+ EOF
+diff --git a/ld/testsuite/ld-elf/ehdr_start-shared.d b/ld/testsuite/ld-elf/ehdr_start-shared.d
+new file mode 100644
+index 0000000..c17516a
+--- /dev/null
++++ b/ld/testsuite/ld-elf/ehdr_start-shared.d
+@@ -0,0 +1,9 @@
++#source: ehdr_start.s
++#ld: -e _start -shared
++#nm: -n
++#target: *-*-linux* *-*-gnu* *-*-nacl*
++#xfail: cris*-*-* frv-*-*
++
++#...
++[0-9a-f]*000 [Adrt] __ehdr_start
++#pass
+diff --git a/ld/testsuite/ld-elf/ehdr_start-userdef.d b/ld/testsuite/ld-elf/ehdr_start-userdef.d
+index 2a88e98..b58ae3f 100644
+--- a/ld/testsuite/ld-elf/ehdr_start-userdef.d
++++ b/ld/testsuite/ld-elf/ehdr_start-userdef.d
+@@ -2,6 +2,7 @@
+ #ld: -e _start -T ehdr_start-userdef.t
+ #readelf: -Ws
+ #target: *-*-linux* *-*-gnu* *-*-nacl*
++#xfail: frv-*-*
+ 
+ #...
+ Symbol table '\.symtab' contains [0-9]+ entries:
+diff --git a/ld/testsuite/ld-elf/ehdr_start-weak.d b/ld/testsuite/ld-elf/ehdr_start-weak.d
+index 8bd9035..24ae34c 100644
+--- a/ld/testsuite/ld-elf/ehdr_start-weak.d
++++ b/ld/testsuite/ld-elf/ehdr_start-weak.d
+@@ -2,6 +2,7 @@
+ #ld: -e _start -T ehdr_start-missing.t
+ #nm: -n
+ #target: *-*-linux* *-*-gnu* *-*-nacl*
++#xfail: frv-*-*
+ 
+ #...
+ \s+[wU] __ehdr_start
+diff --git a/ld/testsuite/ld-elf/ehdr_start.d b/ld/testsuite/ld-elf/ehdr_start.d
+index 52e5b54..d538b66 100644
+--- a/ld/testsuite/ld-elf/ehdr_start.d
++++ b/ld/testsuite/ld-elf/ehdr_start.d
+@@ -2,6 +2,7 @@
+ #ld: -e _start
+ #nm: -n
+ #target: *-*-linux* *-*-gnu* *-*-nacl*
++#xfail: frv-*-*
+ 
+ #...
+ [0-9a-f]*000 [Adrt] __ehdr_start
+-- 
+1.7.1
+
