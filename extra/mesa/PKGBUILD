@@ -11,7 +11,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=10.2.1
-pkgrel=1
+pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm'  'libxdamage' 'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd'
