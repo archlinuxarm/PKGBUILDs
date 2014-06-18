@@ -1,0 +1,81 @@
+# $Id$
+# Maintainer: Kyle Keen <keenerd@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to fix ARM hardfp bug
+#  - mozconfig additions used in xulrunner, just in case
+
+pkgname=seamonkey
+pkgver=2.26.1
+pkgrel=1
+pkgdesc="SeaMonkey internet suite"
+arch=('i686' 'x86_64')
+license=('MPL')
+depends=('alsa-lib'  'dbus-glib'  'desktop-file-utils'  'gtk2' 'hunspell'  'libevent'  'libnotify'  'libvpx'  'libxt' 'mime-types'  'mozilla-common'  'nss'  'sqlite'  'startup-notification' 'libpulse' 'icu')
+makedepends=('unzip' 'zip' 'pkg-config'  'python2' 'yasm' 'wireless_tools' 'mesa' 'autoconf2.13' 'imake' 'python3' 'gstreamer0.10-base')
+optdepends=('gstreamer0.10-base-plugins: vorbis decoding, ogg demuxing'
+            'gstreamer0.10-bad-plugins: aac, vp8 and opus decoding'
+            'gstreamer0.10-good-plugins: webm and mp4 demuxing'
+            'gstreamer0.10-ugly-plugins: h.264 decoding')
+install=$pkgname.install
+url="http://www.seamonkey-project.org/"
+source=(ftp://ftp.mozilla.org/pub/mozilla.org/$pkgname/releases/$pkgver/source/$pkgname-$pkgver.source.tar.bz2
+        mozconfig
+        seamonkey-2.0-lang.patch
+        arm-hardfp.patch::https://hg.mozilla.org/mozilla-central/raw-rev/280aa953c868)
+md5sums=('4bfa46b370b4d211eef56b90277a9517'
+         '806cb42b072a8e749685ae6eafefb4ec'
+         '25b6fe16ac24cd5c852213e5c1adb272'
+         'aaabaf6df9a493570bb8f0d8fac54ace')
+
+prepare() {
+  cd comm-release
+  cp ../mozconfig .mozconfig
+  patch -Np1 -i ../seamonkey-2.0-lang.patch
+
+  # Don't exit with error when some libs are missing which we have in
+  # system.
+  sed -i '/^MOZ_PKG_FATAL_WARNINGS/s@= 1@= 0@' suite/installer/Makefile.in
+
+  # configure script misdetects the preprocessor without an optimization level
+  sed -i '/ac_cpp=/s/$CPPFLAGS/& -O2/' configure
+
+  # 2.26 build fix from wgnie (blfs ch 37)
+  sed -i 's/$(MOZ_ZLIB_CFLAGS)/& $(MOZ_PIXMAN_CFLAGS)/' config/config.mk
+
+  cd mozilla
+  patch -p1 -i ${srcdir}/arm-hardfp.patch
+}
+
+build() {
+  cd comm-release
+
+  export LDFLAGS="$LDFLAGS -Wl,-rpath,/usr/lib/seamonkey-$pkgver"
+  export MOZ_MAKE_FLAGS="$MAKEFLAGS"
+  unset MAKEFLAGS
+  unset CPPFLAGS
+
+  make -j1 -f client.mk build
+}
+
+package() {
+  cd comm-release
+
+  make -j1 -f client.mk DESTDIR="$pkgdir" INSTALL_SDK= install
+
+  rm -rf "$pkgdir"/usr/lib/seamonkey-$pkgver/{dictionaries,hyphenation}
+  ln -s /usr/share/hunspell "$pkgdir/usr/lib/seamonkey-$pkgver/dictionaries"
+  ln -s /usr/share/hyphen "$pkgdir/usr/lib/seamonkey-$pkgver/hyphenation"
+
+  install -Dm644 suite/branding/nightly/icons/gtk/seamonkey.png \
+                "$pkgdir/usr/share/pixmaps/seamonkey.png"
+
+  install -Dm644 mozilla/toolkit/mozapps/installer/linux/rpm/mozilla.desktop \
+                "$pkgdir/usr/share/applications/seamonkey.desktop"
+  sed -i 's/@MOZ_APP_DISPLAYNAME@/SeaMonkey internet suite/' \
+                "$pkgdir/usr/share/applications/seamonkey.desktop"
+  sed -i 's/@MOZ_APP_NAME@/seamonkey/' "$pkgdir/usr/share/applications/seamonkey.desktop"
+
+  rm -f "$pkgdir/usr/lib/pkgconfig/"seamonkey-ns{s,pr}.pc
+  #rm -r "$pkgdir"/usr/{include,lib/seamonkey-devel-$pkgver,share/idl}
+}
