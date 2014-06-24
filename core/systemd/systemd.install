@@ -38,10 +38,6 @@ _dir_empty() {
 post_common() {
   systemd-machine-id-setup
 
-  # TODO: drop this for 214
-  # http://cgit.freedesktop.org/systemd/systemd/commit/?id=fdd2531170
-  add_privs usr/bin/systemd-detect-virt 'cap_dac_override,cap_sys_ptrace+ep'
-
   udevadm hwdb --update
   journalctl --update-catalog
 }
@@ -120,6 +116,27 @@ _213_4_changes() {
   fi
 }
 
+_214_2_changes() {
+  # /run/systemd/network/resolv.conf -> /run/systemd/resolve/resolv.conf
+  if [[ etc/resolv.conf -ef run/systemd/network/resolv.conf ]]; then
+    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+
+    if sd_booted; then
+      if [[ ! -d run/systemd/resolve ]]; then
+        mkdir run/systemd/resolve
+      fi
+
+      if [[ -f run/systemd/network/resolv.conf ]]; then
+        mv run/systemd/{network,resolve}/resolv.conf
+      fi
+    fi
+  fi
+
+  echo ':: coredumps are no longer sent to the journal by default. To re-enable:'
+  echo '   echo >/etc/sysctl.d/50-coredump.conf \'
+  echo '       "kernel.core_pattern=|/usr/lib/systemd/systemd-coredump %p %u %g %s %t %e"'
+}
+
 post_install() {
   post_common "$@"
 
@@ -144,7 +161,8 @@ post_upgrade() {
                     208-8
                     209-1
                     210-1
-                    213-4)
+                    213-4
+                    214-2)
 
   for v in "${upgrades[@]}"; do
     if [[ $(vercmp "$v" "$2") -eq 1 ]]; then
