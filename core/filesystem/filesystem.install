@@ -1,14 +1,14 @@
 # args: <group> [options]
 _addgroup() {
-	if ! getent group "$1" >/dev/null; then
-		groupadd "$@" >/dev/null
+	if ! getent group "$1" >/dev/null && groupadd "$@" >/dev/null; then
+		need_group_update=1
 	fi
 }
 
 # args: <group> [options]
 _adduser() {
-	if ! getent passwd "$1" >/dev/null; then
-		useradd "$@" >/dev/null
+	if ! getent passwd "$1" >/dev/null && useradd "$@" >/dev/null; then
+		need_passwd_update=1
 	fi
 }
 
@@ -40,10 +40,18 @@ post_upgrade() {
 	_adduser systemd-timesync -u 192 -g 192 -d / -s /usr/bin/nologin
 	_addgroup systemd-network -g 193
 	_adduser systemd-network -u 193 -g 193 -d / -s /usr/bin/nologin
+	_addgroup systemd-bus-proxy -g 194
+	_adduser systemd-bus-proxy -u 194 -g 194 -d / -s /usr/bin/nologin
+	_addgroup systemd-resolve -g 195
+	_adduser systemd-resolve -u 195 -g 195 -d / -s /usr/bin/nologin
 
-	# sync gshadow to group (fixes FS#19869)
-	if ! grep -q '^lock:' etc/gshadow; then
+	# update shadow files if needed
+	if (( need_group_update )); then
 		grpconv >/dev/null
+	fi
+
+	if (( need_passwd_update )); then
+		pwconv >/dev/null
 	fi
 
 	if ! grep -q '^include /etc/ld.so.conf.d/\*.conf$' etc/ld.so.conf; then
