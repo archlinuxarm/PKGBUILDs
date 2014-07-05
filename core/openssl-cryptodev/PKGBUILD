@@ -6,18 +6,18 @@
 #  - cryptodev-enabled version
 #
 #	moonman <moonman [dot] ca [at] gmail [dot] com>
-#  - replace eng_cryptodev in openssl with the one provided with cryptodev
 #  - get cryptodev.h from cryptodev tarball instead of the kernel headers
+#  - patches from cryptodev developers for openssl
 
 buildarch=6
 
 pkgname=openssl-cryptodev
 _pkgname=openssl
-_ver=1.0.1e
+_ver=1.0.1h
 # use a pacman compatible version scheme
 pkgver=${_ver/[a-z]/.${_ver//[0-9.]/}}
 #pkgver=$_ver
-pkgrel=7
+pkgrel=1
 pkgdesc='The Open Source toolkit for Secure Sockets Layer and Transport Layer Security'
 arch=('arm' 'armv7h')
 url='https://www.openssl.org'
@@ -33,22 +33,20 @@ _cryptover=1.6
 source=("https://www.openssl.org/source/${_pkgname}-${_ver}.tar.gz"
         'no-rpath.patch'
         'ca-dir.patch'
-        'openssl-1.0.1e-fix_pod_syntax-1.patch'
         "http://download.gna.org/cryptodev-linux/cryptodev-linux-${_cryptover}.tar.gz"
-        'openssl-1.0.1-Check-DTLS_BAD_VER-for-version-number.patch'
-        'openssl-1.0.1-e_aes_cbc_hmac_sha1.c-fix-rare-bad-record-mac-on-AES.patch'
-        'CVE-2014-0160.patch'
-        'CVE-2014-0224.patch')
+	"https://github.com/openssl/openssl/commit/be2c4d9bd9e81030c547a34216ae2d8e5c888190.patch"
+	"https://github.com/openssl/openssl/commit/6ecbc2bb62835a401ad6efe240d469a23b21755b.patch"
+        '0001-cryptodev-Fix-issue-with-signature-generation.patch'
+        '0002-cryptodev-allow-copying-EVP-contexts.patch')
 
-md5sums=('66bf6f10f060d561929de96f9dfe5b8c'
+md5sums=('8d6d684a9430d5cc98a62a5d8fbda8cf'
          'dc78d3d06baffc16217519242ce92478'
          '3bf51be3a1bbd262be46dc619f92aa90'
-         '88d3bef4bbdc640b0412315d8d347bdf'
          'eade38998313c25fd7934719cdf8a2ea'
-         'ae7848bb152b8834ceff30c8c480d422'
-         'c5cc62a47cef72f4e5ad119a88e97ae4'
-         '5fd0261f74e5358fe28b725cddd24bbf'
-         '8c724df827d6036946dc5074aea9ae66')
+         'a1761273d79bc5c62eb3bd4cb91f66b4'
+         '310a63a4ea3e948eee54c953d49a6bf1'
+         '440f706c63735f32274e13325557a331'
+         'e8ec495c49ae2494acbfb47d98c363b6')
 
 prepare() {
         cd $srcdir/${_pkgname}-$_ver
@@ -58,24 +56,13 @@ prepare() {
         # set ca dir to /etc/ssl by default
         patch -p0 -i $srcdir/ca-dir.patch
 
-        patch -p1 -i $srcdir/openssl-1.0.1e-fix_pod_syntax-1.patch
+	msg "Bring eng_cryptodev.c up-to-date for the following 2 patches"
+	patch -Np1 -i $srcdir/be2c4d9bd9e81030c547a34216ae2d8e5c888190.patch
+	patch -Np1 -i $srcdir/6ecbc2bb62835a401ad6efe240d469a23b21755b.patch
 
-        # OpenSSL 1.0.0k, 1.0.1.d, 1.0.1e fail handshake with DTLS1_BAD_VER
-        # http://rt.openssl.org/Ticket/Display.html?id=2984
-        patch -p1 -i $srcdir/openssl-1.0.1-Check-DTLS_BAD_VER-for-version-number.patch
-
-        # Communication problems with 1.0.1e
-        # http://rt.openssl.org/Ticket/Display.html?id=3002
-        patch -p1 -i $srcdir/openssl-1.0.1-e_aes_cbc_hmac_sha1.c-fix-rare-bad-record-mac-on-AES.patch
-
-        # Patch the heartbleed vulnerability
-        patch -p1 -i $srcdir/CVE-2014-0160.patch
-
-        msg2 "Patch zero length master secret vulnerability"
-        patch -p1 -i $srcdir/CVE-2014-0224.patch
-
-        # Replace eng_cryptodev.c with cryptodev version
-        cp -u ${srcdir}/cryptodev-linux-${_cryptover}/extras/eng_cryptodev.c ${srcdir}/openssl-${_ver}/crypto/engine/
+        msg2 "Patch eng_cryptodev.c"
+        patch -p1 -i $srcdir/0001-cryptodev-Fix-issue-with-signature-generation.patch
+        patch -p1 -i $srcdir/0002-cryptodev-allow-copying-EVP-contexts.patch
 
         # Copy the header file
         cp -u ${srcdir}/cryptodev-linux-${_cryptover}/crypto/cryptodev.h ${srcdir}/openssl-${_ver}/crypto/
@@ -98,7 +85,7 @@ build() {
 		-DHAVE_CRYPTODEV -DUSE_CRYPTODEV_DIGESTS -DHASH_MAX_LEN=64 \
 		shared threads zlib \
 		"${openssltarget}" \
-		-Wa,--noexecstack "${CFLAGS}"
+		"-Wa,--noexecstack ${CPPFLAGS} ${CFLAGS} ${LDFLAGS}"
 
 	make depend
 	make
@@ -109,7 +96,7 @@ check() {
 	# the test fails due to missing write permissions in /etc/ssl
 	# revert this patch for make test
 	patch -p0 -R -i $srcdir/ca-dir.patch
-#	make test
+	make test
 	patch -p0 -i $srcdir/ca-dir.patch
 }
 
