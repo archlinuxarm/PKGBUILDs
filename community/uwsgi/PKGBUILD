@@ -1,0 +1,252 @@
+# $Id$
+# Maintainer: Daniel Wallace <danielwallace at gtmanfred dot com>
+# Contributor: Valentin Hăloiu <vially.ichb+aur@gmail.com>
+# Contributor: Angel Velasquez <angvp@archlinux.org>  
+# Contributor: Kevin Zuber <uKev@knet.eu>
+# Contributor: Vsevolod Balashov <vsevolod@balashov.name>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - ripped out pypy stuff
+
+pkgbase=uwsgi
+pkgname=(uwsgi
+        uwsgi-plugin-common
+        uwsgi-plugin-rack
+        uwsgi-plugin-psgi
+        uwsgi-plugin-python2
+        uwsgi-plugin-python
+        uwsgi-plugin-nagios
+        uwsgi-plugin-router
+        uwsgi-plugin-php
+        uwsgi-plugin-lua51
+        uwsgi-plugin-carbon
+        uwsgi-plugin-rrdtool
+        uwsgi-plugin-pam
+        uwsgi-plugin-zergpool
+        )
+        #uwsgi-plugin-erlang
+        #uwsgi-plugin-admin
+pkgver=2.0.6
+pkgrel=1
+arch=(i686 x86_64)
+url="http://projects.unbit.it/$pkgbase"
+license=(GPL2)
+backup=('etc/uwsgi/emperor.ini')
+conflicts=(python-$pkgbase)
+makedepends=(gcc python python2 ruby python2-greenlet php-embed curl libxml2 libyaml
+             perl lua51 pcre libedit openssl bzip2 gmp pam java-environment=7
+             jansson classpath)
+source=(http://projects.unbit.it/downloads/$pkgbase-$pkgver.tar.gz
+        archlinux.ini
+        tmpfilesd
+        uwsgi@.service
+        uwsgi@.socket
+        uwsgi_fix_rpath.patch
+        uwsgi_ruby20_compatibility.patch
+        uwsgi_trick_chroot.patch
+        emperor.ini
+        emperor.uwsgi.service
+        emperor.uwsgi.socket)
+
+md5sums=('50e9657ebbf52dd3bcd57b565f6b65a5'
+         'a0749da07b545efcbb0276f52be22652'
+         '752475ee32286acfbafa49b898616817'
+         'c54a60431d8d81c1a65b9f4b271ac718'
+         'ea381549fe65a5d72fa1abb5ceb7d3ef'
+         '1a4516d5cdcf5b95b036f4eae2d0c152'
+         '4d09535ce379c8acd76160f35d5d6b55'
+         '0c09a52fdb88f08c36a8b380f451ce6d'
+         '5fa14ddea9a3dae17b5be28468d47b80'
+         '69ab06670656b4ea8f8a91ebe33c38e4'
+         '3ab4486e02f5c217566fb6c8d469c246')
+
+prepare(){
+    cd $srcdir/$pkgbase-$pkgver
+    cp $srcdir/archlinux.ini buildconf/archlinux.ini
+    #sed -i 's/LIBS .*-lphp5.*/LIBS = []/' plugins/php/uwsgiplugin.py
+    for patch in uwsgi_fix_rpath.patch uwsgi_ruby20_compatibility.patch uwsgi_trick_chroot.patch; do
+        patch -Np1 -i $srcdir/$patch
+    done
+    rm -rf plugins/ruby
+    mv plugins/ruby{19,}
+    sed -i 's:\(ruby\)19:\1:' plugins/ruby/uwsgiplugin.py
+
+}
+build() {
+  pushd $srcdir/$pkgbase-$pkgver
+
+  python uwsgiconfig.py --build archlinux
+  python2 uwsgiconfig.py --plugin plugins/python archlinux python2
+  python2 uwsgiconfig.py --plugin plugins/greenlet archlinux greenlet
+  python2 uwsgiconfig.py --plugin plugins/gevent archlinux gevent
+}
+
+package_uwsgi() {
+  pkgdesc="A fast, self-healing and developer/sysadmin-friendly application container server coded in pure C"
+  depends=(python2 libxml2 jansson libyaml systemd) 
+  install=uwsgi.install
+  cd $srcdir/$pkgbase-$pkgver
+  install -Dm755 uwsgi $pkgdir/usr/bin/uwsgi
+  install -Dm644 $srcdir/uwsgi@.service $pkgdir/usr/lib/systemd/system/uwsgi@.service
+  install -Dm644 $srcdir/uwsgi@.socket $pkgdir/usr/lib/systemd/system/uwsgi@.socket
+  install -Dm644 $srcdir/emperor.uwsgi.service $pkgdir/usr/lib/systemd/system/emperor.uwsgi.service
+  install -Dm644 $srcdir/emperor.uwsgi.socket $pkgdir/usr/lib/systemd/system/emperor.uwsgi.socket
+  install -Dm644 $srcdir/emperor.ini $pkgdir/etc/uwsgi/emperor.ini
+  install -Dm755 systemd_logger_plugin.so $pkgdir/usr/lib/uwsgi/systemd_logger_plugin.so
+  install -Dm644 $srcdir/tmpfilesd $pkgdir/usr/lib/tmpfiles.d/uwsgi.conf
+}
+
+package_uwsgi-plugin-common(){
+    depends=(uwsgi)
+    pkgdesc="Common plugins for uWSGI"
+    install -dm755 $pkgdir/usr/bin
+    for plugin in cache cgi rpc ugreen; do
+        install -Dm755 $pkgbase-$pkgver/${plugin}_plugin.so $pkgdir/usr/lib/uwsgi/${plugin}_plugin.so
+        ln -s uwsgi $pkgdir/usr/bin/uwsgi_$plugin
+    done
+    install -Dm755 $pkgbase-$pkgver/corerouter_plugin.so $pkgdir/usr/lib/uwsgi/
+
+}
+
+package_uwsgi-plugin-rack(){
+    depends=(ruby uwsgi-plugin-common)
+    pkgdesc="Ruby rack plugin"
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $pkgbase-$pkgver/rack_plugin.so $pkgdir/usr/lib/uwsgi/rack_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+    install -Dm755 $pkgbase-$pkgver/fiber_plugin.so $pkgdir/usr/lib/uwsgi/fiber_plugin.so
+    install -Dm755 $pkgbase-$pkgver/rbthreads_plugin.so $pkgdir/usr/lib/uwsgi/rbthreads_plugin.so
+}
+
+package_uwsgi-plugin-psgi(){
+    depends=(perl uwsgi-plugin-common)
+    pkgdesc="Perl psgi plugin"
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $pkgbase-$pkgver/psgi_plugin.so $pkgdir/usr/lib/uwsgi/psgi_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+}
+
+package_uwsgi-plugin-python2(){
+    depends=(uwsgi-plugin-common python2-gevent python2-gevent)
+    pkgdesc="Plugin for Python2 support"
+    replace=(uswgi-plugin-greenlet)
+    cd $srcdir/$pkgbase-$pkgver
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $srcdir/$pkgbase-$pkgver/python2_plugin.so $pkgdir/usr/lib/uwsgi/python2_plugin.so
+    install -Dm755 greenlet_plugin.so $pkgdir/usr/lib/uwsgi/greenlet_plugin.so
+    install -Dm755 gevent_plugin.so $pkgdir/usr/lib/uwsgi/gevent_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+}
+
+package_uwsgi-plugin-python(){
+    depends=(python uwsgi-plugin-common)
+    pkgdesc="Plugin for Python support"
+    install -dm755 $pkgdir/usr/bin
+    cd $srcdir/$pkgbase-$pkgver
+    install -Dm755 $srcdir/$pkgbase-$pkgver/python_plugin.so $pkgdir/usr/lib/uwsgi/python_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+}
+
+package_uwsgi-plugin-nagios(){
+    depends=( uwsgi-plugin-common)
+    pkgdesc="Plugin for Nagios support"
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $pkgbase-$pkgver/nagios_plugin.so $pkgdir/usr/lib/uwsgi/nagios_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+}
+
+package_uwsgi-plugin-router(){
+    depends=( uwsgi-plugin-common)
+    pkgdesc="Plugin for Router support"
+    install -dm755 $pkgdir/usr/lib/uwsgi
+    install -dm755 $pkgdir/usr/bin
+    cd $pkgbase-$pkgver
+
+    for file in router_*_plugin.so fastrouter_plugin.so sslrouter_plugin.so rawrouter_plugin.so; do
+        install -Dm755 $file $pkgdir/usr/lib/uwsgi/$file
+    done
+    install -Dm755 router_basicauth_plugin.so $pkgdir/usr/lib/uwsgi/basicauth_plugin.so
+}
+
+#package_uwsgi-plugin-admin(){
+#    depends=( uwsgi-plugin-common)
+#    pkgdesc="Plugin for Admin support"
+#    install -dm755 $pkgdir/usr/bin
+#    install -Dm755 $pkgbase-$pkgver/admin_plugin.so $pkgdir/usr/lib/uwsgi/admin_plugin.so
+#    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+#}
+
+package_uwsgi-plugin-lua51(){
+    depends=(lua51 uwsgi-plugin-common)
+    pkgdesc="Plugin for Lua support"
+    install -dm755 $pkgdir/usr/bin
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $pkgbase-$pkgver/lua_plugin.so $pkgdir/usr/lib/uwsgi/lua_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_lua
+}
+
+package_uwsgi-plugin-php(){
+    depends=(uwsgi-plugin-common php-embed libyaml jansson)
+    replace=(uswgi-plugin-php)
+    pkgdesc="Plugin for PHP support"
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $pkgbase-$pkgver/php_plugin.so $pkgdir/usr/lib/uwsgi/php_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+}
+
+package_uwsgi-plugin-carbon(){
+    depends=(uwsgi-plugin-common)
+    pkgdesc="Plugin for Carbon support"
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $pkgbase-$pkgver/carbon_plugin.so $pkgdir/usr/lib/uwsgi/carbon_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+}
+
+package_uwsgi-plugin-rrdtool(){
+    depends=(uwsgi-plugin-common rrdtool)
+    pkgdesc="Plugin for Rrdtool support"
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $pkgbase-$pkgver/rrdtool_plugin.so $pkgdir/usr/lib/uwsgi/rrdtool_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+}
+
+#package_uwsgi-plugin-erlang(){
+#    depends=(uwsgi-plugin-common erlang)
+#    pkgdesc="Plugin for Erlang support"
+#    install -dm755 $pkgdir/usr/bin
+#    install -Dm755 $pkgbase-$pkgver/erlang_plugin.so $pkgdir/usr/lib/uwsgi/erlang_plugin.so
+#    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+#}
+
+
+package_uwsgi-plugin-pam(){
+    depends=(uwsgi-plugin-common)
+    pkgdesc="Plugin for Pam support"
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $pkgbase-$pkgver/pam_plugin.so $pkgdir/usr/lib/uwsgi/pam_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+}
+
+package_uwsgi-plugin-jvm(){
+    depends=(uwsgi-plugin-common java-environment=7 classpath)
+    pkgdesc="Plugin for Jvm support"
+    install -dm755 $pkgdir/usr/bin
+    install -Dm644 $pkgbase-$pkgver/plugins/jvm/uwsgi.jar $pkgdir/usr/share/java/uwsgi.jar
+    install -Dm755 $pkgbase-$pkgver/jvm_plugin.so $pkgdir/usr/lib/uwsgi/jvm_plugin.so
+}
+
+package_uwsgi-plugin-zergpool(){
+    depends=(uwsgi-plugin-common)
+    pkgdesc="Plugin for zergpool support"
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $pkgbase-$pkgver/zergpool_plugin.so $pkgdir/usr/lib/uwsgi/zergpool_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+}
+
+package_uwsgi-plugin-gevent() {
+    depends=(uwsgi-plugin-common gevent)
+    pkgdesc="Plugin for gevent support"
+    install -dm755 $pkgdir/usr/bin
+    install -Dm755 $pkgbase-$pkgver/gevent_plugin.so $pkgdir/usr/lib/uwsgi/gevent_plugin.so
+    ln -s uwsgi $pkgdir/usr/bin/uwsgi_${pkgname#uwsgi-plugin-}
+}
