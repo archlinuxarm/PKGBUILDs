@@ -1,0 +1,168 @@
+From 925dbd3bdb96e13449577b1386bf76c2e9f970a3 Mon Sep 17 00:00:00 2001
+From: Dennis Gilmore <dennis@ausil.us>
+Date: Mon, 21 Apr 2014 12:18:26 -0500
+Subject: [PATCH 07/36] move udoo over to use the generic distro configuation
+ and environment
+
+port udoo to use the generic distro configuation.
+remove duplicated config options, clean up the environment, include new
+environment.
+---
+ include/configs/udoo.h | 74 ++++++++++++--------------------------------------
+ 1 file changed, 18 insertions(+), 56 deletions(-)
+
+diff --git a/include/configs/udoo.h b/include/configs/udoo.h
+index a0306de..75e24d5 100644
+--- a/include/configs/udoo.h
++++ b/include/configs/udoo.h
+@@ -49,10 +49,6 @@
+ 
+ /* Network support */
+ 
+-#define CONFIG_CMD_PING
+-#define CONFIG_CMD_DHCP
+-#define CONFIG_CMD_MII
+-#define CONFIG_CMD_NET
+ #define CONFIG_FEC_MXC
+ #define CONFIG_MII
+ #define IMX_FEC_BASE                    ENET_BASE_ADDR
+@@ -76,7 +72,6 @@
+ #define CONFIG_CMD_BMODE
+ #define CONFIG_CMD_SETEXPR
+ 
+-#define CONFIG_BOOTDELAY		3
+ 
+ #define CONFIG_SYS_MEMTEST_START	0x10000000
+ #define CONFIG_SYS_MEMTEST_END		(CONFIG_SYS_MEMTEST_START + 500 * SZ_1M)
+@@ -92,9 +87,10 @@
+ #define CONFIG_CMD_MMC
+ #define CONFIG_GENERIC_MMC
+ #define CONFIG_BOUNCE_BUFFER
+-#define CONFIG_CMD_EXT2
+-#define CONFIG_CMD_FAT
+-#define CONFIG_DOS_PARTITION
++
++#ifndef CONFIG_SPL_BUILD
++#include <config_distro_defaults.h>
++#include <config_distro_bootcmd.h>
+ 
+ #define CONFIG_DEFAULT_FDT_FILE		"imx6q-udoo.dtb"
+ 
+@@ -103,15 +99,16 @@
+ 	"image=zImage\0" \
+ 	"console=ttymxc1\0" \
+ 	"splashpos=m,m\0" \
+-	"fdt_high=0xffffffff\0" \
+-	"initrd_high=0xffffffff\0" \
+ 	"fdt_file=" CONFIG_DEFAULT_FDT_FILE "\0" \
+-	"fdt_addr=0x18000000\0" \
+ 	"boot_fdt=try\0" \
++	"kernel_addr_r=0x11000000\0" \
++	"scriptaddr=0x17e00000\0" \
++	"pxefile_addr_r=0x17f00000\0" \
++	"fdt_addr_r=0x18000000\0" \
++	"ramdisk_addr_r=0x18100000\0" \
++	"bootm_size=0x20000000\0" \
+ 	"ip_dyn=yes\0" \
+ 	"mmcdev=0\0" \
+-	"mmcpart=1\0" \
+-	"mmcroot=/dev/mmcblk0p2 rootwait rw\0" \
+ 	"update_sd_firmware_filename=u-boot.imx\0" \
+ 	"update_sd_firmware=" \
+ 		"if test ${ip_dyn} = yes; then " \
+@@ -123,32 +120,9 @@
+ 			"if ${get_cmd} ${update_sd_firmware_filename}; then " \
+ 				"setexpr fw_sz ${filesize} / 0x200; " \
+ 				"setexpr fw_sz ${fw_sz} + 1; "	\
+-				"mmc write ${loadaddr} 0x2 ${fw_sz}; " \
++				"mmc write ${kernel_addr_r} 0x2 ${fw_sz}; " \
+ 			"fi; "	\
+ 		"fi\0" \
+-	"mmcargs=setenv bootargs console=${console},${baudrate} " \
+-		"root=${mmcroot}\0" \
+-	"loadbootscript=" \
+-		"fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${script};\0" \
+-	"bootscript=echo Running bootscript from mmc ...; " \
+-		"source\0" \
+-	"loadimage=fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${image}\0" \
+-	"loadfdt=fatload mmc ${mmcdev}:${mmcpart} ${fdt_addr} ${fdt_file}\0" \
+-	"mmcboot=echo Booting from mmc ...; " \
+-		"run mmcargs; " \
+-		"if test ${boot_fdt} = yes || test ${boot_fdt} = try; then " \
+-			"if run loadfdt; then " \
+-				"bootz ${loadaddr} - ${fdt_addr}; " \
+-			"else " \
+-				"if test ${boot_fdt} = try; then " \
+-					"bootz; " \
+-				"else " \
+-					"echo WARN: Cannot load the DT; " \
+-				"fi; " \
+-			"fi; " \
+-		"else " \
+-			"bootz; " \
+-		"fi;\0" \
+ 	"netargs=setenv bootargs console=${console},${baudrate} " \
+ 		"root=/dev/nfs " \
+ 	"ip=dhcp nfsroot=${serverip}:${nfsroot},v3,tcp\0" \
+@@ -161,8 +135,8 @@
+ 		"fi; " \
+ 		"${get_cmd} ${image}; " \
+ 		"if test ${boot_fdt} = yes || test ${boot_fdt} = try; then " \
+-			"if ${get_cmd} ${fdt_addr} ${fdt_file}; then " \
+-				"bootz ${loadaddr} - ${fdt_addr}; " \
++			"if ${get_cmd} ${fdt_addr_r} ${fdt_file}; then " \
++				"bootz ${kernel_addr_r} - ${fdt_addr_r}; " \
+ 			"else " \
+ 				"if test ${boot_fdt} = try; then " \
+ 					"bootz; " \
+@@ -172,25 +146,16 @@
+ 			"fi; " \
+ 		"else " \
+ 			"bootz; " \
+-		"fi;\0"
++		"fi;\0" \
++	BOOTCMDS_COMMON
+ 
+ #define CONFIG_BOOTCOMMAND \
+-	   "mmc dev ${mmcdev}; if mmc rescan; then " \
+-		   "if run loadbootscript; then " \
+-			   "run bootscript; " \
+-		   "else " \
+-			   "if run loadimage; then " \
+-				   "run mmcboot; " \
+-			   "else run netboot; " \
+-			   "fi; " \
+-		   "fi; " \
+-	   "else run netboot; fi"
++	"for target in ${boot_targets}; do run bootcmd_${target}; done ;" \
++	"run netboot;"
++#endif
+ 
+ /* Miscellaneous configurable options */
+-#define CONFIG_SYS_LONGHELP
+-#define CONFIG_SYS_HUSH_PARSER
+ #define CONFIG_SYS_PROMPT	       "=> "
+-#define CONFIG_AUTO_COMPLETE
+ #define CONFIG_SYS_CBSIZE		256
+ 
+ /* Print Buffer Size */
+@@ -200,7 +165,6 @@
+ 
+ #define CONFIG_SYS_LOAD_ADDR		CONFIG_LOADADDR
+ 
+-#define CONFIG_CMDLINE_EDITING
+ 
+ /* Physical Memory Map */
+ #define CONFIG_NR_DRAM_BANKS		1
+@@ -224,8 +188,6 @@
+ #define CONFIG_ENV_OFFSET		(6 * 64 * 1024)
+ #define CONFIG_SYS_MMC_ENV_DEV		0
+ 
+-#define CONFIG_OF_LIBFDT
+-#define CONFIG_CMD_BOOTZ
+ 
+ #ifndef CONFIG_SYS_DCACHE_OFF
+ #define CONFIG_CMD_CACHE
+-- 
+1.9.0
+
