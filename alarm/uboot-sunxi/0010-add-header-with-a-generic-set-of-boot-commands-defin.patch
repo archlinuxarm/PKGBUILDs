@@ -1,0 +1,236 @@
+From b8dfe74309a4f61fa0078ad04fd4bb4141b13a51 Mon Sep 17 00:00:00 2001
+From: Dennis Gilmore <dennis@ausil.us>
+Date: Mon, 21 Apr 2014 12:29:04 -0500
+Subject: [PATCH 10/36] add header with a generic set of boot commands defined.
+
+As the next step in a generic config we are introducing a set of generic boot
+paramaters. Depending on the hardwares configuration, booting from supported
+hardware will be enabled, mmc, usb, sata, scsi, ide, pxe and dhcp.
+
+There is nothing to stop this being extended to support nand and any other
+type of storage that comes along. An ideal future enhancement will be to
+allow the user to dynamically reorder the boot devices, and allow one off
+boots. for example simply be able to pxe boot to reinstall
+---
+ include/config_distro_bootcmd.h | 209 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 209 insertions(+)
+ create mode 100644 include/config_distro_bootcmd.h
+
+diff --git a/include/config_distro_bootcmd.h b/include/config_distro_bootcmd.h
+new file mode 100644
+index 0000000..025c4d4
+--- /dev/null
++++ b/include/config_distro_bootcmd.h
+@@ -0,0 +1,209 @@
++/*
++ * (C) Copyright 2014
++ * NVIDIA Corporation <www.nvidia.com>
++ *  
++ * Copyright 2014 Red Hat, Inc.
++ *
++ * SPDX-License-Identifier:     GPL-2.0+
++ */
++
++#ifndef _CONFIG_CMD_DISTRO_BOOTCMD_H
++#define _CONFIG_CMD_DISTRO_BOOTCMD_H
++
++
++#ifdef CONFIG_CMD_MMC
++#define BOOTCMDS_MMC \
++	"mmc_boot=" \
++		"setenv devtype mmc; " \
++		"if mmc dev ${devnum}; then " \
++			"run scan_boot; " \
++		"fi\0" \
++	"bootcmd_mmc0=setenv devnum 0; run mmc_boot;\0" \
++	"bootcmd_mmc1=setenv devnum 1; run mmc_boot;\0" \
++	"bootcmd_mmc2=setenv devnum 2; run mmc_boot;\0"
++#define BOOT_TARGETS_MMC "mmc2 mmc1 mmc0"
++#else
++#define BOOTCMDS_MMC ""
++#define BOOT_TARGETS_MMC ""
++#endif
++
++#ifdef CONFIG_CMD_USB
++#define BOOTCMD_INIT_USB "run usb_init; "
++#define BOOTCMDS_USB \
++	"usb_init=" \
++		"if ${usb_need_init}; then " \
++			"set usb_need_init false; " \
++			"usb start 0; " \
++		"fi\0" \
++	\
++	"usb_boot=" \
++		"setenv devtype usb; " \
++		BOOTCMD_INIT_USB \
++		"if usb dev ${devnum}; then " \
++			"run scan_boot; " \
++		"fi\0" \
++	\
++	"bootcmd_usb0=setenv devnum 0; run usb_boot;\0" \
++	"bootcmd_usb1=setenv devnum 1; run usb_boot;\0"
++#define BOOT_TARGETS_USB "usb0 usb1"
++#else
++#define BOOTCMD_INIT_USB ""
++#define BOOTCMDS_USB ""
++#define BOOT_TARGETS_USB ""
++#endif
++
++#ifdef CONFIG_CMD_SATA
++#define BOOTCMDS_SATA \
++	"sata_boot=" \
++		"setenv devtype sata; " \
++		"if sata dev ${devnum}; then " \
++			"run scan_boot; " \
++		"fi\0" \
++	\
++	"bootcmd_sata0=setenv devnum 0; run sata_boot;\0" \
++	"bootcmd_sata1=setenv devnum 1; run sata_boot;\0"
++#define BOOT_TARGETS_SATA "sata0 sata1"
++#else
++#define BOOTCMDS_SATA ""
++#define BOOT_TARGETS_SATA ""
++#endif
++
++#ifdef CONFIG_CMD_SCSI
++#define BOOTCMDS_SCSI \
++        "scsi_boot=" \
++                "setenv devtype scsi; " \
++                "if scsi dev ${devnum}; then " \
++                        "run scan_boot; " \
++                "fi\0" \
++        \
++        "bootcmd_scsi0=setenv devnum 0; run scsi_boot;\0" \
++        "bootcmd_scsi1=setenv devnum 1; run scsi_boot;\0"
++#define BOOT_TARGETS_SCSI "scsi0 scsi1"
++#else
++#define BOOTCMDS_SCSI ""
++#define BOOT_TARGETS_SCSI ""
++#endif
++
++#ifdef CONFIG_CMD_IDE
++#define BOOTCMDS_IDE \
++        "ide_boot=" \
++                "setenv devtype ide; " \
++                "if ide dev ${devnum}; then " \
++                        "run scan_boot; " \
++                "fi\0" \
++        \
++        "bootcmd_ide0=setenv devnum 0; run ide_boot;\0" \
++        "bootcmd_ide1=setenv devnum 1; run ide_boot;\0"
++#define BOOT_TARGETS_IDE "ide0 ide1"
++#else
++#define BOOTCMDS_IDE ""
++#define BOOT_TARGETS_IDE ""
++#endif
++
++#ifdef CONFIG_CMD_DHCP
++#define BOOTCMDS_DHCP \
++	"bootcmd_dhcp=" \
++		BOOTCMD_INIT_USB \
++		"if dhcp ${scriptaddr} boot.scr.uimg; then "\
++			"source ${scriptaddr}; " \
++		"fi\0"
++#define BOOT_TARGETS_DHCP "dhcp"
++#else
++#define BOOTCMDS_DHCP ""
++#define BOOT_TARGETS_DHCP ""
++#endif
++
++#if defined(CONFIG_CMD_DHCP) && defined(CONFIG_CMD_PXE)
++#define BOOTCMDS_PXE \
++	"bootcmd_pxe=" \
++		BOOTCMD_INIT_USB \
++		"dhcp; " \
++		"if pxe get; then " \
++			"pxe boot; " \
++		"fi\0"
++#define BOOT_TARGETS_PXE "pxe"
++#else
++#define BOOTCMDS_PXE ""
++#define BOOT_TARGETS_PXE ""
++#endif
++
++#define BOOTCMDS_COMMON \
++	"rootpart=1\0" \
++	\
++	"do_envimport="                                                   \
++		"load ${devtype} ${devnum}:${rootpart} ${loadaddr} "      \
++			"${environment}\0"                                \
++		"env import -t ${loadaddr} $filesize\0"                   \
++	\
++	"envimport="                                                      \
++		"for environment in ${boot_envs}; do "                    \
++			"if test -e ${devtype} ${devnum}:${rootpart} "    \
++					"${prefix}${environment}; then "  \
++				"echo Found U-Boot environment "          \
++					"${prefix}${environment}; "       \
++				"run do_envimport;"                       \
++				"echo Import FAILED; continuing...; "     \
++			"fi; "                                            \
++		"done\0"                                                  \
++	\
++	"do_script_boot="                                                 \
++		"load ${devtype} ${devnum}:${rootpart} "                  \
++			"${scriptaddr} ${prefix}${script}; "              \
++		"source ${scriptaddr}\0"                                  \
++	\
++	"script_boot="                                                    \
++		"for script in ${boot_scripts}; do "                      \
++			"if test -e ${devtype} ${devnum}:${rootpart} "    \
++					"${prefix}${script}; then "       \
++				"echo Found U-Boot script "               \
++					"${prefix}${script}; "            \
++				"run do_script_boot;"                     \
++				"echo SCRIPT FAILED; continuing...; "     \
++			"fi; "                                            \
++		"done\0"                                                  \
++	\
++	"do_sysboot_boot="                                                \
++		"sysboot ${devtype} ${devnum}:${rootpart} any "           \
++			"${scriptaddr} ${prefix}extlinux/extlinux.conf\0" \
++	\
++	"sysboot_boot="                                                   \
++		"if test -e ${devtype} ${devnum}:${rootpart} "            \
++				"${prefix}extlinux/extlinux.conf; then "  \
++			"echo Found extlinux config "                     \
++				"${prefix}extlinux/extlinux.conf; "       \
++			"run do_sysboot_boot;"                            \
++			"echo SYSBOOT FAILED; continuing...; "            \
++		"fi\0"                                                    \
++	\
++	"scan_boot="                                                      \
++		"echo Scanning ${devtype} ${devnum}...; "                 \
++		"for prefix in ${boot_prefixes}; do "                     \
++			"run sysboot_boot; "                              \
++			"run script_boot; "                               \
++		"done\0"                                                  \
++	\
++	"boot_targets=" \
++		BOOT_TARGETS_MMC " "  \
++		BOOT_TARGETS_USB " "  \
++		BOOT_TARGETS_SATA " " \
++		BOOT_TARGETS_SCSI " " \
++		BOOT_TARGETS_IDE " "  \
++		BOOT_TARGETS_PXE " "  \
++		BOOT_TARGETS_DHCP " " \
++		"\0" \
++	\
++	"boot_prefixes=/ /boot/\0" \
++	\
++	"boot_scripts=boot.scr.uimg boot.scr\0" \
++	\
++	"boot_envs=uEnv.txt\0" \
++	\
++	BOOTCMDS_MMC \
++	BOOTCMDS_USB \
++	BOOTCMDS_SATA \
++	BOOTCMDS_SCSI \
++	BOOTCMDS_IDE \
++	BOOTCMDS_DHCP \
++	BOOTCMDS_PXE
++
++#endif  /* _CONFIG_CMD_DISTRO_BOOTCMD_H */
+-- 
+1.9.0
+
