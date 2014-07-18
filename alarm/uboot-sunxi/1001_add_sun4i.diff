@@ -1,0 +1,298 @@
+diff -ruN u-boot-2014.07.orig/arch/arm/cpu/armv7/sunxi/board.c u-boot-2014.07/arch/arm/cpu/armv7/sunxi/board.c
+--- u-boot-2014.07.orig/arch/arm/cpu/armv7/sunxi/board.c	2014-07-18 18:17:51.847935018 +0200
++++ u-boot-2014.07/arch/arm/cpu/armv7/sunxi/board.c	2014-07-18 18:17:22.026296505 +0200
+@@ -47,9 +47,11 @@
+ 
+ int gpio_init(void)
+ {
++#if CONFIG_CONS_INDEX == 1 && (defined(CONFIG_SUN4I) || defined(CONFIG_SUN7I))
+ 	sunxi_gpio_set_cfgpin(SUNXI_GPB(22), SUN4I_GPB22_UART0_TX);
+ 	sunxi_gpio_set_cfgpin(SUNXI_GPB(23), SUN4I_GPB23_UART0_RX);
+ 	sunxi_gpio_set_pull(SUNXI_GPB(23), 1);
++#endif
+ 
+ 	return 0;
+ }
+@@ -98,6 +100,14 @@
+ {
+ 	int rc;
+ 
++#ifdef CONFIG_SUNXI_WEMAC
++	rc = sunxi_wemac_initialize(bis);
++	if (rc < 0) {
++		printf("sunxi: failed to initialize wemac\n");
++		return rc;
++	}
++#endif
++
+ #ifdef CONFIG_SUNXI_GMAC
+ 	rc = sunxi_gmac_initialize(bis);
+ 	if (rc < 0) {
+diff -ruN u-boot-2014.07.orig/arch/arm/cpu/armv7/sunxi/cpu_info.c u-boot-2014.07/arch/arm/cpu/armv7/sunxi/cpu_info.c
+--- u-boot-2014.07.orig/arch/arm/cpu/armv7/sunxi/cpu_info.c	2014-07-18 18:17:51.847935018 +0200
++++ u-boot-2014.07/arch/arm/cpu/armv7/sunxi/cpu_info.c	2014-07-18 18:17:22.026296505 +0200
+@@ -13,7 +13,11 @@
+ #ifdef CONFIG_DISPLAY_CPUINFO
+ int print_cpuinfo(void)
+ {
++#ifdef CONFIG_SUN4I
++	puts("CPU:   Allwinner A10 (SUN4I)\n");
++#elif defined CONFIG_SUN7I
+ 	puts("CPU:   Allwinner A20 (SUN7I)\n");
++#endif
+ 	return 0;
+ }
+ #endif
+diff -ruN u-boot-2014.07.orig/arch/arm/cpu/armv7/sunxi/dram.c u-boot-2014.07/arch/arm/cpu/armv7/sunxi/dram.c
+--- u-boot-2014.07.orig/arch/arm/cpu/armv7/sunxi/dram.c	2014-07-18 18:17:51.851268160 +0200
++++ u-boot-2014.07/arch/arm/cpu/armv7/sunxi/dram.c	2014-07-18 18:17:22.026296505 +0200
+@@ -53,6 +53,21 @@
+ 	struct sunxi_dram_reg *dram =
+ 			(struct sunxi_dram_reg *)SUNXI_DRAMC_BASE;
+ 
++#ifdef CONFIG_SUN4I
++	struct sunxi_timer_reg *timer =
++			(struct sunxi_timer_reg *)SUNXI_TIMER_BASE;
++	u32 reg_val;
++
++	writel(0, &timer->cpu_cfg);
++	reg_val = readl(&timer->cpu_cfg);
++
++	if ((reg_val & CPU_CFG_CHIP_VER_MASK) !=
++	    CPU_CFG_CHIP_VER(CPU_CFG_CHIP_REV_A)) {
++		setbits_le32(&dram->mcr, DRAM_MCR_RESET);
++		udelay(2);
++		clrbits_le32(&dram->mcr, DRAM_MCR_RESET);
++	} else
++#endif
+ 	clrbits_le32(&dram->mcr, DRAM_MCR_RESET);
+ 	udelay(2);
+ 	setbits_le32(&dram->mcr, DRAM_MCR_RESET);
+@@ -134,6 +149,16 @@
+ }
+ 
+ static u32 hpcr_value[32] = {
++#ifdef CONFIG_SUN4I
++	0x0301, 0x0301, 0x0301, 0x0301,
++	0x0301, 0x0301, 0, 0,
++	0, 0, 0, 0,
++	0, 0, 0, 0,
++	0x1031, 0x1031, 0x0735, 0x5031,
++	0x1035, 0x0731, 0x1031, 0x0735,
++	0x1035, 0x1031, 0x0731, 0x1035,
++	0x1031, 0x0301, 0x0301, 0x0731
++#endif
+ #ifdef CONFIG_SUN7I
+ 	0x0301, 0x0301, 0x0301, 0x0301,
+ 	0x0301, 0x0301, 0x0301, 0x0301,
+@@ -385,6 +410,13 @@
+ 	else
+ 		clrbits_le32(&dram->mcr, DRAM_MCR_DCLK_OUT);
+ #endif
++#ifdef CONFIG_SUN4I
++	struct sunxi_ccm_reg *ccm = (struct sunxi_ccm_reg *)SUNXI_CCM_BASE;
++	if (on)
++		setbits_le32(&ccm->dram_clk_cfg, CCM_DRAM_CTRL_DCLK_OUT);
++	else
++		clrbits_le32(&ccm->dram_clk_cfg, CCM_DRAM_CTRL_DCLK_OUT);
++#endif
+ }
+ 
+ static const u16 tRFC_table[2][6] = {
+@@ -426,6 +458,11 @@
+ 	/* dram clock off */
+ 	dramc_clock_output_en(0);
+ 
++#ifdef CONFIG_SUN4I
++	/* select dram controller 1 */
++	writel(DRAM_CSEL_MAGIC, &dram->csel);
++#endif
++
+ 	mctl_itm_disable();
+ 	mctl_enable_dll0(para->tpr3);
+ 
+@@ -490,6 +527,22 @@
+ 
+ 	mctl_enable_dllx(para->tpr3);
+ 
++#ifdef CONFIG_SUN4I
++	/* set odt impedance divide ratio */
++	reg_val = ((para->zq) >> 8) & 0xfffff;
++	reg_val |= ((para->zq) & 0xff) << 20;
++	reg_val |= (para->zq) & 0xf0000000;
++	writel(reg_val, &dram->zqcr0);
++#endif
++
++#ifdef CONFIG_SUN4I
++	/* set I/O configure register */
++	reg_val = 0x00cc0000;
++	reg_val |= (para->odt_en) & 0x3;
++	reg_val |= ((para->odt_en) & 0x3) << 30;
++	writel(reg_val, &dram->iocr);
++#endif
++
+ 	/* set refresh period */
+ 	dramc_set_autorefresh_cycle(para->clock, para->type - 2, density);
+ 
+diff -ruN u-boot-2014.07.orig/arch/arm/cpu/armv7/sunxi/Makefile u-boot-2014.07/arch/arm/cpu/armv7/sunxi/Makefile
+--- u-boot-2014.07.orig/arch/arm/cpu/armv7/sunxi/Makefile	2014-07-18 18:17:51.851268160 +0200
++++ u-boot-2014.07/arch/arm/cpu/armv7/sunxi/Makefile	2014-07-18 18:17:22.026296505 +0200
+@@ -11,6 +11,7 @@
+ obj-y	+= board.o
+ obj-y	+= clock.o
+ obj-y	+= pinmux.o
++obj-$(CONFIG_SUN4I)	+= clock_sun4i.o
+ obj-$(CONFIG_SUN7I)	+= clock_sun4i.o
+ 
+ ifndef CONFIG_SPL_BUILD
+@@ -18,6 +19,7 @@
+ endif
+ 
+ ifdef CONFIG_SPL_BUILD
++obj-$(CONFIG_SUN4I)	+= dram.o
+ obj-$(CONFIG_SUN7I)	+= dram.o
+ ifdef CONFIG_SPL_FEL
+ obj-y	+= start.o
+diff -ruN u-boot-2014.07.orig/board/sunxi/dram_cubieboard.c u-boot-2014.07/board/sunxi/dram_cubieboard.c
+--- u-boot-2014.07.orig/board/sunxi/dram_cubieboard.c	1970-01-01 01:00:00.000000000 +0100
++++ u-boot-2014.07/board/sunxi/dram_cubieboard.c	2014-07-18 18:17:22.026296505 +0200
+@@ -0,0 +1,31 @@
++/* this file is generated, don't edit it yourself */
++
++#include <common.h>
++#include <asm/arch/dram.h>
++
++static struct dram_para dram_para = {
++	.clock = 480,
++	.type = 3,
++	.rank_num = 1,
++	.density = 4096,
++	.io_width = 16,
++	.bus_width = 32,
++	.cas = 6,
++	.zq = 123,
++	.odt_en = 0,
++	.size = 1024,
++	.tpr0 = 0x30926692,
++	.tpr1 = 0x1090,
++	.tpr2 = 0x1a0c8,
++	.tpr3 = 0,
++	.tpr4 = 0,
++	.tpr5 = 0,
++	.emr1 = 0,
++	.emr2 = 0,
++	.emr3 = 0,
++};
++
++unsigned long sunxi_dram_init(void)
++{
++	return dramc_init(&dram_para);
++}
+diff -ruN u-boot-2014.07.orig/board/sunxi/dram_hackberry.c u-boot-2014.07/board/sunxi/dram_hackberry.c
+--- u-boot-2014.07.orig/board/sunxi/dram_hackberry.c	1970-01-01 01:00:00.000000000 +0100
++++ u-boot-2014.07/board/sunxi/dram_hackberry.c	2014-07-03 11:47:02.000000000 +0200
+@@ -0,0 +1,31 @@
++/* this file is generated, don't edit it yourself */
++
++#include <common.h>
++#include <asm/arch/dram.h>
++
++static struct dram_para dram_para = {
++	.clock = 408,
++	.type = 3,
++	.rank_num = 1,
++	.density = 4096,
++	.io_width = 16,
++	.bus_width = 32,
++	.cas = 6,
++	.zq = 123,
++	.odt_en = 1,
++	.size = 1024,
++	.tpr0 = 0x30926692,
++	.tpr1 = 0x1090,
++	.tpr2 = 0x1a0c8,
++	.tpr3 = 0,
++	.tpr4 = 0,
++	.tpr5 = 0,
++	.emr1 = 0,
++	.emr2 = 0,
++	.emr3 = 0,
++};
++
++unsigned long sunxi_dram_init(void)
++{
++	return dramc_init(&dram_para);
++}
+diff -ruN u-boot-2014.07.orig/board/sunxi/Makefile u-boot-2014.07/board/sunxi/Makefile
+--- u-boot-2014.07.orig/board/sunxi/Makefile	2014-07-18 18:17:51.851268160 +0200
++++ u-boot-2014.07/board/sunxi/Makefile	2014-07-18 18:20:12.909904451 +0200
+@@ -13,4 +13,6 @@
+ obj-$(CONFIG_A20_OLINUXINO_M)	+= dram_sun7i_384_1024_iow16.o
+ obj-$(CONFIG_CUBIEBOARD2)	+= dram_cubieboard2.o
+ obj-$(CONFIG_CUBIETRUCK)	+= dram_cubietruck.o
+-obj-$(CONFIG_ITEADA20)		+= dram_cubieboard2.o
+\ No newline at end of file
++obj-$(CONFIG_ITEADA20)		+= dram_cubieboard2.o
++obj-$(CONFIG_ITEADA10)		+= dram_cubieboard.o
++obj-$(CONFIG_HACKBERRY)		+= dram_hackberry.o
+\ No newline at end of file
+diff -ruN u-boot-2014.07.orig/boards.cfg u-boot-2014.07/boards.cfg
+--- u-boot-2014.07.orig/boards.cfg	2014-07-18 18:17:51.854601304 +0200
++++ u-boot-2014.07/boards.cfg	2014-07-18 18:19:00.887340639 +0200
+@@ -377,11 +377,13 @@
+ Active  arm         armv7          socfpga     altera          socfpga             socfpga_cyclone5                      -                                                                                                                                 -
+ Active  arm         armv7          sunxi       -               sunxi               A20-OLinuXino_MICRO                   sun7i:A20_OLINUXINO_M,SPL,SUNXI_WEMAC                                                                                             -
+ Active  arm         armv7          sunxi       -               sunxi               A20-OLinuXino_MICRO_FEL               sun7i:A20_OLINUXINO_M,SPL_FEL,SUNXI_WEMAC                                                                                         -
++Active  arm         armv7          sunxi       -               sunxi               Iteaduino_Plus_A10                    sun4i:ITEADA10,SPL,SUNXI_WEMAC                                                                                                    -
+ Active  arm         armv7          sunxi       -               sunxi               Iteaduino_Plus_A20                    sun7i:ITEADA20,SPL,SUNXI_WEMAC                                                                                                    -
+ Active  arm         armv7          sunxi       -               sunxi               Cubieboard2                           sun7i:CUBIEBOARD2,SPL,SUNXI_GMAC                                                                                                  -
+ Active  arm         armv7          sunxi       -               sunxi               Cubieboard2_FEL                       sun7i:CUBIEBOARD2,SPL_FEL,SUNXI_GMAC                                                                                              -
+ Active  arm         armv7          sunxi       -               sunxi               Cubietruck                            sun7i:CUBIETRUCK,SPL,SUNXI_GMAC,RGMII                                                                                             -
+ Active  arm         armv7          sunxi       -               sunxi               Cubietruck_FEL                        sun7i:CUBIETRUCK,SPL_FEL,SUNXI_GMAC,RGMII                                                                                         -
++Active  arm         armv7          sunxi       -               sunxi               Hackberry                             sun4i:HACKBERRY,SPL                                                                                                               -
+ Active  arm         armv7          u8500       st-ericsson     snowball            snowball                              -                                                                                                                                 Mathieu Poirier <mathieu.poirier@linaro.org>
+ Active  arm         armv7          u8500       st-ericsson     u8500               u8500_href                            -                                                                                                                                 -
+ Active  arm         armv7          vf610       freescale       vf610twr            vf610twr                              vf610twr:IMX_CONFIG=board/freescale/vf610twr/imximage.cfg                                                                         Alison Wang <b18965@freescale.com>
+diff -ruN u-boot-2014.07.orig/include/configs/sun4i.h u-boot-2014.07/include/configs/sun4i.h
+--- u-boot-2014.07.orig/include/configs/sun4i.h	1970-01-01 01:00:00.000000000 +0100
++++ u-boot-2014.07/include/configs/sun4i.h	2014-07-18 18:17:22.026296505 +0200
+@@ -0,0 +1,24 @@
++/*
++ * (C) Copyright 2012-2013 Henrik Nordstrom <henrik@henriknordstrom.net>
++ * (C) Copyright 2013 Luke Kenneth Casson Leighton <lkcl@lkcl.net>
++ *
++ * Configuration settings for the Allwinner A10 (sun4i) CPU
++ *
++ * SPDX-License-Identifier:	GPL-2.0+
++ */
++#ifndef __CONFIG_H
++#define __CONFIG_H
++
++/*
++ * A10 specific configuration
++ */
++#define CONFIG_SUN4I		/* sun4i SoC generation */
++
++#define CONFIG_SYS_PROMPT		"sun4i# "
++
++/*
++ * Include common sunxi configuration where most the settings are
++ */
++#include <configs/sunxi-common.h>
++
++#endif /* __CONFIG_H */
+diff -ruN u-boot-2014.07.orig/include/configs/sunxi-common.h u-boot-2014.07/include/configs/sunxi-common.h
+--- u-boot-2014.07.orig/include/configs/sunxi-common.h	2014-07-18 18:17:51.854601304 +0200
++++ u-boot-2014.07/include/configs/sunxi-common.h	2014-07-18 18:17:22.026296505 +0200
+@@ -192,6 +192,11 @@
+ 
+ #define CONFIG_CONS_INDEX              1       /* UART0 */
+ 
++/* Ethernet support */
++#ifdef CONFIG_SUNXI_WEMAC
++#define CONFIG_MII			/* MII PHY management		*/
++#endif
++
+ #ifdef CONFIG_SUNXI_GMAC
+ #define CONFIG_DESIGNWARE_ETH		/* GMAC can use designware driver */
+ #define CONFIG_DW_AUTONEG
