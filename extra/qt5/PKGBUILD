@@ -9,6 +9,9 @@
 #  - added Raspberry Pi patches for armv6h
 #  - icu makedepend so qtwebkit can build
 
+# Arno Rehn <arno@arnorehn.de>
+#  - fix Raspberry Pi EGL/GLESv2 build
+
 pkgbase=qt5
 pkgname=('qt5-base'
          'qt5-connectivity'
@@ -32,7 +35,7 @@ pkgname=('qt5-base'
          'qt5-x11extras'
          'qt5-xmlpatterns')
 pkgver=5.3.1
-pkgrel=1
+pkgrel=1.1
 arch=('i686' 'x86_64')
 url='http://qt-project.org/'
 license=('GPL3' 'LGPL' 'FDL' 'custom')
@@ -49,13 +52,13 @@ source=("http://download.qt-project.org/official_releases/qt/5.3/${pkgver}/singl
         'use-python2.patch'
         'rpi.patch'
         'qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch')
-md5sums=('f00ac7930e3b1b2b364dedcd15acc142'
+md5sums=('f9a24a0d5645efa0715b6ff0fa13d60f'
          'b2897dd6a2967bccf8f10e397aafee55'
          '9638a78e502719ef8fe5f8d10d0361a9'
          '188da8f4c87316e730ebf1c6217bf5a0'
          '322b419b16c75d4de0ee7ad0a246caa1'
          'a378deccf363bd6079da459c89aff7b9'
-         'd7992d2309194c42a7d47b86010d13d7'
+         '8df638e1dbf41617ffb0827978b54c8e'
          'd9eb94a6cf4f178a7d77d6b8a9280ee2')
 
 prepare() {
@@ -69,13 +72,26 @@ prepare() {
   cd ..
 
   # Raspberry Pi
-#  if [ "$CARCH" == 'armv6h' ]; then
-#    cd qtbase
-#    patch -p1 -i "${srcdir}"/rpi.patch
-#    cd ..
-#    rbp_config="-device linux-rasp-pi-g++ -eglfs"
-#    export CXXFLAGS=${CXXFLAGS}" -I/opt/vc/include -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux"
-#  fi
+ if [ "$CARCH" == 'armv6h' ]; then
+   # Removes pkg-config checks for egl and glesv2 which would interfere with our custom paths below.
+   # Better solution would be to provide a raspberrypi-libgl package which provides 'libgl' and pkg-config modules
+   # for the egl, glesv2 libs in /opt/vc/. Not sure if that would break other packages, though. So I'm leaving it
+   # at this for now.
+   patch -p1 -i "${srcdir}"/rpi.patch
+
+   # VideoCore libs and includes
+   vc_include_dir="/opt/vc/include /opt/vc/include/interface/vcos/pthreads /opt/vc/include/interface/vmcs_host/linux"
+   vc_lib_dir="/opt/vc/lib"
+   sed -i "/^QMAKE_INCDIR_OPENGL\s/s|=|= $vc_include_dir|g" qtbase/mkspecs/common/linux.conf
+   sed -i "/^QMAKE_LIBDIR_OPENGL\s/s|=|= $vc_lib_dir|g" qtbase/mkspecs/common/linux.conf
+
+   sed -i "/^QMAKE_INCDIR_EGL\s/s|=|= $vc_include_dir|g" qtbase/mkspecs/common/linux.conf
+   sed -i "/^QMAKE_LIBDIR_EGL\s/s|=|= $vc_lib_dir|g" qtbase/mkspecs/common/linux.conf
+   sed -i "/^QMAKE_LIBS_EGL\s/s|= -lEGL|= -lEGL -lGLESv2|g" qtbase/mkspecs/common/linux.conf
+
+   echo "EGLFS_PLATFORM_HOOKS_SOURCES = $PWD/qtbase/mkspecs/devices/linux-rasp-pi-g++/qeglfshooks_pi.cpp" >> qtbase/mkspecs/common/linux.conf
+   echo "EGLFS_PLATFORM_HOOKS_LIBS = -lbcm_host" >> qtbase/mkspecs/common/linux.conf
+ fi
 
   sed -i "s|-O2|${CXXFLAGS}|" qtbase/mkspecs/common/{g++,gcc}-base.conf
   sed -i "/^QMAKE_LFLAGS_RPATH/s| -Wl,-rpath,||g" qtbase/mkspecs/common/gcc-base-unix.conf
@@ -121,8 +137,7 @@ build() {
     -no-sse4.2 \
     -no-avx \
     -no-avx2 \
-    -opengl es2 \
-    $rbp_config
+    -opengl es2
 
   make
 
@@ -138,9 +153,14 @@ build() {
 
 package_qt5-base() {
   pkgdesc='A cross-platform application and UI framework'
-  depends=('libjpeg-turbo' 'xcb-util-keysyms' 'libgl' 'dbus' 'fontconfig' 'systemd'
+  depends=('libjpeg-turbo' 'xcb-util-keysyms' 'dbus' 'fontconfig' 'systemd'
            'xcb-util-wm' 'libxrender' 'libxi' 'sqlite' 'xcb-util-image' 'icu'
            'qtchooser')
+
+  # On the Raspberry Pi, we don't need mesa-libgl and use broadcom's libs instead
+  # (see above in prepare())
+  test "$CARCH" != 'armv6h' && depends+=('libgl')
+
   optdepends=('postgresql-libs: PostgreSQL driver'
               'libmariadbclient: MariaDB driver'
               'unixodbc: ODBC driver'
