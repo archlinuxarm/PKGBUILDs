@@ -1,0 +1,161 @@
+From: Raphael Kubo da Costa <rakuco@FreeBSD.org>
+Date: Wed, 16 Jul 2014 19:29:40 +0000
+Subject: Make FindPyQt4 work with PyQt's new build system.
+X-Git-Tag: v4.13.90
+X-Git-Url: http://quickgit.kde.org/?p=kdelibs.git&a=commitdiff&h=a7e47438d4e3469dc9df70d613826cb360fc8d19
+---
+Make FindPyQt4 work with PyQt's new build system.
+
+Since PyQt 4.10, PyQt.pyqtconfig is deprecated and not available unless
+PyQt is built using the old configure script.
+
+There is no direct replacement for it, as PyQt's new build system does
+not provide as much information as before by design. Luckily, most of
+the variables we are interested in can be obtained from PyQt's QtCore
+module itself even if its old build system is used.
+
+The only exception is pyqt_sip_dir, which cannot be determined at all if
+pyqtconfig is not available. In this case, the most we can do is guess
+the default path like QScintilla2 does, and fail if it does not exist.
+The user then needs to specify it manually via CMake with something like
+-DPYQT4_SIP_DIR=/usr/share/sip/PyQt4. To this effect, all variables set
+by FindPyQt4.cmake have been made cache variables, which means their
+values can be overriden by the user, thus ignoring the contents read via
+FindPyQt.py.
+
+BUG:      337462
+FIXED-IN: 4.14.0
+REVIEW:   119302
+---
+
+
+--- a/cmake/modules/FindPyQt4.cmake
++++ b/cmake/modules/FindPyQt4.cmake
+@@ -9,16 +9,20 @@
+ # Find the installed version of PyQt4. FindPyQt4 should only be called after
+ # Python has been found.
+ #
+-# This file defines the following variables:
++# This file defines the following variables, which can also be overriden by
++# users:
+ #
+ # PYQT4_VERSION - The version of PyQt4 found expressed as a 6 digit hex number
+ #     suitable for comparison as a string
+ #
+ # PYQT4_VERSION_STR - The version of PyQt4 as a human readable string.
+ #
+-# PYQT4_VERSION_TAG - The PyQt version tag using by PyQt's sip files.
++# PYQT4_VERSION_TAG - The Qt4 version tag used by PyQt's sip files.
+ #
+-# PYQT4_SIP_DIR - The directory holding the PyQt4 .sip files.
++# PYQT4_SIP_DIR - The directory holding the PyQt4 .sip files. This can be unset
++# if PyQt4 was built using its new build system and pyqtconfig.py is not
++# present on the system, as in this case its value cannot be determined
++# automatically.
+ #
+ # PYQT4_SIP_FLAGS - The SIP flags used to build PyQt.
+ 
+@@ -31,13 +35,27 @@
+ 
+   EXECUTE_PROCESS(COMMAND ${PYTHON_EXECUTABLE} ${_find_pyqt_py} OUTPUT_VARIABLE pyqt_config)
+   IF(pyqt_config)
+-    STRING(REGEX REPLACE "^pyqt_version:([^\n]+).*$" "\\1" PYQT4_VERSION ${pyqt_config})
+-    STRING(REGEX REPLACE ".*\npyqt_version_str:([^\n]+).*$" "\\1" PYQT4_VERSION_STR ${pyqt_config})
+-    STRING(REGEX REPLACE ".*\npyqt_version_tag:([^\n]+).*$" "\\1" PYQT4_VERSION_TAG ${pyqt_config})
+-    STRING(REGEX REPLACE ".*\npyqt_sip_dir:([^\n]+).*$" "\\1" PYQT4_SIP_DIR ${pyqt_config})
+-    STRING(REGEX REPLACE ".*\npyqt_sip_flags:([^\n]+).*$" "\\1" PYQT4_SIP_FLAGS ${pyqt_config})
++    STRING(REGEX MATCH "^pyqt_version:([^\n]+).*$" _dummy ${pyqt_config})
++    SET(PYQT4_VERSION "${CMAKE_MATCH_1}" CACHE STRING "PyQt4's version as a 6-digit hexadecimal number")
+ 
+-    SET(PYQT4_FOUND TRUE)
++    STRING(REGEX MATCH ".*\npyqt_version_str:([^\n]+).*$" _dummy ${pyqt_config})
++    SET(PYQT4_VERSION_STR "${CMAKE_MATCH_1}" CACHE STRING "PyQt4's version as a human-readable string")
++
++    STRING(REGEX MATCH ".*\npyqt_version_tag:([^\n]+).*$" _dummy ${pyqt_config})
++    SET(PYQT4_VERSION_TAG "${CMAKE_MATCH_1}" CACHE STRING "The Qt4 version tag used by PyQt4's .sip files")
++
++    STRING(REGEX MATCH ".*\npyqt_sip_dir:([^\n]+).*$" _dummy ${pyqt_config})
++    SET(PYQT4_SIP_DIR "${CMAKE_MATCH_1}" CACHE FILEPATH "The base directory where PyQt4's .sip files are installed")
++
++    STRING(REGEX MATCH ".*\npyqt_sip_flags:([^\n]+).*$" _dummy ${pyqt_config})
++    SET(PYQT4_SIP_FLAGS "${CMAKE_MATCH_1}" CACHE STRING "The SIP flags used to build PyQt4")
++
++    IF(NOT IS_DIRECTORY "${PYQT4_SIP_DIR}")
++      MESSAGE(WARNING "The base directory where PyQt4's SIP files are installed could not be determined. This usually means PyQt4 was built with its new build system and pyqtconfig.py is not present.\n"
++                      "Please set the PYQT4_SIP_DIR variable manually.")
++    ELSE(NOT IS_DIRECTORY "${PYQT4_SIP_DIR}")
++      SET(PYQT4_FOUND TRUE)
++    ENDIF(NOT IS_DIRECTORY "${PYQT4_SIP_DIR}")
+   ENDIF(pyqt_config)
+ 
+   IF(PYQT4_FOUND)
+
+--- kdelibs-4.13.3/cmake/modules/FindPyQt.py~	2014-07-11 06:42:13.000000000 +0000
++++ kdelibs-4.13.3/cmake/modules/FindPyQt.py	2014-07-18 13:04:32.070296111 +0000
+@@ -1,24 +1,49 @@
+ # Copyright (c) 2007, Simon Edwards <simon@simonzone.com>
++# Copyright (c) 2014, Raphael Kubo da Costa <rakuco@FreeBSD.org>
+ # Redistribution and use is allowed according to the terms of the BSD license.
+ # For details see the accompanying COPYING-CMAKE-SCRIPTS file.
+ 
+-import PyQt4.pyqtconfig
++import PyQt4.QtCore
++import os
++import sys
+ 
+-pyqtcfg = PyQt4.pyqtconfig.Configuration()
+-print("pyqt_version:%06.0x" % pyqtcfg.pyqt_version)
+-print("pyqt_version_str:%s" % pyqtcfg.pyqt_version_str)
+-
+-pyqt_version_tag = ""
+-in_t = False
+-for item in pyqtcfg.pyqt_sip_flags.split(' '):
+-    if item=="-t":
+-        in_t = True
+-    elif in_t:
+-        if item.startswith("Qt_4"):
+-            pyqt_version_tag = item
++def get_default_sip_dir():
++    # This is based on QScintilla's configure.py, and only works for the
++    # default case where installation paths have not been changed in PyQt's
++    # configuration process.
++    if sys.platform == 'win32':
++        pyqt_sip_dir = os.path.join(sys.platform, 'sip', 'PyQt4')
+     else:
+-        in_t = False
+-print("pyqt_version_tag:%s" % pyqt_version_tag)
++        pyqt_sip_dir = os.path.join(sys.platform, 'share', 'sip', 'PyQt4')
++    return pyqt_sip_dir
++
++def get_qt4_tag(sip_flags):
++    in_t = False
++    for item in sip_flags.split(' '):
++        if item == '-t':
++            in_t = True
++        elif in_t:
++            if item.startswith('Qt_4'):
++                return item
++        else:
++            in_t = False
++    raise ValueError('Cannot find Qt\'s tag in PyQt4\'s SIP flags.')
++
++if __name__ == '__main__':
++    try:
++        import PyQt4.pyqtconfig
++        pyqtcfg = PyQt4.pyqtconfig.Configuration()
++        sip_dir = pyqtcfg.pyqt_sip_dir
++        sip_flags = pyqtcfg.pyqt_sip_flags
++    except ImportError:
++        # PyQt4 >= 4.10.0 was built with configure-ng.py instead of
++        # configure.py, so pyqtconfig.py is not installed.
++        sip_dir = get_default_sip_dir()
++        sip_flags = PyQt4.QtCore.PYQT_CONFIGURATION['sip_flags']
++
++    print('pyqt_version:%06.x' % PyQt4.QtCore.PYQT_VERSION)
++    print('pyqt_version_str:%s' % PyQt4.QtCore.PYQT_VERSION_STR)
++    print('pyqt_version_tag:%s' % get_qt4_tag(sip_flags))
++    print('pyqt_sip_dir:%s' % sip_dir)
++    print('pyqt_sip_flags:%s' % sip_flags)
+ 
+-print("pyqt_sip_dir:%s" % pyqtcfg.pyqt_sip_dir)
+-print("pyqt_sip_flags:%s" % pyqtcfg.pyqt_sip_flags)

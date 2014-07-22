@@ -8,18 +8,21 @@
 
 pkgname=nodejs
 pkgver=0.10.29
-pkgrel=1
+_npmver=1.4.21
+pkgrel=3
 pkgdesc='Evented I/O for V8 javascript'
 arch=('i686' 'x86_64' 'arm')
 url='http://nodejs.org/'
 license=('MIT')
 provides=('nodejs-node-gyp')
-makedepends=('python2')
+makedepends=('python2' 'git' 'procps-ng')
 optdepends=('python2: for node-gyp')
 checkdepends=('curl')
 options=('!emptydirs !strip')
-source=("http://nodejs.org/dist/v${pkgver}/node-v${pkgver}.tar.gz")
-sha256sums=('47379d01f765f87c1a1498b4e65de30e45201de50334954860d7375a8258b15d')
+source=("http://nodejs.org/dist/v$pkgver/node-v$pkgver.tar.gz"
+        git+https://github.com/npm/npm.git#tag=v$_npmver)
+sha256sums=('47379d01f765f87c1a1498b4e65de30e45201de50334954860d7375a8258b15d'
+            'SKIP')
 
 set_flags_for_arm() {
   if [ "$CARCH" == "arm" ]; then
@@ -48,6 +51,11 @@ set_flags_for_arm() {
 
 prepare() {
   cd node-v$pkgver
+
+  # We need new version of npm to fix bugs
+  rm -r deps/npm
+  ln -s "$srcdir/npm" deps
+  rm -r "$srcdir/npm/.git"
 
   msg 'fixing for python2 name'
   find -type f -exec sed -e 's_^#!/usr/bin/env python$_&2_' -e 's_^\(#!/usr/bin/python2\).[45]$_\1_' -e 's_^#!/usr/bin/python$_&2_' -e "s_'python'_'python2'_" -i {} \;
@@ -85,6 +93,11 @@ build() {
 
 
   make 
+
+  cd ../npm
+  ../node-v$pkgver/node cli.js install ronn marked
+  PATH="$srcdir/node-v$pkgver:$PATH" make
+  ../node-v$pkgver/node cli.js uninstall ronn marked
 }
 
 check() {
@@ -112,7 +125,14 @@ package() {
   install -D -m644 LICENSE \
     ${pkgdir}/usr/share/licenses/nodejs/LICENSE
 
-  # Why the hell wasn't this installed?! FS#40221
+  install -d "$pkgdir"/usr/share/man/{man1,man3,man5,man7}
+  for _dir in man1 man3 man5 man7; do
+    cd "$pkgdir"/usr/lib/node_modules/npm/man/$_dir
+    for _file in *; do
+      ln -s /usr/lib/node_modules/npm/man/$_dir/$_file "$pkgdir"/usr/share/man/$_dir/
+    done
+  done
+
   ln -s /usr/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js "$pkgdir"/usr/bin/node-gyp
 }
 
