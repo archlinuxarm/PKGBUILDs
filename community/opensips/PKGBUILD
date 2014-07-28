@@ -1,0 +1,85 @@
+# $Id$
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to fix building on ARM
+
+pkgname=opensips
+pkgver=1.11.2
+pkgrel=1
+pkgdesc="An Open Source SIP Server able to act as a SIP proxy, registrar, location server, redirect server ..."
+url="http://www.opensips.org"
+depends=('gcc-libs' 'openssl' 'db' 'attr' 'libxml2')
+makedepends=('postgresql-libs>=8.4.1' 'unixodbc' 'libldap>=2.4.18' 'libmariadbclient'
+	     'lynx' 'libxslt')
+optdepends=('postgresql-libs'
+	    'unixodbc'
+	    'libldap'
+	    'libmariadbclient'
+	    'libsasl'
+	    'python2'
+	    'pcre')
+backup=("etc/opensips/opensips.cfg"
+	"etc/opensips/dictionary.radius"
+	"etc/opensips/opensipsctlrc")
+arch=('i686' 'x86_64')
+license=('GPL')
+install=opensips.install
+options=('!emptydirs' 'zipman' '!makeflags' 'docs')
+source=(http://opensips.org/pub/opensips/$pkgver/src/opensips-${pkgver}_src.tar.gz
+	opensips.service
+        arm.patch)
+md5sums=('e1af6d4b4837562c0d4bb0fb92a6d8a4'
+         '35cdcb3692f6925236fd5fe7e9484c58'
+         'dc8d8f992e4e5ca24f740a046252fd2e')
+
+prepare() {
+  cd $srcdir/$pkgname-$pkgver-tls/
+
+  # python2 fix
+  for file in $(find . -name '*.py' -print); do
+    sed -i 's_^#!.*/usr/bin/python_#!/usr/bin/python2_' $file
+    sed -i 's_^#!.*/usr/bin/env.*python_#!/usr/bin/env python2_' $file
+  done
+
+  sed -i 's|sbin|bin|g' Makefile
+  sed -i 's|bin-dir = sbin/|bin-dir = bin/|' Makefile.defs
+
+  patch -p1 -i ../arm.patch
+}
+
+build() {
+  cd $srcdir/$pkgname-$pkgver-tls/
+
+  make \
+	include_modules="ldap db_mysql db_postgres db_unixodbc presence presence_xml h350" \
+	TLS=1 LIBDIR=lib PREFIX=/usr V=1
+}
+
+package() {
+  cd $srcdir/$pkgname-$pkgver-tls/
+
+  make \
+	include_modules="ldap db_mysql db_postgres db_unixodbc presence presence_xml h350" \
+	TLS=1 BASEDIR=$pkgdir PREFIX=/usr LIBDIR=lib install
+
+  # Conforms to the arch packaging standards (http://wiki.archlinux.org/index.php/Arch_Packaging_Standards)
+  mkdir -p $pkgdir/etc/
+  mv $pkgdir/usr/etc/opensips/ $pkgdir/etc/
+  sed -i 's#mpath=".*lib/opensips/modules/"#mpath="/usr/lib/opensips/modules/"#' $pkgdir/etc/opensips/opensips.cfg
+
+  # fix bad paths
+  cd $pkgdir/usr/share
+  find -type f -exec sed -i "s#$pkgdir##" {} \;
+
+  cd $pkgdir/usr/lib/opensips/opensipsctl
+  find -type f -exec sed -i "s#$pkgdir##" {} \;
+
+  cd $pkgdir/usr/bin
+  sed -i "s#$pkgdir##" opensipsctl opensipsdbctl osipsconsole
+
+  cd $pkgdir/etc
+  find -type f -exec sed -i "s#$pkgdir##" {} \;
+
+  install -Dm0644 $srcdir/$pkgname.service $pkgdir/usr/lib/systemd/system/$pkgname.service
+}
