@@ -1,6 +1,6 @@
 diff -ur xorg-server-1.16.0.orig/configure.ac xorg-server-1.16.0/configure.ac
 --- xorg-server-1.16.0.orig/configure.ac	2014-07-17 09:00:51.000000000 +0200
-+++ xorg-server-1.16.0/configure.ac	2014-07-19 00:46:53.492489158 +0200
++++ xorg-server-1.16.0/configure.ac	2014-08-04 20:43:26.856687998 +0200
 @@ -74,6 +74,7 @@
  AC_CONFIG_HEADERS(include/version-config.h)
  
@@ -47,7 +47,7 @@ diff -ur xorg-server-1.16.0.orig/configure.ac xorg-server-1.16.0/configure.ac
  hw/xwin/Makefile
 diff -ur xorg-server-1.16.0.orig/hw/Makefile.am xorg-server-1.16.0/hw/Makefile.am
 --- xorg-server-1.16.0.orig/hw/Makefile.am	2014-04-16 22:24:00.000000000 +0200
-+++ xorg-server-1.16.0/hw/Makefile.am	2014-07-19 00:46:53.492489158 +0200
++++ xorg-server-1.16.0/hw/Makefile.am	2014-08-04 20:43:26.856687998 +0200
 @@ -38,7 +38,8 @@
  	$(DMX_SUBDIRS)		\
  	$(KDRIVE_SUBDIRS)	\
@@ -60,7 +60,7 @@ diff -ur xorg-server-1.16.0.orig/hw/Makefile.am xorg-server-1.16.0/hw/Makefile.a
  
 diff -ur xorg-server-1.16.0.orig/mi/miinitext.c xorg-server-1.16.0/mi/miinitext.c
 --- xorg-server-1.16.0.orig/mi/miinitext.c	2014-04-16 22:24:00.000000000 +0200
-+++ xorg-server-1.16.0/mi/miinitext.c	2014-07-19 00:46:53.492489158 +0200
++++ xorg-server-1.16.0/mi/miinitext.c	2014-08-04 20:43:26.856687998 +0200
 @@ -111,6 +111,10 @@
  #include "micmap.h"
  #include "globals.h"
@@ -84,7 +84,7 @@ diff -ur xorg-server-1.16.0.orig/mi/miinitext.c xorg-server-1.16.0/mi/miinitext.
  #ifdef MITSHM
 diff -ur xorg-server-1.16.0.orig/os/WaitFor.c xorg-server-1.16.0/os/WaitFor.c
 --- xorg-server-1.16.0.orig/os/WaitFor.c	2014-02-05 04:08:57.000000000 +0100
-+++ xorg-server-1.16.0/os/WaitFor.c	2014-07-19 00:46:53.493489158 +0200
++++ xorg-server-1.16.0/os/WaitFor.c	2014-08-04 20:44:26.350690385 +0200
 @@ -125,6 +125,9 @@
  static void CheckAllTimers(void);
  static OsTimerPtr timers = NULL;
@@ -113,3 +113,25 @@ diff -ur xorg-server-1.16.0.orig/os/WaitFor.c xorg-server-1.16.0/os/WaitFor.c
          BlockHandler((void *) &wt, (void *) &LastSelectMask);
          if (NewOutputPending)
              FlushAllOutput();
+@@ -223,10 +230,20 @@
+             i = Select(MaxClients, &LastSelectMask, &clientsWritable, NULL, wt);
+         }
+         else {
+-            i = Select(MaxClients, &LastSelectMask, NULL, NULL, wt);
++            if (AnyClientsWriteBlocked)
++            XFD_ORSET(&socketsWritable, &ClientsWriteBlocked, &socketsWritable);
++
++            if (XFD_ANYSET(&socketsWritable)) {
++                i = Select (MaxClients, &LastSelectMask, &socketsWritable, NULL, wt);
++                if (AnyClientsWriteBlocked)
++                    XFD_ANDSET(&clientsWritable, &socketsWritable, &ClientsWriteBlocked);
++            } else {
++                i = Select (MaxClients, &LastSelectMask, NULL, NULL, wt);
++            }
+         }
+         selecterr = GetErrno();
+         WakeupHandler(i, (void *) &LastSelectMask);
++        vncWriteWakeupHandler(i, &socketsWritable);
+         if (i <= 0) {           /* An error or timeout occurred */
+             if (dispatchException)
+                 return 0;
