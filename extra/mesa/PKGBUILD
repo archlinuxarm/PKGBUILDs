@@ -10,7 +10,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
-pkgver=10.2.4
+pkgver=10.2.5
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
@@ -19,9 +19,10 @@ makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3pr
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
-source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2
+source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2{,.sig}
         LICENSE)
-sha256sums=('06a2341244eb85c283f59f70161e06ded106f835ed9b6be1ef0243bd9344811a'
+sha256sums=('b4459f0bf7f4a3c8fb78ece3c9d2eac3d0e5bf38cb470f2a72705e744bd0310d'
+            SKIP
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
 
 build() {
@@ -38,8 +39,8 @@ build() {
     --enable-llvm-shared-libs \
     --enable-egl \
     --disable-gallium-egl \
+    --disable-gallium-gbm \
     --enable-gbm \
-    --enable-gallium-gbm \
     --enable-gallium-llvm \
     --enable-shared-glapi \
     --enable-glx-tls \
@@ -63,7 +64,7 @@ build() {
 
 package_mesa() {
   pkgdesc="an open-source implementation of the OpenGL specification"
-  depends=('libdrm' 'libvdpau' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'systemd' 'elfutils' 'llvm-libs')
+  depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'systemd' 'elfutils' 'llvm-libs')
   optdepends=('opengl-man-pages: for the OpenGL API man pages')
   provides=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
   conflicts=('libglapi' 'osmesa' 'libgbm')
