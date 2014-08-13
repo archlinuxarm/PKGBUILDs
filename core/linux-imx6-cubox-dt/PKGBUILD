@@ -10,24 +10,27 @@ buildarch=4
 pkgbase=linux-imx6-cubox-dt
 pkgname=('linux-imx6-cubox-dt' 'linux-headers-imx6-cubox-dt')
 # pkgname=linux-custom       # Build kernel with a different name
-_commit=a71939b0ffdc9746c55e95f25a152c705eee140b
+_commit=dd9ceaf071b535dbbacfbb90e4b909f66058413d
 _srcname=linux-linaro-stable-mx6-${_commit}
 _kernelname=${pkgname#linux}
 _basekernel=3.10
 pkgver=${_basekernel}.30
-pkgrel=27
+pkgrel=28
+cryptodev_commit=6aa62a2c320b04f55fdfe0ed015c3d9b48997239
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'uboot-mkimage' 'git')
 options=('!strip')
 source=("https://github.com/warped-rudi/linux-linaro-stable-mx6/archive/${_commit}.tar.gz"
+        "https://github.com/cryptodev-linux/cryptodev-linux/archive/${cryptodev_commit}.tar.gz"
         'config'
         'change-default-console-loglevel.pat'
         'http://hg.openbricks.org/openbricks/raw-file/414a70875fc4/config/platforms/arm/imx6/machines/cuboxi/packages/linux/patches/990_cubox-i-hummingboard-enable-spdif.patch'
         'http://hg.openbricks.org/openbricks/raw-file/414a70875fc4/config/platforms/arm/imx6/machines/cuboxi/packages/linux/patches/992_hummingboard-use-ipu0-disable-cec.patch')
-md5sums=('48195aab16c2737685b1becfafe667dd'
-         '15305aa19f1b57471944a0737c9484d0'
+md5sums=('524f0a92e0480a88998f6833967ae17c'
+         'ddf7876487c876f6676ef0e050e9d204'
+         '29a52d616a001bbfd13450b9dd03b1ae'
          '9d3c56a4b999c8bfbd4018089a62f662'
          '7f91cc11b6a63771e415bb3549de8fdd'
          '350c99545523f2fe8301bca9cb05f586')
@@ -80,13 +83,17 @@ build() {
 
   # build!
   make ${MAKEFLAGS} zImage modules imx6q-cubox-i.dtb imx6dl-cubox-i.dtb imx6dl-hummingboard.dtb
+
+  msg "Building cryptodev module"
+  cd "${srcdir}/cryptodev-linux-${cryptodev_commit}"
+  make KERNEL_DIR="${srcdir}/${_srcname}"
 }
 
 package_linux-imx6-cubox-dt() {
   pkgdesc="The Linux Kernel and modules - i.MX6 processors for all cubox-i"
   depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' "linux=${pkgver}")
+  provides=('kernel26' "linux=${pkgver}" 'cryptodev_friendly')
   conflicts=('linux-trimslice' 'linux-omap')
   backup=("etc/mkinitcpio.d/${pkgname}.preset")
   install=${pkgname}.install
@@ -121,6 +128,12 @@ package_linux-imx6-cubox-dt() {
   # add real version for building modules and running depmod from post_install/upgrade
   mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
   echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
+
+  # install cryptodev module
+  cd "${srcdir}/cryptodev-linux-${cryptodev_commit}"
+  make -C "${srcdir}/${_srcname}" INSTALL_MOD_PATH="${pkgdir}" SUBDIRS=`pwd` modules_install
+
+  cd "${srcdir}/${_srcname}"
 
   # Now we call depmod...
   depmod -b "$pkgdir" -F System.map "$_kernver"
@@ -265,4 +278,9 @@ package_linux-headers-imx6-cubox-dt() {
 
   # remove unneeded architectures
   rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
+
+  # install cryptodev header
+  cd "${srcdir}/cryptodev-linux-${cryptodev_commit}"
+  install -D crypto/cryptodev.h "${pkgdir}/usr/src/linux-${_kernver}/crypto/cryptodev.h"
 }
+
