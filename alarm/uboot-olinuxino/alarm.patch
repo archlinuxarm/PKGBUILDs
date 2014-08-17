@@ -1,7 +1,28 @@
 diff -urN a/include/configs/mx23_olinuxino.h b/include/configs/mx23_olinuxino.h
---- a/include/configs/mx23_olinuxino.h	2014-01-08 12:04:21.787377202 -0700
-+++ b/include/configs/mx23_olinuxino.h	2014-01-08 12:40:13.973893123 -0700
-@@ -80,6 +80,8 @@
+--- a/include/configs/mx23_olinuxino.h	2014-07-14 11:16:45.000000000 -0600
++++ b/include/configs/mx23_olinuxino.h	2014-08-17 13:06:15.551391904 -0600
+@@ -26,6 +26,14 @@
+ #define CONFIG_CMD_NET
+ #define CONFIG_CMD_USB
+ 
++#define CONFIG_CMD_FAT
++#define CONFIG_CMD_EXT4
++#define CONFIG_CMD_FS_GENERIC
++
++/* bootz: zImage/initrd.img support */
++#define CONFIG_CMD_BOOTZ
++#define CONFIG_SUPPORT_RAW_INITRD
++
+ /* Memory configuration */
+ #define CONFIG_NR_DRAM_BANKS		1		/* 1 bank of DRAM */
+ #define PHYS_SDRAM_1			0x40000000	/* Base address */
+@@ -66,54 +74,72 @@
+ #endif
+ 
+ /* Booting Linux */
+-#define CONFIG_BOOTDELAY	3
+-#define CONFIG_BOOTFILE		"uImage"
++#define CONFIG_BOOTDELAY	1
  #define CONFIG_LOADADDR		0x42000000
  #define CONFIG_SYS_LOAD_ADDR	CONFIG_LOADADDR
  
@@ -9,56 +30,115 @@ diff -urN a/include/configs/mx23_olinuxino.h b/include/configs/mx23_olinuxino.h
 +
  /* Extra Environment */
  #define CONFIG_EXTRA_ENV_SETTINGS \
- 	"update_sd_firmware_filename=u-boot.sd\0" \
-@@ -102,26 +104,27 @@
- 	"video=\0" \
+-	"update_sd_firmware_filename=u-boot.sd\0" \
+-	"update_sd_firmware="		/* Update the SD firmware partition */ \
+-		"if mmc rescan ; then "	\
+-		"if tftp ${update_sd_firmware_filename} ; then " \
+-		"setexpr fw_sz ${filesize} / 0x200 ; "	/* SD block size */ \
+-		"setexpr fw_sz ${fw_sz} + 1 ; "	\
+-		"mmc write ${loadaddr} 0x800 ${fw_sz} ; " \
+-		"fi ; "	\
+-		"fi\0" \
+-	"script=boot.scr\0"	\
+-	"uimage=uImage\0" \
+ 	"console=ttyAMA0\0" \
+ 	"fdt_file=imx23-olinuxino.dtb\0" \
+ 	"fdt_addr=0x41000000\0" \
+-	"boot_fdt=try\0" \
++	"fdtdir=/boot/dtbs\0" \
++	"bootfile=zImage\0" \
++	"bootdir=/boot\0" \
++	"rdaddr=0x42800000\0" \
++	"rdfile=initramfs-linux.img\0" \
+ 	"ip_dyn=yes\0" \
++	"optargs=\0" \
++	"video=\0" \
  	"mmcdev=0\0" \
- 	"mmcpart=2\0" \
--	"mmcroot=/dev/mmcblk0p2 ro\0" \
--	"mmcrootfstype=ext4 rootwait fixrtc\0" \
-+	"mmcroot=/dev/mmcblk0p2 rw rootwait fixrtc\0" \
+-	"mmcpart=2\0" \
+-	"mmcroot=/dev/mmcblk0p3 rw rootwait\0" \
++	"mmcroot=/dev/mmcblk0p2 rw ext4 rootwait fixrtc\0" \
  	"mmcargs=setenv bootargs console=${console},${baudrate} " \
- 		"${optargs} " \
- 		"root=${mmcroot} " \
--		"rootfstype=${mmcrootfstype} " \
- 		"video=${video}\0" \
- 	"loadbootenv=load mmc ${mmcdev}:${mmcpart} ${loadaddr} /boot/uEnv.txt\0" \
- 	"importbootenv=echo Importing environment from mmc (uEnv.txt)...; " \
- 		"env import -t ${loadaddr} ${filesize}\0" \
- 	"loadbootscript="  \
+-		"root=${mmcroot}\0" \
+-	"loadbootscript="  \
 -		"fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${script};\0" \
-+		"load mmc ${mmcdev}:${mmcpart} ${loadaddr} ${script};\0" \
- 	"bootscript=echo Running bootscript from mmc ...; "	\
- 		"source\0" \
+-	"bootscript=echo Running bootscript from mmc ...; "	\
+-		"source\0" \
 -	"loaduimage=fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${uimage}\0" \
-+	"loaduimage=load mmc ${mmcdev}:${mmcpart} ${loadaddr} /boot/${uimage}\0" \
- 	"loadzimage=load mmc ${mmcdev}:${mmcpart} ${loadaddr} /boot/zImage\0" \
- 	"loadfdt=load mmc ${mmcdev}:${mmcpart} ${fdt_addr} ${fdt_file}\0" \
+-	"loadfdt=fatload mmc ${mmcdev}:${mmcpart} ${fdt_addr} ${fdt_file}\0" \
 -	"mmcboot=echo Booting from mmc ...; " \
-+	"mmcbootz=echo Booting from mmc ...; " \
- 		"run mmcargs; " \
- 		"bootz ${loadaddr} - ${fdt_addr}\0" \
-+	"mmcbootm=echo Booting from mmc ...; " \
-+		"run mmcargs; " \
-+		"bootm ${loadaddr} - ${fdt_addr}\0" \
- 	"mmcdefault=echo Booting from mmc ...; " \
- 		"run mmcargs; " \
- 		"if test ${boot_fdt} = yes || test ${boot_fdt} = try; then " \
-@@ -175,10 +178,15 @@
- 			"echo Running uenvcmd ...;" \
- 			"run uenvcmd;" \
- 		"fi;" \
--		"echo Running default loadzimage ...;" \
-+		"echo Running loaduimage ...;" \
-+		"if run loaduimage; then " \
-+			"run loadfdt;" \
-+			"run mmcbootm;" \
-+		"fi;" \
-+		"echo Running loadzimage ...;" \
- 		"if run loadzimage; then " \
- 			"run loadfdt;" \
--			"run mmcboot;" \
-+			"run mmcbootz;" \
- 		"fi;" \
- 	"fi;"
+-		"run mmcargs; " \
+-		"if test ${boot_fdt} = yes || test ${boot_fdt} = try; then " \
+-			"if run loadfdt; then " \
+-				"bootm ${loadaddr} - ${fdt_addr}; " \
++		"${optargs} " \
++		"root=${mmcroot} " \
++		"video=${video}\0" \
++	"loadbootenv=load mmc ${bootpart} ${loadaddr} ${bootdir}/uEnv.txt\0" \
++	"importbootenv=echo Importing environment from mmc (uEnv.txt)...; " \
++		"env import -t ${loadaddr} ${filesize}\0" \
++	"loadimage=load mmc ${bootpart} ${loadaddr} ${bootdir}/${bootfile}\0" \
++	"loadrd=load mmc ${bootpart} ${rdaddr} ${bootdir}/${rdfile}\0" \
++	"loaduimage=load mmc ${bootpart} ${loadaddr} ${bootdir}/uImage\0" \
++	"loadfdt=echo loading ${fdtdir}/${fdt_file} ...;  load mmc ${bootpart} ${fdt_addr} ${fdtdir}/${fdt_file}\0" \
++	"mmcboot=mmc dev ${mmcdev}; " \
++		"if mmc rescan; then " \
++			"echo SD/MMC found on device ${mmcdev};" \
++			"setenv bootpart ${mmcdev}:2; " \
++			"echo Checking for: ${bootdir}/uEnv.txt ...;" \
++			"if test -e mmc ${bootpart} ${bootdir}/uEnv.txt; then " \
++				"load mmc ${bootpart} ${loadaddr} ${bootdir}/uEnv.txt;" \
++				"env import -t ${loadaddr} ${filesize};" \
++				"echo Loaded environment from ${bootdir}/uEnv.txt;" \
++				"echo Checking if uenvcmd is set ...;" \
++				"if test -n ${uenvcmd}; then " \
++					"echo Running uenvcmd ...;" \
++					"run uenvcmd;" \
++				"fi;" \
++			"fi; " \
++			"if run loadimage; then " \
++				"if run loadfdt; then " \
++					"run mmcargs;" \
++					"if run loadrd; then " \
++						"bootz ${loadaddr} ${rdaddr}:${filesize} ${fdt_addr};" \
++					"else " \
++						"bootz ${loadaddr} - ${fdt_addr};" \
++					"fi;" \
++				"else " \
++					"echo Kernel found, but no device tree found;" \
++				"fi;" \
+ 			"else " \
+-				"if test ${boot_fdt} = try; then " \
+-					"bootm; " \
++				"if run loaduimage; then " \
++					"run mmcargs;" \
++					"bootm;" \
+ 				"else " \
+-					"echo WARN: Cannot load the DT; " \
+-				"fi; " \
+-			"fi; " \
+-		"else " \
+-			"bootm; " \
++					"echo No kernel found;" \
++				"fi;" \
++			"fi;" \
+ 		"fi;\0" \
+ 	"netargs=setenv bootargs console=${console},${baudrate} " \
+ 		"root=/dev/nfs " \
+@@ -142,16 +168,7 @@
+ 		"fi;\0"
  
+ #define CONFIG_BOOTCOMMAND \
+-	"mmc dev ${mmcdev}; if mmc rescan; then " \
+-		"if run loadbootscript; then " \
+-			"run bootscript; " \
+-		"else " \
+-			"if run loaduimage; then " \
+-				"run mmcboot; " \
+-			"else run netboot; " \
+-			"fi; " \
+-		"fi; " \
+-	"else run netboot; fi"
++	"run mmcboot;"
+ 
+ /* The rest of the configuration is shared */
+ #include <configs/mxs.h>
