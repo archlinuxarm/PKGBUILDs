@@ -1,0 +1,72 @@
+# $Id$
+# Maintainer: Florian Pritz <bluewind@xinu.at>
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Todd Musall <tmusall@comcast.net>
+# Contributor: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to fix ARMism, should be included in the next release
+
+pkgname=apcupsd
+pkgver=3.14.12
+pkgrel=2.1
+pkgdesc="Power mangement and controlling most of APC's UPS models"
+arch=(i686 x86_64)
+url="http://www.apcupsd.org"
+license=('GPL')
+depends=('gcc-libs' 'systemd-sysvcompat')
+optdepends=('gd: for CGI'
+            'gconf: for frontend'
+            'gtk2: for frontend')
+makedepends=('pkgconfig' 'gd' 'gconf' 'gtk2')
+backup=(etc/apcupsd/apcupsd.conf
+        etc/apcupsd/hosts.conf
+        etc/apcupsd/multimon.conf
+        etc/apcupsd/apcupsd.css
+        etc/apcupsd/changeme
+        etc/apcupsd/commfailure
+        etc/apcupsd/commok
+        etc/apcupsd/offbattery
+        etc/apcupsd/onbattery
+        etc/apcupsd/apccontrol)
+source=(http://downloads.sourceforge.net/apcupsd/$pkgname-$pkgver.tar.gz{,.sig}
+        apcupsd.service
+        apcupsd-tmpfiles.conf
+        arm.patch)
+sha256sums=('1b4f703cb19cfdf44daf173dc8394cafd30fee0b30a0c75a7d19db622454a440'
+            'SKIP'
+            '145e88863335f077fc354b4d263b15f64af67b45a10ed37c68ebd468181e23f7'
+            'b00cd1a31de70a172698d486583aa79113b99c1bb4b882ab906d0e37504d7f55'
+            '2b07c2227ee53dd41c4d339fc3dd7c57918f5bb6a0d613c6ef3ee90ca21ae1df')
+
+prepare() {
+	cd "$srcdir/$pkgname-$pkgver"
+	patch -p3 -i ../arm.patch
+}
+
+build() {
+	cd "$srcdir/$pkgname-$pkgver"
+	./configure --prefix=/usr  --libexecdir=/usr/lib/$pkgname \
+		--sbindir=/usr/bin \
+		--enable-cgi --enable-usb --enable-net \
+		--with-upstype=usb --with-upscable=usb \
+		--with-serial-dev=/dev/usb/hid/hiddev[0-9] \
+		--enable-pthreads --enable-gapcmon
+	make
+}
+
+package() {
+	cd "$srcdir/$pkgname-$pkgver"
+
+	make DESTDIR="$pkgdir" install
+
+	install -Dm644 "$srcdir/apcupsd.service" "$pkgdir/usr/lib/systemd/system/apcupsd.service"
+	install -Dm644 "$srcdir/apcupsd-tmpfiles.conf" "$pkgdir/usr/lib/tmpfiles.d/apcupsd.conf"
+
+	chmod 755 "$pkgdir"/usr/bin/*
+
+	install -dm755 "$pkgdir/usr/lib/$pkgname/cgi-bin"
+	mv "$pkgdir"/etc/apcupsd/*.cgi "$pkgdir/usr/lib/$pkgname/cgi-bin"
+
+	rm -rf "$pkgdir/usr/share/hal"
+}
