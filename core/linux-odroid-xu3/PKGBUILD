@@ -9,7 +9,7 @@ _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.53
-pkgrel=1
+pkgrel=2
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
@@ -17,8 +17,8 @@ makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         'config')
-md5sums=('b4aa976835a9b85c9c023f1160f29cc7'
-         'c0079c5da138967392906d76fb1d9791')
+md5sums=('ba8cf5e6038554089058e5d6dd9e0405'
+         '5cdd6562c2a4f50409a3b16f89a782be')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
@@ -266,5 +266,3 @@ for _p in ${pkgname[@]}; do
     _package${_p#${pkgbase}}
   }"
 done
-md5sums=('ba8cf5e6038554089058e5d6dd9e0405'
-         'ca1bbbebaa3a4f76e4c2a9d627148fd3')
