@@ -4,11 +4,11 @@
 buildarch=4
 
 pkgbase=linux-odroid-xu3
-_commit=542b5353fb4421943398060eb4491c58d359bd6c
+_commit=a3933a6987a02bd3fee4225cf5ff90e5d62c20c7
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
-pkgver=3.10.51
+pkgver=3.10.53
 pkgrel=1
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
@@ -266,3 +266,5 @@ for _p in ${pkgname[@]}; do
     _package${_p#${pkgbase}}
   }"
 done
+md5sums=('ba8cf5e6038554089058e5d6dd9e0405'
+         'ca1bbbebaa3a4f76e4c2a9d627148fd3')
