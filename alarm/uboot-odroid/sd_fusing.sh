@@ -56,19 +56,19 @@ fi
 
 #<BL1 fusing>
 echo "BL1 fusing"
-dd iflag=dsync oflag=dsync if=/boot/bl1.HardKernel of=$device seek=$signed_bl1_position
+dd iflag=dsync oflag=dsync if=./bl1.HardKernel of=$device seek=$signed_bl1_position
 
 #<BL2 fusing>
 echo "BL2 fusing"
-dd iflag=dsync oflag=dsync if=/boot/bl2.HardKernel of=$device seek=$bl2_position
+dd iflag=dsync oflag=dsync if=./bl2.HardKernel of=$device seek=$bl2_position
 
 #<u-boot fusing>
 echo "u-boot fusing"
-dd iflag=dsync oflag=dsync if=/boot/u-boot.bin of=$device seek=$uboot_position
+dd iflag=dsync oflag=dsync if=./u-boot.bin of=$device seek=$uboot_position
 
 #<TrustZone S/W fusing>
 echo "TrustZone S/W fusing"
-dd iflag=dsync oflag=dsync if=/boot/tzsw.HardKernel of=$device seek=$tzsw_position
+dd iflag=dsync oflag=dsync if=./tzsw.HardKernel of=$device seek=$tzsw_position
 
 ####################################
 #<Message Display>
