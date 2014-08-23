@@ -1,0 +1,54 @@
+sd_fuse() {
+  if [ ! -b /dev/mmcblk0 ]; then
+    echo "No MMC device to flash, exiting."
+    exit 0
+  fi
+
+  if [ -d /sys/block/mmcblk0boot0 ]; then
+    echo "/dev/mmcblk0 is an eMMC card, disabling read-only.."
+    if ! echo 0 > /sys/block/mmcblk0boot0/force_ro; then
+      echo "Disabling read-only for /dev/mmcblk0boot0 failed."
+      exit 1
+    fi
+    signed_bl1_position=0
+    bl2_position=30
+    uboot_position=62
+    tzsw_position=2110
+    device=/dev/mmcblk0boot0
+  else
+    signed_bl1_position=1
+    bl2_position=31
+    uboot_position=63
+    tzsw_position=2111
+    device=/dev/mmcblk0
+  fi
+
+  echo "BL1 fusing"
+  dd iflag=dsync oflag=dsync if=/boot/bl1.HardKernel of=$device seek=$signed_bl1_position
+  echo "BL2 fusing"
+  dd iflag=dsync oflag=dsync if=/boot/bl2.HardKernel of=$device seek=$bl2_position
+  echo "u-boot fusing"
+  dd iflag=dsync oflag=dsync if=/boot/u-boot.bin of=$device seek=$uboot_position
+  echo "TrustZone S/W fusing"
+  dd iflag=dsync oflag=dsync if=/boot/tzsw.HardKernel of=$device seek=$tzsw_position
+}
+
+flash_uboot() {
+  echo "A new U-Boot version needs to be flashed onto /dev/mmcblk0."
+  echo "Do you want to do this now? [y|N]"
+  read -r shouldwe
+  if [[ $shouldwe =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    sd_fuse
+  else
+    echo "You can do this later by running:"
+    echo "# /boot/sd_fusing.sh /dev/mmcblk0"
+  fi
+}
+
+post_install() {
+  flash_uboot
+}
+
+post_upgrade() {
+  flash_uboot
+}
