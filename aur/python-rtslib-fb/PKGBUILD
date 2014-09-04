@@ -1,7 +1,7 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
 pkgname=python-rtslib-fb
 _pkgname=rtslib-fb
-pkgver=2.1.fb48
+pkgver=2.1.fb49
 pkgrel=1
 pkgdesc="free branch version of the LIO target API"
 arch=('any')
@@ -16,7 +16,7 @@ backup=()
 options=()
 install=
 source=(https://fedorahosted.org/releases/t/a/targetcli-fb/$_pkgname-$pkgver.tar.gz target.service)
-sha256sums=('4e7f6e002c82861271b90aea8005d84d5d0cf7c48ed1938f61583eefd7337305'
+sha256sums=('1827d036c0de760d6ce9040edb3bee85cf7bf5eb7af025e66db559646391d0f9'
             '74b9e5c11eab1781aa8b43680b429080ae800fbcdafd29626791b5426a4cdea8')
 
 build() {

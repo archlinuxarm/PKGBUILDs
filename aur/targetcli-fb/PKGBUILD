@@ -1,8 +1,7 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
 pkgname=targetcli-fb
-pkgver=2.1.fb35
+pkgver=2.1.fb36
 pkgrel=1
-epoch=
 pkgdesc="free branch of the targetcli LIO administration shell (iSCSI + Co)"
 arch=('any')
 url="https://github.com/agrover/targetcli-fb"
@@ -17,7 +16,6 @@ backup=()
 options=()
 install=
 source=(https://fedorahosted.org/releases/t/a/targetcli-fb/$pkgname-$pkgver.tar.gz)
-md5sums=('4d662f860755dacbf0371db93ed73ada')
 
 
 build() {
@@ -34,3 +32,4 @@ package() {
 }
 
 # vim:set ts=2 sw=2 et:
+sha256sums=('6fce7c702c7b121ee900cfacef77234bad012cd97f9b256852f179afe29974aa')
