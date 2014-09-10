@@ -11,7 +11,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
 pkgver=10.2.7
-pkgrel=2
+pkgrel=3
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm'  'libxdamage' 'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd'
@@ -21,16 +21,25 @@ license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2{,.sig}
         llvm35.patch
+        0001-gallivm-Disable-workaround-for-PR12833-on-LLVM-3.2.patch
+        0002-gallivm-set-mcpu-when-initializing-llvm-execution-en.patch
         LICENSE)
 sha256sums=('27b958063a4c002071f14ed45c7d2a1ee52cd85e4ac8876e8a1c273495a7d43f'
             'SKIP'
             'd3d433564cd21da8aa56a9ceccee6122d5991cae2bd1924173359f13bd38bd6f'
+            '5d66636b06736027708ffa60afb92fc81f085df35b9d91ab7ac4107c8b52d500'
+            '8dc0935e66669bc111e69a80057831aa1f675179ca689c1c044ab588587da010'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
 
 prepare() {
   cd ${srcdir}/?esa-*
 
   patch -Np1 -i ../llvm35.patch
+
+  # https://bugs.freedesktop.org/show_bug.cgi?id=77493
+  # https://bugs.freedesktop.org/show_bug.cgi?id=83735
+  patch -Np1 -i ../0001-gallivm-Disable-workaround-for-PR12833-on-LLVM-3.2.patch
+  patch -Np1 -i ../0002-gallivm-set-mcpu-when-initializing-llvm-execution-en.patch
 }
 
 build() {
