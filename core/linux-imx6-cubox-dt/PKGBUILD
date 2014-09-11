@@ -10,33 +10,43 @@ buildarch=4
 pkgbase=linux-imx6-cubox-dt
 pkgname=('linux-imx6-cubox-dt' 'linux-headers-imx6-cubox-dt')
 # pkgname=linux-custom       # Build kernel with a different name
-_commit=2252efa0655c4efe126dfa2e402c2f1e52ef4a78
-_srcname=linux-linaro-stable-mx6-${_commit}
+_commit=e85332f747c8ad0d6f4482ac1d4299a293ce52d5
+_srcname=linux-imx6-3.14-${_commit}
 _kernelname=${pkgname#linux}
-_basekernel=3.10
-pkgver=${_basekernel}.30
-pkgrel=30
+_basekernel=3.14
+pkgver=${_basekernel}.14
+pkgrel=1
 cryptodev_commit=6aa62a2c320b04f55fdfe0ed015c3d9b48997239
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'uboot-mkimage' 'git')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'uboot-mkimage' 'git' 'lzop')
 options=('!strip')
-source=("https://github.com/warped-rudi/linux-linaro-stable-mx6/archive/${_commit}.tar.gz"
+source=("https://github.com/SolidRun/linux-imx6-3.14/archive/${_commit}.tar.gz"
         "https://github.com/cryptodev-linux/cryptodev-linux/archive/${cryptodev_commit}.tar.gz"
-        'config'
-        'change-default-console-loglevel.pat'
-        'http://hg.openbricks.org/openbricks/raw-file/414a70875fc4/config/platforms/arm/imx6/machines/cuboxi/packages/linux/patches/990_cubox-i-hummingboard-enable-spdif.patch'
-        'http://hg.openbricks.org/openbricks/raw-file/414a70875fc4/config/platforms/arm/imx6/machines/cuboxi/packages/linux/patches/992_hummingboard-use-ipu0-disable-cec.patch')
-md5sums=('6457ebca3380990dfeaaee5f8113dd0a'
+        "git://git.code.sf.net/p/aufs/aufs3-standalone#branch=aufs${pkgver:0:4}"
+        'config')
+md5sums=('ddb5c90773318db4bf23899103e52d86'
          'ddf7876487c876f6676ef0e050e9d204'
-         '8941dd4f187671482083718e00ab986d'
-         '9d3c56a4b999c8bfbd4018089a62f662'
-         '7f91cc11b6a63771e415bb3549de8fdd'
-         '350c99545523f2fe8301bca9cb05f586')
+         'SKIP'
+         '75f8ded0b8bb1e09ade661466c143244')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
+
+msg2 "Copying aufs3 patches into the kernel source tree"
+
+  cp -ru "${srcdir}/aufs3-standalone/Documentation" "${srcdir}/${_srcname}"
+  cp -ru "${srcdir}/aufs3-standalone/fs" "${srcdir}/${_srcname}"
+  cp -ru "${srcdir}/aufs3-standalone/include/uapi/linux/aufs_type.h" "${srcdir}/${_srcname}/include/linux/"
+  cp -ru "${srcdir}/aufs3-standalone/include/uapi/linux/aufs_type.h" "${srcdir}/${_srcname}/include/uapi/linux/"
+
+msg2 "Applying aufs3 patches"
+  patch -Np1 -i ../aufs3-standalone/aufs3-kbuild.patch
+  patch -Np1 -i ../aufs3-standalone/aufs3-base.patch
+  patch -Np1 -i ../aufs3-standalone/aufs3-mmap.patch
+  patch -Np1 -i ../aufs3-standalone/aufs3-standalone.patch
+
 
   cat "${srcdir}/config" > ./.config
 
@@ -46,12 +56,6 @@ prepare() {
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
 
-  # set DEFAULT_CONSOLE_LOGLEVEL to 4 (same value as the 'quiet' kernel param)
-  # remove this when a Kconfig knob is made available by upstream
-  # (relevant patch sent upstream: https://lkml.org/lkml/2011/7/26/227)
-  patch -Np1 -i "${srcdir}/change-default-console-loglevel.pat"
-  patch -Np1 -i "${srcdir}/990_cubox-i-hummingboard-enable-spdif.patch"
-  patch -Np1 -i "${srcdir}/992_hummingboard-use-ipu0-disable-cec.patch"
 }
 
 build() {
@@ -82,7 +86,7 @@ build() {
   #yes "" | make config
 
   # build!
-  make ${MAKEFLAGS} zImage modules imx6q-cubox-i.dtb imx6dl-cubox-i.dtb imx6dl-hummingboard.dtb
+  make ${MAKEFLAGS} zImage modules imx6q-cubox-i.dtb imx6dl-cubox-i.dtb imx6dl-hummingboard.dtb imx6q-hummingboard.dtb
 
   msg "Building cryptodev module"
   cd "${srcdir}/cryptodev-linux-${cryptodev_commit}"
@@ -93,7 +97,7 @@ package_linux-imx6-cubox-dt() {
   pkgdesc="The Linux Kernel and modules - i.MX6 processors for all cubox-i"
   depends=('coreutils' 'linux-firmware' 'module-init-tools>=3.16' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' "linux=${pkgver}" 'cryptodev_friendly')
+  provides=('kernel26' "linux=${pkgver}" 'aufs_friendly' 'cryptodev_friendly')
   conflicts=('linux-trimslice' 'linux-omap')
   backup=("etc/mkinitcpio.d/${pkgname}.preset")
   install=${pkgname}.install
@@ -198,7 +202,7 @@ package_linux-headers-imx6-cubox-dt() {
 
   cp drivers/video/*.h  "${pkgdir}/usr/src/linux-${_kernver}/drivers/video/"
 
-  for i in cpia2 pwc sn9c102; do
+  for i in cpia2 pwc; do
     mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
     cp -a drivers/media/usb/${i}/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/media/usb/${i}"
   done
