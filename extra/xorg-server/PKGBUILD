@@ -1,0 +1,225 @@
+# $Id: PKGBUILD 203648 2014-01-13 17:13:35Z andyrtr $
+# Maintainer: AndyRTR <andyrtr@archlinux.org>
+# Maintainer: Jan de Groot <jgc@archlinux.org>
+# Modifier: gripped <odroid.forum.com> : applied dsd patch
+# Modifier: hreikin <odroid.forum.com> : updated version/checksum
+
+pkgbase=xorg-server
+pkgname=('xorg-server' 'xorg-server-xephyr' 'xorg-server-xdmx' 'xorg-server-xvfb' 'xorg-server-xnest' 'xorg-server-common' 'xorg-server-devel')
+pkgver=1.16.0
+pkgrel=6 # build first with 0.1 and then rebuild it after xf86-input-evdev rebuild
+arch=('i686' 'x86_64' 'armv7h')
+license=('custom')
+url="http://xorg.freedesktop.org"
+makedepends=('pixman' 'libx11' 'mesa' 'mesa-libgl' 'xf86driproto' 'xcmiscproto' 'xtrans' 'bigreqsproto' 'randrproto' 
+             'inputproto' 'fontsproto' 'videoproto' 'presentproto' 'compositeproto' 'recordproto' 'scrnsaverproto'
+             'resourceproto' 'xineramaproto' 'libxkbfile' 'libxfont' 'renderproto' 'libpciaccess' 'libxv'
+             'xf86dgaproto' 'libxmu' 'libxrender' 'libxi' 'dmxproto' 'libxaw' 'libdmx' 'libxtst' 'libxres'
+             'xorg-xkbcomp' 'xorg-util-macros' 'xorg-font-util' 'glproto' 'dri2proto' 'libgcrypt' 'libepoxy'
+             'xcb-util' 'xcb-util-image' 'xcb-util-wm' 'xcb-util-keysyms' 'dri3proto' 'libxshmfence') 
+source=(${url}/releases/individual/xserver/${pkgbase}-${pkgver}.tar.bz2
+        autoconfig-nvidia.patch
+        autoconfig-sis.patch
+        glamor-upstream-fix.patch
+        nvidia-drm-outputclass.conf
+        xvfb-run
+        xvfb-run.1
+        10-quirks.conf
+        CVE-2013-6424.diff
+	dsd.patch)
+sha256sums=('38330a03c5f7a38745a3f9816cf069db5b8844eebb358fd39dbabf61f32cd06b'
+            '66e25f76a7496c429e0aff4b0670f168719bb0ceaeb88c6f2272f2bf3ed21162'
+            'd027776fac1f7675b0a9ee817502290b1c45f9c09b0f0a6bb058c35f92361e84'
+	    'fbd898f0e867c77c9bf918fd2e7956c7776ecb3cc3634c61290fb03513b47987'
+	    'af1c3d2ea5de7f6a6b5f7c60951a189a4749d1495e5462f3157ae7ac8fe1dc56'
+            'ff0156309470fc1d378fd2e104338020a884295e285972cc88e250e031cc35b9'
+            '2460adccd3362fefd4cdc5f1c70f332d7b578091fb9167bf88b5f91265bbd776'
+            '94612f5c0d34a3b7152915c2e285c7b462e9d8e38d3539bd551a339498eac166'
+            '89948993afd4d9aec6a0bdbaf62f494e9956bb77a0386307d497f340a818ff61'
+	    'a58a34c95397dde79eecc72d8a7e403769b45b8aef2cee6c56c0f5562fde1284' )
+
+prepare() {
+  cd "${pkgbase}-${pkgver}"
+  # Use unofficial imedia SiS driver for supported SiS devices
+  patch -Np0 -i ../autoconfig-sis.patch
+  # outputclass config file works only when nvidia-drm kernel driver is exposed
+  # this means that older drivers (304xx and before) aren't currently supported
+  # Use nouveau/nv/nvidia drivers for nvidia devices
+  patch -Np1 -i ../autoconfig-nvidia.patch
+  # merged upstream (1.16 branch)
+  patch -Np1 -i ../glamor-upstream-fix.patch
+
+  # Fix CVE-2013-6424 (FS#38401)
+  patch -Np1 -i ../CVE-2013-6424.diff
+  patch -Np1 -i ../dsd.patch
+}
+
+build() {
+  cd "${pkgbase}-${pkgver}"
+  autoreconf -fi
+  ./configure --prefix=/usr \
+      --enable-ipv6 \
+      --enable-dri \
+      --enable-dmx \
+      --enable-xvfb \
+      --enable-xnest \
+      --enable-composite \
+      --enable-xcsecurity \
+      --enable-xorg \
+      --enable-xephyr \
+      --enable-glx-tls \
+      --enable-kdrive \
+      --enable-kdrive-evdev \
+      --enable-kdrive-kbd \
+      --enable-kdrive-mouse \
+      --enable-install-setuid \
+      --enable-config-udev \
+      --disable-config-dbus \
+      --enable-record \
+      --disable-xfbdev \
+      --disable-xfake \
+      --disable-static \
+      --sysconfdir=/etc/X11 \
+      --localstatedir=/var \
+      --with-xkb-path=/usr/share/X11/xkb \
+      --with-xkb-output=/var/lib/xkb \
+      --with-fontrootdir=/usr/share/fonts
+      
+#             --without-dtrace \
+#	--disable-linux-acpi --disable-linux-apm \
+
+  make
+
+  # Disable subdirs for make install rule to make splitting easier
+  sed -e 's/^DMX_SUBDIRS =.*/DMX_SUBDIRS =/' \
+      -e 's/^XVFB_SUBDIRS =.*/XVFB_SUBDIRS =/' \
+      -e 's/^XNEST_SUBDIRS =.*/XNEST_SUBDIRS = /' \
+      -e 's/^KDRIVE_SUBDIRS =.*/KDRIVE_SUBDIRS =/' \
+      -i hw/Makefile
+}
+
+package_xorg-server-common() {
+  pkgdesc="Xorg server common files"
+  depends=('xkeyboard-config' 'xorg-xkbcomp' 'xorg-setxkbmap' 'xorg-fonts-misc')
+
+  cd "${pkgbase}-${pkgver}"
+  install -m755 -d "${pkgdir}/usr/share/licenses/xorg-server-common"
+  install -m644 COPYING "${pkgdir}/usr/share/licenses/xorg-server-common"
+  
+  make -C xkb DESTDIR="${pkgdir}" install-data
+
+  install -m755 -d "${pkgdir}/usr/share/man/man1"
+  install -m644 man/Xserver.1 "${pkgdir}/usr/share/man/man1/"
+
+  install -m755 -d "${pkgdir}/usr/lib/xorg"
+  install -m644 dix/protocol.txt "${pkgdir}/usr/lib/xorg/"
+}
+
+package_xorg-server() {
+  pkgdesc="Xorg X server"
+  depends=(libepoxy libxdmcp libxfont libpciaccess libdrm pixman libgcrypt libxau xorg-server-common xf86-input-evdev libxshmfence)
+  backup=('etc/X11/xorg.conf.d/10-evdev.conf' 'etc/X11/xorg.conf.d/10-quirks.conf')
+  # see xorg-server-*/hw/xfree86/common/xf86Module.h for ABI versions - we provide major numbers that drivers can depend on
+  # and /usr/lib/pkgconfig/xorg-server.pc in xorg-server-devel pkg
+  provides=('X-ABI-VIDEODRV_VERSION=18' 'X-ABI-XINPUT_VERSION=21' 'X-ABI-EXTENSION_VERSION=8.0' 'x-server')
+  groups=('xorg')
+  conflicts=('nvidia-utils<=331.20' 'glamour-egl')
+  replaces=('glamor-egl')
+  install=xorg-server.install
+
+  cd "${pkgbase}-${pkgver}"
+  make DESTDIR="${pkgdir}" install
+
+  install -m755 -d "${pkgdir}/etc/X11"
+  mv "${pkgdir}/usr/share/X11/xorg.conf.d" "${pkgdir}/etc/X11/"
+  install -m644 "${srcdir}/10-quirks.conf" "${pkgdir}/etc/X11/xorg.conf.d/"
+
+  rmdir "${pkgdir}/usr/share/X11"
+
+  # Needed for non-mesa drivers, libgl will restore it
+  mv "${pkgdir}/usr/lib/xorg/modules/extensions/libglx.so" \
+     "${pkgdir}/usr/lib/xorg/modules/extensions/libglx.xorg"
+
+  rm -rf "${pkgdir}/var"
+
+  rm -f "${pkgdir}/usr/share/man/man1/Xserver.1"
+  rm -f "${pkgdir}/usr/lib/xorg/protocol.txt"
+
+  install -m755 -d "${pkgdir}/usr/share/licenses/xorg-server"
+  ln -sf ../xorg-server-common/COPYING "${pkgdir}/usr/share/licenses/xorg-server/COPYING"
+
+  rm -rf "${pkgdir}/usr/lib/pkgconfig"
+  rm -rf "${pkgdir}/usr/include"
+  rm -rf "${pkgdir}/usr/share/aclocal"
+}
+
+package_xorg-server-xephyr() {
+  pkgdesc="A nested X server that runs as an X application"
+  depends=(libxfont libgl libgcrypt libxv pixman xorg-server-common 'xcb-util-image' 'xcb-util-wm' 'xcb-util-keysyms')
+
+  cd "${pkgbase}-${pkgver}/hw/kdrive"
+  make DESTDIR="${pkgdir}" install
+
+  install -m755 -d "${pkgdir}/usr/share/licenses/xorg-server-xephyr"
+  ln -sf ../xorg-server-common/COPYING "${pkgdir}/usr/share/licenses/xorg-server-xephyr/COPYING"
+}
+
+package_xorg-server-xvfb() {
+  pkgdesc="Virtual framebuffer X server"
+  depends=(libxfont libxdmcp libxau libgcrypt pixman xorg-server-common xorg-xauth)
+
+  cd "${pkgbase}-${pkgver}/hw/vfb"
+  make DESTDIR="${pkgdir}" install
+
+  install -m755 "${srcdir}/xvfb-run" "${pkgdir}/usr/bin/"
+  install -m644 "${srcdir}/xvfb-run.1" "${pkgdir}/usr/share/man/man1/"
+
+  install -m755 -d "${pkgdir}/usr/share/licenses/xorg-server-xvfb"
+  ln -sf ../xorg-server-common/COPYING "${pkgdir}/usr/share/licenses/xorg-server-xvfb/COPYING"
+}
+
+package_xorg-server-xnest() {
+  pkgdesc="A nested X server that runs as an X application"
+  depends=(libxfont libxext libgcrypt pixman xorg-server-common)
+
+  cd "${pkgbase}-${pkgver}/hw/xnest"
+  make DESTDIR="${pkgdir}" install
+
+  install -m755 -d "${pkgdir}/usr/share/licenses/xorg-server-xnest"
+  ln -sf ../xorg-server-common/COPYING "${pkgdir}/usr/share/licenses/xorg-server-xnest/COPYING"
+}
+
+package_xorg-server-xdmx() {
+  pkgdesc="Distributed Multihead X Server and utilities"
+  depends=(libxfont libxi libgcrypt libxaw libxrender libdmx libxfixes pixman xorg-server-common)
+
+  cd "${pkgbase}-${pkgver}/hw/dmx"
+  make DESTDIR="${pkgdir}" install
+
+  install -m755 -d "${pkgdir}/usr/share/licenses/xorg-server-xdmx"
+  ln -sf ../xorg-server-common/COPYING "${pkgdir}/usr/share/licenses/xorg-server-xdmx/COPYING"
+}
+
+package_xorg-server-devel() {
+  pkgdesc="Development files for the X.Org X server"
+  depends=(# see pkgdir/usr/lib/pkgconfig/xorg-server.pc
+           xproto randrproto renderproto xextproto inputproto kbproto 
+           fontsproto pixman videoproto xf86driproto glproto 
+           mesa dri2proto dri3proto xineramaproto libpciaccess
+           resourceproto scrnsaverproto presentproto
+           # not technically required but almost every Xorg pkg needs it to build
+           xorg-util-macros)
+
+  cd "${pkgbase}-${pkgver}"
+  make DESTDIR="${pkgdir}" install
+
+  rm -rf "${pkgdir}/usr/bin"
+  rm -rf "${pkgdir}/usr/share/man"
+  rm -rf "${pkgdir}/usr/share/doc"
+  rm -rf "${pkgdir}/usr/share/X11"
+  rm -rf "${pkgdir}/usr/lib/xorg"
+  rm -rf "${pkgdir}/var"
+
+  install -m755 -d "${pkgdir}/usr/share/licenses/xorg-server-devel"
+  ln -sf ../xorg-server-common/COPYING "${pkgdir}/usr/share/licenses/xorg-server-devel/COPYING"
+}
