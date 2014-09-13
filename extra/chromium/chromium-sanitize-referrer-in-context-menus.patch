@@ -1,0 +1,388 @@
+Index: chrome/browser/download/download_browsertest.cc
+diff --git a/chrome/browser/download/download_browsertest.cc b/chrome/browser/download/download_browsertest.cc
+index 9fd163b1133b65f68a2369e9e0c452e5253d1b47..91525d254e70e40afe3b1765119d547c5b295a79 100644
+--- a/chrome/browser/download/download_browsertest.cc
++++ b/chrome/browser/download/download_browsertest.cc
+@@ -15,6 +15,7 @@
+ #include "base/path_service.h"
+ #include "base/prefs/pref_service.h"
+ #include "base/stl_util.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_split.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/stringprintf.h"
+@@ -44,6 +45,7 @@
+ #include "chrome/browser/infobars/infobar_service.h"
+ #include "chrome/browser/net/url_request_mock_util.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/renderer_context_menu/render_view_context_menu_browsertest_util.h"
+ #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
+ #include "chrome/browser/safe_browsing/download_feedback_service.h"
+ #include "chrome/browser/safe_browsing/download_protection_service.h"
+@@ -2750,6 +2752,116 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, LoadURLExternallyReferrerPolicy) {
+   ASSERT_TRUE(VerifyFile(file, expected_contents, expected_contents.length()));
+ }
+ 
++// This test ensures that the Referer header is properly sanitized when
++// Save Link As is chosen from the context menu.
++IN_PROC_BROWSER_TEST_F(DownloadTest, SaveLinkAsReferrerPolicyOrigin) {
++  // Do initial setup.
++  ASSERT_TRUE(test_server()->Start());
++  net::SpawnedTestServer ssl_test_server(
++      net::SpawnedTestServer::TYPE_HTTPS,
++      net::SpawnedTestServer::kLocalhost,
++      base::FilePath(FILE_PATH_LITERAL("chrome/test/data/referrer_policy")));
++  ASSERT_TRUE(ssl_test_server.Start());
++  EnableFileChooser(true);
++  std::vector<DownloadItem*> download_items;
++  GetDownloads(browser(), &download_items);
++  ASSERT_TRUE(download_items.empty());
++
++  // Navigate to the initial page, where Save Link As will be executed.
++  GURL url = ssl_test_server.GetURL(
++      std::string("files/referrer-policy-start.html?policy=origin") +
++      "&port=" + base::IntToString(test_server()->host_port_pair().port()) +
++      "&ssl_port=" +
++      base::IntToString(ssl_test_server.host_port_pair().port()) +
++      "&redirect=echoheader&link=true&target=");
++  ASSERT_TRUE(url.is_valid());
++  ui_test_utils::NavigateToURL(browser(), url);
++
++  scoped_ptr<content::DownloadTestObserver> waiter(
++      new content::DownloadTestObserverTerminal(
++          DownloadManagerForBrowser(browser()), 1,
++          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
++
++  // Right-click on the link and choose Save Link As. This will download the
++  // link target.
++  ContextMenuNotificationObserver context_menu_observer(
++      IDC_CONTENT_CONTEXT_SAVELINKAS);
++
++  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
++  blink::WebMouseEvent mouse_event;
++  mouse_event.type = blink::WebInputEvent::MouseDown;
++  mouse_event.button = blink::WebMouseEvent::ButtonRight;
++  mouse_event.x = 15;
++  mouse_event.y = 15;
++  mouse_event.clickCount = 1;
++  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
++  mouse_event.type = blink::WebInputEvent::MouseUp;
++  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
++
++  waiter->WaitForFinished();
++  EXPECT_EQ(1u, waiter->NumDownloadsSeenInState(DownloadItem::COMPLETE));
++  CheckDownloadStates(1, DownloadItem::COMPLETE);
++
++  // Validate that the correct file was downloaded.
++  GetDownloads(browser(), &download_items);
++  EXPECT_EQ(1u, download_items.size());
++  EXPECT_EQ(test_server()->GetURL("echoheader?Referer"),
++            download_items[0]->GetOriginalUrl());
++
++  // Check that the file contains the expected referrer.
++  base::FilePath file(download_items[0]->GetTargetFilePath());
++  std::string expected_contents = ssl_test_server.GetURL(std::string()).spec();
++  EXPECT_TRUE(VerifyFile(file, expected_contents, expected_contents.length()));
++}
++
++// This test ensures that the Referer header is properly sanitized when
++// Save Image As is chosen from the context menu. The test succeeds if
++// it doesn't crash.
++IN_PROC_BROWSER_TEST_F(DownloadTest, SaveImageAsReferrerPolicyDefault) {
++  // Do initial setup.
++  ASSERT_TRUE(test_server()->Start());
++  net::SpawnedTestServer ssl_test_server(
++      net::SpawnedTestServer::TYPE_HTTPS,
++      net::SpawnedTestServer::kLocalhost,
++      base::FilePath(FILE_PATH_LITERAL("chrome/test/data/")));
++  ASSERT_TRUE(ssl_test_server.Start());
++  EnableFileChooser(true);
++  std::vector<DownloadItem*> download_items;
++  GetDownloads(browser(), &download_items);
++  ASSERT_TRUE(download_items.empty());
++
++  GURL url = ssl_test_server.GetURL("files/title1.html");
++  GURL img_url = test_server()->GetURL("files/downloads/image.jpg");
++  ASSERT_TRUE(url.is_valid());
++  ui_test_utils::NavigateToURL(browser(), url);
++
++  // Try to download an image via a context menu.
++  scoped_ptr<content::DownloadTestObserver> waiter_context_menu(
++      new content::DownloadTestObserverTerminal(
++          DownloadManagerForBrowser(browser()), 1,
++          content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
++  content::ContextMenuParams context_menu_params;
++  context_menu_params.media_type = blink::WebContextMenuData::MediaTypeImage;
++  context_menu_params.page_url = url;
++  context_menu_params.src_url = img_url;
++  TestRenderViewContextMenu menu(
++      browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame(),
++      context_menu_params);
++  menu.Init();
++  menu.ExecuteCommand(IDC_CONTENT_CONTEXT_SAVEIMAGEAS, 0);
++  waiter_context_menu->WaitForFinished();
++  EXPECT_EQ(
++      1u, waiter_context_menu->NumDownloadsSeenInState(DownloadItem::COMPLETE));
++  CheckDownloadStates(1, DownloadItem::COMPLETE);
++
++  // Validate that the correct file was downloaded via the context menu.
++  download_items.clear();
++  GetDownloads(browser(), &download_items);
++  EXPECT_TRUE(DidShowFileChooser());
++  ASSERT_EQ(1u, download_items.size());
++  ASSERT_EQ(img_url, download_items[0]->GetOriginalUrl());
++}
++
+ IN_PROC_BROWSER_TEST_F(DownloadTest, HiddenDownload) {
+   base::FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
+   GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
+Index: chrome/browser/referrer_policy_browsertest.cc
+diff --git a/chrome/browser/referrer_policy_browsertest.cc b/chrome/browser/referrer_policy_browsertest.cc
+index 8c10e6d0fc3159d1d0c6c349f374a0dac82b7306..eb1dd5dcb0112dc68253a6045002b07a330bb1e7 100644
+--- a/chrome/browser/referrer_policy_browsertest.cc
++++ b/chrome/browser/referrer_policy_browsertest.cc
+@@ -109,7 +109,7 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
+ 
+   enum StartOnProtocol { START_ON_HTTP, START_ON_HTTPS, };
+ 
+-  enum LinkType { REGULAR_LINK, LINk_WITH_TARGET_BLANK, };
++  enum LinkType { REGULAR_LINK, LINK_WITH_TARGET_BLANK, };
+ 
+   enum RedirectType { NO_REDIRECT, SERVER_REDIRECT, SERVER_REDIRECT_ON_HTTP, };
+ 
+@@ -159,7 +159,7 @@ class ReferrerPolicyTest : public InProcessBrowserTest {
+         base::IntToString(ssl_test_server_->host_port_pair().port()) +
+         "&redirect=" + RedirectTypeToString(redirect) + "&link=" +
+         (button == blink::WebMouseEvent::ButtonNone ? "false" : "true") +
+-        "&target=" + (link_type == LINk_WITH_TARGET_BLANK ? "_blank" : ""));
++        "&target=" + (link_type == LINK_WITH_TARGET_BLANK ? "_blank" : ""));
+ 
+     ui_test_utils::WindowedTabAddedNotificationObserver tab_added_observer(
+         content::NotificationService::AllSources());
+@@ -288,7 +288,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, HttpsMiddleClickOrigin) {
+ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, TargetBlankOrigin) {
+   RunReferrerTest(blink::WebReferrerPolicyOrigin,
+                   START_ON_HTTP,
+-                  LINk_WITH_TARGET_BLANK,
++                  LINK_WITH_TARGET_BLANK,
+                   NO_REDIRECT,
+                   NEW_FOREGROUND_TAB,
+                   blink::WebMouseEvent::ButtonLeft,
+@@ -299,7 +299,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, TargetBlankOrigin) {
+ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, HttpsTargetBlankOrigin) {
+   RunReferrerTest(blink::WebReferrerPolicyOrigin,
+                   START_ON_HTTPS,
+-                  LINk_WITH_TARGET_BLANK,
++                  LINK_WITH_TARGET_BLANK,
+                   NO_REDIRECT,
+                   NEW_FOREGROUND_TAB,
+                   blink::WebMouseEvent::ButtonLeft,
+@@ -310,7 +310,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, HttpsTargetBlankOrigin) {
+ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MiddleClickTargetBlankOrigin) {
+   RunReferrerTest(blink::WebReferrerPolicyOrigin,
+                   START_ON_HTTP,
+-                  LINk_WITH_TARGET_BLANK,
++                  LINK_WITH_TARGET_BLANK,
+                   NO_REDIRECT,
+                   NEW_FOREGROUND_TAB,
+                   blink::WebMouseEvent::ButtonMiddle,
+@@ -321,7 +321,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MiddleClickTargetBlankOrigin) {
+ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, HttpsMiddleClickTargetBlankOrigin) {
+   RunReferrerTest(blink::WebReferrerPolicyOrigin,
+                   START_ON_HTTPS,
+-                  LINk_WITH_TARGET_BLANK,
++                  LINK_WITH_TARGET_BLANK,
+                   NO_REDIRECT,
+                   NEW_FOREGROUND_TAB,
+                   blink::WebMouseEvent::ButtonMiddle,
+@@ -427,7 +427,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, HttpsMiddleClickRedirect) {
+ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, TargetBlankRedirect) {
+   RunReferrerTest(blink::WebReferrerPolicyOrigin,
+                   START_ON_HTTP,
+-                  LINk_WITH_TARGET_BLANK,
++                  LINK_WITH_TARGET_BLANK,
+                   SERVER_REDIRECT,
+                   NEW_FOREGROUND_TAB,
+                   blink::WebMouseEvent::ButtonLeft,
+@@ -439,7 +439,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, TargetBlankRedirect) {
+ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, HttpsTargetBlankRedirect) {
+   RunReferrerTest(blink::WebReferrerPolicyOrigin,
+                   START_ON_HTTPS,
+-                  LINk_WITH_TARGET_BLANK,
++                  LINK_WITH_TARGET_BLANK,
+                   SERVER_REDIRECT,
+                   NEW_FOREGROUND_TAB,
+                   blink::WebMouseEvent::ButtonLeft,
+@@ -451,7 +451,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, HttpsTargetBlankRedirect) {
+ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest, MiddleClickTargetBlankRedirect) {
+   RunReferrerTest(blink::WebReferrerPolicyOrigin,
+                   START_ON_HTTP,
+-                  LINk_WITH_TARGET_BLANK,
++                  LINK_WITH_TARGET_BLANK,
+                   SERVER_REDIRECT,
+                   NEW_FOREGROUND_TAB,
+                   blink::WebMouseEvent::ButtonMiddle,
+@@ -464,7 +464,7 @@ IN_PROC_BROWSER_TEST_F(ReferrerPolicyTest,
+                        HttpsMiddleClickTargetBlankRedirect) {
+   RunReferrerTest(blink::WebReferrerPolicyOrigin,
+                   START_ON_HTTPS,
+-                  LINk_WITH_TARGET_BLANK,
++                  LINK_WITH_TARGET_BLANK,
+                   SERVER_REDIRECT,
+                   NEW_FOREGROUND_TAB,
+                   blink::WebMouseEvent::ButtonMiddle,
+Index: chrome/browser/renderer_context_menu/render_view_context_menu.cc
+diff --git a/chrome/browser/renderer_context_menu/render_view_context_menu.cc b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+index 8b1f54547a36a5301418e68b6e521c204cc1aece..3758462437f8e8c920999054ad36e3200b8d906c 100644
+--- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
++++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+@@ -1534,14 +1534,17 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
+ 
+     case IDC_CONTENT_CONTEXT_SAVELINKAS: {
+       RecordDownloadSource(DOWNLOAD_INITIATED_BY_CONTEXT_MENU);
+-      const GURL& referrer =
+-          params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
+       const GURL& url = params_.link_url;
++      const GURL& referring_url =
++          params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
++      content::Referrer referrer = content::Referrer::SanitizeForRequest(
++          url,
++          content::Referrer(referring_url.GetAsReferrer(),
++                            params_.referrer_policy));
+       DownloadManager* dlm = BrowserContext::GetDownloadManager(profile_);
+       scoped_ptr<DownloadUrlParameters> dl_params(
+           DownloadUrlParameters::FromWebContents(source_web_contents_, url));
+-      dl_params->set_referrer(
+-          content::Referrer(referrer, params_.referrer_policy));
++      dl_params->set_referrer(referrer);
+       dl_params->set_referrer_encoding(params_.frame_charset);
+       dl_params->set_prompt(true);
+       dlm->DownloadUrl(dl_params.Pass());
+@@ -1558,11 +1561,14 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
+       } else {
+         // TODO(zino): We can use SaveImageAt() like a case of canvas.
+         RecordDownloadSource(DOWNLOAD_INITIATED_BY_CONTEXT_MENU);
+-        const GURL& referrer =
+-            params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
+         const GURL& url = params_.src_url;
+-        source_web_contents_->SaveFrame(url, content::Referrer(
+-            referrer, params_.referrer_policy));
++        const GURL& referring_url =
++            params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
++        content::Referrer referrer = content::Referrer::SanitizeForRequest(
++            url,
++            content::Referrer(referring_url.GetAsReferrer(),
++                              params_.referrer_policy));
++        source_web_contents_->SaveFrame(url, referrer);
+       }
+       break;
+     }
+@@ -1974,8 +1980,10 @@ void RenderViewContextMenu::OpenURL(
+     const GURL& url, const GURL& referring_url,
+     WindowOpenDisposition disposition,
+     content::PageTransition transition) {
+-  content::Referrer referrer(referring_url.GetAsReferrer(),
+-      params_.referrer_policy);
++  content::Referrer referrer = content::Referrer::SanitizeForRequest(
++      url,
++      content::Referrer(referring_url.GetAsReferrer(),
++                        params_.referrer_policy));
+ 
+   if (params_.link_url == url && disposition != OFF_THE_RECORD)
+     params_.custom_context.link_followed = url;
+Index: components/sessions/serialized_navigation_entry.cc
+diff --git a/components/sessions/serialized_navigation_entry.cc b/components/sessions/serialized_navigation_entry.cc
+index c0ed8d2a835a7cc44ef29f8df0c6c7558e6dbd55..a5ba41c850fc508f0eff54380db43e606c71538d 100644
+--- a/components/sessions/serialized_navigation_entry.cc
++++ b/components/sessions/serialized_navigation_entry.cc
+@@ -512,32 +512,13 @@ std::vector<NavigationEntry*> SerializedNavigationEntry::ToNavigationEntries(
+ }
+ 
+ void SerializedNavigationEntry::Sanitize() {
+-  // Store original referrer so we can later see whether it was actually
+-  // changed during sanitization, and we need to strip the referrer from the
+-  // page state as well.
+-  content::Referrer old_referrer = referrer_;
++  content::Referrer new_referrer =
++      content::Referrer::SanitizeForRequest(virtual_url_, referrer_);
+ 
+-  if (!referrer_.url.SchemeIsHTTPOrHTTPS())
+-    referrer_ = content::Referrer();
+-  switch (referrer_.policy) {
+-    case blink::WebReferrerPolicyNever:
+-      referrer_.url = GURL();
+-      break;
+-    case blink::WebReferrerPolicyAlways:
+-      break;
+-    case blink::WebReferrerPolicyOrigin:
+-      referrer_.url = referrer_.url.GetWithEmptyPath();
+-      break;
+-    case blink::WebReferrerPolicyDefault:
+-      // Fall through.
+-    default:
+-      referrer_.policy = blink::WebReferrerPolicyDefault;
+-      if (referrer_.url.SchemeIsSecure() && !virtual_url_.SchemeIsSecure())
+-        referrer_.url = GURL();
+-  }
+-
+-  if (referrer_.url != old_referrer.url ||
+-      referrer_.policy != old_referrer.policy) {
++  // No need to compare the policy, as it doesn't change during
++  // sanitization. If there has been a change, the referrer needs to be
++  // stripped from the page state as well.
++  if (referrer_.url != new_referrer.url) {
+     referrer_ = content::Referrer();
+     page_state_ = page_state_.RemoveReferrer();
+   }
+Index: content/public/common/referrer.h
+diff --git a/content/public/common/referrer.h b/content/public/common/referrer.h
+index b10bfd6c28e6cd96f6e44a5a2070904693fae979..122c5ead79096c2fb148d11206e8071f48671074 100644
+--- a/content/public/common/referrer.h
++++ b/content/public/common/referrer.h
+@@ -5,6 +5,7 @@
+ #ifndef CONTENT_PUBLIC_COMMON_REFERRER_H_
+ #define CONTENT_PUBLIC_COMMON_REFERRER_H_
+ 
++#include "base/logging.h"
+ #include "content/common/content_export.h"
+ #include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
+ #include "url/gurl.h"
+@@ -23,6 +24,38 @@ struct CONTENT_EXPORT Referrer {
+ 
+   GURL url;
+   blink::WebReferrerPolicy policy;
++
++  static Referrer SanitizeForRequest(const GURL& request,
++                                     const Referrer& referrer) {
++    Referrer sanitized_referrer(referrer.url.GetAsReferrer(), referrer.policy);
++
++    if (!request.SchemeIsHTTPOrHTTPS() ||
++        !sanitized_referrer.url.SchemeIsHTTPOrHTTPS()) {
++      sanitized_referrer.url = GURL();
++      return sanitized_referrer;
++    }
++
++    switch (sanitized_referrer.policy) {
++      case blink::WebReferrerPolicyDefault:
++        if (sanitized_referrer.url.SchemeIsSecure() &&
++            !request.SchemeIsSecure()) {
++          sanitized_referrer.url = GURL();
++        }
++        break;
++      case blink::WebReferrerPolicyAlways:
++        break;
++      case blink::WebReferrerPolicyNever:
++        sanitized_referrer.url = GURL();
++        break;
++      case blink::WebReferrerPolicyOrigin:
++        sanitized_referrer.url = sanitized_referrer.url.GetOrigin();
++        break;
++      default:
++        NOTREACHED();
++        break;
++    }
++    return sanitized_referrer;
++  }
+ };
+ 
+ }  // namespace content
