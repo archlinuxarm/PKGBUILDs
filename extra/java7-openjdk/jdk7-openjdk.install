@@ -13,7 +13,7 @@ post_install() {
   fi
 
   if [ ! -f /etc/ssl/certs/java/cacerts ]; then
-    JAVA_HOME=/usr/lib/jvm/java-default-runtime /usr/bin/init-jks-keystore
+    JAVA_HOME=/usr/lib/jvm/${this_java} /usr/bin/init-jks-keystore
   fi
 }
 
@@ -26,7 +26,7 @@ post_upgrade() {
   fi
 
   if [ ! -f /etc/ssl/certs/java/cacerts ]; then
-    JAVA_HOME=/usr/lib/jvm/java-default-runtime /usr/bin/init-jks-keystore
+    JAVA_HOME=/usr/lib/jvm/${this_java} /usr/bin/init-jks-keystore
   fi
 }
 
