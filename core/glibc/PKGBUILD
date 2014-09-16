@@ -15,47 +15,49 @@
 noautobuild=1
 
 pkgname=glibc
-pkgver=2.19
-pkgrel=5
+pkgver=2.20
+pkgrel=2
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
 url="http://www.gnu.org/software/libc"
 license=('GPL' 'LGPL')
 groups=('base')
-depends=('linux-api-headers>=3.13' 'tzdata' 'filesystem>=2013.01')
-makedepends=('gcc>=4.8')
+depends=('linux-api-headers>=3.16' 'tzdata' 'filesystem>=2013.01')
++makedepends=('gcc>=4.9')
 backup=(etc/gai.conf
         etc/locale.gen
         etc/nscd.conf)
 options=('!strip' 'staticlibs' '!distcc')
 install=glibc.install
 source=(http://ftp.gnu.org/gnu/libc/${pkgname}-${pkgver}.tar.xz{,.sig}
-        glibc-2.19-xattr_header.patch
-        glibc-2.19-fix-sign-in-bsloww1-input.patch
-        glibc-2.19-tzselect-default.patch
+        glibc-2.20-getifaddrs_internal-segfault.patch
+        glibc-2.20-linux-3.16-additions.patch
+        glibc-2.20-do_ftell_wide-memleak.patch
         local-soname-hack.diff
         locale.gen.txt
         locale-gen)
-md5sums=('e26b8cc666b162f999404b03970f14e4'
+md5sums=('948a6e06419a01bd51e97206861595b0'
          'SKIP'
-         '39a4876837789e07746f1d84cd8cb46a'
-         '755a1a9d7844a5e338eddaa9a5d974cd'
-         'c772dc99ddd8032ecbf43884ae0cf42e'
+         '1c5d5c2017445c75dbc5c6d0c1e45ddb'
+         '8f1059f431b842e54b12bde689620df8'
+         'b50feeab78fa6ce0a8cfb41ee8dc1fd8'
          '905370139382428ef2b97b247c0970bf'
          '07ac979b6ab5eeb778d55f041529d623'
          '476e9113489f93b348b21e144b6a8fcf')
+validpgpkeys=('F37CDAB708E65EA183FD1AF625EF0A436C2A4AFF')  # Carlos O'Donell
 
 prepare() {
   cd ${srcdir}/${pkgname}-${pkgver}
 
-  # fix for {linux,sys}/xattr.h incompatibility - commit fdbe8eae
-  patch -p1 -i $srcdir/glibc-2.19-xattr_header.patch
-
-  # fix issues in sin/cos slow path calculation - commit ffe768a9
-  patch -p1 -i $srcdir/glibc-2.19-fix-sign-in-bsloww1-input.patch
-
-  # fix tzselect with missing TZDIR - commit 893b4f37/c72399fb
-  patch -p1 -i $srcdir/glibc-2.19-tzselect-default.patch
+  # fix segfault in getifaddrs_internal
+  # https://sourceware.org/ml/libc-alpha/2014-09/msg00312.html
+  patch -p1 -i $srcdir/glibc-2.20-getifaddrs_internal-segfault.patch
+  
+  # linux 3.16 additions - commit 0bd72468
+  patch -p1 -i $srcdir/glibc-2.20-linux-3.16-additions.patch
+  
+  # plug memory leak - commit 984c0ea9
+  patch -p1 -i $srcdir/glibc-2.20-do_ftell_wide-memleak.patch
 
   # ALARM: patch for hard-float ld-linux soname
   if [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]]; then
@@ -74,6 +76,7 @@ build() {
   [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf"
 
   echo "slibdir=/usr/lib" >> configparms
+  echo "rtlddir=/usr/lib" >> configparms
   echo "sbindir=/usr/bin" >> configparms
   echo "rootsbindir=/usr/bin" >> configparms
 
@@ -88,7 +91,7 @@ build() {
       --libdir=/usr/lib --libexecdir=/usr/lib \
       --with-headers=/usr/include \
       --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
-      --enable-add-ons=nptl,libidn,ports \
+      --enable-add-ons \
       --enable-obsolete-rpc \
       --enable-kernel=2.6.27 \
       --enable-bind-now --disable-profile \
@@ -107,7 +110,7 @@ build() {
   make
 
   # remove harding in preparation to run test-suite
-  sed -i '4,6d' configparms
+  sed -i '5,7d' configparms
 }
 
 check() {
@@ -115,9 +118,9 @@ check() {
   LDFLAGS=${LDFLAGS/--as-needed,/}
 
   cd ${srcdir}/glibc-build
-  # only acceptable testsuite error is some small libm ulp failures on i686 with gcc-4.9
-  # TODO: fix upstream and provide patch
-  make -k check || true
+
+  # tst-cleanupx4 failure on i686 is "expected"
+  make check || true
 }
 
 package() {
