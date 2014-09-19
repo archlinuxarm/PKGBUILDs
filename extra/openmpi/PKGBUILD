@@ -1,0 +1,71 @@
+# $Id$
+# Maintainer: Anatol Pomozov <anatol dot pomozov at gmail>
+# Contributor: Stéphane Gaudreault <stephane@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org
+#  - only use valgrind with v7
+
+pkgname=openmpi
+pkgver=1.8.2
+pkgrel=1.1
+pkgdesc='High performance message passing library (MPI)'
+arch=(i686 x86_64)
+url='http://www.open-mpi.org'
+license=(custom)
+depends=(libltdl hwloc)
+makedepends=(inetutils gcc-fortran)
+optdepends=('gcc-fortran: fortran support')
+options=(staticlibs)
+source=(http://www.open-mpi.org/software/ompi/v1.8/downloads/${pkgname}-${pkgver}.tar.bz2)
+sha1sums=('55067856b351cbeb5ebe8a430bfe0656115a04ed')
+
+[[ $CARCH = armv7h ]] && makedepends+=('valgrind')
+
+build() {
+   cd $pkgname-$pkgver
+
+   # Make sure we use the system ltdl library rather than the ones in the tarball
+   rm -r opal/libltdl
+
+   # enable valgrind and memchecker for v7
+   [[ $CARCH = armv7h ]] && CONFIG='--with-valgrind --enable-memchecker'
+
+   ./configure --prefix=/usr \
+               --sysconfdir=/etc/${pkgname} \
+               --enable-mpi-fortran=all \
+               --libdir=/usr/lib/${pkgname} \
+               --with-threads=posix \
+               --enable-smp-locks \
+               --enable-debug \
+               --enable-pretty-print-stacktrace \
+               --without-slurm \
+               --with-hwloc=/usr \
+               --with-libltdl=/usr  \
+               FC=/usr/bin/gfortran \
+               LDFLAGS="$LDFLAGS -Wl,-z,noexecstack" \
+               $CONFIG
+
+   make
+}
+
+package() {
+   cd $pkgname-$pkgver
+   make DESTDIR="$pkgdir" install
+
+   # FS#28583
+   install -d -m 755 "$pkgdir"/usr/lib/pkgconfig
+   for i in ompi-c.pc ompi-cxx.pc ompi-f77.pc ompi-f90.pc ompi.pc; do
+      ln -sf /usr/lib/openmpi/pkgconfig/$i "$pkgdir"/usr/lib/pkgconfig/
+   done
+
+   # Openmpi's otfinfo conflicts with the one from texlive
+   mv "$pkgdir"/usr/bin/otfinfo{,mpi}
+
+   # Remove dangling symlink and useless file
+   rm "$pkgdir"/usr/share/vampirtrace/config.log
+
+   install -d -m 755 "$pkgdir"/etc/ld.so.conf.d
+   echo "/usr/lib/$pkgname" > "$pkgdir"/etc/ld.so.conf.d/$pkgname.conf
+
+   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
