@@ -1,6 +1,6 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
 pkgname=targetcli-fb
-pkgver=2.1.fb36
+pkgver=2.1.fb37
 pkgrel=1
 pkgdesc="free branch of the targetcli LIO administration shell (iSCSI + Co)"
 arch=('any')
@@ -32,4 +32,4 @@ package() {
 }
 
 # vim:set ts=2 sw=2 et:
-sha256sums=('6fce7c702c7b121ee900cfacef77234bad012cd97f9b256852f179afe29974aa')
+sha256sums=('e7d11fa0a01cde443a1689966a62cab3e8a15ea500d03b0f9564b7ac44fa5a65')
