@@ -8,7 +8,7 @@
 #  - Moved .pc files to mesa-libgl that reference libraries in mesa-libgl
 
 pkgbase=mesa
-pkgname=('mesa' 'mesa-libgl')
+pkgname=('mesa' 'mesa-libgl' 'mesa-dri')
 pkgver=10.3.0
 pkgrel=3
 arch=('i686' 'x86_64')
