@@ -4,14 +4,13 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
-#  - Build v7h with -O1 instead of -O2
 #  - Removed libgles, libegl and khrplatform-devel from conflicts for marvell-libgfx compatibility.
-#  - Moved .pc files to mesa-libgl that referencing libraries in mesa-libgl
+#  - Moved .pc files to mesa-libgl that reference libraries in mesa-libgl
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl')
-pkgver=10.2.8
-pkgrel=1
+pkgver=10.3.0
+pkgrel=3
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm'  'libxdamage' 'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd'
@@ -19,9 +18,10 @@ makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3pr
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
-source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2{,.sig}
+#source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2{,.sig}
+source=(ftp://ftp.freedesktop.org/pub/mesa/10.3/MesaLib-${pkgver}.tar.bz2{,.sig}
         LICENSE)
-sha256sums=('1ef9ad3f241788d454f2ff8c9d65b6849dfc31c8fe91f70fd2930b81c8af1398'
+sha256sums=('0283bfe710fa449ed82e465cfa09612a269e19abb7e0382082608062ce7960b5'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
 
@@ -33,8 +33,8 @@ build() {
   ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-gallium-drivers=swrast \
-    --with-dri-drivers=swrast \
+    --with-gallium-drivers=nouveau,swrast \
+    --with-dri-drivers=nouveau,swrast \
     --with-egl-platforms=x11,drm,wayland \
     --enable-llvm-shared-libs \
     --enable-egl \
@@ -43,14 +43,13 @@ build() {
     --enable-gbm \
     --enable-gallium-llvm \
     --enable-shared-glapi \
+    --enable-glx \
     --enable-glx-tls \
     --enable-dri \
-    --enable-glx \
     --enable-osmesa \
     --enable-gles1 \
     --enable-gles2 \
     --enable-texture-float \
-    --enable-dri3 \
     --enable-omx \
     --with-clang-libdir=/usr/lib
     # --help
@@ -62,23 +61,45 @@ build() {
   make DESTDIR=${srcdir}/fakeinstall install
 }
 
+package_mesa-dri() {
+  pkgdesc="Mesa DRI drivers"
+  depends=('expat' 'libdrm' 'libtxc_dxtn')
+
+  install -m755 -d ${pkgdir}/etc
+  mv -v ${srcdir}/fakeinstall/etc/drirc ${pkgdir}/etc
+  
+  install -m755 -d ${pkgdir}/usr/lib/xorg/modules/dri
+  # nouveau-dri
+  mv -v ${srcdir}/fakeinstall/usr/lib/xorg/modules/dri/nouveau{,_vieux}_dri.so ${pkgdir}/usr/lib/xorg/modules/dri
+  # swrast
+  mv -v ${srcdir}/fakeinstall/usr/lib/xorg/modules/dri/{kms_,}swrast_dri.so ${pkgdir}/usr/lib/xorg/modules/dri
+   
+  install -m755 -d "${pkgdir}/usr/share/licenses/mesa-dri"
+  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa-dri/"
+}
+
 package_mesa() {
   pkgdesc="an open-source implementation of the OpenGL specification"
-  depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'systemd' 'elfutils' 'llvm-libs')
+  depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'systemd' 'elfutils' 
+           'libomxil-bellagio' 'llvm-libs' 'mesa-dri')
   optdepends=('opengl-man-pages: for the OpenGL API man pages')
   provides=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
   conflicts=('libglapi' 'osmesa' 'libgbm')
   replaces=('libglapi' 'osmesa' 'libgbm' 'libgles' 'libegl' 'khrplatform-devel')
 
-  mv -v ${srcdir}/fakeinstall/* ${pkgdir}
+  install -m755 -d ${pkgdir}/usr/lib
+  mv -v ${srcdir}/fakeinstall/usr/lib/bellagio  ${pkgdir}/usr/lib
+  mv -v ${srcdir}/fakeinstall/usr/lib/lib{OSMesa,gbm,glapi,wayland-egl}.so* ${pkgdir}/usr/lib/
+  # FS#41337
+  #mv -v ${srcdir}/fakeinstall/usr/lib/gbm/gbm_gallium_drm* ${pkgdir}/usr/lib/gbm/
+
+  mv -v ${srcdir}/fakeinstall/usr/include ${pkgdir}/usr
+  
   install -m755 -d ${pkgdir}/usr/lib/mesa
   # move libgl/EGL/glesv*.so to not conflict with blobs - may break .pc files ?
-  mv -v ${pkgdir}/usr/lib/libGL.so* 	${pkgdir}/usr/lib/mesa/
-  mv -v ${pkgdir}/usr/lib/libEGL.so* 	${pkgdir}/usr/lib/mesa/
-  mv -v ${pkgdir}/usr/lib/libGLES*.so*	${pkgdir}/usr/lib/mesa/
-
-  # remove .pc files that refer to libraries packaged in mesa-libgl
-  rm ${pkgdir}/usr/lib/pkgconfig/{gl,gles{v1_cm,v2},egl}.pc
+  mv -v ${srcdir}/fakeinstall/usr/lib/libGL.so* 	${pkgdir}/usr/lib/mesa/
+  mv -v ${srcdir}/fakeinstall/usr/lib/libEGL.so* 	${pkgdir}/usr/lib/mesa/
+  mv -v ${srcdir}/fakeinstall/usr/lib/libGLES*.so*	${pkgdir}/usr/lib/mesa/
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa/"
@@ -86,9 +107,12 @@ package_mesa() {
 
 package_mesa-libgl() {
   pkgdesc="Mesa 3-D graphics library"
-  depends=("mesa=${pkgver}")
-  provides=("libgl=${pkgver}")
+  depends=('mesa')
+  provides=('libgl')
   replaces=('libgl')
+
+  install -m755 -d ${pkgdir}/usr/lib
+  mv -v ${srcdir}/fakeinstall/usr/lib/pkgconfig ${pkgdir}/usr/lib/
  
   # See FS#26284
   install -m755 -d "${pkgdir}/usr/lib/xorg/modules/extensions"
@@ -109,10 +133,6 @@ package_mesa-libgl() {
   ln -s /usr/lib/mesa/libGLESv2.so.2.0.0 ${pkgdir}/usr/lib/libGLESv2.so.2.0.0
   ln -s libGLESv2.so.2.0.0               ${pkgdir}/usr/lib/libGLESv2.so.2
   ln -s libGLESv2.so.2.0.0               ${pkgdir}/usr/lib/libGLESv2.so
-
-  # install .pc files
-  install -m755 -d "${pkgdir}/usr/lib/pkgconfig"
-  install -m644 ${srcdir}/?esa-*/src/{mesa/gl.pc,mapi/{es1api/glesv1_cm.pc,es2api/glesv2.pc},egl/main/egl.pc} "${pkgdir}/usr/lib/pkgconfig"
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa-libgl"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa-libgl/"
