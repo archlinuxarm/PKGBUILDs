@@ -21,13 +21,13 @@
 buildarch=4
 
 pkgname=chromium
-pkgver=37.0.2062.120
-pkgrel=2
+pkgver=38.0.2125.101
+pkgrel=1
 pkgdesc="The open-source project behind Google Chrome, an attempt at creating a safer, faster, and more stable browser"
 arch=('armv6h' 'armv7h')
 url="http://www.chromium.org/"
 license=('BSD')
-depends=('gtk2' 'nss' 'alsa-lib' 'xdg-utils' 'bzip2' 'libevent' 'libxss'
+depends=('gtk2' 'nss' 'alsa-lib' 'xdg-utils' 'bzip2' 'libevent' 'libxss' 'icu'
          'libexif' 'libgcrypt' 'ttf-font' 'systemd' 'dbus' 'flac' 'snappy'
          'speech-dispatcher' 'pciutils' 'libpulse' 'harfbuzz'
          'desktop-file-utils' 'hicolor-icon-theme')
@@ -44,18 +44,14 @@ install=chromium.install
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
         chromium.desktop
         chromium.default
-        chromium-sanitize-referrer-in-context-menus.patch
-        chromium-use-correct-referrer-policy.patch
         chromium.sh
         arm-webrtc-fix.patch
         chromium-arm-r0.patch
         skia.patch
         v6-ffmpeg.patch)
-sha256sums=('b3073758b6caf384d30de20ba7514ee52cce5c1460bc768cd28d15f53f0c6efb'
+sha256sums=('d3303519ab471a3bc831e9b366e64dc2fe651894e52ae5d1e74de60ee2a1198a'
             '09bfac44104f4ccda4c228053f689c947b3e97da9a4ab6fa34ce061ee83d0322'
             '478340d5760a9bd6c549e19b1b5d1c5b4933ebf5f8cfb2b3e2d70d07443fe232'
-            'c5d793dbaaaee8455ffc5cf008239b0b0bb8fe32e2e7b2b44d181cebb432f28e'
-            '9f5b73070b1d360c1d7915115c6829e11361d243e424c24179ca39b28ae03f85'
             '4999fded897af692f4974f0a3e3bbb215193519918a1fa9b31ed51e74a2dccb9'
             '9db0f01517c52e3236ff52e8a664840542a19144a54923ae6aabea3dcfa92c52'
             'df4be49770d508b772f98eda9fc5f37fa71d4c0459437e12f7f3db5892aa1611'
@@ -83,13 +79,10 @@ prepare() {
   # Fix icu build on ARM
   patch -Np0 -i ../chromium-arm-r0.patch
 
-  # URL request check fails for save-as command (FS#41033)
-  # https://code.google.com/p/chromium/issues/detail?id=357473
-  patch -Np1 <../chromium-sanitize-referrer-in-context-menus.patch
-
-  # Make sure to use the correct referrer policy in the FrameFetchContext
-  # https://code.google.com/p/chromium/issues/detail?id=407510
-  patch -d third_party/WebKit -Np1 <../chromium-use-correct-referrer-policy.patch
+  # Remove bundled ICU; its header files appear to get picked up instead of
+  # the system ones, leading to errors during the final link stage
+  # https://groups.google.com/a/chromium.org/d/topic/chromium-packagers/BNGvJc08B6Q
+  find third_party/icu -type f \! -regex '.*\.\(gyp\|gypi\|isolate\)' -delete
 
   MAKEFLAGS=-j4
 
@@ -142,6 +135,7 @@ fi
     -Dlinux_use_bundled_binutils=0
     -Dlinux_use_bundled_gold=0
     -Dlinux_use_gold_flags=0
+    -Dicu_use_data_file_flag=0
     -Drelease_extra_cflags="$CFLAGS -DUSE_EABI_HARDFLOAT"
     -Dlibspeechd_h_prefix=speech-dispatcher/
     -Dffmpeg_branding=Chrome
@@ -151,6 +145,7 @@ fi
     -Duse_system_protobuf=0
     -Duse_system_ffmpeg=0
     -Duse_system_harfbuzz=1
+    -Duse_system_icu=1
     -Duse_system_libevent=1
     -Duse_system_libjpeg=1
     -Duse_system_libpng=1
@@ -174,9 +169,6 @@ fi
     -Darm_float_abi=hard
     -Dsysroot=
     ${arch_specific_flags})
-
-  # https://code.google.com/p/chromium/issues/detail?id=386097
-  third_party/libaddressinput/chromium/tools/update-strings.py
 
   # Re-configure bundled ffmpeg.
   pushd third_party/ffmpeg > /dev/null || exit 1
@@ -208,7 +200,7 @@ package() {
   # Allow users to override command-line options
   install -Dm644 "$srcdir/chromium.default" "$pkgdir/etc/chromium/default"
 
-  cp -a out/Release/locales out/Release/icudtl.dat "$pkgdir/usr/lib/chromium/"
+  cp -a out/Release/locales "$pkgdir/usr/lib/chromium/"
 
   install -Dm644 out/Release/chrome.1 "$pkgdir/usr/share/man/man1/chromium.1"
 
