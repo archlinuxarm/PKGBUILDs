@@ -1,0 +1,72 @@
+# $Id: PKGBUILD 224438 2014-10-15 16:56:29Z andrea $
+# Maintainer: Andrea Scarpino <andrea@archlinux.org>
+
+# ALARM on armv6h: Arno Rehn <arno@arnorehn.de>
+# - Find Broadcom's VideoCore GLES and EGL libraries instead of mesa's libs.
+# - Remove forced compilation of the EGLonX part (not available on the r-pi)
+# - Fix general compilation errors.
+# - Proper upstream patches for the above are pending.
+
+pkgname=kwin
+pkgver=5.1.0.1
+_pkgver=5.1.0
+pkgrel=1.1
+pkgdesc='KDE Window manager'
+arch=('i686' 'x86_64')
+url='https://projects.kde.org/projects/kde/workspace/kwin'
+license=('LGPL')
+depends=('qt5-multimedia' 'plasma-framework' 'knewstuff' 'libxcursor' 'kinit'
+         'hicolor-icon-theme' 'libepoxy')
+makedepends=('extra-cmake-modules' 'qt5-tools' 'kdoctools')
+groups=('plasma-next')
+install=${pkgname}.install
+conflicts=('kdebase-workspace')
+source=("http://download.kde.org/stable/plasma/5.1.0/${pkgname}-${pkgver}.tar.xz"
+        "rpi_fix_build.patch"
+        "kwin_remove_eglonxbackend.patch")
+md5sums=('ab52f7ad3630b4da94b5e5dd09358e66'
+         '3e11a42013f03d55b4b730463bdd6fe0'
+         '28a1e8bd701a8fd1421e6ec238b4c522')
+
+prepare() {
+  mkdir -p build
+
+  cd "${srcdir}/${pkgname}-${_pkgver}"
+
+  # Raspberry Pi
+  if [ "$CARCH" == 'armv6h' ]; then
+    patch -p1 -i "${srcdir}/rpi_fix_build.patch"
+    patch -p1 -i "${srcdir}/kwin_remove_eglonxbackend.patch"
+  fi
+}
+
+build() {
+  # Raspberry Pi
+  if [ "$CARCH" == 'armv6h' ]; then
+    VC_INCLUDE_DIR="/opt/vc/include;/opt/vc/include/interface/vcos/pthreads;/opt/vc/include/interface/vmcs_host/linux"
+    VC_EGL_LIB="/opt/vc/lib/libEGL.so"
+    VC_GLESv2_LIB="/opt/vc/lib/libGLESv2.so"
+
+    CMAKE_EXTRA_CONFIG_OPTIONS="-DOPENGLES_EGL_INCLUDE_DIR=$VC_INCLUDE_DIR \
+                                -DOPENGLES_EGL_LIBRARY=$VC_EGL_LIB \
+                                -DOPENGLES_INCLUDE_DIR=$VC_INCLUDE_DIR \
+                                -DOPENGLES_LIBRARY=$VC_GLESv2_LIB"
+  fi
+
+  cd build
+  cmake ../${pkgname}-5.1.0 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_INSTALL_DIR=lib \
+    -DKDE_INSTALL_USE_QT_SYS_PATHS=ON \
+    -DQML_INSTALL_DIR=lib/qt/qml \
+    -DBUILD_TESTING=OFF \
+    -DSYSCONF_INSTALL_DIR=/etc \
+    $CMAKE_EXTRA_CONFIG_OPTIONS
+  make
+}
+
+package() {
+  cd build
+  make DESTDIR="${pkgdir}" install
+}
