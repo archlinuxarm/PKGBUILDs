@@ -1,0 +1,117 @@
+# Maintainer: Andreas Radke <andyrtr@archlinux.org>
+# Maintainer: Guillaume ALAUX <guillaume@archlinux.org>
+
+# ALARM: Jason Plum <jplum@archlinuxarm.org>
+#  - v5,v6h - drop chromium
+#  - v5 - drop chromium
+
+pkgbase=icedtea-web
+pkgname=('icedtea-web' 'icedtea-web-doc')
+pkgver=1.5.1
+pkgrel=3
+arch=('i686' 'x86_64')
+url='http://icedtea.classpath.org/wiki/IcedTea-Web'
+license=('GPL2')
+# TODO do we still need 'chromium' and '--with-chromium'? What does it do?
+# https://www.java.com/en/download/faq/chrome.xml
+makedepends=('java-environment-openjdk' 'zip' 'libxtst' 'npapi-sdk' 'rhino' 'junit'
+             'epiphany')
+optdepends=('rhino: for using proxy auto config files')
+# Due to broken path names in the tarball that fails with LANG=C in our chroot
+noextract=${pkgbase}-${pkgver}.tar.gz
+source=(http://icedtea.classpath.org/download/source/${pkgbase}-${pkgver}.tar.gz)
+sha256sums=('03f16356fa84564f1ae32286e0a090a464c87ec123b40602dcea925757900195')
+
+case $CARCH in
+  armv6h)
+    makedepends+=('firefox')
+    ;;
+  armv7h)
+    makedepends+=('firefox' 'chromium')
+    ;;
+esac
+
+prepare() {
+  cd "${srcdir}"
+  LANG=en_US.UTF-8 bsdtar -x -f "${srcdir}"/${pkgbase}-${pkgver}.tar.gz
+}
+
+build() {
+  _arm_configure=""
+  case $CARCH in 
+    armv6h)
+      _arm_configure="--with-firefox=/usr/bin/firefox"
+      ;;
+    armv7h)
+      _arm_configure="\
+        --with-firefox=/usr/bin/firefox \
+        --with-chromium=/usr/bin/chromium"
+      ;;
+  esac
+
+
+  cd "${srcdir}"/${pkgbase}-${pkgver}
+  ./configure \
+      --prefix=/usr/share/${pkgbase} \
+      --datarootdir=/usr/share \
+      --with-jdk-home=/usr/lib/jvm/default \
+      --with-jre-home=/usr/lib/jvm/default-runtime \
+      --with-java=/usr/bin/java \
+      --with-browser-tests \
+     $_arm_configure \
+      --with-epiphany=/usr/bin/epiphany
+   make
+}
+
+#check() {
+#  cd "${srcdir}"/${pkgbase}-${pkgver}
+#  # as more tests have been added some are expectged to fail
+#  # see http://mail.openjdk.java.net/pipermail/distro-pkg-dev/2012-March/017566.html
+#  make -k check
+#}
+
+
+package_icedtea-web() {
+
+  pkgdesc='Free web browser plugin to run applets written in Java and an implementation of Java Web Start'
+  depends=('java-runtime-openjdk' 'desktop-file-utils')
+  provides=('java-web-start')
+  replaces=('icedtea-web-java7')
+  install=install_${pkgname}.sh
+
+  cd "${srcdir}"/${pkgbase}-${pkgver}
+  # possible make target (see bottom of Makefile.am: install-exec-local install-data-local
+  make DESTDIR="${pkgdir}" install-exec-local install-data-local
+
+  # Install desktop files.
+  install -m 755 -d "${pkgdir}"/usr/share/{applications,pixmaps}
+  install -m 644 javaws.png "${pkgdir}"/usr/share/pixmaps
+  install -m 644 {javaws,itweb-settings}.desktop "${pkgdir}"/usr/share/applications
+  # remove splitted doc files
+  rm -rf "${pkgdir}"/usr/share/doc
+
+  # link binaries into /usr/bin + jre/bin
+  install -m 755 -d "${pkgdir}"/usr/bin
+  pushd "${pkgdir}"/usr/share/${pkgbase}/bin
+  for file in *; do
+    ln -sf /usr/share/${pkgbase}/bin/${file} "${pkgdir}"/usr/bin
+  done
+  popd
+
+  # link the mozilla-plugin - test it here http://www.java.com/en/download/help/testvm.xml
+  install -m 755 -d "${pkgdir}"/usr/lib/mozilla/plugins/
+  ln -sf /usr/share/${pkgbase}/lib/IcedTeaPlugin.so "${pkgdir}"/usr/lib/mozilla/plugins/
+}
+
+package_icedtea-web-doc() {
+
+  pkgdesc='icedtea-web browser plugin + Java WebStart - documentation files'
+  replaces=('icedtea-web-java7-doc')
+
+  cd "${srcdir}"/${pkgbase}-${pkgver}
+  make DESTDIR="${pkgdir}" install-data-local
+  # remove javaws about and man page
+  rm -rf "${pkgdir}"/usr/lib
+  rm -rf "${pkgdir}"/usr/share/man
+  rm -rf "${pkgdir}"/usr/share/icedtea-web # conflicting and unneeded file it seems
+}
