@@ -1,41 +1,45 @@
-# $Id: PKGBUILD 90942 2013-05-16 02:47:08Z jconder $
+# $Id$
 # Maintainer: Jonathan Conder <jonno.conder@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - --disable-strict, ensure our cflags are used
 
 pkgbase='packagekit'
-pkgname=('packagekit' 'packagekit-qt2' 'python2-packagekit')
+pkgname=('packagekit' 'packagekit-qt2' 'python2-packagekit' 'python-packagekit')
 pkgver=0.7.6
-pkgrel=11
+pkgrel=12
 pkgdesc="A system designed to make installation and updates of packages easier."
 arch=('i686' 'x86_64')
 url="http://www.packagekit.org"
 license=('GPL')
 makedepends=('dbus-glib' 'gobject-introspection' 'gtk-doc' 'intltool'
              'networkmanager' 'pacman'  'pm-utils' 'polkit' 'python2' 'qt4'
-             'shared-mime-info' 'sqlite' 'udev')
-options=('!libtool')
-source=("http://www.packagekit.org/releases/PackageKit-$pkgver.tar.xz"
+             'shared-mime-info' 'sqlite' 'udev' 'python')
+source=("http://www.freedesktop.org/software/PackageKit/releases/PackageKit-$pkgver.tar.xz"
         'adopt.patch'
 	'alpm.patch'
 	'libarchive.patch')
 sha256sums=('82c0a553075d49add3c4f58e6e93f7f3613938809a4b8e36f46476e86981b45d'
             'd0ee8580202a878571dddd470017731299c63e5c5120afe881bb41b9544322b8'
-	    'c7f6da04f5b8f09e6d884ae4f480c064eae10de1d2528bf14d2f55b34e472c23'
-	    '0d3798c8992afdc0930aa271b3e44deb55c046ab4adee25b4ec4c33bcdd950e2')
+            'c7f6da04f5b8f09e6d884ae4f480c064eae10de1d2528bf14d2f55b34e472c23'
+            '0d3798c8992afdc0930aa271b3e44deb55c046ab4adee25b4ec4c33bcdd950e2')
 
 prepare() {
   cd "$srcdir/PackageKit-$pkgver"
 
   sed -i 's@SUBDIRS = test@SUBDIRS =@' 'backends/Makefile.in'
-  sed -i 's@python @python2 @' 'lib/python/packagekit/Makefile.in'
-  sed -i 's@bin/python@bin/python2@' 'lib/python/packagekit/'*.py
-
+  sed -i 's@-Werror@@' configure.ac
   patch -Np1 -i "$srcdir/adopt.patch"
   patch -Np1 -i "$srcdir/alpm.patch"
   patch -Np1 -i "$srcdir/libarchive.patch"
   sed -i 's@sbin_PROGRAMS@bin_PROGRAMS@' 'contrib/device-rebind/Makefile.am'
+
+  cd "$srcdir"
+  cp -r PackageKit-$pkgver PackageKit-$pkgver-python3
+
+  cd "$srcdir/PackageKit-$pkgver"
+  sed -i 's@python @python2 @' 'lib/python/packagekit/Makefile.in'
+  sed -i 's@bin/python@bin/python2@' 'lib/python/packagekit/'*.py
 }
 
 build() {
@@ -61,7 +65,31 @@ build() {
               --disable-dummy \
               --enable-alpm \
               --with-default-backend=alpm
-  make -s CFLAGS="$CFLAGS -D_FILE_OFFSET_BITS=64 -O2"
+  make -s CFLAGS="$CFLAGS -D_FILE_OFFSET_BITS=64 -O2 -Wno-unused-local-typedefs -Wno-deprecated-declarations -Wno-suggest-attribute=format"
+
+ cd "$srcdir/PackageKit-$pkgver-python3"
+
+  export PYTHON=/usr/bin/python
+  ./autogen.sh --prefix=/usr \
+              --sysconfdir=/etc \
+              --localstatedir=/var \
+              --libexecdir=/usr/lib/PackageKit \
+              --disable-strict \
+              --disable-static \
+              --disable-gtk-doc \
+              --disable-tests \
+              --disable-local \
+              --disable-browser-plugin \
+              --disable-gstreamer-plugin \
+              --disable-gtk-module \
+              --disable-command-not-found \
+              --disable-cron \
+              --disable-debuginfo-install \
+              --enable-pm-utils \
+              --disable-dummy \
+              --enable-alpm \
+              --with-default-backend=alpm
+  make -s CFLAGS="$CFLAGS -D_FILE_OFFSET_BITS=64 -O2 -Wno-unused-local-typedefs -Wno-deprecated-declarations -Wno-suggest-attribute=format"
 }
 
 package_packagekit() {
@@ -103,11 +131,20 @@ package_packagekit-qt2() {
 
 package_python2-packagekit() {
   depends=('packagekit' 'python2')
-  pkgdesc=('Python bindings for PackageKit')
+  pkgdesc=('Python 2 bindings for PackageKit')
   conflicts=('packagekit-python')
   replaces=('packagekit-python')
 
   cd "$srcdir/PackageKit-$pkgver/lib/python"
+
+  make DESTDIR="$pkgdir" install
+}
+
+package_python-packagekit() {
+  depends=('packagekit' 'python')
+  pkgdesc=('Python 3 bindings for PackageKit')
+
+  cd "$srcdir/PackageKit-$pkgver-python3/lib/python"
 
   make DESTDIR="$pkgdir" install
 }
