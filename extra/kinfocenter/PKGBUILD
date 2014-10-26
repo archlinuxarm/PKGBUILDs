@@ -1,0 +1,64 @@
+# $Id: PKGBUILD 224713 2014-10-18 08:27:20Z andrea $
+# Maintainer: Andrea Scarpino <andrea@archlinux.org>
+# Contributor: Antonio Rojas
+
+# ALARM on armv6h: Arno Rehn <arno@arnorehn.de>
+# - Disable the failing EGLonX parts (not available on the R-Pi). Needs better upstream support.
+
+pkgname=kinfocenter
+pkgver=5.1.0.1
+_pkgver=5.1.0
+pkgrel=1.1
+pkgdesc='KInfocenter'
+arch=('i686' 'x86_64')
+url='https://projects.kde.org/projects/kde/workspace/kinfocenter'
+license=('LGPL')
+depends=('kdelibs4support' 'kcmutils' 'pciutils' 'glu' 'libraw1394' 'kwayland')
+makedepends=('extra-cmake-modules' 'kdoctools' 'python' 'plasma-framework')
+conflicts=('kdebase-workspace')
+groups=('plasma-next')
+source=("http://download.kde.org/stable/plasma/5.1.0/$pkgname-$pkgver.tar.xz"
+        "kinfocenter_disable_eglonx.patch")
+md5sums=('8d258cd1cb691027b8ccaa95695920a5'
+         'a43a82b8be9aea5a4666b6372eecc7d2')
+
+prepare() {
+  mkdir -p build
+
+  cd "${srcdir}/${pkgname}-${_pkgver}"
+
+  # Raspberry Pi
+  if [ "$CARCH" == 'armv6h' ]; then
+    patch -p1 -i "${srcdir}/kinfocenter_disable_eglonx.patch"
+  fi
+}
+
+build() {
+  # Raspberry Pi
+  if [ "$CARCH" == 'armv6h' ]; then
+    VC_INCLUDE_DIR="/opt/vc/include;/opt/vc/include/interface/vcos/pthreads;/opt/vc/include/interface/vmcs_host/linux"
+    VC_EGL_LIB="/opt/vc/lib/libEGL.so"
+    VC_GLESv2_LIB="/opt/vc/lib/libGLESv2.so"
+
+    CMAKE_EXTRA_CONFIG_OPTIONS="-DOPENGLES_EGL_INCLUDE_DIR=$VC_INCLUDE_DIR \
+                                -DOPENGLES_EGL_LIBRARY=$VC_EGL_LIB \
+                                -DOPENGLES_INCLUDE_DIR=$VC_INCLUDE_DIR \
+                                -DOPENGLES_LIBRARY=$VC_GLESv2_LIB"
+  fi
+
+  cd build
+  cmake ../$pkgname-5.1.0 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIB_INSTALL_DIR=lib \
+    -DSYSCONF_INSTALL_DIR=/etc \
+    -DKDE_INSTALL_USE_QT_SYS_PATHS=ON \
+    -DBUILD_TESTING=OFF \
+    $CMAKE_EXTRA_CONFIG_OPTIONS
+  make
+}
+
+package() {
+  cd build
+  make DESTDIR="${pkgdir}" install
+}
