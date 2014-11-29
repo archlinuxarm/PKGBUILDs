@@ -10,7 +10,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'mesa-dri')
 pkgver=10.3.4
-pkgrel=1
+pkgrel=1.1
 arch=('i686' 'x86_64')
 makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm'  'libxdamage' 'libvdpau' 'wayland' 'elfutils' 'llvm' 'systemd'
@@ -94,6 +94,9 @@ package_mesa() {
   #mv -v ${srcdir}/fakeinstall/usr/lib/gbm/gbm_gallium_drm* ${pkgdir}/usr/lib/gbm/
 
   mv -v ${srcdir}/fakeinstall/usr/include ${pkgdir}/usr
+
+  install -m755 -d ${pkgdir}/usr/lib/pkgconfig
+  mv -v ${srcdir}/fakeinstall/usr/lib/pkgconfig/{osmesa,gbm,dri,wayland-egl}.pc ${pkgdir}/usr/lib/pkgconfig
   
   install -m755 -d ${pkgdir}/usr/lib/mesa
   # move libgl/EGL/glesv*.so to not conflict with blobs - may break .pc files ?
