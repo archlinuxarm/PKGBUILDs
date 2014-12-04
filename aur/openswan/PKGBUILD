@@ -1,7 +1,8 @@
-# Contributor: xjpvictor Huang <ke [AT] xjpvictor [DOT] info>
+# Contributor: uuwe
+# Maintainer: xjpvictor Huang <ke [AT] xjpvictor [DOT] info>
 pkgname=openswan
 pkgver=2.6.42
-pkgrel=1
+pkgrel=2
 pkgdesc="Open Source implementation of IPsec for the Linux operating system"
 url="http://www.openswan.org"
 license=('GPL' 'custom')
@@ -15,30 +16,41 @@ backup=(etc/ipsec.conf \
 source=(http://download.openswan.org/openswan/openswan-$pkgver.tar.gz
         openswan.service)
 
-package() {
-  # Create /etc/rc.d for init script, and license directory
-  mkdir -p $pkgdir/{etc/rc.d,usr/share/licenses/openswan}
-
-  cd $srcdir/openswan-$pkgver
+prepare() {
+  cd $srcdir/${pkgname}-$pkgver
 
   # Change install paths to Arch defaults
   sed -i 's|/usr/local|/usr|;s|libexec/ipsec|lib/openswan|;s|)/sbin|)/bin|' Makefile.inc
 
+  # Replace invalid init script paths with systemd script path
+  sed -i 's/^INC_RCDIRS.*/INC_RCDIRS\?\=\/usr\/lib\/systemd\/scripts/' Makefile.inc
+}
+
+build() {
+  cd $srcdir/${pkgname}-$pkgver
   make USE_XAUTH=true USE_OBJDIR=true programs || return 1
-  make DESTDIR=$pkgdir install
+}
+
+package() {
+  cd $srcdir/${pkgname}-$pkgver
+
+  # Pre-create init script directory
+  mkdir -p $pkgdir/usr/lib/systemd/scripts/
+
+  make DESTDIR="${pkgdir}" install
 
   # Change permissions in /var
   chmod 700 $pkgdir/var/run/pluto
 
   # Copy License
-  cp LICENSE $pkgdir/usr/share/licenses/openswan
+  install -Dm644 LICENSE $pkgdir/usr/share/licenses/openswan/LICENSE
 
   # Install init script
   install -Dm644 ../openswan.service $pkgdir/usr/lib/systemd/system/openswan.service
-  mkdir $pkgdir/usr/lib/systemd/scripts/
-  mv $pkgdir/etc/rc.d/ipsec $pkgdir/usr/lib/systemd/scripts/ipsec
+
   # fix manpages
   mv $pkgdir/usr/man $pkgdir/usr/share/
+
   # fix python2
   sed -i '1s|python|python2|' $pkgdir/usr/lib/openswan/verify
 }
