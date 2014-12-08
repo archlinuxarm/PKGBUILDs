@@ -1,0 +1,122 @@
+
+# HG changeset patch
+# User Steve Singer <steve@ssinger.info>
+# Date 1414612994 25200
+# Node ID 273bcc4d6e9b93e3a48b286b4f3f935c18176525
+# Parent  33d45705a4d10668408b47cb3c13322ea7496841
+Bug 1085151 - avoid char (-1) in FilterList to compile on powerpc, r=rkent, a=rkent
+
+diff --git a/mailnews/base/search/src/nsMsgFilterList.cpp b/mailnews/base/search/src/nsMsgFilterList.cpp
+--- a/mailnews/base/search/src/nsMsgFilterList.cpp
++++ b/mailnews/base/search/src/nsMsgFilterList.cpp
+@@ -27,16 +27,18 @@
+ 
+ // unicode "%s" format string
+ static const char16_t unicodeFormatter[] = {
+     (char16_t)'%',
+     (char16_t)'s',
+     (char16_t)0,
+ };
+ 
++// Marker for EOF or failure during read
++#define EOF_CHAR (char) 0xFF
+ 
+ nsMsgFilterList::nsMsgFilterList() :
+     m_fileVersion(0)
+ {
+   m_loggingEnabled = false;
+   m_startWritingToBuffer = false;
+   m_temporaryList = false;
+   m_curFilter = nullptr;
+@@ -378,21 +380,21 @@ static const unsigned int sNumFilterFile
+ 
+ // If we want to buffer file IO, wrap it in here.
+ char nsMsgFilterList::ReadChar(nsIInputStream *aStream)
+ {
+   char  newChar;
+   uint32_t bytesRead;
+   nsresult rv = aStream->Read(&newChar, 1, &bytesRead);
+   if (NS_FAILED(rv) || !bytesRead)
+-    return -1;
++    return EOF_CHAR;
+   uint64_t bytesAvailable;
+   rv = aStream->Available(&bytesAvailable);
+   if (NS_FAILED(rv))
+-    return -1;
++    return EOF_CHAR;
+   else
+   {
+     if (m_startWritingToBuffer)
+       m_unparsedFilterBuffer.Append(newChar);
+     return newChar;
+   }
+ }
+ 
+@@ -417,17 +419,17 @@ char nsMsgFilterList::LoadAttrib(nsMsgFi
+   char  attribStr[100];
+   char  curChar;
+   attrib = nsIMsgFilterList::attribNone;
+ 
+   curChar = SkipWhitespace(aStream);
+   int i;
+   for (i = 0; i + 1 < (int)(sizeof(attribStr)); )
+   {
+-    if (curChar == (char) -1 || (!(curChar & 0x80) && isspace(curChar)) || curChar == '=')
++    if (curChar == EOF_CHAR || (!(curChar & 0x80) && isspace(curChar)) || curChar == '=')
+       break;
+     attribStr[i++] = curChar;
+     curChar = ReadChar(aStream);
+   }
+   attribStr[i] = '\0';
+   for (unsigned int tableIndex = 0; tableIndex < sNumFilterFileAttribTable; tableIndex++)
+   {
+     if (!PL_strcasecmp(attribStr, FilterFileAttribTable[tableIndex].attribName))
+@@ -476,26 +478,26 @@ nsresult nsMsgFilterList::LoadValue(nsCS
+       else
+       {
+         valueStr += curChar;
+         curChar = nextChar;
+       }
+     }
+     else
+     {
+-      if (curChar == (char) -1 || curChar == '"' || curChar == '\n' || curChar == '\r')
++      if (curChar == EOF_CHAR || curChar == '"' || curChar == '\n' || curChar == '\r')
+       {
+         value += valueStr;
+         break;
+       }
+     }
+     valueStr += curChar;
+     curChar = ReadChar(aStream);
+   }
+-  while (curChar != -1);
++  while (curChar != EOF_CHAR);
+   return NS_OK;
+ }
+ 
+ nsresult nsMsgFilterList::LoadTextFilters(nsIInputStream *aStream)
+ {
+   nsresult  err = NS_OK;
+   uint64_t bytesAvailable;
+ 
+@@ -508,17 +510,17 @@ nsresult nsMsgFilterList::LoadTextFilter
+   // We'd really like to move lot's of these into the objects that they refer to.
+   do
+   {
+     nsAutoCString value;
+     nsresult intToStringResult;
+ 
+     char curChar;
+     curChar = LoadAttrib(attrib, bufStream);
+-    if (curChar == (char) -1)  //reached eof
++    if (curChar == EOF_CHAR)  //reached eof
+       break;
+     err = LoadValue(value, bufStream);
+     if (NS_FAILED(err))
+       break;
+ 
+     switch(attrib)
+     {
+     case nsIMsgFilterList::attribNone:
+
