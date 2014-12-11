@@ -25,7 +25,7 @@ post_install() {
   esac
 
   if [ ! -f /etc/ssl/certs/java/cacerts ]; then
-     /usr/bin/init-jks-keystore
+     /usr/bin/update-ca-trust
   fi
 }
 
@@ -35,7 +35,7 @@ post_upgrade() {
   fi
 
   if [ ! -f /etc/ssl/certs/java/cacerts ]; then
-    /usr/bin/init-jks-keystore
+    /usr/bin/update-ca-trust
   fi
 }
 
