@@ -30,34 +30,36 @@ pkgname=('qt5-base'
          'qt5-svg'
          'qt5-tools'
          'qt5-translations'
+         'qt5-wayland'
+         'qt5-webchannel'
+         'qt5-webengine'
          'qt5-webkit'
          'qt5-websockets'
          'qt5-x11extras'
          'qt5-xmlpatterns')
-pkgver=5.3.2
-pkgrel=2
+pkgver=5.4.0
+pkgrel=1
 arch=('i686' 'x86_64')
 url='http://qt-project.org/'
 license=('GPL3' 'LGPL' 'FDL' 'custom')
 makedepends=('libxcb' 'xcb-proto' 'xcb-util' 'xcb-util-image' 'xcb-util-wm' 'xcb-util-keysyms'
-            'mesa' 'at-spi2-core' 'alsa-lib' 'gst-plugins-base-libs' 'gstreamer0.10-base-plugins' 'libmng'
+            'mesa' 'at-spi2-core' 'alsa-lib' 'gst-plugins-base-libs' 'gstreamer0.10-base-plugins'
             'libjpeg-turbo' 'cups' 'libpulse' 'hicolor-icon-theme' 'desktop-file-utils'
-            'postgresql-libs' 'libmariadbclient' 'sqlite' 'unixodbc'
-            'python2' 'ruby' 'gperf' 'libxslt' 'libxcomposite' 'fontconfig'
-            'openal' 'gtk2' 'libxkbcommon-x11' 'python' 'mtdev' 'harfbuzz' 'icu')
+            'postgresql-libs' 'libmariadbclient' 'sqlite' 'unixodbc' 'libfbclient' 'libmng'
+            'python2' 'ruby' 'gperf' 'libxslt' 'libxcomposite' 'fontconfig' 'bluez-libs'
+            'openal' 'gtk2' 'libxkbcommon-x11' 'mtdev' 'harfbuzz' 'libwebp' 'leveldb'
+            'geoclue' 'pciutils' 'nss' 'gstreamer0.10-bad')
 groups=('qt' 'qt5')
 _pkgfqn="qt-everywhere-opensource-src-${pkgver}"
-source=("http://download.qt-project.org/official_releases/qt/5.3/${pkgver}/single/${_pkgfqn}.tar.xz"
+source=("http://download.qt-project.org/official_releases/qt/${pkgver%.*}/${pkgver}/single/${_pkgfqn}.tar.xz"
         'assistant.desktop' 'designer.desktop' 'linguist.desktop' 'qdbusviewer.desktop'
-        'use-python2.patch'
         'rpi.patch'
         'qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch')
-md5sums=('c4e893678e3d8388ab04d059523d1d78'
+md5sums=('21843b00ecde8956217faab391bc007b'
          'b2897dd6a2967bccf8f10e397aafee55'
          '9638a78e502719ef8fe5f8d10d0361a9'
          '188da8f4c87316e730ebf1c6217bf5a0'
          '322b419b16c75d4de0ee7ad0a246caa1'
-         'a378deccf363bd6079da459c89aff7b9'
          'df4b63eb078b81a708a7dc0859cdd693'
          'd55ad1f1c90725834b44eada5db4e401')
 
@@ -99,10 +101,12 @@ prepare() {
   sed -i "/^QMAKE_LFLAGS\s/s|+=|+= ${LDFLAGS}|g" qtbase/mkspecs/common/gcc-base.conf
 
   # Use python2 for Python 2.x
-  patch -p1 -i "${srcdir}"/use-python2.patch
-  sed -i -e "s|#![ ]*/usr/bin/python$|#!/usr/bin/python2|" \
-    -e "s|#![ ]*/usr/bin/env python$|#!/usr/bin/env python2|" \
-    $(find . -name '*.py')
+  find . -name '*.py' -exec sed -i \
+    's|#![ ]*/usr/bin/python$|&2|;s|#![ ]*/usr/bin/env python$|&2|' {} +
+
+  # There are still a lot of relative calls which need a workaround
+  mkdir "${srcdir}"/python2-path
+  ln -s /usr/bin/python2 "${srcdir}"/python2-path/python
 }
 
 build() {
@@ -111,6 +115,8 @@ build() {
   export QTDIR="${srcdir}"/${_pkgfqn}
   export LD_LIBRARY_PATH="${QTDIR}"/qtbase/lib:"${QTDIR}"/qttools/lib:"${LD_LIBRARY_PATH}"
   export QT_PLUGIN_PATH="${QTDIR}"/qtbase/plugins
+
+  export PATH="${srcdir}/python2-path:$PATH"
 
   PYTHON=/usr/bin/python2 ./configure -confirm-license -opensource \
     -prefix /usr \
@@ -190,7 +196,7 @@ package_qt5-base() {
 
 package_qt5-connectivity() {
   pkgdesc='Provides access to Bluetooth hardware'
-  depends=('qt5-declarative')
+  depends=('qt5-declarative' 'bluez-libs')
 
   cd ${_pkgfqn}/qtconnectivity
   make INSTALL_ROOT="${pkgdir}" install
@@ -282,6 +288,7 @@ package_qt5-xmlpatterns() {
 package_qt5-translations() {
   pkgdesc='A cross-platform application and UI framework (Translations)'
   depends=('qt5-base')
+  optdepends=('gstreamer0.10-bad: Qt MediaService plugin')
   conflicts=('qt')
 
   cd ${_pkgfqn}/qttranslations
@@ -320,7 +327,7 @@ package_qt5-graphicaleffects() {
 
 package_qt5-imageformats() {
   pkgdesc='Plugins for additional image formats: TIFF, MNG, TGA, WBMP'
-  depends=('qt5-base' 'jasper' 'libmng')
+  depends=('qt5-base' 'jasper' 'libmng' 'libwebp')
   conflicts=('qt')
 
   cd ${_pkgfqn}/qtimageformats
@@ -332,7 +339,7 @@ package_qt5-imageformats() {
 
 package_qt5-location() {
   pkgdesc='Provides access to position, satellite and area monitoring classes'
-  depends=('qt5-declarative')
+  depends=('qt5-declarative' 'geoclue')
 
   cd ${_pkgfqn}/qtlocation
   make INSTALL_ROOT="${pkgdir}" install
@@ -489,7 +496,8 @@ package_qt5-tools() {
 
 package_qt5-webkit() {
   pkgdesc='Classes for a WebKit2 based implementation and a new QML API'
-  depends=('qt5-sensors' 'qt5-location' 'gst-plugins-base' 'libxslt' 'libxcomposite')
+  depends=('qt5-sensors' 'qt5-location' 'qt5-webchannel' 'gst-plugins-base' 'libxslt'
+           'libxcomposite' 'libwebp')
   optdepends=('gst-plugins-good: Webm codec support')
   license=('GPL3' 'LGPL' 'FDL')
 
@@ -502,6 +510,47 @@ package_qt5-webkit() {
 
   # Fix wrong path in pc file
   perl -pi -e "s, -L${srcdir}/?\S+,,g" "${pkgdir}"/usr/lib/pkgconfig/Qt5WebKit.pc
+}
+
+package_qt5-wayland() {
+  pkgdesc='Provides APIs for Wayland'
+  depends=('qt5-base' 'libxcomposite' 'libxkbcommon')
+
+  cd ${_pkgfqn}/qtwayland
+  make INSTALL_ROOT="${pkgdir}" install
+
+  # Fix wrong path in prl files
+  find "${pkgdir}/usr/lib" -type f -name '*.prl' \
+    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
+}
+
+package_qt5-webchannel() {
+  pkgdesc='Provides access to QObject or QML objects from HTML clients for seamless integration of Qt applications with HTML/JavaScript clients'
+  depends=('qt5-declarative')
+
+  cd ${_pkgfqn}/qtwebchannel
+  make INSTALL_ROOT="${pkgdir}" install
+
+  # Fix wrong path in prl files
+  find "${pkgdir}/usr/lib" -type f -name '*.prl' \
+    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d;s/\(QMAKE_PRL_LIBS =\).*/\1/' {} \;
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
+}
+
+package_qt5-webengine() {
+  pkgdesc='Provides support for web applications using the Chromium browser project'
+  depends=('qt5-declarative' 'nss' 'libxtst' 'libxcursor' 'libxrandr' 'alsa-lib' 'libxcomposite')
+  license=('LGPL')
+
+  cd ${_pkgfqn}/qtwebengine
+  make INSTALL_ROOT="${pkgdir}" install
+
+  rm -rf "${pkgdir}"/usr/share/doc
 }
 
 package_qt5-websockets() {
