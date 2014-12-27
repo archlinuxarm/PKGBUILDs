@@ -1,0 +1,121 @@
+# Contributor tomasgroth at yahoo.dk
+# Contributor WarheadsSE <max@warheads.net>
+# Contributor Romzetron <asromzek@gmail.com>
+# Contributor Holzhaus <holthuis.jan@googlemail.com>
+
+buildarch=16
+
+pkgname=kodi-rbp
+pkgver=14.0
+_codename=Helix
+pkgrel=1
+pkgdesc="A software media player and entertainment hub for digital media for the Raspberry Pi"
+arch=('armv6h')
+url="http://kodi.tv"
+license=('GPL' 'custom')
+depends=('hicolor-icon-theme' 'fribidi' 'lzo2' 'smbclient' 'libtiff' 'libva' 'libpng' 'libcdio' 'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd' 'sdl_image' 'python2' 'libass' 'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 'xorg-xdpyinfo' 'libbluray' 'libnfs' 'afpfs-ng' 'avahi' 'bluez-libs' 'tinyxml' 'raspberrypi-firmware' 'libcec' 'libplist' 'swig' 'taglib' 'libxslt' 'shairplay-git')
+makedepends=('boost' 'cmake' 'gperf' 'nasm' 'zip' 'udisks' 'upower' 'git' 'autoconf' 'java-environment')
+optdepends=(
+  'lirc: remote controller support'
+  'udisks: automount external drives'
+  'upower: used to trigger power management functionality'
+  'unrar: access compressed files without unpacking them')
+
+provides=("kodi")
+conflicts=("xbmc" "kodi")
+replaces=("xbmc-rbp" "xbmc-rbp-git" "kodi-rbp-git")
+install="kodi.install"
+source=("https://github.com/xbmc/xbmc/archive/$pkgver-$_codename.tar.gz"
+        'kodi.service'
+        'polkit.rules')
+
+sha256sums=('11746d95cc59361f36ce6ea9d0d36bbd9ec3376e991f5ec1720f8ff740b91192'
+            '5235068d5800d69f0287087815990e7fe8d6572733d60c8800546d35f608e87f'
+            '9ea592205023ba861603d74b63cdb73126c56372a366dc4cb7beb379073cbb96')
+
+_prefix=/usr
+
+prepare() {
+  cd "$srcdir/xbmc-$pkgver-$_codename"
+
+  # fix lsb_release dependency
+  sed -i -e 's:/usr/bin/lsb_release -d:cat /etc/arch-release:' xbmc/utils/SystemInfo.cpp
+}
+
+build() {
+  cd "$srcdir/xbmc-$pkgver-$_codename"
+
+  # Bootstrapping Kodi
+  ./bootstrap
+
+  # Configuring Kodi
+  export PYTHON_VERSION=2  # external python v2
+  # we need to compile for armv6 instead of armv5 to avoid problems compiling assembler code
+  export CFLAGS="-Ofast -mcpu=arm1176jzf-s -mtune=arm1176jzf-s -fexcess-precision=fast -mfloat-abi=hard \
+                 -mfpu=vfp -mabi=aapcs-linux -pipe -fstack-protector --param=ssp-buffer-size=4 -D_FORTIFY_SOURCE=1 \
+                 -I/opt/vc/include/ -I/opt/vc/include/IL -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux"
+  export CXXFLAGS="-Ofast -mcpu=arm1176jzf-s -mtune=arm1176jzf-s -fexcess-precision=fast -mfloat-abi=hard -mfpu=vfp \
+                   -mabi=aapcs-linux -fstack-protector --param=ssp-buffer-size=4 -D_FORTIFY_SOURCE=1 \
+                   -I/opt/vc/include/ -I/opt/vc/include/IL -I/opt/vc/include/interface/vcos/pthreads -I/opt/vc/include/interface/vmcs_host/linux"
+  export LDFLAGS="$LDFLAGS -L/opt/vc/lib"
+
+  #If build fails try uncommenting the line below first
+  #export MAKEFLAGS="-j1"
+ 
+  ./configure --prefix=$_prefix --exec-prefix=$_prefix  \
+  --with-platform=raspberry-pi \
+  --disable-gl \
+  --enable-gles \
+  --disable-x11 \
+  --disable-sdl \
+  --enable-optimizations \
+  --disable-goom \
+  --disable-pulse \
+  --disable-vaapi \
+  --disable-vdpau \
+  --disable-xrandr \
+  --enable-airplay \
+  --enable-airtunes \
+  --disable-alsa \
+  --enable-avahi \
+  --enable-libbluray \
+  --enable-dvdcss \
+  --disable-debug \
+  --disable-joystick \
+  --disable-mid \
+  --enable-nfs \
+  --disable-profiling \
+  --disable-projectm \
+  --enable-rsxs \
+  --enable-rtmp \
+  --disable-vaapi \
+  --enable-optical-drive \
+  --enable-player=omxplayer
+  make
+}
+
+package() {
+  cd "$srcdir/xbmc-$pkgver-$_codename"
+  # Running make install
+  make DESTDIR="${pkgdir}" install
+
+  # run feh with python2
+  sed -i -e 's/python/python2/g' ${pkgdir}${_prefix}/bin/kodi
+
+  # lsb_release fix
+  sed -i -e 's/which lsb_release > \/dev\/null/\[ -f \/etc\/arch-release ]/g' "${pkgdir}${_prefix}/bin/kodi"
+  sed -i -e "s/lsb_release -a 2> \/dev\/null | sed -e 's\/\^\/    \/'/cat \/etc\/arch-release/g" "${pkgdir}${_prefix}/bin/kodi"
+
+  # Tools
+  install -D -m 0755 "${srcdir}/xbmc-${pkgver}-${_codename}/tools/TexturePacker/TexturePacker" "${pkgdir}${_prefix}/lib/kodi/"
+
+  # Licenses
+  install -d -m 0755 "${pkgdir}${_prefix}/share/licenses/${pkgname}"
+  for licensef in LICENSE.GPL copying.txt; do
+    mv "${pkgdir}${_prefix}/share/doc/kodi/${licensef}" "${pkgdir}${_prefix}/share/licenses/${pkgname}"
+  done
+
+  install -Dm0644 $srcdir/kodi.service $pkgdir/usr/lib/systemd/system/kodi.service
+  install -Dm0644 $srcdir/polkit.rules $pkgdir/usr/share/polkit-1/rules.d/10-kodi.rules
+  chmod 0700 $pkgdir/usr/share/polkit-1/rules.d/
+}
