@@ -8,21 +8,26 @@ pkgname=('linux-odroid-x' 'linux-odroid-x2' 'linux-odroid-u2' 'linux-headers-odr
 _kernelname=${pkgname#linux}
 _basekernel=3.8
 pkgver=${_basekernel}.13.28
-pkgrel=3
+pkgrel=4
 arch=('armv7h')
 url="http://github.com/hardkernel/linux/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'kmod' 'git' 'inetutils' 'bc')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'git' 'inetutils' 'bc' 'uboot-tools')
 options=('!strip')
 _commit=3bcdf52287dbfa82643a8f59dc32c14fed2587b0
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         'config_x'
         'config_x2'
-        'config_u2')
+        'config_u2'
+        'linux-odroid.preset')
 md5sums=('535dc7f921ae5c4618c2ab8de535c166'
          'd62dbed886fb95750031d4ab577c4739'
          '4ee9bbb8bf22b078ffcb6d5d60f9d431'
-         'e2e88e5c82e509d13287d45f78a6caeb')
+         'e2e88e5c82e509d13287d45f78a6caeb'
+         'f4b60c38c4930d40bf025e50d3ec45d3')
+
+# Kernel and initrd images go here
+_bootdir=/boot
 
 prepare() {
   cd "${srcdir}/linux-${_commit}"
@@ -49,13 +54,22 @@ build_kernel_package() {
 
   mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
-  cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
+  cp arch/$KARCH/boot/zImage "${pkgdir}/${_bootdir}/zImage"
 
   # set correct depmod command for install
   sed \
     -e  "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
     -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
+    -e  "s|BOOT_DIR=.*|BOOT_DIR=${_bootdir}|g" \
     -i "${startdir}/${pkgbase}.install"
+
+  # install mkinitcpio preset file for kernel
+  install -D -m644 "${startdir}/${pkgbase}.preset" "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
+  sed \
+    -e "s|ALL_kver=.*|ALL_kver=${_kernver}|" \
+    -e "s|BOOT_DIR=.*|BOOT_DIR=${_bootdir}|" \
+    -i "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
+
   # remove build and source links
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
   # remove the firmware
@@ -83,6 +97,7 @@ package_linux-odroid-x() {
   provides=('kernel26' "linux=${pkgver}")
   conflicts=('linux-odroidx' 'linux-odroid-x-mali' 'linux-odroid-u2' 'linux-odroid-u2-mali' 'linux-odroid-x2')
   replaces=('linux-odroidx' 'linux-odroid-x-mali')
+  backup=("etc/mkinitcpio.d/${pkgbase}.preset")
   install=${pkgbase}.install
 
   build_kernel_package config_x
@@ -95,6 +110,7 @@ package_linux-odroid-x2() {
   provides=('kernel26' "linux=${pkgver}")
   conflicts=('linux-odroidx' 'linux-odroid-x-mali' 'linux-odroid-u2' 'linux-odroid-u2-mali' 'linux-odroid-x')
   replaces=('linux-odroidx' 'linux-odroid-x-mali')
+  backup=("etc/mkinitcpio.d/${pkgbase}.preset")
   install=${pkgbase}.install
 
   build_kernel_package config_x2
@@ -107,6 +123,7 @@ package_linux-odroid-u2() {
   provides=('kernel26' "linux=${pkgver}")
   conflicts=('linux-odroidx' 'linux-odroid-x' 'linux-odroid-x-mali' 'linux-odroid-u2-mali' 'linux-odroid-x2')
   replaces=('linux-odroid-u2-mali')
+  backup=("etc/mkinitcpio.d/${pkgbase}.preset")
   install=${pkgbase}.install
 
   build_kernel_package config_u2
