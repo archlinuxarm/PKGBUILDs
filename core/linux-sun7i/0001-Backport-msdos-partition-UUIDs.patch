@@ -1,0 +1,632 @@
+From dbef9fc3e1410edcd553989a3ddc1120609a5ad3 Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Fri, 2 Jan 2015 19:50:37 -0700
+Subject: [PATCH] Backport msdos partition UUIDs
+
+Squashed commit of the following:
+
+commit 2819ae1987539215d1ce91d80d831e0350107e1e
+Author: Stephen Warren <swarren@nvidia.com>
+Date:   Thu Nov 8 16:12:28 2012 -0800
+
+    block: partition: msdos: provide UUIDs for partitions
+
+    The MSDOS/MBR partition table includes a 32-bit unique ID, often referred
+    to as the NT disk signature.  When combined with a partition number within
+    the table, this can form a unique ID similar in concept to EFI/GPT's
+    partition UUID.  Constructing and recording this value in struct
+    partition_meta_info allows MSDOS partitions to be referred to on the
+    kernel command-line using the following syntax:
+
+    root=PARTUUID=0002dd75-01
+
+    Signed-off-by: Stephen Warren <swarren@nvidia.com>
+    Cc: Tejun Heo <tj@kernel.org>
+    Cc: Will Drewry <wad@chromium.org>
+    Cc: Kay Sievers <kay.sievers@vrfy.org>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+    Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+commit a4f7d3032fb20f11722d266f678a004ec0f9f0b1
+Author: Stephen Warren <swarren@nvidia.com>
+Date:   Thu Nov 8 16:12:27 2012 -0800
+
+    init: reduce PARTUUID min length to 1 from 36
+
+    Reduce the minimum length for a root=PARTUUID= parameter to be considered
+    valid from 36 to 1.  EFI/GPT partition UUIDs are always exactly 36
+    characters long, hence the previous limit.  However, the next patch will
+    support DOS/MBR UUIDs too, which have a different, shorter, format.
+    Instead of validating any particular length, just ensure that at least
+    some non-empty value was given by the user.
+
+    Also, consider a missing UUID value to be a parsing error, in the same
+    vein as if /PARTNROFF exists and can't be parsed.  As such, make both
+    error cases print a message and disable rootwait.  Convert to pr_err while
+    we're at it.
+
+    Signed-off-by: Stephen Warren <swarren@nvidia.com>
+    Cc: Tejun Heo <tj@kernel.org>
+    Cc: Will Drewry <wad@chromium.org>
+    Cc: Kay Sievers <kay.sievers@vrfy.org>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+    Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+commit 0422f1d96772bf35a14bc87f3bb603b9ff825799
+Author: Stephen Warren <swarren@nvidia.com>
+Date:   Thu Nov 8 16:12:25 2012 -0800
+
+    block: store partition_meta_info.uuid as a string
+
+    This will allow other types of UUID to be stored here, aside from true
+    UUIDs.  This also simplifies code that uses this field, since it's usually
+    constructed from a, used as a, or compared to other, strings.
+
+    Note: A simplistic approach here would be to set uuid_str[36]=0 whenever a
+    /PARTNROFF option was found to be present.  However, this modifies the
+    input string, and causes subsequent calls to devt_from_partuuid() not to
+    see the /PARTNROFF option, which causes different results.  In order to
+    avoid misleading future maintainers, this parameter is marked const.
+
+    Signed-off-by: Stephen Warren <swarren@nvidia.com>
+    Cc: Tejun Heo <tj@kernel.org>
+    Cc: Will Drewry <wad@chromium.org>
+    Cc: Kay Sievers <kay.sievers@vrfy.org>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+    Signed-off-by: Jens Axboe <axboe@kernel.dk>
+
+commit 152f0b9a9d1d0ee8c01eaa1dda689bd5d0f9d512
+Author: Vivek Goyal <vgoyal@redhat.com>
+Date:   Wed Aug 1 12:24:18 2012 +0200
+
+    block: add partition resize function to blkpg ioctl
+
+    Add a new operation code (BLKPG_RESIZE_PARTITION) to the BLKPG ioctl that
+    allows altering the size of an existing partition, even if it is currently
+    in use.
+
+    This patch converts hd_struct->nr_sects into sequence counter because
+    One might extend a partition while IO is happening to it and update of
+    nr_sects can be non-atomic on 32bit machines with 64bit sector_t. This
+    can lead to issues like reading inconsistent size of a partition. Sequence
+    counter have been used so that readers don't have to take bdev mutex lock
+    as we call sector_in_part() very frequently.
+
+    Now all the access to hd_struct->nr_sects should happen using sequence
+    counter read/update helper functions part_nr_sects_read/part_nr_sects_write.
+    There is one exception though, set_capacity()/get_capacity(). I think
+    theoritically race should exist there too but this patch does not
+    modify set_capacity()/get_capacity() due to sheer number of call sites
+    and I am afraid that change might break something. I have left that as a
+    TODO item. We can handle it later if need be. This patch does not introduce
+    any new races as such w.r.t set_capacity()/get_capacity().
+
+    v2: Add CONFIG_LBDAF test to UP preempt case as suggested by Phillip.
+
+    Signed-off-by: Vivek Goyal <vgoyal@redhat.com>
+    Signed-off-by: Phillip Susi <psusi@ubuntu.com>
+    Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/genhd.c             | 28 +++++++++++---------
+ block/ioctl.c             | 59 +++++++++++++++++++++++++++++++++++++++---
+ block/partition-generic.c |  4 ++-
+ block/partitions/efi.c    |  7 +----
+ block/partitions/msdos.c  | 21 +++++++++++++--
+ include/linux/blkpg.h     |  1 +
+ include/linux/genhd.h     | 65 +++++++++++++++++++++++++++++++++++++++++++++--
+ init/do_mounts.c          | 61 +++++++++++++++++++++++++++++---------------
+ 8 files changed, 199 insertions(+), 47 deletions(-)
+
+diff --git a/block/genhd.c b/block/genhd.c
+index dd44885..3d9d3f59 100644
+--- a/block/genhd.c
++++ b/block/genhd.c
+@@ -154,7 +154,7 @@ struct hd_struct *disk_part_iter_next(struct disk_part_iter *piter)
+ 		part = rcu_dereference(ptbl->part[piter->idx]);
+ 		if (!part)
+ 			continue;
+-		if (!part->nr_sects &&
++		if (!part_nr_sects_read(part) &&
+ 		    !(piter->flags & DISK_PITER_INCL_EMPTY) &&
+ 		    !(piter->flags & DISK_PITER_INCL_EMPTY_PART0 &&
+ 		      piter->idx == 0))
+@@ -191,7 +191,7 @@ EXPORT_SYMBOL_GPL(disk_part_iter_exit);
+ static inline int sector_in_part(struct hd_struct *part, sector_t sector)
+ {
+ 	return part->start_sect <= sector &&
+-		sector < part->start_sect + part->nr_sects;
++		sector < part->start_sect + part_nr_sects_read(part);
+ }
+ 
+ /**
+@@ -744,7 +744,6 @@ void __init printk_all_partitions(void)
+ 		struct hd_struct *part;
+ 		char name_buf[BDEVNAME_SIZE];
+ 		char devt_buf[BDEVT_SIZE];
+-		char uuid_buf[PARTITION_META_INFO_UUIDLTH * 2 + 5];
+ 
+ 		/*
+ 		 * Don't show empty devices or things that have been
+@@ -763,16 +762,11 @@ void __init printk_all_partitions(void)
+ 		while ((part = disk_part_iter_next(&piter))) {
+ 			bool is_part0 = part == &disk->part0;
+ 
+-			uuid_buf[0] = '\0';
+-			if (part->info)
+-				snprintf(uuid_buf, sizeof(uuid_buf), "%pU",
+-					 part->info->uuid);
+-
+ 			printk("%s%s %10llu %s %s", is_part0 ? "" : "  ",
+ 			       bdevt_str(part_devt(part), devt_buf),
+-			       (unsigned long long)part->nr_sects >> 1,
+-			       disk_name(disk, part->partno, name_buf),
+-			       uuid_buf);
++			       (unsigned long long)part_nr_sects_read(part) >> 1
++			       , disk_name(disk, part->partno, name_buf),
++			       part->info ? part->info->uuid : "");
+ 			if (is_part0) {
+ 				if (disk->driverfs_dev != NULL &&
+ 				    disk->driverfs_dev->driver != NULL)
+@@ -863,7 +857,7 @@ static int show_partition(struct seq_file *seqf, void *v)
+ 	while ((part = disk_part_iter_next(&piter)))
+ 		seq_printf(seqf, "%4d  %7d %10llu %s\n",
+ 			   MAJOR(part_devt(part)), MINOR(part_devt(part)),
+-			   (unsigned long long)part->nr_sects >> 1,
++			   (unsigned long long)part_nr_sects_read(part) >> 1,
+ 			   disk_name(sgp, part->partno, buf));
+ 	disk_part_iter_exit(&piter);
+ 
+@@ -1286,6 +1280,16 @@ struct gendisk *alloc_disk_node(int minors, int node_id)
+ 		}
+ 		disk->part_tbl->part[0] = &disk->part0;
+ 
++		/*
++		 * set_capacity() and get_capacity() currently don't use
++		 * seqcounter to read/update the part0->nr_sects. Still init
++		 * the counter as we can read the sectors in IO submission
++		 * patch using seqence counters.
++		 *
++		 * TODO: Ideally set_capacity() and get_capacity() should be
++		 * converted to make use of bd_mutex and sequence counters.
++		 */
++		seqcount_init(&disk->part0.nr_sects_seq);
+ 		hd_ref_init(&disk->part0);
+ 
+ 		disk->minors = minors;
+diff --git a/block/ioctl.c b/block/ioctl.c
+index ba15b2d..4476e0e8 100644
+--- a/block/ioctl.c
++++ b/block/ioctl.c
+@@ -13,7 +13,7 @@ static int blkpg_ioctl(struct block_device *bdev, struct blkpg_ioctl_arg __user
+ {
+ 	struct block_device *bdevp;
+ 	struct gendisk *disk;
+-	struct hd_struct *part;
++	struct hd_struct *part, *lpart;
+ 	struct blkpg_ioctl_arg a;
+ 	struct blkpg_partition p;
+ 	struct disk_part_iter piter;
+@@ -36,8 +36,8 @@ static int blkpg_ioctl(struct block_device *bdev, struct blkpg_ioctl_arg __user
+ 		case BLKPG_ADD_PARTITION:
+ 			start = p.start >> 9;
+ 			length = p.length >> 9;
+-			/* check for fit in a hd_struct */ 
+-			if (sizeof(sector_t) == sizeof(long) && 
++			/* check for fit in a hd_struct */
++			if (sizeof(sector_t) == sizeof(long) &&
+ 			    sizeof(long long) > sizeof(long)) {
+ 				long pstart = start, plength = length;
+ 				if (pstart != start || plength != length
+@@ -92,6 +92,59 @@ static int blkpg_ioctl(struct block_device *bdev, struct blkpg_ioctl_arg __user
+ 			bdput(bdevp);
+ 
+ 			return 0;
++		case BLKPG_RESIZE_PARTITION:
++			start = p.start >> 9;
++			/* new length of partition in bytes */
++			length = p.length >> 9;
++			/* check for fit in a hd_struct */
++			if (sizeof(sector_t) == sizeof(long) &&
++			    sizeof(long long) > sizeof(long)) {
++				long pstart = start, plength = length;
++				if (pstart != start || plength != length
++				    || pstart < 0 || plength < 0)
++					return -EINVAL;
++			}
++			part = disk_get_part(disk, partno);
++			if (!part)
++				return -ENXIO;
++			bdevp = bdget(part_devt(part));
++			if (!bdevp) {
++				disk_put_part(part);
++				return -ENOMEM;
++			}
++			mutex_lock(&bdevp->bd_mutex);
++			mutex_lock_nested(&bdev->bd_mutex, 1);
++			if (start != part->start_sect) {
++				mutex_unlock(&bdevp->bd_mutex);
++				mutex_unlock(&bdev->bd_mutex);
++				bdput(bdevp);
++				disk_put_part(part);
++				return -EINVAL;
++			}
++			/* overlap? */
++			disk_part_iter_init(&piter, disk,
++					    DISK_PITER_INCL_EMPTY);
++			while ((lpart = disk_part_iter_next(&piter))) {
++				if (lpart->partno != partno &&
++				   !(start + length <= lpart->start_sect ||
++				   start >= lpart->start_sect + lpart->nr_sects)
++				   ) {
++					disk_part_iter_exit(&piter);
++					mutex_unlock(&bdevp->bd_mutex);
++					mutex_unlock(&bdev->bd_mutex);
++					bdput(bdevp);
++					disk_put_part(part);
++					return -EBUSY;
++				}
++			}
++			disk_part_iter_exit(&piter);
++			part_nr_sects_write(part, (sector_t)length);
++			i_size_write(bdevp->bd_inode, p.length);
++			mutex_unlock(&bdevp->bd_mutex);
++			mutex_unlock(&bdev->bd_mutex);
++			bdput(bdevp);
++			disk_put_part(part);
++			return 0;
+ 		default:
+ 			return -EINVAL;
+ 	}
+diff --git a/block/partition-generic.c b/block/partition-generic.c
+index 8d9281d..d5f9306 100644
+--- a/block/partition-generic.c
++++ b/block/partition-generic.c
+@@ -89,7 +89,7 @@ ssize_t part_size_show(struct device *dev,
+ 		       struct device_attribute *attr, char *buf)
+ {
+ 	struct hd_struct *p = dev_to_part(dev);
+-	return sprintf(buf, "%llu\n",(unsigned long long)p->nr_sects);
++	return sprintf(buf, "%llu\n",(unsigned long long)part_nr_sects_read(p));
+ }
+ 
+ static ssize_t part_ro_show(struct device *dev,
+@@ -310,6 +310,8 @@ struct hd_struct *add_partition(struct gendisk *disk, int partno,
+ 		err = -ENOMEM;
+ 		goto out_free;
+ 	}
++
++	seqcount_init(&p->nr_sects_seq);
+ 	pdev = part_to_dev(p);
+ 
+ 	p->start_sect = start;
+diff --git a/block/partitions/efi.c b/block/partitions/efi.c
+index 6296b40..b62fb88 100644
+--- a/block/partitions/efi.c
++++ b/block/partitions/efi.c
+@@ -620,7 +620,6 @@ int efi_partition(struct parsed_partitions *state)
+ 	gpt_entry *ptes = NULL;
+ 	u32 i;
+ 	unsigned ssz = bdev_logical_block_size(state->bdev) / 512;
+-	u8 unparsed_guid[37];
+ 
+ 	if (!find_valid_gpt(state, &gpt, &ptes) || !gpt || !ptes) {
+ 		kfree(gpt);
+@@ -649,11 +648,7 @@ int efi_partition(struct parsed_partitions *state)
+ 			state->parts[i + 1].flags = ADDPART_FLAG_RAID;
+ 
+ 		info = &state->parts[i + 1].info;
+-		/* Instead of doing a manual swap to big endian, reuse the
+-		 * common ASCII hex format as the interim.
+-		 */
+-		efi_guid_unparse(&ptes[i].unique_partition_guid, unparsed_guid);
+-		part_pack_uuid(unparsed_guid, info->uuid);
++		efi_guid_unparse(&ptes[i].unique_partition_guid, info->uuid);
+ 
+ 		/* Naively convert UTF16-LE to 7 bits. */
+ 		label_max = min(sizeof(info->volname) - 1,
+diff --git a/block/partitions/msdos.c b/block/partitions/msdos.c
+index 5f79a66..8752a5d 100644
+--- a/block/partitions/msdos.c
++++ b/block/partitions/msdos.c
+@@ -94,6 +94,17 @@ static int aix_magic_present(struct parsed_partitions *state, unsigned char *p)
+ 	return ret;
+ }
+ 
++static void set_info(struct parsed_partitions *state, int slot,
++		     u32 disksig)
++{
++	struct partition_meta_info *info = &state->parts[slot].info;
++
++	snprintf(info->uuid, sizeof(info->uuid), "%08x-%02x", disksig,
++		 slot);
++	info->volname[0] = 0;
++	state->parts[slot].has_info = true;
++}
++
+ /*
+  * Create devices for each logical partition in an extended partition.
+  * The logical partitions form a linked list, with each entry being
+@@ -106,7 +117,8 @@ static int aix_magic_present(struct parsed_partitions *state, unsigned char *p)
+  */
+ 
+ static void parse_extended(struct parsed_partitions *state,
+-			   sector_t first_sector, sector_t first_size)
++			   sector_t first_sector, sector_t first_size,
++			   u32 disksig)
+ {
+ 	struct partition *p;
+ 	Sector sect;
+@@ -166,6 +178,7 @@ static void parse_extended(struct parsed_partitions *state,
+ 			}
+ 
+ 			put_partition(state, state->next, next, size);
++			set_info(state, state->next, disksig);
+ 			if (SYS_IND(p) == LINUX_RAID_PARTITION)
+ 				state->parts[state->next].flags = ADDPART_FLAG_RAID;
+ 			loopct = 0;
+@@ -437,6 +450,7 @@ int msdos_partition(struct parsed_partitions *state)
+ 	struct partition *p;
+ 	struct fat_boot_sector *fb;
+ 	int slot;
++	u32 disksig;
+ 
+ 	data = read_part_sector(state, 0, &sect);
+ 	if (!data)
+@@ -491,6 +505,8 @@ int msdos_partition(struct parsed_partitions *state)
+ #endif
+ 	p = (struct partition *) (data + 0x1be);
+ 
++	disksig = le32_to_cpup((__le32 *)(data + 0x1b8));
++
+ 	/*
+ 	 * Look for partitions in two passes:
+ 	 * First find the primary and DOS-type extended partitions.
+@@ -515,11 +531,12 @@ int msdos_partition(struct parsed_partitions *state)
+ 			put_partition(state, slot, start, n);
+ 
+ 			strlcat(state->pp_buf, " <", PAGE_SIZE);
+-			parse_extended(state, start, size);
++			parse_extended(state, start, size, disksig);
+ 			strlcat(state->pp_buf, " >", PAGE_SIZE);
+ 			continue;
+ 		}
+ 		put_partition(state, slot, start, size);
++		set_info(state, slot, disksig);
+ 		if (SYS_IND(p) == LINUX_RAID_PARTITION)
+ 			state->parts[slot].flags = ADDPART_FLAG_RAID;
+ 		if (SYS_IND(p) == DM6_PARTITION)
+diff --git a/include/linux/blkpg.h b/include/linux/blkpg.h
+index faf8a45..a851944 100644
+--- a/include/linux/blkpg.h
++++ b/include/linux/blkpg.h
+@@ -40,6 +40,7 @@ struct blkpg_ioctl_arg {
+ /* The subfunctions (for the op field) */
+ #define BLKPG_ADD_PARTITION	1
+ #define BLKPG_DEL_PARTITION	2
++#define BLKPG_RESIZE_PARTITION	3
+ 
+ /* Sizes of name fields. Unused at present. */
+ #define BLKPG_DEVNAMELTH	64
+diff --git a/include/linux/genhd.h b/include/linux/genhd.h
+index 017a7fb..9747efc 100644
+--- a/include/linux/genhd.h
++++ b/include/linux/genhd.h
+@@ -89,16 +89,26 @@ struct disk_stats {
+ };
+ 
+ #define PARTITION_META_INFO_VOLNAMELTH	64
+-#define PARTITION_META_INFO_UUIDLTH	16
++/*
++ * Enough for the string representation of any kind of UUID plus NULL.
++ * EFI UUID is 36 characters. MSDOS UUID is 11 characters.
++ */
++#define PARTITION_META_INFO_UUIDLTH	37
+ 
+ struct partition_meta_info {
+-	u8 uuid[PARTITION_META_INFO_UUIDLTH];	/* always big endian */
++	char uuid[PARTITION_META_INFO_UUIDLTH];
+ 	u8 volname[PARTITION_META_INFO_VOLNAMELTH];
+ };
+ 
+ struct hd_struct {
+ 	sector_t start_sect;
++	/*
++	 * nr_sects is protected by sequence counter. One might extend a
++	 * partition while IO is happening to it and update of nr_sects
++	 * can be non-atomic on 32bit machines with 64bit sector_t.
++	 */
+ 	sector_t nr_sects;
++	seqcount_t nr_sects_seq;
+ 	sector_t alignment_offset;
+ 	unsigned int discard_alignment;
+ 	struct device __dev;
+@@ -648,6 +658,57 @@ static inline void hd_struct_put(struct hd_struct *part)
+ 		__delete_partition(part);
+ }
+ 
++/*
++ * Any access of part->nr_sects which is not protected by partition
++ * bd_mutex or gendisk bdev bd_mutex, should be done using this
++ * accessor function.
++ *
++ * Code written along the lines of i_size_read() and i_size_write().
++ * CONFIG_PREEMPT case optimizes the case of UP kernel with preemption
++ * on.
++ */
++static inline sector_t part_nr_sects_read(struct hd_struct *part)
++{
++#if BITS_PER_LONG==32 && defined(CONFIG_LBDAF) && defined(CONFIG_SMP)
++	sector_t nr_sects;
++	unsigned seq;
++	do {
++		seq = read_seqcount_begin(&part->nr_sects_seq);
++		nr_sects = part->nr_sects;
++	} while (read_seqcount_retry(&part->nr_sects_seq, seq));
++	return nr_sects;
++#elif BITS_PER_LONG==32 && defined(CONFIG_LBDAF) && defined(CONFIG_PREEMPT)
++	sector_t nr_sects;
++
++	preempt_disable();
++	nr_sects = part->nr_sects;
++	preempt_enable();
++	return nr_sects;
++#else
++	return part->nr_sects;
++#endif
++}
++
++/*
++ * Should be called with mutex lock held (typically bd_mutex) of partition
++ * to provide mutual exlusion among writers otherwise seqcount might be
++ * left in wrong state leaving the readers spinning infinitely.
++ */
++static inline void part_nr_sects_write(struct hd_struct *part, sector_t size)
++{
++#if BITS_PER_LONG==32 && defined(CONFIG_LBDAF) && defined(CONFIG_SMP)
++	write_seqcount_begin(&part->nr_sects_seq);
++	part->nr_sects = size;
++	write_seqcount_end(&part->nr_sects_seq);
++#elif BITS_PER_LONG==32 && defined(CONFIG_LBDAF) && defined(CONFIG_PREEMPT)
++	preempt_disable();
++	part->nr_sects = size;
++	preempt_enable();
++#else
++	part->nr_sects = size;
++#endif
++}
++
+ #else /* CONFIG_BLOCK */
+ 
+ static inline void printk_all_partitions(void) { }
+diff --git a/init/do_mounts.c b/init/do_mounts.c
+index 7b81405..97fb6f0 100644
+--- a/init/do_mounts.c
++++ b/init/do_mounts.c
+@@ -59,23 +59,28 @@ __setup("ro", readonly);
+ __setup("rw", readwrite);
+ 
+ #ifdef CONFIG_BLOCK
++struct uuidcmp {
++	const char *uuid;
++	int len;
++};
++
+ /**
+  * match_dev_by_uuid - callback for finding a partition using its uuid
+  * @dev:	device passed in by the caller
+- * @data:	opaque pointer to a 36 byte char array with a UUID
++ * @data:	opaque pointer to the desired struct uuidcmp to match
+  *
+  * Returns 1 if the device matches, and 0 otherwise.
+  */
+ static int match_dev_by_uuid(struct device *dev, void *data)
+ {
+-	u8 *uuid = data;
++	struct uuidcmp *cmp = data;
+ 	struct hd_struct *part = dev_to_part(dev);
+ 
+ 	if (!part->info)
+ 		goto no_match;
+ 
+-	if (memcmp(uuid, part->info->uuid, sizeof(part->info->uuid)))
+-			goto no_match;
++	if (strncasecmp(cmp->uuid, part->info->uuid, cmp->len))
++		goto no_match;
+ 
+ 	return 1;
+ no_match:
+@@ -85,7 +90,7 @@ no_match:
+ 
+ /**
+  * devt_from_partuuid - looks up the dev_t of a partition by its UUID
+- * @uuid:	min 36 byte char array containing a hex ascii UUID
++ * @uuid:	char array containing ascii UUID
+  *
+  * The function will return the first partition which contains a matching
+  * UUID value in its partition_meta_info struct.  This does not search
+@@ -96,38 +101,41 @@ no_match:
+  *
+  * Returns the matching dev_t on success or 0 on failure.
+  */
+-static dev_t devt_from_partuuid(char *uuid_str)
++static dev_t devt_from_partuuid(const char *uuid_str)
+ {
+ 	dev_t res = 0;
++	struct uuidcmp cmp;
+ 	struct device *dev = NULL;
+-	u8 uuid[16];
+ 	struct gendisk *disk;
+ 	struct hd_struct *part;
+ 	int offset = 0;
++	bool clear_root_wait = false;
++	char *slash;
+ 
+-	if (strlen(uuid_str) < 36)
+-		goto done;
++	cmp.uuid = uuid_str;
+ 
++	slash = strchr(uuid_str, '/');
+ 	/* Check for optional partition number offset attributes. */
+-	if (uuid_str[36]) {
++	if (slash) {
+ 		char c = 0;
+ 		/* Explicitly fail on poor PARTUUID syntax. */
+-		if (sscanf(&uuid_str[36],
+-			   "/PARTNROFF=%d%c", &offset, &c) != 1) {
+-			printk(KERN_ERR "VFS: PARTUUID= is invalid.\n"
+-			 "Expected PARTUUID=<valid-uuid-id>[/PARTNROFF=%%d]\n");
+-			if (root_wait)
+-				printk(KERN_ERR
+-				     "Disabling rootwait; root= is invalid.\n");
+-			root_wait = 0;
++		if (sscanf(slash + 1,
++			   "PARTNROFF=%d%c", &offset, &c) != 1) {
++			clear_root_wait = true;
+ 			goto done;
+ 		}
++		cmp.len = slash - uuid_str;
++	} else {
++		cmp.len = strlen(uuid_str);
+ 	}
+ 
+-	/* Pack the requested UUID in the expected format. */
+-	part_pack_uuid(uuid_str, uuid);
++	if (!cmp.len) {
++		clear_root_wait = true;
++		goto done;
++	}
+ 
+-	dev = class_find_device(&block_class, NULL, uuid, &match_dev_by_uuid);
++	dev = class_find_device(&block_class, NULL, &cmp,
++				&match_dev_by_uuid);
+ 	if (!dev)
+ 		goto done;
+ 
+@@ -148,6 +156,13 @@ static dev_t devt_from_partuuid(char *uuid_str)
+ no_offset:
+ 	put_device(dev);
+ done:
++	if (clear_root_wait) {
++		pr_err("VFS: PARTUUID= is invalid.\n"
++		       "Expected PARTUUID=<valid-uuid-id>[/PARTNROFF=%%d]\n");
++		if (root_wait)
++			pr_err("Disabling rootwait; root= is invalid.\n");
++		root_wait = 0;
++	}
+ 	return res;
+ }
+ #endif
+@@ -164,6 +179,10 @@ done:
+  *	   used when disk name of partitioned disk ends on a digit.
+  *	6) PARTUUID=00112233-4455-6677-8899-AABBCCDDEEFF representing the
+  *	   unique id of a partition if the partition table provides it.
++ *	   The UUID may be either an EFI/GPT UUID, or refer to an MSDOS
++ *	   partition using the format SSSSSSSS-PP, where SSSSSSSS is a zero-
++ *	   filled hex representation of the 32-bit "NT disk signature", and PP
++ *	   is a zero-filled hex representation of the 1-based partition number.
+  *	7) PARTUUID=<UUID>/PARTNROFF=<int> to select a partition in relation to
+  *	   a partition with a known unique id.
+  *
+-- 
+2.2.1
+
