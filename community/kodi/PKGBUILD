@@ -1,0 +1,133 @@
+# vim:set ts=2 sw=2 et:
+# $Id$
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Maintainer: BlackIkeEagle < ike DOT devolder AT gmail DOT com >
+# Contributor: Brad Fanella <bradfanella@archlinux.us>
+# Contributor: [vEX] <niechift.dot.vex.at.gmail.dot.com>
+# Contributor: Zeqadious <zeqadious.at.gmail.dot.com>
+# Contributor: BlackIkeEagle < ike DOT devolder AT gmail DOT com >
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Maxime Gauduin <alucryd@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove libvdpau dependency
+#  - --disable-vaapi
+
+_prefix=/usr
+
+pkgbase=kodi
+pkgname=('kodi' 'kodi-eventclients')
+pkgver=14.0
+_codename=Helix
+pkgrel=1
+arch=('i686' 'x86_64')
+url="http://kodi.tv"
+license=('GPL2')
+makedepends=(
+  'afpfs-ng' 'bluez-libs' 'boost' 'cmake' 'curl' 'cwiid' 'doxygen' 'git' 'glew'
+  'gperf' 'hicolor-icon-theme' 'jasper' 'java-runtime' 'libaacs' 'libass'
+  'libbluray' 'libcdio' 'libcec' 'libgl' 'libmariadbclient' 'libmicrohttpd'
+  'libmodplug' 'libmpeg2' 'libnfs' 'libplist' 'libpulse' 'libssh' 'libva'
+  'libxrandr' 'libxslt' 'lzo' 'nasm' 'nss-mdns' 'python2-pillow'
+  'python2-pybluez' 'python2-simplejson' 'rtmpdump' 'sdl2' 'sdl_image'
+  'shairplay' 'smbclient' 'swig' 'taglib' 'tinyxml' 'unzip' 'upower' 'yajl' 'zip'
+)
+source=(
+  "$pkgname-$pkgver-$_codename.tar.gz::https://github.com/xbmc/xbmc/archive/$pkgver-$_codename.tar.gz"
+)
+sha256sums=(
+  '11746d95cc59361f36ce6ea9d0d36bbd9ec3376e991f5ec1720f8ff740b91192'
+)
+
+prepare() {
+  cd "$srcdir/xbmc-$pkgver-$_codename"
+
+  find -type f -name *.py -exec sed 's|^#!.*python$|#!/usr/bin/python2|' -i "{}" +
+  sed 's|^#!.*python$|#!/usr/bin/python2|' -i tools/depends/native/rpl-native/rpl
+	sed 's/python/python2/' -i tools/Linux/kodi.sh.in
+}
+
+build() {
+  cd "$srcdir/xbmc-$pkgver-$_codename"
+
+	# Bootstrapping
+  MAKEFLAGS=-j1 ./bootstrap
+
+  #./configure --help
+  #return 1
+
+  # Configuring XBMC
+  export PYTHON_VERSION=2  # external python v2
+  ./configure --prefix=$_prefix --exec-prefix=$_prefix \
+    --disable-debug \
+    --enable-optimizations \
+    --enable-libbluray \
+    --enable-texturepacker \
+    --enable-external-libraries \
+    --with-lirc-device=/run/lirc/lircd \
+    --disable-vaapi
+
+  # Now (finally) build
+  make
+}
+
+package_kodi() {
+  pkgdesc="A software media player and entertainment hub for digital media"
+
+  # depends expected for kodi plugins:
+  # 'python2-pillow' 'python2-pybluez' 'python2-simplejson'
+  # depends expeced in FEH.py
+  # 'mesa-demos' 'xorg-xdpyinfo'
+  depends=(
+    'python2-pillow' 'python2-pybluez' 'python2-simplejson'
+    'mesa-demos' 'xorg-xdpyinfo'
+    'bluez-libs' 'fribidi' 'glew' 'hicolor-icon-theme' 'libcdio'
+    'libjpeg-turbo' 'libmariadbclient' 'libmicrohttpd' 'libpulse' 'libssh'
+    'libva' 'libxrandr' 'libxslt' 'lzo' 'sdl2' 'smbclient' 'taglib' 'tinyxml'
+    'yajl'
+  )
+  optdepends=(
+    'afpfs-ng: Apple shares support'
+    'bluez: Blutooth support'
+    'libnfs: NFS shares support'
+    'libplist: AirPlay support'
+    'libcec: Pulse-Eight USB-CEC adapter support'
+    'lirc: Remote controller support'
+    'pulseaudio: PulseAudio support'
+    'shairplay: AirPlay support'
+    'udisks: Automount external drives'
+    'unrar: Archives support'
+    'unzip: Archives support'
+    'upower: Display battery level'
+  )
+  install="kodi.install"
+  provides=('xbmc')
+  conflicts=('xbmc')
+  replaces=('xbmc')
+
+  cd "$srcdir/xbmc-$pkgver-$_codename"
+  # Running make install
+  make DESTDIR="$pkgdir" install
+
+  # Licenses
+	install -dm755 ${pkgdir}${_prefix}/share/licenses/${pkgname}
+  for licensef in LICENSE.GPL copying.txt; do
+		mv ${pkgdir}${_prefix}/share/doc/kodi/${licensef} \
+			${pkgdir}${_prefix}/share/licenses/${pkgname}
+  done
+}
+
+package_kodi-eventclients() {
+  pkgdesc="Kodi Event Clients"
+
+  depends=('cwiid')
+
+  cd "$srcdir/xbmc-$pkgver-$_codename"
+
+  make DESTDIR="$pkgdir" eventclients WII_EXTRA_OPTS=-DCWIID_OLD
+
+  install -dm755 "$pkgdir/usr/share/$pkgbase/eventclients"
+  mv "$pkgdir/kodi"/* "$pkgdir/usr/share/$pkgbase/eventclients"
+  rmdir "$pkgdir/kodi"
+}
+
