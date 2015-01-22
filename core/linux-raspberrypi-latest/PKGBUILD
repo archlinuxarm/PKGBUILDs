@@ -5,46 +5,36 @@
 buildarch=18
 
 pkgbase=linux-raspberrypi-latest
-_commit=d3a1e4cc4c5639ba73d4c51d5c4b8a23d0ebfe5d
+_commit=a96c657cb56bc612f4dec5ca2faf0bda19e876cc
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="Raspberry Pi"
 pkgver=3.18.3
-pkgrel=1
+pkgrel=2
 bfqver=v7r6
-
 arch=('arm' 'armv6h')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'uboot-mkimage' 'git' 'python2' 'bc')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'dtc-overlay')
 options=('!strip')
 source=("https://github.com/raspberrypi/linux/archive/${_commit}.tar.gz"
-        'config'
-        'args-uncompressed.txt'
-        'boot-uncompressed.txt'
-        'imagetool-uncompressed.py'
         #"git://git.code.sf.net/p/aufs/aufs3-standalone#branch=aufs3.x-rcN"
         "git://git.code.sf.net/p/aufs/aufs3-standalone#branch=aufs${pkgver%.*}.1+" # 3.18.1+
         "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/${pkgver:0:4}.0-${bfqver}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver:0:4}.patch"
         "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/${pkgver:0:4}.0-${bfqver}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver:0:4}.patch"
-        "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/${pkgver:0:4}.0-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.0.patch")
-md5sums=('c47e4eb0fedd7f518bd848fa99bf275b'
-         'ef77516e06cbedc9beeda1158dc8ed95'
-         '9335d1263fd426215db69841a380ea26'
-         'a00e424e2fbb8c5a5f77ba2c4871bed4'
-         '2f82dbe5752af65ff409d737caf11954'
+        "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/${pkgver:0:4}.0-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.0.patch"
+        'https://github.com/raspberrypi/tools/raw/master/mkimage/mkknlimg'
+        'config')
+md5sums=('268d92c11ba4251bfcb062c17463bc33'
          'SKIP'
          'f84f5f809a0f92e5e469d7c9e2dbac58'
          '22ef862652608c8d6b07536e990d4bcb'
-         'b031b1aafd416453d1c8579bd6823fca')
+         'b031b1aafd416453d1c8579bd6823fca'
+         '405015cdeb544575c25018b3487a2e76'
+         '46b4b57d60bd346f8a9ff7a5f20c6f39')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
-
-msg "Patches:"
-  cp ${srcdir}/args-uncompressed.txt arch/arm/boot/
-  cp ${srcdir}/boot-uncompressed.txt arch/arm/boot/
-  cp ${srcdir}/imagetool-uncompressed.py arch/arm/boot/
 
  msg2 "AUFS patches"
   cp -ru "${srcdir}/aufs3-standalone/Documentation" .
@@ -100,7 +90,7 @@ build() {
   #yes "" | make config
 
 msg "Building!"
-  make ${MAKEFLAGS} modules uImage
+  make ${MAKEFLAGS} zImage modules dtbs
 }
 
 _package() {
@@ -118,13 +108,18 @@ _package() {
   # get kernel version
   _kernver="$(make kernelrelease)"
 
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
+  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/overlays}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
-  pushd arch/$KARCH/boot/
-    /usr/bin/python2 imagetool-uncompressed.py
+
+  perl ../mkknlimg --dtok arch/$KARCH/boot/zImage "${pkgdir}/boot/kernel.img"
+  cp arch/$KARCH/boot/dts/*.dtb "${pkgdir}/boot"
+
+  # compile overlays
+  pushd arch/$KARCH/boot/dts
+  for i in `ls *-overlay.dts`; do
+    dtc -@ -O dtb -o "${pkgdir}/boot/overlays/${i/.dts/.dtb}" "${i}"
+  done
   popd
-  cp arch/$KARCH/boot/kernel.img ${pkgdir}/boot/kernel.img
-  #cp arch/$KARCH/boot/uImage "${pkgdir}/boot/uImage"
 
   # set correct depmod command for install
   sed \
