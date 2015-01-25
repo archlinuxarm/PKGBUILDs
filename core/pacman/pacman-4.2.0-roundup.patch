@@ -1,3 +1,16 @@
+diff --git a/contrib/paccache.sh.in b/contrib/paccache.sh.in
+index 6a68d4d..1690583 100644
+--- a/contrib/paccache.sh.in
++++ b/contrib/paccache.sh.in
+@@ -256,6 +256,8 @@ while :; do
+ 			delete=1 ;;
+ 		-u|--uninstalled)
+ 			IFS=$'\n' read -r -d '' -a ign < <(pacman -Qq)
++			# pacman -Qq may exit with an error, thus making ign an empty array
++			(( ${#ign[@]} )) || die 'failed to retrieve the list of installed packages'
+ 			blacklist+=("${ign[@]}")
+ 			unset ign ;;
+ 		-V|--version)
 diff --git a/contrib/paclist.sh.in b/contrib/paclist.sh.in
 index 1c10b32..f4fd540 100644
 --- a/contrib/paclist.sh.in
@@ -11,15 +24,68 @@ index 1c10b32..f4fd540 100644
  	echo
  	printf "List all packages installed from a given repository\n" "${myname}"
  	echo
+diff --git a/contrib/updpkgsums.sh.in b/contrib/updpkgsums.sh.in
+index b0d2d69..7b92efe 100644
+--- a/contrib/updpkgsums.sh.in
++++ b/contrib/updpkgsums.sh.in
+@@ -82,9 +82,6 @@ fi
+ export BUILDDIR=$(mktemp -d --tmpdir updpkgsums.XXXXXX)
+ newbuildfile=$(mktemp --tmpdir updpkgsums.XXXXXX)
+ 
+-# In case the eventual replacement fails, we don't want to leave behind
+-# $newbuildfile as garbage in $TMPDIR. This fails silently if the replacement
+-# succeeds.
+ trap "rm -rf '$BUILDDIR' '$newbuildfile'" EXIT
+ newsums=$(makepkg -g -p "$buildfile") || die 'Failed to generate new checksums'
+ awk -v newsums="$newsums" '
+@@ -100,8 +97,9 @@ awk -v newsums="$newsums" '
+ 	END { if (!w) print newsums }
+ ' "$buildfile" > "$newbuildfile" || die 'Failed to write new PKGBUILD'
+ 
+-# Replace the original buildfile.
+-if ! mv -- "$newbuildfile" "$buildfile"; then
++# Rewrite the original buildfile. Use cat instead of mv/cp to preserve
++# permissions implicitly.
++if ! cat -- "$newbuildfile" >"$buildfile"; then
+ 	die "Failed to update %s. The file has not been modified." "$buildfile"
+ fi
+ 
+diff --git a/doc/PKGBUILD.5.txt b/doc/PKGBUILD.5.txt
+index 7fa91ff..c95c41d 100644
+--- a/doc/PKGBUILD.5.txt
++++ b/doc/PKGBUILD.5.txt
+@@ -216,7 +216,7 @@ underscore and the architecture name e.g., 'checkdepends_x86_64=()'.
+ 	and are not utilized by pacman during dependency resolution. The format
+ 	for specifying optdepends is:
+ 
+-	optdepends=('fakeroot: for makepkg usage as normal user')
++	optdepends=('python: for library bindings')
+ +
+ Additional architecture-specific optdepends can be added by appending an
+ underscore and the architecture name e.g., 'optdepends_x86_64=()'.
+@@ -336,10 +336,9 @@ files into the packaging directory, with optional `prepare()`, `build()`, and
+ *package() Function*::
+ 	The `package()` function is used to install files into the directory that
+ 	will become the root directory of the built package and is run after all
+-	the optional functions listed below. When specified in combination with
+-	the fakeroot BUILDENV option in linkman:makepkg.conf[5], fakeroot usage
+-	will be limited to running the packaging stage. All other functions will
+-	be run as the user calling makepkg.
++	the optional functions listed below. The packaging stage is run using
++	fakeroot to ensure correct file permissions in the resulting package.
++	All other functions will be run as the user calling makepkg.
+ 
+ *prepare() Function*::
+ 	An optional `prepare()` function can be specified in which operations to
 diff --git a/etc/makepkg.conf.in b/etc/makepkg.conf.in
-index 712ca60..9ed7ef9 100644
+index 712ca60..19f673d 100644
 --- a/etc/makepkg.conf.in
 +++ b/etc/makepkg.conf.in
 @@ -19,6 +19,13 @@ DLAGENTS=('ftp::/usr/bin/curl -qfC - --ftp-pasv --retry 3 --retry-delay 3 -o %o
  # /usr/bin/lftpget -c
  # /usr/bin/wget
  
-+#-- The the package required by makepkg to download VCS sources
++#-- The package required by makepkg to download VCS sources
 +#  Format: 'protocol::package'
 +VCSCLIENTS=('bzr::bzr'
 +            'git::git'
@@ -69,9 +135,23 @@ index 6e6d944..d9da167 100755
  		}
  		$values{$key} = $val;
 diff --git a/scripts/makepkg.sh.in b/scripts/makepkg.sh.in
-index 33dff24..18b2822 100644
+index 33dff24..da68dc7 100644
 --- a/scripts/makepkg.sh.in
 +++ b/scripts/makepkg.sh.in
+@@ -362,11 +362,11 @@ download_file() {
+ 	# replace %o by the temporary dlfile if it exists
+ 	if [[ ${cmdline[*]} = *%o* ]]; then
+ 		dlfile=$filename.part
+-		cmdline=("${cmdline[@]//%o/"$dlfile"}")
++		cmdline=("${cmdline[@]//%o/$dlfile}")
+ 	fi
+ 	# add the URL, either in place of %u or at the end
+ 	if [[ ${cmdline[*]} = *%u* ]]; then
+-		cmdline=("${cmdline[@]//%u/"$url"}")
++		cmdline=("${cmdline[@]//%u/$url}")
+ 	else
+ 		cmdline+=("$url")
+ 	fi
 @@ -1317,47 +1317,41 @@ verify_integrity_sums() {
  	fi
  }
@@ -133,6 +213,15 @@ index 33dff24..18b2822 100644
  		error "$(gettext "Integrity checks are missing.")"
  		exit 1 # TODO: error code
  	fi
+@@ -1504,7 +1498,7 @@ check_pgpsigs() {
+ 			esac
+ 			errors=1
+ 		else
+-			if (( ${#validpgpkeys[@]} == 0 && ! $trusted )); then
++			if (( ${#validpgpkeys[@]} == 0 && !trusted )); then
+ 				printf "%s ($(gettext "the public key %s is not trusted"))" $(gettext "FAILED") "$fingerprint" >&2
+ 				errors=1
+ 			elif (( ${#validpgpkeys[@]} > 0 )) && ! in_array "$fingerprint" "${validpgpkeys[@]}"; then
 @@ -1627,7 +1621,10 @@ merge_arch_attrs() {
  
  source_buildfile() {
@@ -145,16 +234,26 @@ index 33dff24..18b2822 100644
  }
  
  run_function_safe() {
-@@ -2142,8 +2139,6 @@ write_pkginfo() {
- 	local size="$(@DUPATH@ @DUFLAGS@)"
- 	size="$(( ${size%%[^0-9]*} * 1024 ))"
+@@ -1835,7 +1832,7 @@ tidy_install() {
+ 	# check existence of backup files
+ 	local file
+ 	for file in "${backup[@]}"; do
+-		if [[ ! -f $file ]]; then
++		if [[ ! -f $file && ! -h $file ]]; then
+ 			warning "$(gettext "%s entry file not in package : %s")" "backup" "$file"
+ 		fi
+ 	done
+@@ -2469,6 +2466,9 @@ array_build() {
+ 	# Build an array of the indicies of the source array.
+ 	eval "keys=(\"\${!$2[@]}\")"
  
--	merge_arch_attrs
--
- 	msg2 "$(gettext "Generating %s file...")" ".PKGINFO"
- 	printf "# Generated by makepkg %s\n" "$makepkg_version"
- 	printf "# using %s\n" "$(fakeroot -v)"
-@@ -2896,7 +2891,7 @@ get_vcsclient() {
++	# Clear the destination array
++	eval "$dest=()"
++
+ 	# Read values indirectly via their index. This approach gives us support
+ 	# for associative arrays, sparse arrays, and empty strings as elements.
+ 	for i in "${keys[@]}"; do
+@@ -2896,7 +2896,7 @@ get_vcsclient() {
  }
  
  check_vcs_software() {
@@ -163,7 +262,7 @@ index 33dff24..18b2822 100644
  
  	if (( SOURCEONLY == 1 )); then
  		# we will not download VCS sources
-@@ -2908,7 +2903,17 @@ check_vcs_software() {
+@@ -2908,7 +2908,17 @@ check_vcs_software() {
  		return $ret
  	fi
  
@@ -182,7 +281,7 @@ index 33dff24..18b2822 100644
  		local proto=$(get_protocol "$netfile")
  
  		case $proto in
-@@ -2921,7 +2926,7 @@ check_vcs_software() {
+@@ -2921,7 +2931,7 @@ check_vcs_software() {
  					uninstalled="$(set +E; check_deps $client)" || exit 1
  					# if not installed, check presence in depends or makedepends
  					if [[ -n "$uninstalled" ]] && (( ! NODEPS || ( VERIFYSOURCE && !DEP_BIN ) )); then
@@ -191,7 +290,7 @@ index 33dff24..18b2822 100644
  							error "$(gettext "Cannot find the %s package needed to handle %s sources.")" \
  									"$client" "${proto%%+*}"
  							ret=1
-@@ -3435,7 +3440,7 @@ CARCH=${_CARCH:-$CARCH}
+@@ -3435,7 +3445,7 @@ CARCH=${_CARCH:-$CARCH}
  if (( ! INFAKEROOT )); then
  	if (( EUID == 0 )); then
  		error "$(gettext "Running %s as root is not allowed as it can cause permanent,\n\
@@ -200,7 +299,7 @@ index 33dff24..18b2822 100644
  		exit 1 # $E_USER_ABORT
  	fi
  else
-@@ -3597,7 +3602,7 @@ if (( SOURCEONLY )); then
+@@ -3597,7 +3607,7 @@ if (( SOURCEONLY )); then
  		download_sources allarch
  	elif ( (( ! SKIPCHECKSUMS )) || \
  			( (( ! SKIPPGPCHECK )) && source_has_signatures ) ); then
