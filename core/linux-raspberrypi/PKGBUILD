@@ -4,17 +4,17 @@
 
 # NOTE: Packages replace linux-raspberrypi-latest, remove if that package comes back
 
-buildarch=18
+buildarch=20
 
 pkgbase=linux-raspberrypi
-_commit=05851b0ab113773aeefbe98bee94298fa3cf646c
+_commit=ddabc66bccf573e00f23c6c09627194e6ec1fa68
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="Raspberry Pi"
 pkgver=3.18.5
-pkgrel=1
+pkgrel=3
 bfqver=v7r7
-arch=('arm' 'armv6h')
+arch=('armv6h' 'armv7h')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
@@ -22,22 +22,24 @@ options=('!strip')
 source=("https://github.com/raspberrypi/linux/archive/${_commit}.tar.gz"
         #"git://git.code.sf.net/p/aufs/aufs3-standalone#branch=aufs3.x-rcN"
         "git://git.code.sf.net/p/aufs/aufs3-standalone#branch=aufs${pkgver%.*}.1+" # 3.18.1+
-        "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/${pkgver:0:4}.0-${bfqver}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver:0:4}.patch"
-        "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/${pkgver:0:4}.0-${bfqver}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver:0:4}.patch"
-        "http://algo.ing.unimo.it/people/paolo/disk_sched/patches/${pkgver:0:4}.0-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.0.patch"
+        "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.0-${bfqver}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver:0:4}.patch"
+        "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.0-${bfqver}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver:0:4}.patch"
+        "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.0-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.0.patch"
         'https://github.com/raspberrypi/tools/raw/master/mkimage/mkknlimg'
         'config.txt'
         'cmdline.txt'
-        'config')
-md5sums=('1d05c5376cc06bea1892dddd93cb5058'
+        'config.v6'
+        'config.v7')
+md5sums=('ef1fb69bb6522190f9cb318433419509'
          'SKIP'
          '1c7c2d0338939a9e6953a64d80861471'
          'a81346cce95baeac2c56cf60d3c7e5b6'
          '8f2743651280f5a022e541f4e95e5546'
          '405015cdeb544575c25018b3487a2e76'
-         'a294b4a0d711c58fb0d94df3b5ace975'
+         '2377702414f77f964fb97fb9ce9502b6'
          '60bc3624123c183305677097bcd56212'
-         '565e0f31537e6cbfb81960e3f7f9a8eb')
+         '291c9285b48b8f1798389ac634b6dfae'
+         '88a818ae651cd18afca6d0d83188d197')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
@@ -59,7 +61,8 @@ prepare() {
   patch -Np1 -i "${srcdir}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.0.patch"
 
 msg "Prepare to build"
-  cat "${srcdir}/config" > ./.config
+  [[ $CARCH == "armv6h" ]] && cat "${srcdir}/config.v6" > ./.config
+  [[ $CARCH == "armv7h" ]] && cat "${srcdir}/config.v7" > ./.config
 
   # add pkgrel to extraversion
   sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
@@ -119,7 +122,8 @@ _package() {
   mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/overlays}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
 
-  perl ../mkknlimg --dtok arch/$KARCH/boot/zImage "${pkgdir}/boot/kernel.img"
+  [[ $CARCH == "armv6h" ]] && perl ../mkknlimg --dtok arch/$KARCH/boot/zImage "${pkgdir}/boot/kernel.img"
+  [[ $CARCH == "armv7h" ]] && perl ../mkknlimg --dtok arch/$KARCH/boot/zImage "${pkgdir}/boot/kernel7.img"
   mv arch/$KARCH/boot/dts/*-overlay.dtb "${pkgdir}/boot/overlays"
   mv arch/$KARCH/boot/dts/*.dtb "${pkgdir}/boot"
 
@@ -175,11 +179,14 @@ _package-headers() {
     cp -a include/${i} "${pkgdir}/usr/lib/modules/${_kernver}/build/include/"
   done
 
+  [[ $CARCH == "armv6h" ]] && MACH="mach-bcm2708"
+  [[ $CARCH == "armv7h" ]] && MACH="mach-bcm2709"
+
   # copy arch includes for external modules
   mkdir -p ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH
   cp -a arch/$KARCH/include ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/
-  mkdir -p ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/mach-bcm2708
-  cp -a arch/$KARCH/mach-bcm2708/include ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/mach-bcm2708/
+  mkdir -p ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/$MACH
+  cp -a arch/$KARCH/$MACH/include ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/$MACH/
 
   # copy files necessary for later builds, like nvidia and vmware
   cp Module.symvers "${pkgdir}/usr/lib/modules/${_kernver}/build"
