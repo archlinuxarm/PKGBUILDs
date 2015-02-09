@@ -13,7 +13,7 @@ diff -ruN a/drivers/ata/sata_mv.c b/drivers/ata/sata_mv.c
  {
  	int want_ncq = (protocol == ATA_PROT_NCQ);
  
-+	ledtrig_ide_activity();
++	ledtrig_ide_activity(ap->port_no);
 +
  	if (pp->pp_flags & MV_PP_FLAG_EDMA_EN) {
  		int using_ncq = ((pp->pp_flags & MV_PP_FLAG_NCQ_EN) != 0);
@@ -29,6 +29,67 @@ diff -ruN a/drivers/leds/trigger/Kconfig b/drivers/leds/trigger/Kconfig
  	depends on LEDS_TRIGGERS
  	help
  	  This allows LEDs to be controlled by IDE disk activity.
+diff -ruN a/drivers/leds/trigger/ledtrig-ide-disk.c b/drivers/leds/trigger/ledtrig-ide-disk.
+--- a/drivers/leds/trigger/ledtrig-ide-disk.c	2014-10-05 12:23:04.000000000 -0700
++++ b/drivers/leds/trigger/ledtrig-ide-disk.c	2014-10-09 22:04:58.000000000 -0700
+@@ -18,25 +20,36 @@
+ 
+ #define BLINK_DELAY 30
+ 
+-DEFINE_LED_TRIGGER(ledtrig_ide);
++DEFINE_LED_TRIGGER(ledtrig_ide1);
++DEFINE_LED_TRIGGER(ledtrig_ide2);
+ static unsigned long ide_blink_delay = BLINK_DELAY;
+ 
+-void ledtrig_ide_activity(void)
++void ledtrig_ide_activity(int port_number)
+ {
+-	led_trigger_blink_oneshot(ledtrig_ide,
+-				  &ide_blink_delay, &ide_blink_delay, 0);
++	switch (port_number) {
++		case 0:
++		        led_trigger_blink_oneshot(ledtrig_ide1, &ide_blink_delay, &ide_blink_delay, 0);
++			break;
++        	case 1:
++			led_trigger_blink_oneshot(ledtrig_ide2, &ide_blink_delay, &ide_blink_delay, 0);
++			break;
++		default:
++			break;
++	}
+ }
+ EXPORT_SYMBOL(ledtrig_ide_activity);
+ 
+ static int __init ledtrig_ide_init(void)
+ {
+-	led_trigger_register_simple("ide-disk", &ledtrig_ide);
++	led_trigger_register_simple("ide-disk1", &ledtrig_ide1); 
++	led_trigger_register_simple("ide-disk2", &ledtrig_ide2);
+ 	return 0;
+ }
+ 
+ static void __exit ledtrig_ide_exit(void)
+ {
+-	led_trigger_unregister_simple(ledtrig_ide);
++	led_trigger_unregister_simple(ledtrig_ide1);
++	led_trigger_unregister_simple(ledtrig_ide2);
+ }
+ 
+ module_init(ledtrig_ide_init);
+diff -ruN a/include/linux/leds.h b/include/linux/leds.h
+--- a/include/linux/leds.h	2014-10-05 12:23:04.000000000 -0700
++++ b/include/linux/leds.h	2014-10-09 22:04:58.000000000 -0700
+@@ -215,9 +216,9 @@
+ 
+ /* Trigger specific functions */
+ #ifdef CONFIG_LEDS_TRIGGER_IDE_DISK
+-extern void ledtrig_ide_activity(void);
++extern void ledtrig_ide_activity(int port_number);
+ #else
+-static inline void ledtrig_ide_activity(void) {}
++static inline void ledtrig_ide_activity(int port_number) {}
+ #endif
+ 
+ #if defined(CONFIG_LEDS_TRIGGER_CAMERA) || defined(CONFIG_LEDS_TRIGGER_CAMERA_MODULE)
 diff -ruN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
 --- a/drivers/mmc/core/core.c	2013-11-03 16:41:51.000000000 -0700
 +++ b/drivers/mmc/core/core.c	2013-11-08 01:39:49.008020351 -0700
@@ -78,3 +139,318 @@ diff -ruN a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
 +	if (cmd->opcode == SD_SWITCH) mdelay(1); /* Voodoo */
  
  	cmdreg = MVSD_CMD_INDEX(cmd->opcode);
+
+diff -ruN a/drivers/hwmon/Kconfig b/drivers/hwmon/Kconfig
+--- a/drivers/hwmon/Kconfig	2014-10-05 12:23:04.000000000 -0700
++++ b/drivers/hwmon/Kconfig	2014-10-09 22:04:58.000000000 -0700
+@@ -1669,6 +1669,19 @@
+ 	  This driver provides support for the Ultra45 workstation environmental
+ 	  sensors.
+ 
++config SENSORS_NSA3XX
++	tristate "ZyXEL NSA3xx fan speed and temperature sensors"
++	depends on GPIOLIB
++	help
++	  If you say yes here you get support for hardware monitoring
++	  for the ZyXEL NSA3XX Media Servers.
++
++	  The sensor data is taken from a Holtek HT46R065 microcontroller
++	  connected to GPIO lines.
++
++	  This driver can also be built as a module. If so, the module
++	  will be called nsa3xx-hwmon.
++
+ if ACPI
+ 
+ comment "ACPI drivers"
+diff -Naur a/drivers/hwmon/Makefile b/drivers/hwmon/Makefile
+--- a/drivers/hwmon/Makefile	2014-10-05 12:23:04.000000000 -0700
++++ b/drivers/hwmon/Makefile	2014-10-09 22:04:58.000000000 -0700
+@@ -114,6 +114,7 @@
+ obj-$(CONFIG_SENSORS_MAX6650)	+= max6650.o
+ obj-$(CONFIG_SENSORS_MAX6697)	+= max6697.o
+ obj-$(CONFIG_SENSORS_MC13783_ADC)+= mc13783-adc.o
++obj-$(CONFIG_SENSORS_NSA3XX)	+= nsa3xx-hwmon.o
+ obj-$(CONFIG_SENSORS_MCP3021)	+= mcp3021.o
+ obj-$(CONFIG_SENSORS_NCT6683)	+= nct6683.o
+ obj-$(CONFIG_SENSORS_NCT6775)	+= nct6775.o
+diff -Naur a/drivers/hwmon/nsa3xx-hwmon.c b/drivers/hwmon/nsa3xx-hwmon.c
+--- a/drivers/hwmon/nsa3xx-hwmon.c	1969-12-31 16:00:00.000000000 -0800
++++ b/drivers/hwmon/nsa3xx-hwmon.c	2014-10-09 22:04:58.000000000 -0700
+@@ -0,0 +1,251 @@
++/*
++ * drivers/hwmon/nsa3xx-hwmon.c
++ *
++ * ZyXEL NSA3xx Media Servers
++ * hardware monitoring
++ *
++ * Copyright (C) 2012 Peter Schildmann <linux@schildmann.info>
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License v2 as published by the
++ * Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along with
++ * this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
++ */
++
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/platform_device.h>
++#include <linux/err.h>
++#include <linux/gpio.h>
++#include <linux/hwmon.h>
++#include <linux/hwmon-sysfs.h>
++#include <linux/nsa3xx-hwmon.h>
++#include <linux/slab.h>
++#include <linux/jiffies.h>
++#include <linux/delay.h>
++#include <asm/delay.h>
++
++#define MAGIC_NUMBER 0x55
++
++struct nsa3xx_hwmon {
++	struct platform_device	*pdev;
++	struct device		*classdev;
++	struct mutex		update_lock;	/* lock GPIO operations */
++	unsigned long		last_updated;	/* jiffies */
++	unsigned long		mcu_data;
++};
++
++enum nsa3xx_inputs {
++	NSA3XX_FAN = 1,
++	NSA3XX_TEMP = 0,
++};
++
++static const char *nsa3xx_input_names[] = {
++	[NSA3XX_FAN] = "Chassis Fan",
++	[NSA3XX_TEMP] = "System Temperature",
++};
++
++static unsigned long nsa3xx_hwmon_update(struct device *dev)
++{
++	int i;
++	unsigned long mcu_data;
++	struct nsa3xx_hwmon *hwmon = dev_get_drvdata(dev);
++	struct nsa3xx_hwmon_platform_data *pdata = hwmon->pdev->dev.platform_data;
++
++	mutex_lock(&hwmon->update_lock);
++
++	mcu_data = hwmon->mcu_data;
++
++	if (time_after(jiffies, hwmon->last_updated + (3 * HZ)) || mcu_data == 0) {
++		dev_dbg(dev, "Reading MCU data\n");
++
++		gpio_set_value(pdata->act_pin, 0);
++		msleep(100);
++
++		for (i = 31; i >= 0; i--) {
++			gpio_set_value(pdata->clk_pin, 0);
++			udelay(100);
++
++			gpio_set_value(pdata->clk_pin, 1);
++			udelay(100);
++
++			mcu_data |= gpio_get_value(pdata->data_pin) ? (1 << i) : 0;
++		}
++
++		gpio_set_value(pdata->act_pin, 1);
++
++		if ((mcu_data & 0xff000000) != (MAGIC_NUMBER << 24)) {
++			dev_err(dev, "Failed to read MCU data\n");
++			mcu_data = 0;
++		}
++
++		hwmon->mcu_data = mcu_data;
++		hwmon->last_updated = jiffies;
++	}
++
++	mutex_unlock(&hwmon->update_lock);
++
++	return mcu_data;
++}
++
++static ssize_t show_name(struct device *dev,
++			 struct device_attribute *attr, char *buf)
++{
++	return sprintf(buf, "nsa3xx\n");
++}
++
++static ssize_t show_label(struct device *dev,
++			  struct device_attribute *attr, char *buf)
++{
++	int channel = to_sensor_dev_attr(attr)->index;
++	return sprintf(buf, "%s\n", nsa3xx_input_names[channel]);
++}
++
++static ssize_t show_value(struct device *dev,
++			  struct device_attribute *attr, char *buf)
++{
++	int channel = to_sensor_dev_attr(attr)->index;
++	unsigned long mcu_data = nsa3xx_hwmon_update(dev);
++	unsigned long value = 0;
++	switch(channel) {
++	case NSA3XX_TEMP:
++		value = (mcu_data & 0xffff) * 100;
++		break;
++	case NSA3XX_FAN:
++		value = ((mcu_data & 0xff0000) >> 16) * 100;
++		break;
++	}
++	return sprintf(buf, "%lu\n", value);
++}
++
++static DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
++static SENSOR_DEVICE_ATTR(temp1_label, S_IRUGO, show_label, NULL, NSA3XX_TEMP);
++static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, show_value, NULL, NSA3XX_TEMP);
++static SENSOR_DEVICE_ATTR(fan1_label, S_IRUGO, show_label, NULL, NSA3XX_FAN);
++static SENSOR_DEVICE_ATTR(fan1_input, S_IRUGO, show_value, NULL, NSA3XX_FAN);
++
++static struct attribute *nsa3xx_attributes[] = {
++	&dev_attr_name.attr,
++	&sensor_dev_attr_temp1_label.dev_attr.attr,
++	&sensor_dev_attr_temp1_input.dev_attr.attr,
++	&sensor_dev_attr_fan1_label.dev_attr.attr,
++	&sensor_dev_attr_fan1_input.dev_attr.attr,
++	NULL
++};
++
++static const struct attribute_group nsa3xx_attr_group = {
++	.attrs	= nsa3xx_attributes,
++};
++
++static int nsa3xx_hwmon_request_gpios(struct nsa3xx_hwmon_platform_data *pdata)
++{
++	int ret;
++
++	if ((ret = gpio_request(pdata->act_pin, "act pin")))
++		return ret;
++
++	if ((ret = gpio_request(pdata->clk_pin, "clk pin")))
++		return ret;
++
++	if ((ret = gpio_request(pdata->data_pin, "data pin")))
++		return ret;
++
++	if ((ret = gpio_direction_output(pdata->act_pin, 1)))
++		return ret;
++
++	if ((ret = gpio_direction_output(pdata->clk_pin, 1)))
++		return ret;
++
++	if ((ret = gpio_direction_input(pdata->data_pin)))
++		return ret;
++
++	return 0;
++}
++
++static void nsa3xx_hwmon_free_gpios(struct nsa3xx_hwmon_platform_data *pdata)
++{
++	gpio_free(pdata->act_pin);
++	gpio_free(pdata->clk_pin);
++	gpio_free(pdata->data_pin);
++}
++
++static int nsa3xx_hwmon_probe(struct platform_device *pdev)
++{
++	int ret;
++	struct nsa3xx_hwmon *hwmon;
++	struct nsa3xx_hwmon_platform_data *pdata = pdev->dev.platform_data;
++
++	hwmon = kzalloc(sizeof(struct nsa3xx_hwmon), GFP_KERNEL);
++	if (!hwmon)
++		return -ENOMEM;
++
++	platform_set_drvdata(pdev, hwmon);
++	hwmon->pdev = pdev;
++	hwmon->mcu_data = 0;
++	mutex_init(&hwmon->update_lock);
++
++	ret = sysfs_create_group(&pdev->dev.kobj, &nsa3xx_attr_group);
++	if (ret)
++		goto err;
++
++	hwmon->classdev = hwmon_device_register(&pdev->dev);
++	if (IS_ERR(hwmon->classdev)) {
++		ret = PTR_ERR(hwmon->classdev);
++		goto err_sysfs;
++	}
++
++	ret = nsa3xx_hwmon_request_gpios(pdata);
++	if (ret)
++		goto err_free_gpio;
++
++	dev_info(&pdev->dev, "initialized\n");
++
++	return 0;
++
++err_free_gpio:
++	nsa3xx_hwmon_free_gpios(pdata);
++	hwmon_device_unregister(hwmon->classdev);
++err_sysfs:
++	sysfs_remove_group(&pdev->dev.kobj, &nsa3xx_attr_group);
++err:
++	platform_set_drvdata(pdev, NULL);
++	kfree(hwmon);
++	return ret;
++}
++
++static int nsa3xx_hwmon_remove(struct platform_device *pdev)
++{
++	struct nsa3xx_hwmon *hwmon = platform_get_drvdata(pdev);
++
++	nsa3xx_hwmon_free_gpios(pdev->dev.platform_data);
++	hwmon_device_unregister(hwmon->classdev);
++	sysfs_remove_group(&pdev->dev.kobj, &nsa3xx_attr_group);
++	platform_set_drvdata(pdev, NULL);
++	kfree(hwmon);
++
++	return 0;
++}
++
++static struct platform_driver nsa3xx_hwmon_driver = {
++	.probe = nsa3xx_hwmon_probe,
++	.remove = nsa3xx_hwmon_remove,
++	.driver = {
++		.name = "nsa3xx-hwmon",
++		.owner = THIS_MODULE,
++	},
++};
++
++module_platform_driver(nsa3xx_hwmon_driver);
++
++MODULE_AUTHOR("Peter Schildmann <linux@schildmann.info>");
++MODULE_DESCRIPTION("NSA3XX Hardware Monitoring");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("platform:nsa3xx-hwmon");
+diff -Naur a/include/linux/nsa3xx-hwmon.h b/include/linux/nsa3xx-hwmon.h
+--- a/include/linux/nsa3xx-hwmon.h	1969-12-31 16:00:00.000000000 -0800
++++ b/include/linux/nsa3xx-hwmon.h	2014-10-09 22:04:58.000000000 -0700
+@@ -0,0 +1,21 @@
++/*
++ * include/linux/nsa3xx.hwmon.h
++ *
++ * Platform data structure for ZyXEL NSA3xx hwmon driver
++ *
++ * This file is licensed under the terms of the GNU General Public
++ * License version 2.  This program is licensed "as is" without any
++ * warranty of any kind, whether express or implied.
++ */
++
++#ifndef __LINUX_NSA3XX_HWMON_H
++#define __LINUX_NSA3XX_HWMON_H
++
++struct nsa3xx_hwmon_platform_data {
++	/* GPIO pins */
++	unsigned act_pin;
++	unsigned clk_pin;
++	unsigned data_pin;
++};
++
++#endif /* __LINUX_NSA3XX_HWMON_H */
