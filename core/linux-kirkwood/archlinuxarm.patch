@@ -2490,7 +2490,7 @@ diff -ruN a/arch/arm/mach-kirkwood/goflexhome-setup.c b/arch/arm/mach-kirkwood/g
 +	},
 +	{
 +		.name			= "status:white:misc",
-+		.default_trigger	= "ide-disk",
++		.default_trigger	= "ide-disk1",
 +		.gpio			= 40,
 +		.active_low		= 0,
 +	}
@@ -5925,7 +5925,7 @@ diff -ruN a/arch/arm/mach-kirkwood/nsa320-setup.c b/arch/arm/mach-kirkwood/nsa32
 +static struct gpio_led nsa320_led_pins[] = {
 +	{
 +		.name			= "nsa320:green:hdd2",
-+		.default_trigger	= "ide-disk",
++		.default_trigger	= "ide-disk2",
 +		.gpio			= 12,
 +		.active_low		= 0,
 +	}, {
@@ -5960,7 +5960,7 @@ diff -ruN a/arch/arm/mach-kirkwood/nsa320-setup.c b/arch/arm/mach-kirkwood/nsa32
 +		.active_low		= 0,
 +	}, {
 +		.name			= "nsa320:green:hdd1",
-+		.default_trigger	= "ide-disk",
++		.default_trigger	= "ide-disk1",
 +		.gpio			= 41,
 +		.active_low		= 0,
 +	}, {
@@ -8734,10 +8734,11 @@ diff -ruN a/drivers/ata/Kconfig b/drivers/ata/Kconfig
  		   ARCH_MVEBU || ARCH_ORION5X || COMPILE_TEST
  	select GENERIC_PHY
  	help
+
 diff -ruN a/drivers/ata/sata_mv.c b/drivers/ata/sata_mv.c
---- a/drivers/ata/sata_mv.c	2014-12-07 22:21:05.000000000 +0000
-+++ b/drivers/ata/sata_mv.c	2014-12-12 01:25:02.011863184 +0000
-@@ -72,6 +72,7 @@
+--- a/drivers/ata/sata_mv.c	2013-11-03 16:41:51.000000000 -0700
++++ b/drivers/ata/sata_mv.c	2013-11-08 01:39:48.868014917 -0700
+@@ -71,6 +71,7 @@
  #include <scsi/scsi_cmnd.h>
  #include <scsi/scsi_device.h>
  #include <linux/libata.h>
@@ -8745,15 +8746,87 @@ diff -ruN a/drivers/ata/sata_mv.c b/drivers/ata/sata_mv.c
  
  #define DRV_NAME	"sata_mv"
  #define DRV_VERSION	"1.28"
-@@ -1170,6 +1171,8 @@
+@@ -1161,6 +1162,8 @@
  {
  	int want_ncq = (protocol == ATA_PROT_NCQ);
  
-+	ledtrig_ide_activity();
++	ledtrig_ide_activity(ap->port_no);
 +
  	if (pp->pp_flags & MV_PP_FLAG_EDMA_EN) {
  		int using_ncq = ((pp->pp_flags & MV_PP_FLAG_NCQ_EN) != 0);
  		if (want_ncq != using_ncq)
+diff -ruN a/drivers/leds/trigger/Kconfig b/drivers/leds/trigger/Kconfig
+--- a/drivers/leds/trigger/Kconfig	2013-11-03 16:41:51.000000000 -0700
++++ b/drivers/leds/trigger/Kconfig	2013-11-08 01:39:48.958018410 -0700
+@@ -35,7 +35,6 @@
+ 
+ config LEDS_TRIGGER_IDE_DISK
+ 	bool "LED IDE Disk Trigger"
+-	depends on IDE_GD_ATA
+ 	depends on LEDS_TRIGGERS
+ 	help
+ 	  This allows LEDs to be controlled by IDE disk activity.
+diff -ruN a/drivers/leds/trigger/ledtrig-ide-disk.c b/drivers/leds/trigger/ledtrig-ide-disk.
+--- a/drivers/leds/trigger/ledtrig-ide-disk.c	2014-10-05 12:23:04.000000000 -0700
++++ b/drivers/leds/trigger/ledtrig-ide-disk.c	2014-10-09 22:04:58.000000000 -0700
+@@ -18,25 +20,36 @@
+ 
+ #define BLINK_DELAY 30
+ 
+-DEFINE_LED_TRIGGER(ledtrig_ide);
++DEFINE_LED_TRIGGER(ledtrig_ide1);
++DEFINE_LED_TRIGGER(ledtrig_ide2);
+ static unsigned long ide_blink_delay = BLINK_DELAY;
+ 
+-void ledtrig_ide_activity(void)
++void ledtrig_ide_activity(int port_number)
+ {
+-	led_trigger_blink_oneshot(ledtrig_ide,
+-				  &ide_blink_delay, &ide_blink_delay, 0);
++	switch (port_number) {
++		case 0:
++		        led_trigger_blink_oneshot(ledtrig_ide1, &ide_blink_delay, &ide_blink_delay, 0);
++			break;
++        	case 1:
++			led_trigger_blink_oneshot(ledtrig_ide2, &ide_blink_delay, &ide_blink_delay, 0);
++			break;
++		default:
++			break;
++	}
+ }
+ EXPORT_SYMBOL(ledtrig_ide_activity);
+ 
+ static int __init ledtrig_ide_init(void)
+ {
+-	led_trigger_register_simple("ide-disk", &ledtrig_ide);
++	led_trigger_register_simple("ide-disk1", &ledtrig_ide1); 
++	led_trigger_register_simple("ide-disk2", &ledtrig_ide2);
+ 	return 0;
+ }
+ 
+ static void __exit ledtrig_ide_exit(void)
+ {
+-	led_trigger_unregister_simple(ledtrig_ide);
++	led_trigger_unregister_simple(ledtrig_ide1);
++	led_trigger_unregister_simple(ledtrig_ide2);
+ }
+ 
+ module_init(ledtrig_ide_init);
+diff -ruN a/include/linux/leds.h b/include/linux/leds.h
+--- a/include/linux/leds.h	2014-10-05 12:23:04.000000000 -0700
++++ b/include/linux/leds.h	2014-10-09 22:04:58.000000000 -0700
+@@ -215,9 +216,9 @@
+ 
+ /* Trigger specific functions */
+ #ifdef CONFIG_LEDS_TRIGGER_IDE_DISK
+-extern void ledtrig_ide_activity(void);
++extern void ledtrig_ide_activity(int port_number);
+ #else
+-static inline void ledtrig_ide_activity(void) {}
++static inline void ledtrig_ide_activity(int port_number) {}
+ #endif
+ 
+ #if defined(CONFIG_LEDS_TRIGGER_CAMERA) || defined(CONFIG_LEDS_TRIGGER_CAMERA_MODULE)
 diff -ruN a/drivers/cpufreq/Kconfig.arm b/drivers/cpufreq/Kconfig.arm
 --- a/drivers/cpufreq/Kconfig.arm	2014-12-07 22:21:05.000000000 +0000
 +++ b/drivers/cpufreq/Kconfig.arm	2014-12-12 01:26:17.539188086 +0000
@@ -9088,17 +9161,6 @@ diff -ruN a/drivers/leds/Kconfig b/drivers/leds/Kconfig
  	default y
  	help
  	  This option enable support for LEDs found on the LaCie 2Big
-diff -ruN a/drivers/leds/trigger/Kconfig b/drivers/leds/trigger/Kconfig
---- a/drivers/leds/trigger/Kconfig	2014-12-07 22:21:05.000000000 +0000
-+++ b/drivers/leds/trigger/Kconfig	2014-12-12 01:25:02.022863959 +0000
-@@ -35,7 +35,6 @@
- 
- config LEDS_TRIGGER_IDE_DISK
- 	bool "LED IDE Disk Trigger"
--	depends on IDE_GD_ATA
- 	depends on LEDS_TRIGGERS
- 	help
- 	  This allows LEDs to be controlled by IDE disk activity.
 diff -ruN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
 --- a/drivers/mmc/core/core.c	2014-12-07 22:21:05.000000000 +0000
 +++ b/drivers/mmc/core/core.c	2014-12-12 01:25:02.026864241 +0000
