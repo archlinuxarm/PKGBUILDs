@@ -9,19 +9,18 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=10.4.6
-pkgrel=1
+pkgver=10.5.1
+pkgrel=2
 arch=('i686' 'x86_64')
-makedepends=('python2' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
+makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
              'systemd' 'libomxil-bellagio' 'clang')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
-source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/MesaLib-${pkgver}.tar.bz2{,.sig}
-#source=(ftp://ftp.freedesktop.org/pub/mesa/10.3/MesaLib-${pkgver}.tar.bz2{,.sig}
+source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE)
-sha256sums=('d8baedd20e79ccd98a5a7b05e23d59a30892e68de1fcc057ca6873dafca02735'
+sha256sums=('ffc51943d15c6812ee7611d053d8980a683fbd6a4986cff567b12cc66637d679'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
@@ -29,7 +28,7 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l
 build() {
   cd ${srcdir}/?esa-*
 
-  autoreconf -vfi # our automake is far too new for their build system :)
+  #autoreconf -vfi # our automake is far too new for their build system :)
 
   ./configure --prefix=/usr \
     --sysconfdir=/etc \
