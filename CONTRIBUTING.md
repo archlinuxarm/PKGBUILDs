@@ -1,5 +1,5 @@
 ## New Issues
-This issue tracker is for bugs with packages.  Use [the forum](http://archlinuxarm.org/forum) for anything else.
+This issue tracker is for bugs with packaging, and the PKGBUILDs *only*.  Use [the forum](http://archlinuxarm.org/forum) for *all* other issues.
 
 *Before* filing an issue, copy and paste the following template.  **This is required to be completely filled out.**
 ```AsciiDoc
