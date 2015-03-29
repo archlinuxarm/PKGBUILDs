@@ -19,7 +19,7 @@ _prefix=/usr
 
 pkgbase=kodi
 pkgname=('kodi' 'kodi-eventclients')
-pkgver=14.1
+pkgver=14.2
 _codename=Helix
 pkgrel=2
 arch=('i686' 'x86_64')
@@ -37,9 +37,7 @@ makedepends=(
 source=(
   "$pkgname-$pkgver-$_codename.tar.gz::https://github.com/xbmc/xbmc/archive/$pkgver-$_codename.tar.gz"
 )
-sha256sums=(
-  'a38059e292cf8523918834e49fcc2d688525ceb7951ddf7f5ee535f4147255d6'
-)
+sha256sums=('d9cb8590430a925fb789a5beb4da2695cdcd2d2500dd31126f3b77b31aa267f4')
 
 prepare() {
   cd "$srcdir/xbmc-$pkgver-$_codename"
@@ -47,6 +45,11 @@ prepare() {
   find -type f -name *.py -exec sed 's|^#!.*python$|#!/usr/bin/python2|' -i "{}" +
   sed 's|^#!.*python$|#!/usr/bin/python2|' -i tools/depends/native/rpl-native/rpl
 	sed 's/python/python2/' -i tools/Linux/kodi.sh.in
+  sed 's/shell python/shell python2/' -i tools/EventClients/Makefile.in
+  # disable wiiremote due to incompatibility with bluez-5.29
+  sed '/WiiRemote/d' -i tools/EventClients/Makefile.in
+  sed '/mkdir -p $(DESTDIR)$(bindir)/i \
+install:' -i tools/EventClients/Makefile.in
 }
 
 build() {
@@ -66,7 +69,8 @@ build() {
     --enable-libbluray \
     --enable-external-libraries \
     --with-lirc-device=/run/lirc/lircd \
-    --disable-vaapi
+    --disable-vaapi \
+    ac_cv_lib_bluetooth_hci_devid=no
 
   # Now (finally) build
   make
@@ -111,6 +115,11 @@ package_kodi() {
   # Running make install
   make DESTDIR="$pkgdir" install
 
+  # We will no longer support the xbmc name
+  rm "$pkgdir/usr/share/xsessions/xbmc.desktop"
+  rm "$pkgdir/usr/bin/"xbmc{,-standalone}
+  # we will leave /usr/{include,lib,share}/xbmc for now
+
   # Licenses
 	install -dm755 ${pkgdir}${_prefix}/share/licenses/${pkgname}
   for licensef in LICENSE.GPL copying.txt; do
@@ -127,8 +136,4 @@ package_kodi-eventclients() {
   cd "$srcdir/xbmc-$pkgver-$_codename"
 
   make DESTDIR="$pkgdir" eventclients WII_EXTRA_OPTS=-DCWIID_OLD
-
-  install -dm755 "$pkgdir/usr/lib/python2.7/$pkgbase"
-  mv "$pkgdir/kodi"/* "$pkgdir/usr/lib/python2.7/$pkgbase"
-  rmdir "$pkgdir/kodi"
 }
