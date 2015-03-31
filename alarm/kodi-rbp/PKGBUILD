@@ -5,47 +5,50 @@
 
 buildarch=20
 
-pkgname=kodi-rbp
-pkgver=14.1
+_prefix=/usr
+
+pkgbase=kodi-rbp
+pkgname=('kodi-rbp' 'kodi-rbp-eventclients')
+pkgver=14.2
 _codename=Helix
-pkgrel=4
+pkgrel=1
 pkgdesc="A software media player and entertainment hub for digital media for the Raspberry Pi"
 arch=('armv6h' 'armv7h')
 url="http://kodi.tv"
-license=('GPL' 'custom')
-depends=('hicolor-icon-theme' 'fribidi' 'lzo2' 'smbclient' 'libtiff' 'libva' 'libpng' 'libcdio' 'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd' 'sdl_image' 'python2' 'libass' 'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 'xorg-xdpyinfo' 'libbluray' 'libnfs' 'afpfs-ng' 'avahi' 'bluez-libs' 'tinyxml' 'raspberrypi-firmware' 'libcec-rpi' 'libplist' 'swig' 'taglib' 'libxslt' 'shairplay-git')
-makedepends=('boost' 'cmake' 'gperf' 'nasm' 'zip' 'udisks' 'upower' 'git' 'autoconf' 'java-environment')
-optdepends=(
-  'lirc: remote controller support'
-  'udisks: automount external drives'
-  'upower: used to trigger power management functionality'
-  'unrar: access compressed files without unpacking them')
-
-provides=('xbmc' 'kodi')
-conflicts=('xbmc' 'kodi')
-replaces=('xbmc-rbp')
-install="kodi.install"
+license=('GPL2')
+makedepends=('hicolor-icon-theme' 'fribidi' 'lzo2' 'smbclient' 'libtiff' 'libva' 'libpng' 'libcdio'
+             'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd'
+             'sdl_image' 'python2' 'python2-pillow' 'python2-pybluez' 'python2-simplejson' 'libass'
+             'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 'xorg-xdpyinfo' 'libbluray'
+             'libnfs' 'afpfs-ng' 'avahi' 'bluez-libs' 'tinyxml' 'raspberrypi-firmware' 'libcec-rpi'
+             'libplist' 'swig' 'taglib' 'libxslt' 'shairplay-git' 'boost' 'cmake' 'gperf' 'nasm' 'zip'
+             'udisks' 'upower' 'git' 'autoconf' 'java-environment')
 source=("https://github.com/xbmc/xbmc/archive/$pkgver-$_codename.tar.gz"
         'kodi.service'
         'polkit.rules')
 
-sha256sums=('a38059e292cf8523918834e49fcc2d688525ceb7951ddf7f5ee535f4147255d6'
+sha256sums=('d9cb8590430a925fb789a5beb4da2695cdcd2d2500dd31126f3b77b31aa267f4'
             '5235068d5800d69f0287087815990e7fe8d6572733d60c8800546d35f608e87f'
             '9ea592205023ba861603d74b63cdb73126c56372a366dc4cb7beb379073cbb96')
-_prefix=/usr
 
 prepare() {
   cd "$srcdir/xbmc-$pkgver-$_codename"
 
-  # fix lsb_release dependency
-  sed -i -e 's:/usr/bin/lsb_release -d:cat /etc/arch-release:' xbmc/utils/SystemInfo.cpp
+  find -type f -name *.py -exec sed 's|^#!.*python$|#!/usr/bin/python2|' -i "{}" +
+  sed 's|^#!.*python$|#!/usr/bin/python2|' -i tools/depends/native/rpl-native/rpl
+	sed 's/python/python2/' -i tools/Linux/kodi.sh.in
+  sed 's/shell python/shell python2/' -i tools/EventClients/Makefile.in
+  # disable wiiremote due to incompatibility with bluez-5.29
+  sed '/WiiRemote/d' -i tools/EventClients/Makefile.in
+  sed '/mkdir -p $(DESTDIR)$(bindir)/i \
+install:' -i tools/EventClients/Makefile.in
 }
 
 build() {
   cd "$srcdir/xbmc-$pkgver-$_codename"
 
-  # Bootstrapping Kodi
-  ./bootstrap
+  # Bootstrapping
+  MAKEFLAGS=-j1 ./bootstrap
 
   # Configuring Kodi
   export PYTHON_VERSION=2  # external python v2
@@ -57,9 +60,8 @@ build() {
 
   export LDFLAGS="$LDFLAGS -L/opt/vc/lib"
 
-
-  #If build fails try uncommenting the line below first
-  #export MAKEFLAGS="-j1"
+  # If build fails try uncommenting the line below first
+  # export MAKEFLAGS="-j1"
  
   ./configure --prefix=$_prefix --exec-prefix=$_prefix  \
   --with-platform=raspberry-pi \
@@ -88,21 +90,48 @@ build() {
   --enable-rtmp \
   --disable-vaapi \
   --enable-optical-drive \
-  --enable-player=omxplayer
+  --enable-player=omxplayer \
+  --with-lirc-device=/run/lirc/lircd \
+  ac_cv_lib_bluetooth_hci_devid=no
   make
 }
 
-package() {
+package_kodi-rbp() {
+  pkgdesc="A software media player and entertainment hub for digital media (Raspberry Pi)"
+
+  # depends expected for kodi plugins:
+  # 'python2-pillow' 'python2-pybluez' 'python2-simplejson'
+  # depends expeced in FEH.py
+  # 'mesa-demos' 'xorg-xdpyinfo'
+  depends=('hicolor-icon-theme' 'fribidi' 'lzo2' 'smbclient' 'libtiff' 'libva' 'libpng' 'libcdio'
+           'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd'
+           'sdl_image' 'python2' 'python2-pillow' 'python2-pybluez' 'python2-simplejson' 'libass'
+           'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 'xorg-xdpyinfo' 'libbluray'
+           'libnfs' 'avahi' 'bluez-libs' 'tinyxml' 'raspberrypi-firmware' 'libcec-rpi'
+           'libplist' 'swig' 'taglib' 'libxslt' 'shairplay')
+
+  optdepends=(
+    'afpfs-ng: Apple shares support'
+    'lirc: remote controller support'
+    'polkit: permissions for automounting external drives and power management functionality'
+    'udisks: automount external drives'
+    'upower: used to trigger power management functionality'
+    'unrar: access compressed files without unpacking them'
+    'lsb-release: log distro information in crashlog')
+
+  install="kodi.install"
+  provides=('xbmc' 'kodi')
+  conflicts=('xbmc' 'kodi' 'shairplay-git')
+  replaces=('xbmc-rbp')
+
   cd "$srcdir/xbmc-$pkgver-$_codename"
   # Running make install
   make DESTDIR="${pkgdir}" install
 
-  # run feh with python2
-  sed -i -e 's/python/python2/g' ${pkgdir}${_prefix}/bin/kodi
-
-  # lsb_release fix
-  sed -i -e 's/which lsb_release > \/dev\/null/\[ -f \/etc\/arch-release ]/g' "${pkgdir}${_prefix}/bin/kodi"
-  sed -i -e "s/lsb_release -a 2> \/dev\/null | sed -e 's\/\^\/    \/'/cat \/etc\/arch-release/g" "${pkgdir}${_prefix}/bin/kodi"
+  # We will no longer support the xbmc name
+  rm "$pkgdir/usr/share/xsessions/xbmc.desktop"
+  rm "$pkgdir/usr/bin/"xbmc{,-standalone}
+  # we will leave /usr/{include,lib,share}/xbmc for now
 
   # Tools
   install -D -m 0755 "${srcdir}/xbmc-${pkgver}-${_codename}/tools/TexturePacker/TexturePacker" "${pkgdir}${_prefix}/lib/kodi/"
@@ -116,4 +145,15 @@ package() {
   install -Dm0644 $srcdir/kodi.service $pkgdir/usr/lib/systemd/system/kodi.service
   install -Dm0644 $srcdir/polkit.rules $pkgdir/usr/share/polkit-1/rules.d/10-kodi.rules
   chmod 0700 $pkgdir/usr/share/polkit-1/rules.d/
+}
+
+package_kodi-rbp-eventclients() {
+  pkgdesc="Kodi Event Clients (Raspberry Pi)"
+  provides=('kodi-eventclients')
+  conflicts=('kodi-eventclients')
+  depends=('cwiid')
+
+  cd "$srcdir/xbmc-$pkgver-$_codename"
+
+  make DESTDIR="$pkgdir" eventclients WII_EXTRA_OPTS=-DCWIID_OLD
 }
