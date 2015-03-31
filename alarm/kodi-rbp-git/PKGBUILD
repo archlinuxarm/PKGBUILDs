@@ -1,75 +1,55 @@
+# Contributor Oleg Rakhmanov <oleg [at] archlinuxarm [dot] com>
 # Contributor tomasgroth at yahoo.dk
 # Contributor WarheadsSE <max@warheads.net>
 
 buildarch=20
 
-pkgname=kodi-rbp-git
-pkgver=15.20150228
-pkgrel=1
-pkgdesc="A software media player and entertainment hub for digital media for the Raspberry Pi"
-arch=('armv6h')
-url="http://kodi.tv"
-license=('GPL' 'custom')
-depends=('hicolor-icon-theme' 'fribidi' 'lzo2' 'smbclient' 'giflib' 'libtiff' 'libva' 'libpng' 
-         'libcdio' 'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd' 
-         'sdl_image' 'python2' 'libass' 'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 
-         'xorg-xdpyinfo' 'libbluray' 'libnfs' 'afpfs-ng' 'avahi' 'bluez-libs' 'tinyxml' 
-         'raspberrypi-firmware' 'libcec-rpi' 'libplist' 'swig' 'taglib' 'libxslt' 'shairplay-git')
-makedepends=('boost' 'cmake' 'gperf' 'nasm' 'zip' 'udisks' 'upower' 'git' 'autoconf' 'java-environment')
-optdepends=(
-  'lirc: remote controller support'
-  'udisks: automount external drives'
-  'upower: used to trigger power management functionality'
-  'unrar: access compressed files without unpacking them')
-
-provides=('xbmc' 'kodi')
-conflicts=('xbmc' 'kodi')
-replaces=('xbmc-rbp-git')
-install="kodi.install"
-source=('kodi.service'
-        'polkit.rules')
-
-md5sums=('11cbf4307dd468dc9fa638bc8a13846b'
-         '725bcdb8a5557374ea3522169a8a6423')
-
-_gitname="xbmc"
-_gitroot="git://github.com/xbmc"
-
-# Only change _gitbranch if master has moved on to the next release number
-# but there's hasn't been a stable release yet.
-_gitbranch="master"
-
 _prefix=/usr
 
+pkgbase=kodi-rbp-git
+pkgname=('kodi-rbp-git' 'kodi-rbp-git-eventclients')
+pkgver=15.20150330
+
+_commit=e826779451fdcb865f6a66cc092e17d6ec5f2d6e
+pkgrel=1
+pkgdesc="A software media player and entertainment hub for digital media for the Raspberry Pi"
+arch=('armv6h' 'armv7h')
+url="http://kodi.tv"
+license=('GPL2')
+makedepends=('hicolor-icon-theme' 'fribidi' 'lzo2' 'smbclient' 'libtiff' 'libva' 'libpng' 'libcdio'
+             'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd'
+             'sdl_image' 'python2' 'python2-pillow' 'python2-pybluez' 'python2-simplejson' 'libass'
+             'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 'xorg-xdpyinfo' 'libbluray'
+             'libnfs' 'afpfs-ng' 'avahi' 'bluez-libs' 'tinyxml' 'raspberrypi-firmware' 'libcec-rpi'
+             'libplist' 'swig' 'taglib' 'libxslt' 'shairplay' 'boost' 'cmake' 'gperf' 'nasm' 'zip'
+             'udisks' 'upower' 'git' 'autoconf' 'java-environment')
+source=("kodi-${_commit}.tar.gz::https://github.com/xbmc/xbmc/archive/${_commit}.tar.gz"
+        'kodi.service'
+        'polkit.rules')
+
+sha256sums=('9302b3cc9eb72f4e17e7a44a46d2ae739937fcf1bbe52f0408da8b6c974b8756'
+            '5235068d5800d69f0287087815990e7fe8d6572733d60c8800546d35f608e87f'
+            '9ea592205023ba861603d74b63cdb73126c56372a366dc4cb7beb379073cbb96')
 prepare() {
-  cd "${srcdir}"
+  cd "$srcdir/xbmc-${_commit}"
 
-
-  msg2 "Connecting to GIT server..."
-  
-  if [[ -d "${_gitname}" ]]; then
-     cd "${_gitname}" && git pull origin
-     msg2 "The local files are updated."
-  else
-     git clone --branch=${_gitbranch} --depth 1 "${_gitroot}/${_gitname}"
-  fi
-  
-  msg2 "GIT checkout done or server timeout." 
-
-
-  cd "${srcdir}/${_gitname}"
-
-  # fix lsb_release dependency
-  sed -i -e 's:/usr/bin/lsb_release -d:cat /etc/arch-release:' xbmc/utils/SystemInfo.cpp
+  find -type f -name *.py -exec sed 's|^#!.*python$|#!/usr/bin/python2|' -i "{}" +
+  sed 's|^#!.*python$|#!/usr/bin/python2|' -i tools/depends/native/rpl-native/rpl
+	sed 's/python/python2/' -i tools/Linux/kodi.sh.in
+  sed 's/shell python/shell python2/' -i tools/EventClients/Makefile.in
+  # disable wiiremote due to incompatibility with bluez-5.29
+  sed '/WiiRemote/d' -i tools/EventClients/Makefile.in
+  sed '/mkdir -p $(DESTDIR)$(bindir)/i \
+install:' -i tools/EventClients/Makefile.in
 }
 
 build() {
-  cd "${srcdir}/${_gitname}"
+  cd "${srcdir}/xbmc-${_commit}"
 
-  # Bootstrapping KODI
-  ./bootstrap
+  # Bootstrapping
+  MAKEFLAGS=-j1 ./bootstrap
 
-  # Configuring KODI
+  # Configuring Kodi
   export PYTHON_VERSION=2  # external python v2
   # we need to compile for armv6 instead of armv5 to avoid problems compiling assembler code
   FLAGS="-Ofast -fexcess-precision=fast -mfloat-abi=hard -mabi=aapcs-linux -pipe -fstack-protector --param=ssp-buffer-size=4 \
@@ -78,9 +58,9 @@ build() {
   [[ $CARCH == "armv7h" ]] && export CFLAGS="$FLAGS -mcpu=cortex-a7 -mtune=cortex-a7 -mfpu=neon-vfpv4 -mvectorize-with-neon-quad" && export CXXFLAGS="$FLAGS -mcpu=cortex-a7 -mtune=cortex-a7 -mfpu=neon-vfpv4 -mvectorize-with-neon-quad"
 
   export LDFLAGS="$LDFLAGS -L/opt/vc/lib"
-   
+
   # If build fails try uncommenting the line below first
-  #export MAKEFLAGS="-j1"
+  # export MAKEFLAGS="-j1"
  
   ./configure --prefix=$_prefix --exec-prefix=$_prefix  \
   --with-platform=raspberry-pi \
@@ -110,27 +90,50 @@ build() {
   --disable-vaapi \
   --enable-optical-drive \
   --enable-player=omxplayer \
-#  --enable-texturepacker
+  --with-lirc-device=/run/lirc/lircd \
+  ac_cv_lib_bluetooth_hci_devid=no
   make
 }
 
-package() {
-  cd "${srcdir}/${_gitname}"
+package_kodi-rbp-git() {
+  pkgdesc="A software media player and entertainment hub for digital media (Raspberry Pi)"
+
+  # depends expected for kodi plugins:
+  # 'python2-pillow' 'python2-pybluez' 'python2-simplejson'
+  # depends expeced in FEH.py
+  # 'mesa-demos' 'xorg-xdpyinfo'
+  depends=('hicolor-icon-theme' 'fribidi' 'lzo2' 'smbclient' 'libtiff' 'libva' 'libpng' 'libcdio'
+           'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd'
+           'sdl_image' 'python2' 'python2-pillow' 'python2-pybluez' 'python2-simplejson' 'libass'
+           'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'unzip' 'xorg-xdpyinfo' 'libbluray'
+           'libnfs' 'avahi' 'bluez-libs' 'tinyxml' 'raspberrypi-firmware' 'libcec-rpi'
+           'libplist' 'swig' 'taglib' 'libxslt' 'shairplay')
+
+  optdepends=(
+    'afpfs-ng: Apple shares support'
+    'lirc: remote controller support'
+    'polkit: permissions for automounting external drives and power management functionality'
+    'udisks: automount external drives'
+    'upower: used to trigger power management functionality'
+    'unrar: access compressed files without unpacking them'
+    'lsb-release: log distro information in crashlog')
+
+  install="kodi.install"
+  provides=('xbmc' 'kodi')
+  conflicts=('xbmc' 'kodi' 'shairplay-git')
+  replaces=('xbmc-rbp-git')
+
+  cd "$srcdir/xbmc-${_commit}"
   # Running make install
   make DESTDIR="${pkgdir}" install
 
-  # run feh with python2
-  sed -i -e 's/python/python2/g' ${pkgdir}${_prefix}/bin/kodi
-
-  # lsb_release fix
-  sed -i -e 's/which lsb_release > \/dev\/null/\[ -f \/etc\/arch-release ]/g' "${pkgdir}${_prefix}/bin/kodi"
-  sed -i -e "s/lsb_release -a 2> \/dev\/null | sed -e 's\/\^\/    \/'/cat \/etc\/arch-release/g" "${pkgdir}${_prefix}/bin/kodi"
-
-  # Tools
-  #install -D -m 0755 "${srcdir}/${_gitname}/tools/TexturePacker/TexturePacker" "${pkgdir}${_prefix}/lib/kodi"
+  # We will no longer support the xbmc name
+  rm "$pkgdir/usr/share/xsessions/xbmc.desktop"
+  rm "$pkgdir/usr/bin/"xbmc{,-standalone}
+  # we will leave /usr/{include,lib,share}/xbmc for now
 
   # Licenses
-  install -dm755 "${pkgdir}${_prefix}/share/licenses/${pkgname}"
+  install -d -m 0755 "${pkgdir}${_prefix}/share/licenses/${pkgname}"
   for licensef in LICENSE.GPL copying.txt; do
     mv "${pkgdir}${_prefix}/share/doc/kodi/${licensef}" "${pkgdir}${_prefix}/share/licenses/${pkgname}"
   done
@@ -138,4 +141,15 @@ package() {
   install -Dm0644 $srcdir/kodi.service $pkgdir/usr/lib/systemd/system/kodi.service
   install -Dm0644 $srcdir/polkit.rules $pkgdir/usr/share/polkit-1/rules.d/10-kodi.rules
   chmod 0700 $pkgdir/usr/share/polkit-1/rules.d/
+}
+
+package_kodi-rbp-git-eventclients() {
+  pkgdesc="Kodi Event Clients (Raspberry Pi)"
+  provides=('kodi-eventclients')
+  conflicts=('kodi-eventclients')
+  depends=('cwiid')
+
+  cd "$srcdir/xbmc-${_commit}"
+
+  make DESTDIR="$pkgdir" eventclients WII_EXTRA_OPTS=-DCWIID_OLD
 }
