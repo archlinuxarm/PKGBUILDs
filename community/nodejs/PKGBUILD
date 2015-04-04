@@ -11,7 +11,7 @@
 pkgname=nodejs
 pkgver=0.12.2
 _npmver=2.7.5
-pkgrel=2
+pkgrel=2.1
 pkgdesc='Evented I/O for V8 javascript'
 arch=('i686' 'x86_64' 'arm')
 url='http://nodejs.org/'
@@ -23,30 +23,26 @@ optdepends=('python2: for node-gyp')
 checkdepends=('curl')
 options=('!emptydirs' '!strip')
 source=("http://nodejs.org/dist/v$pkgver/node-v$pkgver.tar.gz"
-        git+https://github.com/npm/npm.git#tag=v$_npmver)
+        git+https://github.com/npm/npm.git#tag=v$_npmver
+        arm.patch)
 sha256sums=('ac7e78ade93e633e7ed628532bb8e650caba0c9c33af33581957f3382e2a772d'
-            'SKIP')
+            'SKIP'
+            '37cec64b8364c1ecb13f914b44dc86eb12a72be985f78e6d07b5ced91edfe246')
 
 set_flags_for_arm() {
   if [ "$CARCH" == "arm" ]; then
     # CXXFLAGS is here to bash it over the head. It has a bad habit.
     EABI=soft
     CXXFLAGS="$CXXFLAGS -march=armv5t -mno-unaligned-access" ;
-    GYPFLAGS="-Darmeabi=soft -Dv8_can_use_vfp_instructions=false -Dv8_can_use_unaligned_accesses=false -Darmv7=0"
-    VFP3=off
-    VFP2=off
+    GYPFLAGS="-Darm_thumb -Darm_float_abi=soft -Darm_version=5 -Darm_fpu= -Darm_test_noprobe=on"
   fi
   if [ "$CARCH" == "armv6h" ]; then
     EABI=hard
-    GYPFLAGS="-Darmeabi=hard -Dv8_use_arm_eabi_hardfloat=true -Dv8_can_use_vfp3_instructions=false -Dv8_can_use_vfp2_instructions=true -Darm7=0 -Darm_vfp=vfp"
-    VFP3=off
-    VFP2=on
+    GYPFLAGS="-Darm_thumb -Darm_float_abi=hard -Darm_version=6 -Darm_fpu=vfpv2"
   fi
   if [ "$CARCH" == "armv7h" ]; then
     EABI=hard
-    GYPFLAGS="-Darmeabi=hard -Dv8_use_arm_eabi_hardfloat=true -Dv8_can_use_vfp3_instructions=true -Dv8_can_use_vfp2_instructions=true -Darm7=1"  
-    VFP3=on
-    VFP2=on
+    GYPFLAGS="-Darm_thumb -Darm_float_abi=hard -Darm_version=7 -Darm_fpu=vfpv3-d16"
   fi
   export CXXFLAGS
   export GYPFLAGS
@@ -55,17 +51,19 @@ set_flags_for_arm() {
 prepare() {
   cd node-v$pkgver
 
+  patch -p1 -i ../arm.patch
+
   # We need newer version of npm to fix bugs
   rm -r deps/npm
   ln -s "$srcdir/npm" deps
-  rm -r "$srcdir/npm/.git"
+  rm -rf "$srcdir/npm/.git"
 
   msg 'fixing for python2 name'
   find -type f -exec sed -e 's_^#!/usr/bin/env python$_&2_' -e 's_^\(#!/usr/bin/python2\).[45]$_\1_' -e 's_^#!/usr/bin/python$_&2_' -e "s_'python'_'python2'_" -i {} \;
   find test -type f -exec sed -e "s|python |python2 |" -i {} \;
   sed -i "s|python |python2 |" Makefile
 }
- 
+
 build() {
   cd node-v$pkgver
 
@@ -96,8 +94,10 @@ build() {
 #    --shared-v8-libpath=/usr/lib \
 #    --shared-v8-includes=/usr/include 
 
+  [ "$CARCH" == "arm" ] && sed -i 's/vfpv3//' config.gypi
+  [ "$CARCH" == "armv6h" ] && sed -i 's/vfpv3/vfp/' config.gypi
 
-  make 
+  make
 
   cd ../npm
   ../node-v$pkgver/node cli.js install ronn marked
