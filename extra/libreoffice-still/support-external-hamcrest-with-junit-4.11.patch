@@ -1,0 +1,150 @@
+From 4db2d600ebc541adfaaf0a1a176df1c74e3ae0e4 Mon Sep 17 00:00:00 2001
+From: Peter Foley <pefoley2@pefoley.com>
+Date: Tue, 9 Sep 2014 22:19:42 -0400
+Subject: Add support for external hamcrest when using junit 4.11+
+
+Starting with junit 4.11 hamcrest is no longer bundled,
+so add a --with-hamcrest option to support this.
+
+Change-Id: Icdae946af82b9c56bf25d37cbf88275fc6a6a1eb
+Reviewed-on: https://gerrit.libreoffice.org/11383
+Reviewed-by: Stephan Bergmann <sbergman@redhat.com>
+Tested-by: Stephan Bergmann <sbergman@redhat.com>
+
+diff --git a/config_host.mk.in b/config_host.mk.in
+index e717745..605bb6b 100644
+--- a/config_host.mk.in
++++ b/config_host.mk.in
+@@ -239,6 +239,7 @@ export GTK_LIBS=$(gb_SPACE)@GTK_LIBS@
+ export GTK_PRINT_CFLAGS=$(gb_SPACE)@GTK_PRINT_CFLAGS@
+ export GTK_PRINT_LIBS=$(gb_SPACE)@GTK_PRINT_LIBS@
+ export GUIBASE=@GUIBASE@
++export HAMCREST_JAR=@HAMCREST_JAR@
+ export HARDLINKDELIVER=@HARDLINKDELIVER@
+ export HAVE_GCC_AVX=@HAVE_GCC_AVX@
+ export HAVE_GCC_BUILTIN_ATOMIC=@HAVE_GCC_BUILTIN_ATOMIC@
+diff --git a/configure.ac b/configure.ac
+index e5c01e8..84add6c 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1987,6 +1987,15 @@ AC_ARG_WITH(junit,
+     ],
+ ,with_junit=yes)
+ 
++AC_ARG_WITH(hamcrest,
++    AS_HELP_STRING([--with-hamcrest],
++        [Specifies the hamcrest jar file to use for JUnit-based tests.
++         --without-junit disables those tests. Not relevant in the --without-java case.])
++    [
++                          Usage:     --with-hamcrest=<absolute path to hamcrest jar>
++    ],
++,with_hamcrest=yes)
++
+ AC_ARG_WITH(perl-home,
+     AS_HELP_STRING([--with-perl-home],
+         [If you have installed Perl 5 Distribution, on your system, please
+@@ -12051,23 +12060,53 @@ if test "$ENABLE_JAVA" != "" -a "$with_junit" != "no"; then
+     if test "$_os" = "WINNT"; then
+         OOO_JUNIT_JAR=`cygpath -m "$OOO_JUNIT_JAR"`
+     fi
+-    printf 'import org.junit.Before; import org.hamcrest.BaseDescription;' \
+-        > conftest.java
++    printf 'import org.junit.Before;' > conftest.java
+     if "$JAVACOMPILER" -classpath "$OOO_JUNIT_JAR" conftest.java >&5 2>&5; then
+         AC_MSG_RESULT([$OOO_JUNIT_JAR])
+     else
+         AC_MSG_ERROR(
+-[cannot find JUnit 4 jar, or JUnit 4 jar does not provide Hamcrest; please
+-install one in the default location (/usr/share/java), specify its pathname via
+---with-junit=..., or disable it via --without-junit])
++[cannot find JUnit 4 jar; please install one in the default location (/usr/share/java),
++ specify its pathname via --with-junit=..., or disable it via --without-junit])
+     fi
+-    rm -f conftestj.class conftestj.java
++    rm -f conftest.class conftest.java
+     if test $OOO_JUNIT_JAR != ""; then
+     BUILD_TYPE="$BUILD_TYPE QADEVOOO"
+     fi
+ fi
+ AC_SUBST(OOO_JUNIT_JAR)
+ 
++HAMCREST_JAR=
++if test "$ENABLE_JAVA" != "" -a "$with_junit" != "no"; then
++    AC_MSG_CHECKING([for included Hamcrest])
++    printf 'import org.hamcrest.BaseDescription;' > conftest.java
++    if "$JAVACOMPILER" -classpath "$OOO_JUNIT_JAR" conftest.java >&5 2>&5; then
++        AC_MSG_RESULT([Included in $OOO_JUNIT_JAR])
++    else
++        AC_MSG_RESULT([Not included])
++        AC_MSG_CHECKING([for standalone hamcrest jar.])
++        if test "$with_hamcrest" = "yes"; then
++            if test -e /usr/share/lib/java/hamcrest.jar; then
++                HAMCREST_JAR=/usr/share/lib/java/hamcrest.jar
++            else
++                HAMCREST_JAR=/usr/share/java/hamcrest.jar
++            fi
++        else
++            HAMCREST_JAR=$with_hamcrest
++        fi
++        if test "$_os" = "WINNT"; then
++            HAMCREST_JAR=`cygpath -m "$HAMCREST_JAR"`
++        fi
++        if "$JAVACOMPILER" -classpath "$HAMCREST_JAR" conftest.java >&5 2>&5; then
++            AC_MSG_RESULT([$HAMCREST_JAR])
++        else
++            AC_MSG_ERROR([junit does not contain hamcrest; please use a junit jar that includes hamcrest, install a hamcrest jar in the default location (/usr/share/java),
++                          specify its path with --with-hamcrest=..., or disable junit with --without-junit])
++        fi
++    fi
++    rm -f conftest.class conftest.java
++fi
++AC_SUBST(HAMCREST_JAR)
++
+ 
+ AC_SUBST(SCPDEFS)
+ 
+diff --git a/solenv/gbuild/JunitTest.mk b/solenv/gbuild/JunitTest.mk
+index 9801ed2..8370603 100644
+--- a/solenv/gbuild/JunitTest.mk
++++ b/solenv/gbuild/JunitTest.mk
+@@ -54,12 +54,13 @@ $(call gb_JunitTest_get_target,%) :
+ 	$(CLEAN_CMD)
+ 
+ define gb_JunitTest_JunitTest
+-$(call gb_JunitTest_get_target,$(1)) : T_CP := $(call gb_JavaClassSet_get_classdir,$(call gb_JunitTest_get_classsetname,$(1)))$$(gb_CLASSPATHSEP)$(OOO_JUNIT_JAR)$$(gb_CLASSPATHSEP)$(INSTROOT)/$(LIBO_URE_LIB_FOLDER)
++$(call gb_JunitTest_get_target,$(1)) : T_CP := $(call gb_JavaClassSet_get_classdir,$(call gb_JunitTest_get_classsetname,$(1)))$$(gb_CLASSPATHSEP)$(OOO_JUNIT_JAR)$(if $(HAMCREST_JAR),$$(gb_CLASSPATHSEP)$(HAMCREST_JAR))$$(gb_CLASSPATHSEP)$(INSTROOT)/$(LIBO_URE_LIB_FOLDER)
+ $(call gb_JunitTest_get_target,$(1)) : CLASSES :=
+ $(eval $(call gb_JunitTest_JunitTest_platform,$(1)))
+ 
+ $(call gb_JavaClassSet_JavaClassSet,$(call gb_JunitTest_get_classsetname,$(1)))
+ $(call gb_JavaClassSet_use_system_jar,$(call gb_JunitTest_get_classsetname,$(1)),$(OOO_JUNIT_JAR))
++$(if $(HAMCREST_JAR),$(call gb_JavaClassSet_use_system_jar,$(call gb_JunitTest_get_classsetname,$(1)),$(HAMCREST_JAR)))
+ $(call gb_JunitTest_get_target,$(1)) : $(call gb_JavaClassSet_get_target,$(call gb_JunitTest_get_classsetname,$(1)))
+ $(eval $(call gb_Module_register_target,$(call gb_JunitTest_get_target,$(1)),$(call gb_JunitTest_get_clean_target,$(1))))
+ $(call gb_Helper_make_userfriendly_targets,$(1),JunitTest)
+-- 
+cgit v0.10.2
+
+From 8419fa8c28dd9c5f64a72d28d561b3817d781232 Mon Sep 17 00:00:00 2001
+From: Stephan Bergmann <sbergman@redhat.com>
+Date: Fri, 23 Jan 2015 15:55:24 +0100
+Subject: Related rhbz#1185307: One more location to look for Hamcrest jar
+
+Change-Id: I307a009c14dd5cd946b39fbfb80ffc3962a7739b
+
+diff --git a/configure.ac b/configure.ac
+index 5c67205..607e97e 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -12022,6 +12022,8 @@ if test "$ENABLE_JAVA" != "" -a "$with_junit" != "no"; then
+         if test "$with_hamcrest" = "yes"; then
+             if test -e /usr/share/lib/java/hamcrest.jar; then
+                 HAMCREST_JAR=/usr/share/lib/java/hamcrest.jar
++            elif test -e /usr/share/java/hamcrest/core.jar; then
++                HAMCREST_JAR=/usr/share/java/hamcrest/core.jar
+             else
+                 HAMCREST_JAR=/usr/share/java/hamcrest.jar
+             fi
+-- 
+cgit v0.10.2
+
