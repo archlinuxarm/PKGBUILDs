@@ -1,0 +1,376 @@
+From 6e392c9c45643d106673c6643ac8bf4e65da13c1 Mon Sep 17 00:00:00 2001
+From: Ivan Shapovalov <intelfx100@gmail.com>
+Date: Sat, 7 Mar 2015 08:44:52 -0500
+Subject: [PATCH] core: do not spawn jobs or touch other units during
+ coldplugging
+
+Because the order of coldplugging is not defined, we can reference a
+not-yet-coldplugged unit and read its state while it has not yet been
+set to a meaningful value.
+
+This way, already active units may get started again.
+
+We fix this by deferring such actions until all units have been at
+least somehow coldplugged.
+
+Fixes https://bugs.freedesktop.org/show_bug.cgi?id=88401
+---
+ src/core/automount.c |  2 +-
+ src/core/busname.c   |  2 +-
+ src/core/device.c    |  2 +-
+ src/core/manager.c   | 35 +++++++++++++++++++++++++++++++++--
+ src/core/mount.c     |  2 +-
+ src/core/path.c      | 14 ++++++++++----
+ src/core/scope.c     |  2 +-
+ src/core/service.c   |  2 +-
+ src/core/slice.c     |  2 +-
+ src/core/snapshot.c  |  2 +-
+ src/core/socket.c    |  2 +-
+ src/core/swap.c      |  2 +-
+ src/core/target.c    |  2 +-
+ src/core/timer.c     | 14 ++++++++++----
+ src/core/unit.c      | 25 ++++++++++++++++---------
+ src/core/unit.h      | 12 +++++++++---
+ 16 files changed, 89 insertions(+), 33 deletions(-)
+
+diff --git a/src/core/automount.c b/src/core/automount.c
+index 4a509ef..0539fbb 100644
+--- a/src/core/automount.c
++++ b/src/core/automount.c
+@@ -233,7 +233,7 @@ static void automount_set_state(Automount *a, AutomountState state) {
+         unit_notify(UNIT(a), state_translation_table[old_state], state_translation_table[state], true);
+ }
+ 
+-static int automount_coldplug(Unit *u) {
++static int automount_coldplug(Unit *u, Hashmap *deferred_work) {
+         Automount *a = AUTOMOUNT(u);
+         int r;
+ 
+diff --git a/src/core/busname.c b/src/core/busname.c
+index 1d77292..43d7607 100644
+--- a/src/core/busname.c
++++ b/src/core/busname.c
+@@ -335,7 +335,7 @@ static void busname_set_state(BusName *n, BusNameState state) {
+         unit_notify(UNIT(n), state_translation_table[old_state], state_translation_table[state], true);
+ }
+ 
+-static int busname_coldplug(Unit *u) {
++static int busname_coldplug(Unit *u, Hashmap *deferred_work) {
+         BusName *n = BUSNAME(u);
+         int r;
+ 
+diff --git a/src/core/device.c b/src/core/device.c
+index eb976b8..6b489a4 100644
+--- a/src/core/device.c
++++ b/src/core/device.c
+@@ -140,7 +140,7 @@ static void device_set_state(Device *d, DeviceState state) {
+         unit_notify(UNIT(d), state_translation_table[old_state], state_translation_table[state], true);
+ }
+ 
+-static int device_coldplug(Unit *u) {
++static int device_coldplug(Unit *u, Hashmap *deferred_work) {
+         Device *d = DEVICE(u);
+ 
+         assert(d);
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 7a6d519..3e87aa9 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -975,7 +975,28 @@ static int manager_coldplug(Manager *m) {
+         Unit *u;
+         char *k;
+ 
+-        assert(m);
++        /*
++         * Some unit types tend to spawn jobs or check other units' state
++         * during coldplug. This is wrong because it is undefined whether the
++         * units in question have been already coldplugged (i. e. their state
++         * restored). This way, we can easily re-start an already started unit
++         * or otherwise make a wrong decision based on the unit's state.
++         *
++         * Solve this by providing a way for coldplug functions to defer
++         * such actions until after all units have been coldplugged.
++         *
++         * We store Unit* -> int(*)(Unit*).
++         *
++         * https://bugs.freedesktop.org/show_bug.cgi?id=88401
++         */
++        _cleanup_hashmap_free_ Hashmap *deferred_work = NULL;
++        int(*proc)(Unit*);
++
++        assert(m);
++
++        deferred_work = hashmap_new(&trivial_hash_ops);
++        if (!deferred_work)
++                return -ENOMEM;
+ 
+         /* Then, let's set up their initial state. */
+         HASHMAP_FOREACH_KEY(u, k, m->units, i) {
+@@ -985,7 +1006,17 @@ static int manager_coldplug(Manager *m) {
+                 if (u->id != k)
+                         continue;
+ 
+-                q = unit_coldplug(u);
++                q = unit_coldplug(u, deferred_work);
++                if (q < 0)
++                        r = q;
++        }
++
++        /* After coldplugging and setting up initial state of the units,
++         * let's perform operations which spawn jobs or query units' state. */
++        HASHMAP_FOREACH_KEY(proc, u, deferred_work, i) {
++                int q;
++
++                q = proc(u);
+                 if (q < 0)
+                         r = q;
+         }
+diff --git a/src/core/mount.c b/src/core/mount.c
+index 5ee679d..1251c94 100644
+--- a/src/core/mount.c
++++ b/src/core/mount.c
+@@ -612,7 +612,7 @@ static void mount_set_state(Mount *m, MountState state) {
+         m->reload_result = MOUNT_SUCCESS;
+ }
+ 
+-static int mount_coldplug(Unit *u) {
++static int mount_coldplug(Unit *u, Hashmap *deferred_work) {
+         Mount *m = MOUNT(u);
+         MountState new_state = MOUNT_DEAD;
+         int r;
+diff --git a/src/core/path.c b/src/core/path.c
+index fbb695d..6be9ac8 100644
+--- a/src/core/path.c
++++ b/src/core/path.c
+@@ -438,7 +438,12 @@ static void path_set_state(Path *p, PathState state) {
+ 
+ static void path_enter_waiting(Path *p, bool initial, bool recheck);
+ 
+-static int path_coldplug(Unit *u) {
++static int path_enter_waiting_coldplug(Unit *u) {
++        path_enter_waiting(PATH(u), true, true);
++        return 0;
++}
++
++static int path_coldplug(Unit *u, Hashmap *deferred_work) {
+         Path *p = PATH(u);
+ 
+         assert(p);
+@@ -447,9 +452,10 @@ static int path_coldplug(Unit *u) {
+         if (p->deserialized_state != p->state) {
+ 
+                 if (p->deserialized_state == PATH_WAITING ||
+-                    p->deserialized_state == PATH_RUNNING)
+-                        path_enter_waiting(p, true, true);
+-                else
++                    p->deserialized_state == PATH_RUNNING) {
++                        hashmap_put(deferred_work, u, &path_enter_waiting_coldplug);
++                        path_set_state(p, PATH_WAITING);
++                } else
+                         path_set_state(p, p->deserialized_state);
+         }
+ 
+diff --git a/src/core/scope.c b/src/core/scope.c
+index 1c3c6bb..8b2bb29 100644
+--- a/src/core/scope.c
++++ b/src/core/scope.c
+@@ -171,7 +171,7 @@ static int scope_load(Unit *u) {
+         return scope_verify(s);
+ }
+ 
+-static int scope_coldplug(Unit *u) {
++static int scope_coldplug(Unit *u, Hashmap *deferred_work) {
+         Scope *s = SCOPE(u);
+         int r;
+ 
+diff --git a/src/core/service.c b/src/core/service.c
+index a89ff3f..cc4ea19 100644
+--- a/src/core/service.c
++++ b/src/core/service.c
+@@ -878,7 +878,7 @@ static void service_set_state(Service *s, ServiceState state) {
+         s->reload_result = SERVICE_SUCCESS;
+ }
+ 
+-static int service_coldplug(Unit *u) {
++static int service_coldplug(Unit *u, Hashmap *deferred_work) {
+         Service *s = SERVICE(u);
+         int r;
+ 
+diff --git a/src/core/slice.c b/src/core/slice.c
+index 0bebdbc..0285c49 100644
+--- a/src/core/slice.c
++++ b/src/core/slice.c
+@@ -150,7 +150,7 @@ static int slice_load(Unit *u) {
+         return slice_verify(s);
+ }
+ 
+-static int slice_coldplug(Unit *u) {
++static int slice_coldplug(Unit *u, Hashmap *deferred_work) {
+         Slice *t = SLICE(u);
+ 
+         assert(t);
+diff --git a/src/core/snapshot.c b/src/core/snapshot.c
+index b70c3be..b1d8448 100644
+--- a/src/core/snapshot.c
++++ b/src/core/snapshot.c
+@@ -75,7 +75,7 @@ static int snapshot_load(Unit *u) {
+         return 0;
+ }
+ 
+-static int snapshot_coldplug(Unit *u) {
++static int snapshot_coldplug(Unit *u, Hashmap *deferred_work) {
+         Snapshot *s = SNAPSHOT(u);
+ 
+         assert(s);
+diff --git a/src/core/socket.c b/src/core/socket.c
+index 9606ac2..f67370b 100644
+--- a/src/core/socket.c
++++ b/src/core/socket.c
+@@ -1322,7 +1322,7 @@ static void socket_set_state(Socket *s, SocketState state) {
+         unit_notify(UNIT(s), state_translation_table[old_state], state_translation_table[state], true);
+ }
+ 
+-static int socket_coldplug(Unit *u) {
++static int socket_coldplug(Unit *u, Hashmap *deferred_work) {
+         Socket *s = SOCKET(u);
+         int r;
+ 
+diff --git a/src/core/swap.c b/src/core/swap.c
+index 4dd6be8..bb1398f 100644
+--- a/src/core/swap.c
++++ b/src/core/swap.c
+@@ -506,7 +506,7 @@ static void swap_set_state(Swap *s, SwapState state) {
+                         job_add_to_run_queue(UNIT(other)->job);
+ }
+ 
+-static int swap_coldplug(Unit *u) {
++static int swap_coldplug(Unit *u, Hashmap *deferred_work) {
+         Swap *s = SWAP(u);
+         SwapState new_state = SWAP_DEAD;
+         int r;
+diff --git a/src/core/target.c b/src/core/target.c
+index 8817ef2..5f64402 100644
+--- a/src/core/target.c
++++ b/src/core/target.c
+@@ -103,7 +103,7 @@ static int target_load(Unit *u) {
+         return 0;
+ }
+ 
+-static int target_coldplug(Unit *u) {
++static int target_coldplug(Unit *u, Hashmap *deferred_work) {
+         Target *t = TARGET(u);
+ 
+         assert(t);
+diff --git a/src/core/timer.c b/src/core/timer.c
+index 9405501..79a7540 100644
+--- a/src/core/timer.c
++++ b/src/core/timer.c
+@@ -267,7 +267,12 @@ static void timer_set_state(Timer *t, TimerState state) {
+ 
+ static void timer_enter_waiting(Timer *t, bool initial);
+ 
+-static int timer_coldplug(Unit *u) {
++static int timer_enter_waiting_coldplug(Unit *u) {
++        timer_enter_waiting(TIMER(u), false);
++        return 0;
++}
++
++static int timer_coldplug(Unit *u, Hashmap *deferred_work) {
+         Timer *t = TIMER(u);
+ 
+         assert(t);
+@@ -275,9 +280,10 @@ static int timer_coldplug(Unit *u) {
+ 
+         if (t->deserialized_state != t->state) {
+ 
+-                if (t->deserialized_state == TIMER_WAITING)
+-                        timer_enter_waiting(t, false);
+-                else
++                if (t->deserialized_state == TIMER_WAITING) {
++                        hashmap_put(deferred_work, u, &timer_enter_waiting_coldplug);
++                        timer_set_state(t, TIMER_WAITING);
++                } else
+                         timer_set_state(t, t->deserialized_state);
+         }
+ 
+diff --git a/src/core/unit.c b/src/core/unit.c
+index b639d68..ec4fa82 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -2856,27 +2856,34 @@ int unit_add_node_link(Unit *u, const char *what, bool wants) {
+         return 0;
+ }
+ 
+-int unit_coldplug(Unit *u) {
++static int unit_add_deserialized_job_coldplug(Unit *u) {
++        int r;
++
++        r = manager_add_job(u->manager, u->deserialized_job, u, JOB_IGNORE_REQUIREMENTS, false, NULL, NULL);
++        if (r < 0)
++                return r;
++
++        u->deserialized_job = _JOB_TYPE_INVALID;
++
++        return 0;
++}
++
++int unit_coldplug(Unit *u, Hashmap *deferred_work) {
+         int r;
+ 
+         assert(u);
+ 
+         if (UNIT_VTABLE(u)->coldplug)
+-                if ((r = UNIT_VTABLE(u)->coldplug(u)) < 0)
++                if ((r = UNIT_VTABLE(u)->coldplug(u, deferred_work)) < 0)
+                         return r;
+ 
+         if (u->job) {
+                 r = job_coldplug(u->job);
+                 if (r < 0)
+                         return r;
+-        } else if (u->deserialized_job >= 0) {
++        } else if (u->deserialized_job >= 0)
+                 /* legacy */
+-                r = manager_add_job(u->manager, u->deserialized_job, u, JOB_IGNORE_REQUIREMENTS, false, NULL, NULL);
+-                if (r < 0)
+-                        return r;
+-
+-                u->deserialized_job = _JOB_TYPE_INVALID;
+-        }
++                hashmap_put(deferred_work, u, &unit_add_deserialized_job_coldplug);
+ 
+         return 0;
+ }
+diff --git a/src/core/unit.h b/src/core/unit.h
+index ac5647a..11242c2 100644
+--- a/src/core/unit.h
++++ b/src/core/unit.h
+@@ -301,8 +301,14 @@ struct UnitVTable {
+         int (*load)(Unit *u);
+ 
+         /* If a lot of units got created via enumerate(), this is
+-         * where to actually set the state and call unit_notify(). */
+-        int (*coldplug)(Unit *u);
++         * where to actually set the state and call unit_notify().
++         *
++         * This must not reference other units (maybe implicitly through spawning
++         * jobs), because it is possible that they are not yet coldplugged.
++         * Such actions must be deferred until the end of coldplug bу adding
++         * a "Unit* -> int(*)(Unit*)" entry into the hashmap.
++         */
++        int (*coldplug)(Unit *u, Hashmap *deferred_work);
+ 
+         void (*dump)(Unit *u, FILE *f, const char *prefix);
+ 
+@@ -538,7 +544,7 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds);
+ 
+ int unit_add_node_link(Unit *u, const char *what, bool wants);
+ 
+-int unit_coldplug(Unit *u);
++int unit_coldplug(Unit *u, Hashmap *deferred_work);
+ 
+ void unit_status_printf(Unit *u, const char *status, const char *unit_status_msg_format) _printf_(3, 0);
+ 
+-- 
+2.3.2
+

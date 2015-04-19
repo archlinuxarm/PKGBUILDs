@@ -1,0 +1,135 @@
+From c78e47a61fa8d9a21fece01c83e4c26ce0938d27 Mon Sep 17 00:00:00 2001
+From: Michal Schmidt <mschmidt@redhat.com>
+Date: Thu, 19 Feb 2015 23:12:38 +0100
+Subject: [PATCH] core, shared: in deserializing, match same files reached via
+ different paths
+
+When dbus.socket is updated like this:
+-ListenStream=/var/run/dbus/system_bus_socket
++ListenStream=/run/dbus/system_bus_socket
+... and daemon-reload is performed, bad things happen.
+During deserialization systemd does not recognize that the two paths
+refer to the same named socket and replaces the socket file with a new
+one. As a result, applications hang when they try talking to dbus.
+
+Fix this by finding a match not only when the path names are equal, but
+also when they point to the same inode.
+In socket_address_equal() it is necessary to move the address size
+comparison into the abstract sockets branch. For path name sockets the
+comparison must not be done and for other families it is redundant
+(their sizes are constant and checked by socket_address_verify()).
+
+FIFOs and special files can also have multiple pathnames, so compare the
+inodes for them as well. Note that previously the pathname checks used
+streq_ptr(), but the paths cannot be NULL.
+
+Fixes: https://bugzilla.redhat.com/show_bug.cgi?id=1186018
+---
+ src/core/socket.c        |  6 +++---
+ src/shared/path-util.c   |  4 ++++
+ src/shared/path-util.h   |  1 +
+ src/shared/socket-util.c | 10 ++++------
+ 4 files changed, 12 insertions(+), 9 deletions(-)
+
+diff --git a/src/core/socket.c b/src/core/socket.c
+index 48c43a2..88aae48 100644
+--- a/src/core/socket.c
++++ b/src/core/socket.c
+@@ -2100,7 +2100,7 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value,
+ 
+                         LIST_FOREACH(port, p, s->ports)
+                                 if (p->type == SOCKET_FIFO &&
+-                                    streq_ptr(p->path, value+skip))
++                                    path_equal_or_files_same(p->path, value+skip))
+                                         break;
+ 
+                         if (p) {
+@@ -2119,7 +2119,7 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value,
+ 
+                         LIST_FOREACH(port, p, s->ports)
+                                 if (p->type == SOCKET_SPECIAL &&
+-                                    streq_ptr(p->path, value+skip))
++                                    path_equal_or_files_same(p->path, value+skip))
+                                         break;
+ 
+                         if (p) {
+@@ -2138,7 +2138,7 @@ static int socket_deserialize_item(Unit *u, const char *key, const char *value,
+ 
+                         LIST_FOREACH(port, p, s->ports)
+                                 if (p->type == SOCKET_MQUEUE &&
+-                                    streq_ptr(p->path, value+skip))
++                                    streq(p->path, value+skip))
+                                         break;
+ 
+                         if (p) {
+diff --git a/src/shared/path-util.c b/src/shared/path-util.c
+index b9db7f1..70bc1ca 100644
+--- a/src/shared/path-util.c
++++ b/src/shared/path-util.c
+@@ -436,6 +436,10 @@ bool path_equal(const char *a, const char *b) {
+         }
+ }
+ 
++bool path_equal_or_files_same(const char *a, const char *b) {
++        return path_equal(a, b) || files_same(a, b) > 0;
++}
++
+ char* path_join(const char *root, const char *path, const char *rest) {
+         assert(path);
+ 
+diff --git a/src/shared/path-util.h b/src/shared/path-util.h
+index bd0d324..bcf116e 100644
+--- a/src/shared/path-util.h
++++ b/src/shared/path-util.h
+@@ -45,6 +45,7 @@ int path_make_relative(const char *from_dir, const char *to_path, char **_r);
+ char* path_kill_slashes(char *path);
+ char* path_startswith(const char *path, const char *prefix) _pure_;
+ bool path_equal(const char *a, const char *b) _pure_;
++bool path_equal_or_files_same(const char *a, const char *b);
+ char* path_join(const char *root, const char *path, const char *rest);
+ 
+ char** path_strv_make_absolute_cwd(char **l);
+diff --git a/src/shared/socket-util.c b/src/shared/socket-util.c
+index c6f6487..c278d6f 100644
+--- a/src/shared/socket-util.c
++++ b/src/shared/socket-util.c
+@@ -325,9 +325,6 @@ bool socket_address_equal(const SocketAddress *a, const SocketAddress *b) {
+         if (a->type != b->type)
+                 return false;
+ 
+-        if (a->size != b->size)
+-                return false;
+-
+         if (socket_address_family(a) != socket_address_family(b))
+                 return false;
+ 
+@@ -352,14 +349,16 @@ bool socket_address_equal(const SocketAddress *a, const SocketAddress *b) {
+                 break;
+ 
+         case AF_UNIX:
+-
+                 if ((a->sockaddr.un.sun_path[0] == 0) != (b->sockaddr.un.sun_path[0] == 0))
+                         return false;
+ 
+                 if (a->sockaddr.un.sun_path[0]) {
+-                        if (!strneq(a->sockaddr.un.sun_path, b->sockaddr.un.sun_path, sizeof(a->sockaddr.un.sun_path)))
++                        if (!path_equal_or_files_same(a->sockaddr.un.sun_path, b->sockaddr.un.sun_path))
+                                 return false;
+                 } else {
++                        if (a->size != b->size)
++                                return false;
++
+                         if (memcmp(a->sockaddr.un.sun_path, b->sockaddr.un.sun_path, a->size) != 0)
+                                 return false;
+                 }
+@@ -367,7 +366,6 @@ bool socket_address_equal(const SocketAddress *a, const SocketAddress *b) {
+                 break;
+ 
+         case AF_NETLINK:
+-
+                 if (a->protocol != b->protocol)
+                         return false;
+ 
+-- 
+2.3.2
+

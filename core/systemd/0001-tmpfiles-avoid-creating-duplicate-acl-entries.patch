@@ -1,0 +1,129 @@
+From 1c73f3bc29111a00738569c9d40a989b161a0624 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 23 Feb 2015 23:19:54 -0500
+Subject: [PATCH] tmpfiles: avoid creating duplicate acl entries
+
+https://bugs.freedesktop.org/show_bug.cgi?id=89202
+https://bugs.debian.org/778656
+
+Status quo ante can be restored with:
+  getfacl -p /var/log/journal/`cat /etc/machine-id`|grep -v '^#'|sort -u|sudo setfacl --set-file=- /var/log/journal/`cat /etc/machine-id`
+---
+ src/shared/acl-util.c | 79 +++++++++++++++++++++++++++++++++++++++++++++++++--
+ src/shared/acl-util.h |  4 +++
+ 2 files changed, 81 insertions(+), 2 deletions(-)
+
+diff --git a/src/shared/acl-util.c b/src/shared/acl-util.c
+index 34707e6..36dc824 100644
+--- a/src/shared/acl-util.c
++++ b/src/shared/acl-util.c
+@@ -281,6 +281,77 @@ int parse_acl(char *text, acl_t *acl_access, acl_t *acl_default, bool want_mask)
+         return 0;
+ }
+ 
++static int acl_entry_equal(acl_entry_t a, acl_entry_t b) {
++        acl_tag_t tag_a, tag_b;
++
++        if (acl_get_tag_type(a, &tag_a) < 0)
++                return -errno;
++
++        if (acl_get_tag_type(b, &tag_b) < 0)
++                return -errno;
++
++        if (tag_a != tag_b)
++                return false;
++
++        switch (tag_a) {
++        case ACL_USER_OBJ:
++        case ACL_GROUP_OBJ:
++        case ACL_MASK:
++        case ACL_OTHER:
++                /* can have only one of those */
++                return true;
++        case ACL_USER: {
++                _cleanup_(acl_free_uid_tpp) uid_t *uid_a, *uid_b;
++
++                uid_a = acl_get_qualifier(a);
++                if (!uid_a)
++                        return -errno;
++
++                uid_b = acl_get_qualifier(b);
++                if (!uid_b)
++                        return -errno;
++
++                return *uid_a == *uid_b;
++        }
++        case ACL_GROUP: {
++                _cleanup_(acl_free_gid_tpp) gid_t *gid_a, *gid_b;
++
++                gid_a = acl_get_qualifier(a);
++                if (!gid_a)
++                        return -errno;
++
++                gid_b = acl_get_qualifier(b);
++                if (!gid_b)
++                        return -errno;
++
++                return *gid_a == *gid_b;
++        }
++        default:
++                assert_not_reached("Unknown acl tag type");
++        }
++}
++
++static int find_acl_entry(acl_t acl, acl_entry_t entry, acl_entry_t *out) {
++        acl_entry_t i;
++        int r;
++
++        for (r = acl_get_entry(acl, ACL_FIRST_ENTRY, &i);
++             r > 0;
++             r = acl_get_entry(acl, ACL_NEXT_ENTRY, &i)) {
++
++                r = acl_entry_equal(i, entry);
++                if (r < 0)
++                        return r;
++                if (r > 0) {
++                        *out = i;
++                        return 1;
++                }
++        }
++        if (r < 0)
++                return -errno;
++        return 0;
++}
++
+ int acls_for_file(const char *path, acl_type_t type, acl_t new, acl_t *acl) {
+         _cleanup_(acl_freep) acl_t old;
+         acl_entry_t i;
+@@ -296,8 +367,12 @@ int acls_for_file(const char *path, acl_type_t type, acl_t new, acl_t *acl) {
+ 
+                 acl_entry_t j;
+ 
+-                if (acl_create_entry(&old, &j) < 0)
+-                        return -errno;
++                r = find_acl_entry(old, i, &j);
++                if (r < 0)
++                        return r;
++                if (r == 0)
++                        if (acl_create_entry(&old, &j) < 0)
++                                return -errno;
+ 
+                 if (acl_copy_entry(j, i) < 0)
+                         return -errno;
+diff --git a/src/shared/acl-util.h b/src/shared/acl-util.h
+index 90e88ff..fdb9006 100644
+--- a/src/shared/acl-util.h
++++ b/src/shared/acl-util.h
+@@ -41,5 +41,9 @@ int acls_for_file(const char *path, acl_type_t type, acl_t new, acl_t *acl);
+ DEFINE_TRIVIAL_CLEANUP_FUNC(acl_t, acl_free);
+ #define acl_free_charp acl_free
+ DEFINE_TRIVIAL_CLEANUP_FUNC(char*, acl_free_charp);
++#define acl_free_uid_tp acl_free
++DEFINE_TRIVIAL_CLEANUP_FUNC(uid_t*, acl_free_uid_tp);
++#define acl_free_gid_tp acl_free
++DEFINE_TRIVIAL_CLEANUP_FUNC(gid_t*, acl_free_gid_tp);
+ 
+ #endif
+-- 
+2.3.2
+
