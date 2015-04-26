@@ -1,0 +1,57 @@
+pre_install(){
+    rm -rf /etc/Wireless/RT2860STA
+}
+
+post_install(){
+    MODULE="mt7610"
+    VERSION="v3.0.0.2"
+    KERNEL_MODULE_NAME="mt7650u_sta"
+    USR_SRC="/usr/src"
+    SRC_DIR=$USR_SRC/$MODULE-$VERSION
+
+    dkms add -m $MODULE -v $VERSION
+    dkms build -m $MODULE -v $VERSION
+    dkms install -m $MODULE -v $VERSION
+
+    # This file is read form a hardcoded location.
+    # Can we put this in a standard location?
+    PARAMSDIR="/etc/Wireless/RT2860STA"
+    mkdir -p $PARAMSDIR
+    cp $SRC_DIR/conf/RT2860STA.dat $PARAMSDIR
+
+    depmod -a $(uname -r)
+
+    modprobe -a $KERNEL_MODULE_NAME 
+}
+
+pre_upgrade(){
+    pre_remove
+}
+
+post_upgrade(){
+    post_install
+}
+
+pre_remove (){
+    _inmemory=$(/usr/bin/lsmod | /usr/bin/grep $KERNEL_MODULE_NAME)
+    if [ ! -z "$_inmemory" ]; then
+        /usr/bin/rmmod $KERNEL_MODULE_NAME &> /dev/null
+    fi
+
+    _line=$(dkms status -m mt7610)
+    if echo "$_line" | grep -E 'added|built|installed'; then
+        version=$(echo "$_line" | sed 's/mt7610,\([^,]*\)[,:].*/\1/;t;d')
+        dkms remove -m mt7610 -v $version --all
+    fi
+
+    rm -rf /etc/Wireless/RT2860STA
+    #rmdir --ignore-fail-on-non-empty /etc/Wireless
+}
+
+post_remove () {
+    /sbin/depmod -a
+}
+
+op=$1
+shift
+$op $*
