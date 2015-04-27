@@ -4,7 +4,7 @@ pkgname=(chocolate-{doom,heretic,hexen,strife,common})
 pkgbase=${pkgname[0]}
 pkgdesc="Historically-accurate Doom, Heretic, Hexen, and Strife ports."
 pkgver=2.1.0
-pkgrel=2
+pkgrel=3
 arch=('i686' 'x86_64')
 url="http://www.chocolate-doom.org/"
 license=('GPL2')
@@ -12,10 +12,12 @@ depends=('libsamplerate' 'sdl_mixer' 'sdl_net')
 makedepends=('python')
 source=(http://chocolate-doom.org/downloads/${pkgver}/${pkgbase}-${pkgver}.tar.gz
         0001-Ignore-loop-tags-on-non-looping-substitute-tracks.patch
-        0002-Ignore-metadata-loop-tags-if-both-are-zero.patch)
+        0002-Ignore-metadata-loop-tags-if-both-are-zero.patch
+        0003-setup-dynamically-set-size-of-iwad_labels-array.patch)
 sha256sums=('629305e7f328659f3e93e89b93adc9da4e99b5a351e51ceb749dcf3e3da8bcd3'
-            'cb611700a63a3d4cb58b030d4801c6f331ce7bd08708c281b9385fe1f82066f5'
-            '6330a3b1e6cde2db2554ca709925f2eb63f91df8f14b84946a7f50cff2f52ca3')
+            '39a9e9452167b59f2482a8b4a81cf433c3ae1ca9b0fac69ac94beecee554135b'
+            '33952a8eb4de22b4304654ce3b62ca9009d084e2be4cb0cd338237137d698880'
+            '46b578981aa936b73da359e8f3bbf72a485402a7bc14ac9d92a64490fff51b6c')
 
 prepare() {
   cd "${pkgbase}-${pkgver}"
@@ -25,6 +27,7 @@ prepare() {
 
   patch -p1 -i ../0001-Ignore-loop-tags-on-non-looping-substitute-tracks.patch
   patch -p1 -i ../0002-Ignore-metadata-loop-tags-if-both-are-zero.patch
+  patch -p1 -i ../0003-setup-dynamically-set-size-of-iwad_labels-array.patch
 }
 
 build() {
