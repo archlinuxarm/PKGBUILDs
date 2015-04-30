@@ -1,0 +1,268 @@
+From 29a0d71a482d4a96d6ccc49bad575ae6da8bf893 Mon Sep 17 00:00:00 2001
+From: Jeff Squyres <jsquyres@cisco.com>
+Date: Tue, 6 Jan 2015 09:49:47 -0800
+Subject: [PATCH] Fortran: only emit real16 and complex32 if supported
+
+Fixes open-mpi/ompi-release#148.  Thanks to @opoplawski for
+identifying the issue.
+---
+ ompi/include/Makefile.am                        |  6 ++++--
+ ompi/mpi/fortran/base/gen-mpi-sizeof.pl         | 18 +++++++++++++++---
+ ompi/mpi/fortran/mpif-h/Makefile.am             |  6 +++++-
+ ompi/mpi/fortran/mpif-h/profile/Makefile.am     |  6 +++++-
+ ompi/mpi/fortran/use-mpi-f08/Makefile.am        | 14 +++++++++++---
+ ompi/mpi/fortran/use-mpi-ignore-tkr/Makefile.am | 10 ++++++++--
+ ompi/mpi/fortran/use-mpi-tkr/Makefile.am        | 10 +++++++---
+ 7 files changed, 55 insertions(+), 15 deletions(-)
+
+diff --git a/ompi/include/Makefile.am b/ompi/include/Makefile.am
+index c38eb47..4db50fb 100644
+--- a/ompi/include/Makefile.am
++++ b/ompi/include/Makefile.am
+@@ -11,7 +11,7 @@
+ #                         All rights reserved.
+ # Copyright (c) 2006-2014 Cisco Systems, Inc.  All rights reserved.
+ # Copyright (c) 2009-2011 Oak Ridge National Labs.  All rights reserved.
+-# Copyright (c) 2014      Research Organization for Information Science
++# Copyright (c) 2014-2015 Research Organization for Information Science
+ #                         and Technology (RIST). All rights reserved.
+ # $COPYRIGHT$
+ # 
+@@ -82,7 +82,9 @@ mpif-sizeof.h:
+ 	$(OMPI_V_GEN) $(sizeof_pl) \
+ 	    --header=$@ --ierror=mandatory \
+ 	    --maxrank=$(OMPI_FORTRAN_MAX_ARRAY_RANK) \
+-	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF)
++	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF) \
++	    --real16=$(OMPI_HAVE_FORTRAN_REAL16) \
++	    --complex32=$(OMPI_HAVE_FORTRAN_COMPLEX32)
+ 
+ if WANT_INSTALL_HEADERS 
+ ompidir = $(ompiincludedir)
+diff --git a/ompi/mpi/fortran/base/gen-mpi-sizeof.pl b/ompi/mpi/fortran/base/gen-mpi-sizeof.pl
+index 797c42b..a422c9a 100755
+--- a/ompi/mpi/fortran/base/gen-mpi-sizeof.pl
++++ b/ompi/mpi/fortran/base/gen-mpi-sizeof.pl
+@@ -1,6 +1,8 @@
+ #!/usr/bin/env perl
+ #
+ # Copyright (c) 2014 Cisco Systems, Inc.  All rights reserved.
++# Copyright (c) 2015      Research Organization for Information Science
++#                         and Technology (RIST). All rights reserved.
+ # $COPYRIGHT$
+ #
+ # Script to generate the overloaded MPI_SIZEOF interfaces and
+@@ -30,17 +32,21 @@ my $ierror_arg;
+ my $maxrank_arg;
+ my $generate_arg;
+ my $mpi_arg;
++my $mpi_real16;
++my $mpi_complex32;
+ my $pmpi_arg;
+ my $help_arg = 0;
+ 
+ &Getopt::Long::Configure("bundling");
+-my $ok = Getopt::Long::GetOptions("header=s" => \$header_arg,
++my $ok = Getopt::Long::GetOptions("complex32=i" => \$mpi_complex32,
++                                  "header=s" => \$header_arg,
+                                   "impl=s" => \$impl_arg,
+                                   "ierror=s" => \$ierror_arg,
+                                   "maxrank=s" => \$maxrank_arg,
+                                   "generate=i" => \$generate_arg,
+                                   "mpi" => \$mpi_arg,
+                                   "pmpi" => \$pmpi_arg,
++                                  "real16=i" => \$mpi_real16,
+                                   "help|h" => \$help_arg);
+ 
+ die "Must specify header and/or impl filenames to output"
+@@ -54,6 +60,8 @@ die "max array rank must be >= 4 and <=15"
+ die "Must specify --pmpi and/or --mpi if --impl is specified"
+     if (defined($generate_arg) && $generate_arg &&
+         (defined($impl_arg) && !defined($mpi_arg) && !defined($pmpi_arg)));
++die "Must specify real16 and complex32"
++    if (!defined($mpi_real16) || !defined($mpi_complex32));
+ 
+ #############################################################################
+ 
+@@ -141,8 +149,12 @@ for my $size (qw/8 16 32 64/) {
+     queue_sub("integer(int${size})", "int${size}", "int${size}");
+ }
+ for my $size (qw/32 64 128/) {
+-    queue_sub("real(real${size})", "real${size}", "real${size}");
+-    queue_sub("complex(real${size})", "complex${size}", "real${size}");
++    if ($size != 128 || $mpi_real16 == 1) {
++        queue_sub("real(real${size})", "real${size}", "real${size}");
++    }
++    if ($size != 128 || $mpi_complex32 == 1) {
++        queue_sub("complex(real${size})", "complex${size}", "real${size}");
++    }
+ }
+ 
+ #######################################################
+diff --git a/ompi/mpi/fortran/mpif-h/Makefile.am b/ompi/mpi/fortran/mpif-h/Makefile.am
+index b586f47..8d5330c 100644
+--- a/ompi/mpi/fortran/mpif-h/Makefile.am
++++ b/ompi/mpi/fortran/mpif-h/Makefile.am
+@@ -14,6 +14,8 @@
+ # Copyright (c) 2011-2013 Universite Bordeaux 1
+ # Copyright (c) 2013-2014 Los Alamos National Security, LLC. All rights
+ #                         reserved.
++# Copyright (c) 2015      Research Organization for Information Science
++#                         and Technology (RIST). All rights reserved.
+ # $COPYRIGHT$
+ # 
+ # Additional copyrights may follow
+@@ -135,7 +137,9 @@ sizeof_f.f90:
+ 	$(OMPI_V_GEN) $(sizeof_pl) \
+ 	    --impl=$@ --ierror=mandatory --mpi \
+ 	    --maxrank=$(OMPI_FORTRAN_MAX_ARRAY_RANK) \
+-	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF)
++	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF) \
++	    --real16=$(OMPI_HAVE_FORTRAN_REAL16) \
++	    --complex32=$(OMPI_HAVE_FORTRAN_COMPLEX32)
+ endif OMPI_BUILD_FORTRAN_MPIFH_BINDINGS
+ 
+ if BUILD_MPI_FORTRAN_MPIFH_BINDINGS_LAYER
+diff --git a/ompi/mpi/fortran/mpif-h/profile/Makefile.am b/ompi/mpi/fortran/mpif-h/profile/Makefile.am
+index 2abe58a..0d32e93 100644
+--- a/ompi/mpi/fortran/mpif-h/profile/Makefile.am
++++ b/ompi/mpi/fortran/mpif-h/profile/Makefile.am
+@@ -15,6 +15,8 @@
+ # Copyright (c) 2011-2013 Universite Bordeaux 1
+ # Copyright (c) 2013-2014 Los Alamos National Security, LLC. All rights
+ #                         reserved.
++# Copyright (c) 2015      Research Organization for Information Science
++#                         and Technology (RIST). All rights reserved.
+ # $COPYRIGHT$
+ # 
+ # Additional copyrights may follow
+@@ -426,7 +428,9 @@ psizeof_f.f90:
+ 	$(OMPI_V_GEN) $(sizeof_pl) \
+ 	    --impl=$@ --ierror=mandatory --pmpi \
+ 	    --maxrank=$(OMPI_FORTRAN_MAX_ARRAY_RANK) \
+-	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF)
++	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF) \
++	    --real16=$(OMPI_HAVE_FORTRAN_REAL16) \
++	    --complex32=$(OMPI_HAVE_FORTRAN_COMPLEX32)
+ 
+ #
+ # The library itself
+diff --git a/ompi/mpi/fortran/use-mpi-f08/Makefile.am b/ompi/mpi/fortran/use-mpi-f08/Makefile.am
+index c8b26d7..8489ac0 100644
+--- a/ompi/mpi/fortran/use-mpi-f08/Makefile.am
++++ b/ompi/mpi/fortran/use-mpi-f08/Makefile.am
+@@ -7,6 +7,8 @@
+ # Copyright (c) 2012-2013 Inria.  All rights reserved.
+ # Copyright (c) 2013      Los Alamos National Security, LLC. All rights
+ #                         reserved.
++# Copyright (c) 2015      Research Organization for Information Science
++#                         and Technology (RIST). All rights reserved.
+ #
+ # $COPYRIGHT$
+ # 
+@@ -56,7 +58,9 @@ sizeof_f08.h:
+ 	$(OMPI_V_GEN) $(sizeof_pl) \
+ 	    --header=$@ --ierror=optional \
+ 	    --maxrank=$(OMPI_FORTRAN_MAX_ARRAY_RANK) \
+-	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF)
++	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF) \
++	    --real16=$(OMPI_HAVE_FORTRAN_REAL16) \
++	    --complex32=$(OMPI_HAVE_FORTRAN_COMPLEX32)
+ 
+ sizeof_f08.f90: $(top_builddir)/config.status
+ sizeof_f08.f90: $(sizeof_pl)
+@@ -64,7 +68,9 @@ sizeof_f08.f90:
+ 	$(OMPI_V_GEN) $(sizeof_pl) \
+ 	    --impl=$@ --ierror=optional --mpi \
+ 	    --maxrank=$(OMPI_FORTRAN_MAX_ARRAY_RANK) \
+-	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF)
++	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF) \
++	    --real16=$(OMPI_HAVE_FORTRAN_REAL16) \
++	    --complex32=$(OMPI_HAVE_FORTRAN_COMPLEX32)
+ 
+ profile/psizeof_f08.f90: $(top_builddir)/config.status
+ profile/psizeof_f08.f90: $(sizeof_pl)
+@@ -72,7 +78,9 @@ profile/psizeof_f08.f90:
+ 	$(OMPI_V_GEN) $(sizeof_pl) \
+ 	    --impl=$@ --ierror=optional --pmpi \
+ 	    --maxrank=$(OMPI_FORTRAN_MAX_ARRAY_RANK) \
+-	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF)
++	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF) \
++	    --real16=$(OMPI_HAVE_FORTRAN_REAL16) \
++	    --complex32=$(OMPI_HAVE_FORTRAN_COMPLEX32)
+ 
+ CLEANFILES += sizeof_f08.h sizeof_f08.f90 profile/psizeof_f08.f90
+ 
+diff --git a/ompi/mpi/fortran/use-mpi-ignore-tkr/Makefile.am b/ompi/mpi/fortran/use-mpi-ignore-tkr/Makefile.am
+index d404020..e60c367 100644
+--- a/ompi/mpi/fortran/use-mpi-ignore-tkr/Makefile.am
++++ b/ompi/mpi/fortran/use-mpi-ignore-tkr/Makefile.am
+@@ -1,6 +1,8 @@
+ # -*- makefile -*-
+ #
+ # Copyright (c) 2006-2014 Cisco Systems, Inc.  All rights reserved.
++# Copyright (c) 2015      Research Organization for Information Science
++#                         and Technology (RIST). All rights reserved.
+ #
+ # $COPYRIGHT$
+ # 
+@@ -82,7 +84,9 @@ mpi-ignore-tkr-sizeof.h:
+ 	$(OMPI_V_GEN) $(sizeof_pl) \
+ 	    --header=$@ --ierror=mandatory \
+ 	    --maxrank=$(OMPI_FORTRAN_MAX_ARRAY_RANK) \
+-	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF)
++	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF) \
++	    --real16=$(OMPI_HAVE_FORTRAN_REAL16) \
++	    --complex32=$(OMPI_HAVE_FORTRAN_COMPLEX32)
+ 
+ mpi-ignore-tkr-sizeof.f90: $(top_builddir)/config.status
+ mpi-ignore-tkr-sizeof.f90: $(sizeof_pl)
+@@ -90,7 +94,9 @@ mpi-ignore-tkr-sizeof.f90:
+ 	$(OMPI_V_GEN) $(sizeof_pl) \
+ 	    --impl=$@ --ierror=mandatory --mpi --pmpi \
+ 	    --maxrank=$(OMPI_FORTRAN_MAX_ARRAY_RANK) \
+-	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF)
++	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF) \
++	    --real16=$(OMPI_HAVE_FORTRAN_REAL16) \
++	    --complex32=$(OMPI_HAVE_FORTRAN_COMPLEX32)
+ 
+ #
+ # Clean up generated and module files
+diff --git a/ompi/mpi/fortran/use-mpi-tkr/Makefile.am b/ompi/mpi/fortran/use-mpi-tkr/Makefile.am
+index 549ac1d..c8def2f 100644
+--- a/ompi/mpi/fortran/use-mpi-tkr/Makefile.am
++++ b/ompi/mpi/fortran/use-mpi-tkr/Makefile.am
+@@ -13,7 +13,7 @@
+ # Copyright (c) 2006-2014 Cisco Systems, Inc.  All rights reserved.
+ # Copyright (c) 2007      Los Alamos National Security, LLC.  All rights
+ #                         reserved. 
+-# Copyright (c) 2014      Research Organization for Information Science
++# Copyright (c) 2014-2015 Research Organization for Information Science
+ #                         and Technology (RIST). All rights reserved.
+ # $COPYRIGHT$
+ # 
+@@ -104,7 +104,9 @@ mpi-tkr-sizeof.h:
+ 	$(OMPI_V_GEN) $(sizeof_pl) \
+ 	    --header=$@ --ierror=mandatory \
+ 	    --maxrank=$(OMPI_FORTRAN_MAX_ARRAY_RANK) \
+-	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF)
++	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF) \
++	    --real16=$(OMPI_HAVE_FORTRAN_REAL16) \
++	    --complex32=$(OMPI_HAVE_FORTRAN_COMPLEX32)
+ 
+ mpi-tkr-sizeof.f90: $(top_builddir)/config.status
+ mpi-tkr-sizeof.f90: $(sizeof_pl)
+@@ -112,7 +114,9 @@ mpi-tkr-sizeof.f90:
+ 	$(OMPI_V_GEN) $(sizeof_pl) \
+ 	    --impl=$@ --ierror=mandatory --mpi --pmpi \
+ 	    --maxrank=$(OMPI_FORTRAN_MAX_ARRAY_RANK) \
+-	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF)
++	    --generate=$(OMPI_FORTRAN_BUILD_SIZEOF) \
++	    --real16=$(OMPI_HAVE_FORTRAN_REAL16) \
++	    --complex32=$(OMPI_HAVE_FORTRAN_COMPLEX32)
+ 
+ #
+ # Clean up all F90 module files and all generated files
+-- 
+2.3.7
+
