@@ -1,0 +1,119 @@
+From: Emmanuel Pescosta <emmanuelpescosta099@gmail.com>
+Date: Wed, 29 Apr 2015 14:02:02 +0000
+Subject: Remove bookmarks syncing from KFilePlacesModel and use user-places.xbel only.
+X-Git-Url: http://quickgit.kde.org/?p=kdelibs.git&a=commitdiff&h=5c0a31a2f2a46aa44b8c34baae67b6951b2abcaf
+---
+Remove bookmarks syncing from KFilePlacesModel and use user-places.xbel only.
+
+FIXED-IN: 4.14.8
+BUG: 345174
+REVIEW: 123568
+---
+
+
+--- a/kfile/CMakeLists.txt
++++ b/kfile/CMakeLists.txt
+@@ -22,7 +22,6 @@
+   kfilewidget.cpp
+   kfileplacesitem.cpp
+   kfileplacesmodel.cpp
+-  kfileplacessharedbookmarks.cpp
+   kfileplacesview.cpp
+   kfileplaceeditdialog.cpp
+   kfilepreviewgenerator.cpp
+
+--- a/kfile/kfileplacesmodel.cpp
++++ b/kfile/kfileplacesmodel.cpp
+@@ -19,7 +19,6 @@
+ */
+ #include "kfileplacesmodel.h"
+ #include "kfileplacesitem_p.h"
+-#include "kfileplacessharedbookmarks_p.h"
+ 
+ #ifdef _WIN32_WCE
+ #include "Windows.h"
+@@ -61,10 +60,9 @@
+ class KFilePlacesModel::Private
+ {
+ public:
+-    Private(KFilePlacesModel *self) : q(self), bookmarkManager(0), sharedBookmarks(0) {}
++    Private(KFilePlacesModel *self) : q(self), bookmarkManager(0) {}
+     ~Private()
+     {
+-        delete sharedBookmarks;
+         qDeleteAll(items);
+     }
+ 
+@@ -76,7 +74,6 @@
+ 
+     Solid::Predicate predicate;
+     KBookmarkManager *bookmarkManager;
+-    KFilePlacesSharedBookmarks * sharedBookmarks;
+ 
+     void reloadAndSignal();
+     QList<KFilePlacesItem *> loadBookmarkList();
+@@ -93,8 +90,8 @@
+ KFilePlacesModel::KFilePlacesModel(QObject *parent)
+     : QAbstractItemModel(parent), d(new Private(this))
+ {
+-    const QString file = KStandardDirs::locateLocal("data", "kfileplaces/bookmarks.xml");
+-    d->bookmarkManager = KBookmarkManager::managerForFile(file, "kfilePlaces");
++    const QString file = KStandardDirs().localxdgdatadir() + "user-places.xbel";
++    d->bookmarkManager = KBookmarkManager::managerForExternalFile(file);
+ 
+     // Let's put some places in there if it's empty. We have a corner case here:
+     // Given you have bookmarked some folders (which have been saved on
+@@ -145,9 +142,6 @@
+         // user-places.xbel will be filled later). (ereslibre)
+         d->bookmarkManager->saveAs(file);
+     }
+-
+-    // create after, so if we have own places, they are added afterwards, in case of equal priorities
+-    d->sharedBookmarks = new KFilePlacesSharedBookmarks(d->bookmarkManager);
+ 
+     QString predicate("[[[[ StorageVolume.ignored == false AND [ StorageVolume.usage == 'FileSystem' OR StorageVolume.usage == 'Encrypted' ]]"
+         " OR "
+@@ -632,8 +626,6 @@
+         return false;
+     }
+ 
+-    d->sharedBookmarks->updateSharedBookmarks();
+-
+     d->reloadAndSignal();
+ 
+     return true;
+@@ -660,8 +652,6 @@
+         KFilePlacesItem *item = static_cast<KFilePlacesItem*>(after.internalPointer());
+         d->bookmarkManager->root().moveBookmark(bookmark, item->bookmark());
+     }
+-
+-    d->sharedBookmarks->updateSharedBookmarks();
+ 
+     d->reloadAndSignal();
+ }
+@@ -684,8 +674,6 @@
+     bookmark.setIcon(iconName);
+     bookmark.setMetaDataItem("OnlyInApp", appName);
+ 
+-    d->sharedBookmarks->updateSharedBookmarks();
+-
+     d->reloadAndSignal();
+     emit dataChanged(index, index);
+ }
+@@ -703,7 +691,6 @@
+     if (bookmark.isNull()) return;
+ 
+     d->bookmarkManager->root().deleteBookmark(bookmark);
+-    d->sharedBookmarks->updateSharedBookmarks();
+     d->reloadAndSignal();
+ }
+ 
+@@ -718,8 +705,6 @@
+     if (bookmark.isNull()) return;
+ 
+     bookmark.setMetaDataItem("IsHidden", (hidden ? "true" : "false"));
+-
+-    d->sharedBookmarks->updateSharedBookmarks();
+ 
+     d->reloadAndSignal();
+     emit dataChanged(index, index);
