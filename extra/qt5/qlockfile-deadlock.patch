@@ -1,0 +1,112 @@
+From f58e882b7594c59b6050d3c87562fcf836d10f60 Mon Sep 17 00:00:00 2001
+From: Olivier Goffart <ogoffart@woboq.com>
+Date: Tue, 14 Apr 2015 10:58:26 +0200
+Subject: QLockFile: fix deadlock when the lock file is corrupted
+
+[ChangeLog][QtCore][QLockFile] Fixed a deadlock when the lock file
+is corrupted.
+
+Task-number: QTBUG-44771
+Change-Id: Ic490b09d70ff1cc1733b64949889a73720b2d0f3
+Reviewed-by: David Faure <david.faure@kdab.com>
+---
+ src/corelib/io/qlockfile_unix.cpp                 | 10 +++++-----
+ src/corelib/io/qlockfile_win.cpp                  | 22 +++++++++++-----------
+ tests/auto/corelib/io/qlockfile/tst_qlockfile.cpp | 17 +++++++++++++++++
+ 3 files changed, 33 insertions(+), 16 deletions(-)
+
+diff --git a/src/corelib/io/qlockfile_unix.cpp b/src/corelib/io/qlockfile_unix.cpp
+index bf1015a..dc9f8f7 100644
+--- a/src/corelib/io/qlockfile_unix.cpp
++++ b/src/corelib/io/qlockfile_unix.cpp
+@@ -181,11 +181,11 @@ bool QLockFilePrivate::isApparentlyStale() const
+ {
+     qint64 pid;
+     QString hostname, appname;
+-    if (!getLockInfo(&pid, &hostname, &appname))
+-        return false;
+-    if (hostname.isEmpty() || hostname == QString::fromLocal8Bit(localHostName())) {
+-        if (::kill(pid, 0) == -1 && errno == ESRCH)
+-            return true; // PID doesn't exist anymore
++    if (getLockInfo(&pid, &hostname, &appname)) {
++        if (hostname.isEmpty() || hostname == QString::fromLocal8Bit(localHostName())) {
++            if (::kill(pid, 0) == -1 && errno == ESRCH)
++                return true; // PID doesn't exist anymore
++        }
+     }
+     const qint64 age = QFileInfo(fileName).lastModified().msecsTo(QDateTime::currentDateTime());
+     return staleLockTime > 0 && age > staleLockTime;
+diff --git a/src/corelib/io/qlockfile_win.cpp b/src/corelib/io/qlockfile_win.cpp
+index f9f2909..3587c7b 100644
+--- a/src/corelib/io/qlockfile_win.cpp
++++ b/src/corelib/io/qlockfile_win.cpp
+@@ -115,21 +115,21 @@ bool QLockFilePrivate::isApparentlyStale() const
+ {
+     qint64 pid;
+     QString hostname, appname;
+-    if (!getLockInfo(&pid, &hostname, &appname))
+-        return false;
+ 
+     // On WinRT there seems to be no way of obtaining information about other
+     // processes due to sandboxing
+ #ifndef Q_OS_WINRT
+-    if (hostname == QString::fromLocal8Bit(localHostName())) {
+-        HANDLE procHandle = ::OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+-        if (!procHandle)
+-            return true;
+-        // We got a handle but check if process is still alive
+-        DWORD dwR = ::WaitForSingleObject(procHandle, 0);
+-        ::CloseHandle(procHandle);
+-        if (dwR == WAIT_TIMEOUT)
+-            return true;
++    if (getLockInfo(&pid, &hostname, &appname)) {
++        if (hostname == QString::fromLocal8Bit(localHostName())) {
++            HANDLE procHandle = ::OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
++            if (!procHandle)
++                return true;
++            // We got a handle but check if process is still alive
++            DWORD dwR = ::WaitForSingleObject(procHandle, 0);
++            ::CloseHandle(procHandle);
++            if (dwR == WAIT_TIMEOUT)
++                return true;
++        }
+     }
+ #endif // !Q_OS_WINRT
+     const qint64 age = QFileInfo(fileName).lastModified().msecsTo(QDateTime::currentDateTime());
+diff --git a/tests/auto/corelib/io/qlockfile/tst_qlockfile.cpp b/tests/auto/corelib/io/qlockfile/tst_qlockfile.cpp
+index 77bef94..12bea67 100644
+--- a/tests/auto/corelib/io/qlockfile/tst_qlockfile.cpp
++++ b/tests/auto/corelib/io/qlockfile/tst_qlockfile.cpp
+@@ -58,6 +58,7 @@ private slots:
+     void staleLongLockFromBusyProcess();
+     void staleLockRace();
+     void noPermissions();
++    void corruptedLockFile();
+ 
+ public:
+     QString m_helperApp;
+@@ -415,5 +416,21 @@ void tst_QLockFile::noPermissions()
+     QCOMPARE(int(lockFile.error()), int(QLockFile::PermissionError));
+ }
+ 
++void tst_QLockFile::corruptedLockFile()
++{
++    const QString fileName = dir.path() + "/corruptedLockFile";
++
++    {
++        // Create a empty file. Typically the result of a computer crash or hard disk full.
++        QFile file(fileName);
++        QVERIFY(file.open(QFile::WriteOnly));
++    }
++
++    QLockFile secondLock(fileName);
++    secondLock.setStaleLockTime(100);
++    QVERIFY(secondLock.tryLock(10000));
++    QCOMPARE(int(secondLock.error()), int(QLockFile::NoError));
++}
++
+ QTEST_MAIN(tst_QLockFile)
+ #include "tst_qlockfile.moc"
+-- 
+cgit v0.11.0
+
