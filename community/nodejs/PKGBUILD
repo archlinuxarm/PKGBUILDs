@@ -11,22 +11,19 @@
 pkgname=nodejs
 pkgver=0.12.2
 _npmver=2.8.3
-pkgrel=3
+pkgrel=4
 pkgdesc='Evented I/O for V8 javascript'
 arch=('i686' 'x86_64' 'arm')
 url='http://nodejs.org/'
 license=('MIT')
 provides=('nodejs-node-gyp')
-depends=('openssl' 'zlib') # 'libuv' 'v8' 'c-ares')
-makedepends=('python2' 'git' 'procps-ng')
-optdepends=('python2: for node-gyp')
-checkdepends=('curl')
-options=('!emptydirs' '!strip')
+depends=('openssl' 'zlib' 'icu') # 'libuv' 'v8' 'c-ares')
+makedepends=('python2' 'procps-ng')
+optdepends=('npm: nodejs package manager')
+install=nodejs.install
 source=("http://nodejs.org/dist/v$pkgver/node-v$pkgver.tar.gz"
-        git+https://github.com/npm/npm.git#tag=v$_npmver
-        arm.patch)
+        'arm.patch')
 sha256sums=('ac7e78ade93e633e7ed628532bb8e650caba0c9c33af33581957f3382e2a772d'
-            'SKIP'
             '37cec64b8364c1ecb13f914b44dc86eb12a72be985f78e6d07b5ced91edfe246')
 
 set_flags_for_arm() {
@@ -52,11 +49,6 @@ prepare() {
   cd node-v$pkgver
 
   patch -p1 -i ../arm.patch
-
-  # We need newer version of npm to fix bugs
-  rm -r deps/npm
-  ln -s "$srcdir/npm" deps
-  rm -rf "$srcdir/npm/.git"
 
   msg 'fixing for python2 name'
   find -type f -exec sed -e 's_^#!/usr/bin/env python$_&2_' -e 's_^\(#!/usr/bin/python2\).[45]$_\1_' -e 's_^#!/usr/bin/python$_&2_' -e "s_'python'_'python2'_" -i {} \;
@@ -85,6 +77,8 @@ build() {
 
   ./configure \
     --prefix=/usr \
+    --with-intl=system-icu \
+    --without-npm \
     --without-snapshot \
     --with-arm-float-abi=$EABI \
     --shared-openssl \
@@ -98,11 +92,6 @@ build() {
   [ "$CARCH" == "armv6h" ] && sed -i 's/vfpv3/vfp/' config.gypi
 
   make
-
-  cd ../npm
-  ../node-v$pkgver/node cli.js install ronn marked
-  PATH="$srcdir/node-v$pkgver:$PATH" make
-  ../node-v$pkgver/node cli.js uninstall ronn marked marked-man
 }
 
 check() {
@@ -129,16 +118,6 @@ package() {
 
   install -D -m644 LICENSE \
     ${pkgdir}/usr/share/licenses/nodejs/LICENSE
-
-  install -d "$pkgdir"/usr/share/man/{man1,man3,man5,man7}
-  for _dir in man1 man3 man5 man7; do
-    cd "$pkgdir"/usr/lib/node_modules/npm/man/$_dir
-    for _file in *; do
-      ln -s /usr/lib/node_modules/npm/man/$_dir/$_file "$pkgdir"/usr/share/man/$_dir/
-    done
-  done
-
-  ln -s /usr/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js "$pkgdir"/usr/bin/node-gyp
 }
 
 # vim:set ts=2 sw=2 et:
