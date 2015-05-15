@@ -6,16 +6,16 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - added --disable-neon-opt to configure
-#  - removed xenstore dep
+#  - removed xen pieces
 
 pkgbase=pulseaudio
-pkgname=(pulseaudio libpulse)
+pkgname=(pulseaudio libpulse pulseaudio-{gconf,zeroconf,lirc,jack,bluetooth,equalizer})
 pkgdesc="A featureful, general-purpose sound server"
 pkgver=6.0
-pkgrel=1
+pkgrel=2
 arch=(i686 x86_64)
 url="http://www.freedesktop.org/wiki/Software/PulseAudio"
-license=(LGPL AGPL3)
+license=(LGPL)
 makedepends=(libasyncns libcap attr libxtst libsm libsndfile libtool rtkit
              speexdsp tdb systemd dbus avahi bluez bluez-libs gconf intltool jack2-dbus sbc
              lirc openssl fftw orc json-c gtk3 webrtc-audio-processing
@@ -51,18 +51,11 @@ build() {
 }
 
 package_pulseaudio() {
-  depends=("libpulse=$pkgver-$pkgrel" rtkit libltdl speexdsp tdb fftw orc
+  depends=("libpulse=$pkgver-$pkgrel" rtkit libltdl speexdsp tdb orc
            webrtc-audio-processing sbc)
-  optdepends=('pulseaudio-alsa: ALSA configuration (recommended)'
-              'avahi: zeroconf publishing and discovery'
-              'bluez: Bluetooth'
-              'bluez-libs: Bluetooth'
-              'gconf: paprefs configuration'
-              'jack2-dbus: JACK support'
-              'lirc: IR control'
-              'openssl: RAOP (AirPlay) output'
-              'python-pyqt4: Equalizer GUI (qpaeq)')
+  optdepends=('pulseaudio-alsa: ALSA configuration (recommended)')
   backup=(etc/pulse/{daemon.conf,default.pa,system.pa})
+  install=pulseaudio.install
 
   cd $pkgbase-$pkgver
   make -j1 DESTDIR="$pkgdir" install \
@@ -106,15 +99,77 @@ package_pulseaudio() {
 
   mv {"$pkgdir","$srcdir/libpulse"}/usr/share/man/man5/pulse-client.conf.5
   mv {"$pkgdir","$srcdir/libpulse"}/usr/share/vala
+
+### Split modules
+
+  mkdir -p "$srcdir"/{gconf,zeroconf,lirc,jack,bluetooth,equalizer}/usr/lib/pulse-$pkgver/modules \
+           "$srcdir"/{gconf/usr/lib/pulse,equalizer/usr/bin}
+
+  mv {"$pkgdir","$srcdir/gconf"}/usr/lib/pulse-$pkgver/modules/module-gconf.so
+  mv {"$pkgdir","$srcdir/gconf"}/usr/lib/pulse/gconf-helper
+
+  mv "$pkgdir"/usr/lib/pulse-$pkgver/modules/{libavahi-wrap,module-{zeroconf-{publish,discover},raop-discover}}.so \
+     "$srcdir/zeroconf/usr/lib/pulse-$pkgver/modules"
+
+  mv {"$pkgdir","$srcdir/lirc"}/usr/lib/pulse-$pkgver/modules/module-lirc.so
+
+  mv "$pkgdir"/usr/lib/pulse-$pkgver/modules/module-jack{-sink,-source,dbus-detect}.so \
+     "$srcdir/jack/usr/lib/pulse-$pkgver/modules"
+
+  mv "$pkgdir"/usr/lib/pulse-$pkgver/modules/{libbluez5-util,module-{bluetooth-{discover,policy},bluez5-{discover,device}}}.so \
+     "$srcdir/bluetooth/usr/lib/pulse-$pkgver/modules"
+
+  mv {"$pkgdir","$srcdir/equalizer"}/usr/lib/pulse-$pkgver/modules/module-equalizer-sink.so
+  mv {"$pkgdir","$srcdir/equalizer"}/usr/bin/qpaeq
 }
 
 package_libpulse() {
   pkgdesc="$pkgdesc (client library)"
   depends=(dbus libasyncns libcap libxtst libsm libsndfile json-c systemd)
-  optdepends=('alsa-plugins: ALSA support'
-              'avahi: zeroconf support')
   backup=(etc/pulse/client.conf)
-  license=(LGPL)
 
   mv "$srcdir"/libpulse/* "$pkgdir"
+}
+
+package_pulseaudio-gconf(){
+  pkgdesc="GConf support for PulseAudio"
+  depends=(pulseaudio gconf)
+
+  mv "$srcdir"/gconf/* "$pkgdir"
+}
+
+package_pulseaudio-zeroconf(){
+  pkgdesc="Zeroconf support for PulseAudio"
+  depends=(pulseaudio avahi openssl)
+
+  mv "$srcdir"/zeroconf/* "$pkgdir"
+}
+
+package_pulseaudio-lirc(){
+  pkgdesc="IR (lirc) support for PulseAudio"
+  depends=(pulseaudio lirc)
+
+  mv "$srcdir"/lirc/* "$pkgdir"
+}
+
+package_pulseaudio-jack(){
+  pkgdesc="Jack support for PulseAudio"
+  depends=(pulseaudio jack2)
+
+  mv "$srcdir"/jack/* "$pkgdir"
+}
+
+package_pulseaudio-bluetooth(){
+  pkgdesc="Bluetooth support for PulseAudio"
+  depends=(pulseaudio bluez bluez-libs)
+
+  mv "$srcdir"/bluetooth/* "$pkgdir"
+}
+
+package_pulseaudio-equalizer(){
+  pkgdesc="Equalizer for PulseAudio"
+  depends=(pulseaudio python-pyqt4 fftw)
+  license=(AGPL3)
+
+  mv "$srcdir"/equalizer/* "$pkgdir"
 }
