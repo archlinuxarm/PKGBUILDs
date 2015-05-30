@@ -4,12 +4,12 @@
 buildarch=4
 
 pkgbase=linux-odroid-xu3
-_commit=a8c84831f089392ae16695a5dad7a0819a9d3c0e
+_commit=8e27b79d5f30543062cba52a04de358c3225fe40
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.72
-pkgrel=4
+pkgrel=5
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
@@ -18,11 +18,13 @@ options=('!strip')
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         'config'
         '0001-remove-thermal-messages.patch'
-        '0002-remove-rtc-messages.patch')
-md5sums=('1f4eda3337d1487f394c5b7818f22ae5'
-         'ab5daf1bf208a30dd4d7228ccbfa5eef'
-         '5e9df4f50e140c4491d0045fac025663'
-         '367bbb0892ce26c3627ecd5f95081e7c')
+        '0002-remove-rtc-messages.patch'
+        '0003-remove-backports-cflags.patch')
+md5sums=('bdc2a20186c693e8764efec190acb6fb'
+         '7f575cf47f818ab4bf2cdcce5c7129a1'
+         'd3e96c89070458d50065929e01e62746'
+         '90eebd0fcdcf41a68890d723812f3eba'
+         '6b8e9dd6efc26d2172bee681b3fea4fd')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
@@ -37,6 +39,7 @@ prepare() {
 
   git apply ../0001-remove-thermal-messages.patch
   git apply ../0002-remove-rtc-messages.patch
+  git apply ../0003-remove-backports-cflags.patch
 }
 
 build() {
