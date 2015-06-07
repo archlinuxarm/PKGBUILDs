@@ -1,15 +1,15 @@
-From 1d29c40bd89d75bb27dd856307a0a4d5958e717c Mon Sep 17 00:00:00 2001
+From 8e362b4b2efcf028c06d04f7188b49503ca81ef5 Mon Sep 17 00:00:00 2001
 From: Kevin Mihelich <kevin@archlinuxarm.org>
-Date: Sun, 23 Nov 2014 08:23:29 -0700
+Date: Sun, 7 Jun 2015 10:32:52 -0600
 Subject: [PATCH] arch linux arm modifications
 
 Signed-off-by: Kevin Mihelich <kevin@archlinuxarm.org>
 ---
- include/configs/wandboard.h | 117 ++++++++++++++++++++++----------------------
- 1 file changed, 58 insertions(+), 59 deletions(-)
+ include/configs/wandboard.h | 129 +++++++++++++++++++++++---------------------
+ 1 file changed, 67 insertions(+), 62 deletions(-)
 
 diff --git a/include/configs/wandboard.h b/include/configs/wandboard.h
-index 809017c..383ce6f 100644
+index b586803..542ed8b 100644
 --- a/include/configs/wandboard.h
 +++ b/include/configs/wandboard.h
 @@ -51,7 +51,7 @@
@@ -21,16 +21,19 @@ index 809017c..383ce6f 100644
  
  #define CONFIG_SYS_MEMTEST_START	0x10000000
  #define CONFIG_SYS_MEMTEST_END		(CONFIG_SYS_MEMTEST_START + 500 * SZ_1M)
-@@ -76,6 +76,8 @@
+@@ -76,7 +76,11 @@
  #define CONFIG_BOUNCE_BUFFER
  #define CONFIG_CMD_EXT2
  #define CONFIG_CMD_FAT
 +#define CONFIG_CMD_EXT4
 +#define CONFIG_CMD_FS_GENERIC
  #define CONFIG_DOS_PARTITION
++#define CONFIG_CMD_PART
++#define CONFIG_PARTITION_UUIDS
  
  /* USB Configs */
-@@ -124,6 +126,8 @@
+ #define CONFIG_CMD_USB
+@@ -124,6 +128,8 @@
  #define CONFIG_MXC_OCOTP
  #endif
  
@@ -39,7 +42,7 @@ index 809017c..383ce6f 100644
  #if defined(CONFIG_MX6DL) || defined(CONFIG_MX6S)
  #define CONFIG_DEFAULT_FDT_FILE		"imx6dl-wandboard.dtb"
  #elif defined(CONFIG_MX6Q)
-@@ -131,42 +135,33 @@
+@@ -131,42 +137,33 @@
  #endif
  
  #define CONFIG_EXTRA_ENV_SETTINGS \
@@ -86,7 +89,7 @@ index 809017c..383ce6f 100644
 +	"mmcroot=/dev/mmcblk0p1 rw rootwait\0" \
 +	"mmcargs=setenv bootargs console=${console} " \
 +		"${optargs} " \
-+		"root=${mmcroot} " \
++		"root=${root} " \
 +		"video=${video}\0" \
  	"videoargs=" \
  		"setenv nextcon 0; " \
@@ -99,7 +102,7 @@ index 809017c..383ce6f 100644
  			"setexpr nextcon ${nextcon} + 1; " \
  		"else " \
  			"echo - no HDMI monitor;" \
-@@ -186,26 +181,38 @@
+@@ -186,41 +183,57 @@
  			"echo '- no FWBADAPT-7WVGA-LCD-F07A-0102 display';" \
  		"fi; " \
  		"setenv bootargs ${bootargs} ${fbmem}\0" \
@@ -117,47 +120,58 @@ index 809017c..383ce6f 100644
 -			"else " \
 -				"if test ${boot_fdt} = try; then " \
 -					"bootz; " \
--				"else " \
++	"loadimage=load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/${bootfile}\0" \
++	"loadrd=load ${devtype} ${bootpart} ${rdaddr} ${bootdir}/${rdfile}\0" \
++	"loadfdt=echo loading ${fdtdir}/${fdtfile} ...; load ${devtype} ${bootpart} ${fdtaddr} ${fdtdir}/${fdtfile}\0" \
++	"mmcboot=usb start;" \
++		"for devtype in mmc usb; do " \
++			"setenv devnum 0;" \
++			"while ${devtype} dev ${devnum}; do " \
++				"echo ${devtype} found on device ${devnum};" \
++				"setenv bootpart ${devnum}:1;" \
++				"part uuid ${devtype} ${bootpart} uuid;" \
++				"setenv root PARTUUID=${uuid} rw rootwait;" \
++				"echo Checking for: ${bootdir}/uEnv.txt ...;" \
++				"if test -e ${devtype} ${bootpart} ${bootdir}/uEnv.txt; then " \
++					"load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/uEnv.txt;" \
++					"env import -t ${loadaddr} ${filesize};" \
++					"echo Loaded environment from ${bootdir}/uEnv.txt;" \
++					"echo Checking if uenvcmd is set ...;" \
++					"if test -n ${uenvcmd}; then " \
++						"echo Running uenvcmd ...;" \
++						"run uenvcmd;" \
++					"fi;" \
++				"fi;" \
++				"if run loadimage; then " \
++					"run mmcargs;" \
++					"if run loadfdt; then " \
++						"if run loadrd; then " \
++							"bootz ${loadaddr} ${rdaddr}:${filesize} ${fdtaddr};" \
++						"else " \
++							"bootz ${loadaddr} - ${fdtaddr};" \
++						"fi;" \
++					"fi;" \
+ 				"else " \
 -					"echo WARN: Cannot load the DT; " \
 -				"fi; " \
-+	"loadimage=load mmc ${bootpart} ${loadaddr} ${bootdir}/${bootfile}\0" \
-+	"loadrd=load mmc ${bootpart} ${rdaddr} ${bootdir}/${rdfile}\0" \
-+	"loadfdt=echo loading ${fdtdir}/${fdtfile} ...; load mmc ${bootpart} ${fdtaddr} ${fdtdir}/${fdtfile}\0" \
-+	"mmcboot=mmc dev ${mmcdev}; " \
-+		"if mmc rescan; then " \
-+			"echo SD/MMC found on device ${mmcdev};" \
-+			"setenv bootpart ${mmcdev}:1; " \
-+			"echo Checking for: ${bootdir}/uEnv.txt ...;" \
-+			"if test -e mmc ${bootpart} ${bootdir}/uEnv.txt; then " \
-+				"load mmc ${bootpart} ${loadaddr} ${bootdir}/uEnv.txt;" \
-+				"env import -t ${loadaddr} ${filesize};" \
-+				"echo Loaded environment from ${bootdir}/uEnv.txt;" \
-+				"echo Checking if uenvcmd is set ...;" \
-+				"if test -n ${uenvcmd}; then " \
-+					"echo Running uenvcmd ...;" \
-+					"run uenvcmd;" \
-+				"fi;" \
- 			"fi; " \
+-			"fi; " \
 -		"else " \
 -			"bootz; " \
-+			"if run loadimage; then " \
-+				"if run loadfdt; then " \
-+					"run mmcargs;" \
-+					"if run loadrd; then " \
-+						"bootz ${loadaddr} ${rdaddr}:${filesize} ${fdtaddr};" \
-+					"else " \
-+						"bootz ${loadaddr} - ${fdtaddr};" \
-+					"fi;" \
-+				"else " \
-+					"echo Kernel found, but no device tree found;" \
+-		"fi;\0" \
++					"echo No kernel found;" \
 +				"fi;" \
-+			"else " \
-+				"echo No kernel found;" \
-+			"fi;" \
- 		"fi;\0" \
++				"setexpr devnum ${devnum} + 1;" \
++			"done;" \
++		"done;\0" \
  	"netargs=setenv bootargs console=${console},${baudrate} " \
  		"root=/dev/nfs " \
-@@ -217,10 +224,10 @@
+-	"ip=dhcp nfsroot=${serverip}:${nfsroot},v3,tcp\0" \
+-		"netboot=echo Booting from net ...; " \
++		"ip=dhcp nfsroot=${serverip}:${nfsroot},v3,tcp\0" \
++	"netboot=echo Booting from net ...; " \
+ 		"run netargs; " \
+ 		"if test ${ip_dyn} = yes; then " \
+ 			"setenv get_cmd dhcp; " \
  		"else " \
  			"setenv get_cmd tftp; " \
  		"fi; " \
@@ -171,7 +185,7 @@ index 809017c..383ce6f 100644
  			"else " \
  				"if test ${boot_fdt} = try; then " \
  					"bootz; " \
-@@ -233,16 +240,7 @@
+@@ -233,16 +246,7 @@
  		"fi;\0"
  
  #define CONFIG_BOOTCOMMAND \
@@ -189,7 +203,7 @@ index 809017c..383ce6f 100644
  
  /* Miscellaneous configurable options */
  #define CONFIG_SYS_LONGHELP
-@@ -283,6 +281,7 @@
+@@ -280,6 +284,7 @@
  
  #define CONFIG_OF_LIBFDT
  #define CONFIG_CMD_BOOTZ
@@ -198,5 +212,5 @@ index 809017c..383ce6f 100644
  #ifndef CONFIG_SYS_DCACHE_OFF
  #define CONFIG_CMD_CACHE
 -- 
-2.2.2
+2.4.2
 
