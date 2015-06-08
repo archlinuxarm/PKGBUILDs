@@ -1,15 +1,15 @@
-From cbc2e3d0a3cfb4982061a1b2a02483b3c189ffb2 Mon Sep 17 00:00:00 2001
+From 80bcddf384ff200c677d47926f9159f7a555bd44 Mon Sep 17 00:00:00 2001
 From: Kevin Mihelich <kevin@archlinuxarm.org>
 Date: Sat, 22 Nov 2014 22:55:40 -0700
 Subject: [PATCH] arch linux arm modifications
 
 Signed-off-by: Kevin Mihelich <kevin@archlinuxarm.org>
 ---
- include/configs/ti_omap4_common.h | 36 +++++++++++++++++++++++++-----------
- 1 file changed, 25 insertions(+), 11 deletions(-)
+ include/configs/ti_omap4_common.h | 95 +++++++++++++++++++++------------------
+ 1 file changed, 52 insertions(+), 43 deletions(-)
 
 diff --git a/include/configs/ti_omap4_common.h b/include/configs/ti_omap4_common.h
-index b0f199e..21343a8 100644
+index 1c93aab..e8b6c90 100644
 --- a/include/configs/ti_omap4_common.h
 +++ b/include/configs/ti_omap4_common.h
 @@ -46,7 +46,6 @@
@@ -20,18 +20,20 @@ index b0f199e..21343a8 100644
  #ifndef CONFIG_SYS_EMIF_PRECALCULATED_TIMING_REGS
  #define CONFIG_SYS_AUTOMATIC_SDRAM_DETECTION
  #define CONFIG_SYS_DEFAULT_LPDDR2_TIMINGS
-@@ -82,6 +81,10 @@
+@@ -82,6 +81,12 @@
  #undef CONFIG_CMD_NET
  #undef CONFIG_CMD_NFS
  
 +/* Arch Linux ARM extras */
 +#define CONFIG_IDENT_STRING " Arch Linux ARM"
 +#define CONFIG_SUPPORT_RAW_INITRD
++#define CONFIG_CMD_PART
++#define CONFIG_PARTITION_UUIDS
 +
  /*
   * Environment setup
   */
-@@ -89,29 +92,35 @@
+@@ -89,32 +94,57 @@
  	DEFAULT_LINUX_BOOT_ENV \
  	"console=ttyO2,115200n8\0" \
  	"fdtfile=undefined\0" \
@@ -50,55 +52,99 @@ index b0f199e..21343a8 100644
 +	"mmcroot=/dev/mmcblk0p1 rw rootwait\0" \
  	"mmcargs=setenv bootargs console=${console} " \
  		"vram=${vram} " \
- 		"root=${mmcroot} " \
+-		"root=${mmcroot} " \
 -		"rootfstype=${mmcrootfstype}\0" \
 -	"loadbootscript=load mmc ${mmcdev} ${loadaddr} boot.scr\0" \
-+		"${optargs}\0" \
-+	"loadbootscript=load mmc ${bootpart} ${loadaddr} ${bootdir}/boot.scr\0" \
- 	"bootscript=echo Running bootscript from mmc${mmcdev} ...; " \
- 		"source ${loadaddr}\0" \
+-	"bootscript=echo Running bootscript from mmc${mmcdev} ...; " \
+-		"source ${loadaddr}\0" \
 -	"loadbootenv=load mmc ${mmcdev} ${loadaddr} uEnv.txt\0" \
-+	"loadbootenv=load mmc ${bootpart} ${loadaddr} ${bootdir}/uEnv.txt\0" \
- 	"importbootenv=echo Importing environment from mmc${mmcdev} ...; " \
- 		"env import -t ${loadaddr} ${filesize}\0" \
- 	"loadimage=load mmc ${bootpart} ${loadaddr} ${bootdir}/${bootfile}\0" \
+-	"importbootenv=echo Importing environment from mmc${mmcdev} ...; " \
+-		"env import -t ${loadaddr} ${filesize}\0" \
+-	"loadimage=load mmc ${bootpart} ${loadaddr} ${bootdir}/${bootfile}\0" \
 -	"loaduimage=load mmc ${mmcdev} ${loadaddr} uImage\0" \
-+	"loaduimage=load mmc ${bootpart} ${loadaddr} ${bootdir}/uImage\0" \
-+	"loadrd=load mmc ${bootpart} ${rdaddr} ${bootdir}/${rdfile}\0" \
- 	"mmcboot=echo Booting from mmc${mmcdev} ...; " \
- 		"run mmcargs; " \
- 		"bootz ${loadaddr} - ${fdtaddr}\0" \
-+	"rdboot=echo Booting from mmc${mmcdev} ...; " \
-+		"run mmcargs; " \
-+		"bootz ${loadaddr} ${rdaddr} ${fdtaddr}\0" \
- 	"uimageboot=echo Booting from mmc${mmcdev} ...; " \
- 		"run mmcargs; " \
- 		"bootm ${loadaddr}\0" \
-@@ -128,7 +137,7 @@
+-	"mmcboot=echo Booting from mmc${mmcdev} ...; " \
+-		"run mmcargs; " \
+-		"bootz ${loadaddr} - ${fdtaddr}\0" \
+-	"uimageboot=echo Booting from mmc${mmcdev} ...; " \
+-		"run mmcargs; " \
+-		"bootm ${loadaddr}\0" \
++		"root=${root} " \
++		"${optargs}\0" \
++	"loadimage=load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/${bootfile}\0" \
++	"loadrd=load ${devtype} ${bootpart} ${rdaddr} ${bootdir}/${rdfile}\0" \
++	"loadfdt=echo loading ${fdtdir}/${fdtfile} ...; load ${devtype} ${bootpart} ${fdtaddr} ${fdtdir}/${fdtfile}\0" \
++	"mmcboot=usb start;" \
++		"for devtype in mmc usb; do " \
++			"setenv devnum 0;" \
++			"while ${devtype} dev ${devnum}; do " \
++				"echo ${devtype} found on device ${devnum};" \
++				"setenv bootpart ${devnum}:1;" \
++				"part uuid ${devtype} ${bootpart} uuid;" \
++				"setenv root PARTUUID=${uuid} rw rootwait;" \
++				"echo Checking for: ${bootdir}/uEnv.txt ...;" \
++				"if test -e ${devtype} ${bootpart} ${bootdir}/uEnv.txt; then " \
++					"load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/uEnv.txt;" \
++					"env import -t ${loadaddr} ${filesize};" \
++					"echo Loaded environment from ${bootdir}/uEnv.txt;" \
++					"echo Checking if uenvcmd is set ...;" \
++					"if test -n ${uenvcmd}; then " \
++						"echo Running uenvcmd ...;" \
++						"run uenvcmd;" \
++					"fi;" \
++				"fi;" \
++				"if run loadimage; then " \
++					"run mmcargs;" \
++					"if run loadfdt; then " \
++						"if run loadrd; then " \
++							"bootz ${loadaddr} ${rdaddr}:${filesize} ${fdtaddr};" \
++						"else " \
++							"bootz ${loadaddr} - ${fdtaddr};" \
++						"fi;" \
++					"fi;" \
++				"else " \
++					"echo No kernel found;" \
++				"fi;" \
++				"setexpr devnum ${devnum} + 1;" \
++			"done;" \
++		"done;\0" \
+ 	"findfdt="\
+ 		"if test $board_name = sdp4430; then " \
+ 			"setenv fdtfile omap4-sdp.dtb; fi; " \
+@@ -127,32 +157,11 @@
+ 		"if test $board_name = duovero; then " \
  			"setenv fdtfile omap4-duovero-parlor.dtb; fi;" \
  		"if test $fdtfile = undefined; then " \
- 			"echo WARNING: Could not determine device tree to use; fi; \0" \
+-			"echo WARNING: Could not determine device tree to use; fi; \0" \
 -	"loadfdt=load mmc ${bootpart} ${fdtaddr} ${bootdir}/${fdtfile}\0" \
-+	"loadfdt=load mmc ${bootpart} ${fdtaddr} ${fdtdir}/${fdtfile}\0" \
++			"echo WARNING: Could not determine device tree to use; fi; \0"
  
  #define CONFIG_BOOTCOMMAND \
  	"run findfdt; " \
-@@ -146,8 +155,13 @@
- 			"fi;" \
- 		"fi;" \
- 		"if run loadimage; then " \
+-	"mmc dev ${mmcdev}; if mmc rescan; then " \
+-		"echo SD/MMC found on device ${mmcdev};" \
+-		"if run loadbootscript; then " \
+-			"run bootscript; " \
+-		"else " \
+-			"if run loadbootenv; then " \
+-				"run importbootenv; " \
+-			"fi;" \
+-			"if test -n ${uenvcmd}; then " \
+-				"echo Running uenvcmd ...;" \
+-				"run uenvcmd;" \
+-			"fi;" \
+-		"fi;" \
+-		"if run loadimage; then " \
 -			"run loadfdt;" \
 -			"run mmcboot; " \
-+			"if run loadfdt; then " \
-+				"if run loadrd; then " \
-+					"run rdboot; "\
-+				"else " \
-+					"run mmcboot; " \
-+				"fi;" \
-+			"fi;" \
- 		"fi; " \
- 		"if run loaduimage; then " \
- 			"run uimageboot;" \
+-		"fi; " \
+-		"if run loaduimage; then " \
+-			"run uimageboot;" \
+-		"fi; " \
+-	"fi"
++	"run mmcboot"
+ 
+ /*
+  * Defines for SPL
 -- 
-2.1.3
+2.4.2
 
