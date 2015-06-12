@@ -13,42 +13,37 @@
 buildarch=20
 
 pkgname=thunderbird
-pkgver=31.7.0
+pkgver=38.0.1
 pkgrel=1
 pkgdesc="Standalone Mail/News reader"
 arch=('i686' 'x86_64')
 license=('MPL' 'GPL')
 url="http://www.mozilla.org/thunderbird/"
-depends=('alsa-lib' 'dbus-glib' 'desktop-file-utils' 'gtk2' 'hicolor-icon-theme' 'hunspell' 'libevent' 'libvpx' 'libxt' 'mime-types' 'mozilla-common' 'nss' 'sqlite' 'startup-notification')
+depends=('gtk2' 'mozilla-common' 'libxt' 'startup-notification' 'mime-types'
+         'dbus-glib' 'alsa-lib' 'desktop-file-utils' 'hicolor-icon-theme'
+         'libvpx' 'icu' 'libevent' 'nss' 'hunspell' 'sqlite')
 makedepends=('unzip' 'zip' 'python2' 'wireless_tools' 'yasm' 'mesa' 'libpulse')
 optdepends=('libcanberra: for sound support')
 install=thunderbird.install
-source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.bz2{,.asc}
+source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.bz2
         mozconfig
         thunderbird.desktop
         thunderbird-install-dir.patch
         vendor.js
-        thunderbird-31.6.0-libvpx-modern.patch
         no-neon.patch)
-options=(!emptydirs)
-sha256sums=('dc3a6afaab486ba09745898f55986f98cc9bf7647cd992849f9c7ead563479b7'
-            'SKIP'
-            'a997200050983ae0a4c8d5823eaf5f6844f50610d7fb252eebda2d2c59fc8bc3'
+options=('!emptydirs' '!makeflags')
+sha256sums=('7655039a9a2d5d169f5b43d2c737007dbaa42fa767f7bfbfde8ae46b05e4ab71'
+            '25085e4f147174f88541896673f741a968a6acf13c3f10432e81083416ef5611'
             '3fba13d88aeb003ab0811ef739463858172ce0662a1c7d62835df3d83ddbb8fb'
             '9049ab3f9600a1592a54c41a166c76e046c393e1cfe7c4e769155b7317d197ee'
             'e4ea8e6788163d9f8db8f1f40023db3ea0a1358f9a4510169f2d4c4fe6a887ed'
-            '0e67b4d46f330b0306e01d4c6876ae5a58a4de6ac50f057e23aac41dec3554ef'
             '8010bc3abff71cdaa3624ebbddbc7baaae4cda7ad093ad60d3c3e841c1141872')
-validpgpkeys=('2B90598A745E992F315E22C58AB132963A06537A')
 
 prepare() {
-  cd comm-esr31
+  cd comm-esr${pkgver%%.*}
   patch -Np1 -i ../thunderbird-install-dir.patch
 
   patch -Np0 -i ../no-neon.patch
-
-  # Fix build with libvpx 1.4.0 (patch from Fedora)
-  patch -Np1 -i ../thunderbird-31.6.0-libvpx-modern.patch
 
   cp "$srcdir/mozconfig" .mozconfig
 
@@ -58,32 +53,33 @@ prepare() {
 }
 
 build() {
-  cd comm-esr31
+  cd comm-esr${pkgver%%.*}
 
-  export LDFLAGS="$LDFLAGS -Wl,-rpath,/usr/lib/thunderbird -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
+  export LDFLAGS="$LDFLAGS -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
   export PYTHON="/usr/bin/python2"
 
-  make -j1 -f client.mk build MOZ_MAKE_FLAGS="$MAKEFLAGS"
+  make -f client.mk build
 }
 
 package() {
-  cd comm-esr31
-  make -j1 -f client.mk DESTDIR="$pkgdir" install
+  cd comm-esr${pkgver%%.*}
+  make -f client.mk DESTDIR="$pkgdir" install
 
-  install -Dm644 "$srcdir"/vendor.js "$pkgdir/usr/lib/thunderbird/defaults/preferences/vendor.js"
+  install -Dm644 ../vendor.js "$pkgdir/usr/lib/thunderbird/defaults/preferences/vendor.js"
 
-  for i in 16x16 22x22 24x24 32x32 48x48 256x256; do
-      install -Dm644 other-licenses/branding/thunderbird/mailicon${i/x*/}.png \
-          "$pkgdir/usr/share/icons/hicolor/$i/apps/thunderbird.png"
+  for i in 16 22 24 32 48 256; do
+      install -Dm644 other-licenses/branding/thunderbird/mailicon$i.png \
+          "$pkgdir/usr/share/icons/hicolor/${i}x${i}/apps/thunderbird.png"
   done
 
-  install -Dm644 "$srcdir/thunderbird.desktop" \
+  install -Dm644 ../thunderbird.desktop \
       "$pkgdir/usr/share/applications/thunderbird.desktop"
 
+  # Use system-provided dictionaries
   rm -rf "$pkgdir"/usr/lib/thunderbird/{dictionaries,hyphenation}
   ln -sf /usr/share/hunspell "$pkgdir/usr/lib/thunderbird/dictionaries"
   ln -sf /usr/share/hyphen "$pkgdir/usr/lib/thunderbird/hyphenation"
 
-  # We don't want the development stuff
+  # Remove development stuff
   rm -r "$pkgdir"/usr/{include,lib/thunderbird-devel-*,share/idl}
 }
