@@ -1,0 +1,120 @@
+Index: build/common.gypi
+diff --git a/build/common.gypi b/build/common.gypi
+index b26d0e1aaf3baa8c0bea2aa21795051e0767bb39..bac0544541b1ffbd4c9a072e86425476f01fa3d9 100644
+--- a/build/common.gypi
++++ b/build/common.gypi
+@@ -391,6 +391,9 @@
+       # Web speech is enabled by default. Set to 0 to disable.
+       'enable_web_speech%': 1,
+ 
++      # 'Ok Google' hotwording is enabled by default. Set to 0 to disable.
++      'enable_hotwording%': 1,
++
+       # Notifications are compiled in by default. Set to 0 to disable.
+       'notifications%' : 1,
+ 
+@@ -1136,6 +1139,7 @@
+     'configuration_policy%': '<(configuration_policy)',
+     'safe_browsing%': '<(safe_browsing)',
+     'enable_web_speech%': '<(enable_web_speech)',
++    'enable_hotwording%': '<(enable_hotwording)',
+     'notifications%': '<(notifications)',
+     'clang_use_chrome_plugins%': '<(clang_use_chrome_plugins)',
+     'mac_want_real_dsym%': '<(mac_want_real_dsym)',
+Index: chrome/browser/BUILD.gn
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 30127a3a2ee6836ffb108fd2859707b765d42cb8..867dc390d0b7f623423ed64bfbbe5f938fbc0659 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -19,6 +19,11 @@ if (is_desktop_linux) {
+   import("//build/config/linux/pkg_config.gni")
+ }
+ 
++declare_args() {
++  # 'Ok Google' hotwording is enabled.
++  enable_hotwording = true
++}
++
+ about_credits_file = "$target_gen_dir/about_credits.html"
+ additional_modules_list_file =
+     "$root_gen_dir/chrome/browser/internal/additional_modules_list.txt"
+@@ -452,6 +457,10 @@ source_set("browser") {
+     }
+   }
+ 
++  if (enable_hotwording) {
++    defines += [ "ENABLE_HOTWORDING" ]
++  }
++
+   if (is_linux) {
+     deps += [
+       "//device/media_transfer_protocol",
+Index: chrome/browser/search/hotword_service.cc
+diff --git a/chrome/browser/search/hotword_service.cc b/chrome/browser/search/hotword_service.cc
+index d222b150fbae877fe74598681e956e6e624890fa..5b08027ef4c198480f703a9420a55068e88aa435 100644
+--- a/chrome/browser/search/hotword_service.cc
++++ b/chrome/browser/search/hotword_service.cc
+@@ -639,7 +639,11 @@ bool HotwordService::IsServiceAvailable() {
+   if (group == hotword_internal::kHotwordFieldTrialDisabledGroupName)
+     return false;
+ 
++#if defined(ENABLE_HOTWORDING)
+   return DoesHotwordSupportLanguage(profile_);
++#else
++  return false;
++#endif
+ }
+ 
+ bool HotwordService::IsOptedIntoAudioLogging() {
+Index: chrome/browser/search/hotword_service_unittest.cc
+diff --git a/chrome/browser/search/hotword_service_unittest.cc b/chrome/browser/search/hotword_service_unittest.cc
+index 588706c1c186e7f410230b12f649a6b8853da2fb..84444468e2f7634ad895d0752355303babf0c7d7 100644
+--- a/chrome/browser/search/hotword_service_unittest.cc
++++ b/chrome/browser/search/hotword_service_unittest.cc
+@@ -157,6 +157,7 @@ INSTANTIATE_TEST_CASE_P(HotwordServiceTests,
+                             extension_misc::kHotwordSharedModuleId));
+ 
+ TEST_P(HotwordServiceTest, IsHotwordAllowedLocale) {
++#if defined(ENABLE_HOTWORDING)
+   TestingProfile::Builder profile_builder;
+   scoped_ptr<TestingProfile> profile = profile_builder.Build();
+ 
+@@ -187,6 +188,7 @@ TEST_P(HotwordServiceTest, IsHotwordAllowedLocale) {
+   Profile* otr_profile = profile->GetOffTheRecordProfile();
+   SetApplicationLocale(otr_profile, "en");
+   EXPECT_FALSE(HotwordServiceFactory::IsHotwordAllowed(otr_profile));
++#endif  // defined(ENABLE_HOTWORDING)
+ }
+ 
+ TEST_P(HotwordServiceTest, ShouldReinstallExtension) {
+@@ -243,6 +245,7 @@ TEST_P(HotwordServiceTest, PreviousLanguageSetOnInstall) {
+ }
+ 
+ TEST_P(HotwordServiceTest, UninstallReinstallTriggeredCorrectly) {
++#if defined(ENABLE_HOTWORDING)
+   InitializeEmptyExtensionService();
+   service_->Init();
+ 
+@@ -313,6 +316,7 @@ TEST_P(HotwordServiceTest, UninstallReinstallTriggeredCorrectly) {
+   EXPECT_TRUE(HotwordServiceFactory::IsHotwordAllowed(profile()));
+   EXPECT_FALSE(hotword_service->MaybeReinstallHotwordExtension());
+   EXPECT_EQ(1, hotword_service->uninstall_count());  // no change
++#endif  // defined(ENABLE_HOTWORDING)
+ }
+ 
+ TEST_P(HotwordServiceTest, DisableAlwaysOnOnLanguageChange) {
+Index: chrome/chrome_browser.gypi
+diff --git a/chrome/chrome_browser.gypi b/chrome/chrome_browser.gypi
+index 4070c8c38867d2394d3a2a60b1cd17361ccea1c3..b589e9a52e0ca183da7bee5a644c0de8f61a0d89 100644
+--- a/chrome/chrome_browser.gypi
++++ b/chrome/chrome_browser.gypi
+@@ -3573,6 +3573,9 @@
+         ['enable_session_service==1', {
+           'sources': [ '<@(chrome_browser_session_service_sources)' ],
+         }],
++        ['enable_hotwording==1', {
++          'defines': [ 'ENABLE_HOTWORDING' ],
++        }],
+         ['OS!="android" and OS!="ios" and chromeos==0', {
+           'sources': [ '<@(chrome_browser_desktop_sources)' ],
+         }],
