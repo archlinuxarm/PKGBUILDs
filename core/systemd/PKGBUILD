@@ -3,82 +3,64 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - disable optimization, currently breaks many things
-#  - v5: revert 5bac523 until the issue with it can be figured out
+#  - removed makedepend on gnu-efi-libs, --enable-gnuefi configure option
 
 pkgbase=systemd
 pkgname=('systemd' 'libsystemd' 'systemd-sysvcompat')
-pkgver=219
-pkgrel=6
+pkgver=221
+pkgrel=1
 arch=('i686' 'x86_64')
 url="http://www.freedesktop.org/wiki/Software/systemd"
-makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gobject-introspection' 'gperf'
-             'gtk-doc' 'intltool' 'iptables' 'kmod' 'libcap' 'libidn' 'libgcrypt'
-             'libmicrohttpd' 'libxslt' 'util-linux' 'linux-api-headers' 'lz4' 'pam'
-             'python' 'python-lxml' 'quota-tools' 'shadow' 'xz')
+makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam'
+             'intltool' 'iptables' 'kmod' 'libcap' 'libidn' 'libgcrypt'
+             'libmicrohttpd' 'libxslt' 'util-linux' 'linux-api-headers'
+             'python' 'python-lxml' 'quota-tools' 'shadow' 'git')
 options=('strip' 'debug')
-source=("http://www.freedesktop.org/software/$pkgname/$pkgname-$pkgver.tar.xz"
+source=("git://github.com/systemd/systemd.git#tag=v$pkgver"
         'initcpio-hook-udev'
         'initcpio-install-systemd'
         'initcpio-install-udev'
-        '0001-tmpfiles-avoid-creating-duplicate-acl-entries.patch'
-        '0001-nspawn-when-connected-to-pipes-for-stdin-stdout-pass.patch'
-        '0001-core-shared-in-deserializing-match-same-files-reache.patch'
-        '0001-tmpfiles-Fix-handling-of-duplicate-lines.patch'
-        '0001-core-do-not-spawn-jobs-or-touch-other-units-during-c.patch'
-        '0001-use-x-machine-unix-prefix-for-the-container-bus-on-dbus1.patch'
-        '0001-unit-use-weaker-dependencies-between-mount-and-devic.patch'
-        '0001-core-rework-device-state-logic.patch'
-        '0001-core-don-t-change-removed-devices-to-state-tentative.patch'
-        '5bac5235934fabe5a3e6a9d47f4812f81034c427.patch')
-md5sums=('e0d6c9a4b4f69f66932d2230298c9a34'
+        'arch.conf'
+        'loader.conf'
+        'splash-arch.bmp')
+md5sums=('SKIP'
          '90ea67a7bb237502094914622a39e281'
-         '58af51bd4c0464f195b3433b4e17cf6c'
+         '8516a7bd65157d0115c113118c10c3f3'
          'bde43090d4ac0ef048e3eaee8202a407'
-         '7cdefc73bf61934c353e4450e280e551'
-         'cb8550749cd52b5902ed6fdf0eb465ec'
-         '9d46aebfc04cc849fd4295f449b239a2'
-         'c4c9c0f0a06314450563ed571962881e'
-         '6b9d611dffd92c94641360c3ef2659c1'
-         '3a0fc672b34ced18ca1364edf8644165'
-         'cd2719e8e93ad662c00bf9f195fdce66'
-         '12e01f00c91e54680098a799517698f2'
-         'd0aa4e5ec598063eab2e79fb95bceece'
-         'a168ea8a805ee16c1dd1cfe6f5893558')
+         '20ead378f5d6df4b2a3e670301510a7d'
+         'ddaef54f68f6c86c6c07835fc668f62a'
+         '1e2f9a8b0fa32022bf0a8f39123e5f4e')
 
 prepare() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname"
 
-  patch -Np1 <../0001-tmpfiles-avoid-creating-duplicate-acl-entries.patch
-  patch -Np1 <../0001-nspawn-when-connected-to-pipes-for-stdin-stdout-pass.patch
-  patch -Np1 <../0001-core-shared-in-deserializing-match-same-files-reache.patch
-  patch -Np1 <../0001-tmpfiles-Fix-handling-of-duplicate-lines.patch
-  patch -Np1 <../0001-core-do-not-spawn-jobs-or-touch-other-units-during-c.patch
-  patch -Np1 <../0001-use-x-machine-unix-prefix-for-the-container-bus-on-dbus1.patch
-  patch -Np1 <../0001-unit-use-weaker-dependencies-between-mount-and-devic.patch
-  patch -Np1 <../0001-core-rework-device-state-logic.patch
-  patch -Np1 <../0001-core-don-t-change-removed-devices-to-state-tentative.patch
-  [[ $CARCH == "arm" ]] && patch -Rp1 -i ../5bac5235934fabe5a3e6a9d47f4812f81034c427.patch || true
+  # pam_systemd: Properly check kdbus availability
+  # https://github.com/systemd/systemd/commit/c5d452bb228e
+  git cherry-pick -n c5d452bb228e
+
+  # udevd: suppress warning if we don't find cgroup
+  # https://github.com/systemd/systemd/commit/11b9fb15be96
+  git cherry-pick -n 11b9fb15be96
+
+  ./autogen.sh
 }
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname"
+
+  local timeservers=({0..3}.arch.pool.ntp.org)
 
   CFLAGS=`echo $CFLAGS | sed -e 's/-O2/-O0/'` && CXXFLAGS="$CFLAGS"
   unset CPPFLAGS
-
-  local timeservers=({0..3}.arch.pool.ntp.org)
 
   ./configure \
       --libexecdir=/usr/lib \
       --localstatedir=/var \
       --sysconfdir=/etc \
-      --enable-introspection \
-      --enable-gtk-doc \
       --enable-lz4 \
       --enable-compat-libs \
       --disable-audit \
       --disable-ima \
-      --disable-kdbus \
       --with-sysvinit-path= \
       --with-sysvrcnd-path= \
       --with-ntp-servers="${timeservers[*]}"
@@ -88,7 +70,7 @@ build() {
 
 package_systemd() {
   pkgdesc="system and service manager"
-  license=('GPL2' 'LGPL2.1' 'MIT')
+  license=('GPL2' 'LGPL2.1')
   depends=('acl' 'bash' 'dbus' 'glib2' 'iptables' 'kbd' 'kmod' 'hwids' 'libcap'
            'libgcrypt' 'libsystemd' 'libidn' 'lz4' 'pam' 'libseccomp' 'util-linux'
            'xz')
@@ -123,7 +105,7 @@ package_systemd() {
           etc/udev/udev.conf)
   install="systemd.install"
 
-  make -C "$pkgname-$pkgver" DESTDIR="$pkgdir" install
+  make -C "$pkgname" DESTDIR="$pkgdir" install
 
   # don't write units to /etc by default. some of these will be re-enabled on
   # post_install.
@@ -133,7 +115,7 @@ package_systemd() {
   rm -r "$pkgdir/usr/lib/rpm"
 
   # add back tmpfiles.d/legacy.conf
-  install -m644 "systemd-$pkgver/tmpfiles.d/legacy.conf" "$pkgdir/usr/lib/tmpfiles.d"
+  install -m644 "$pkgname/tmpfiles.d/legacy.conf" "$pkgdir/usr/lib/tmpfiles.d"
 
   # Replace dialout/tape/cdrom group in rules with uucp/storage/optical group
   sed -i 's#GROUP="dialout"#GROUP="uucp"#g;
@@ -171,18 +153,19 @@ package_systemd() {
   rm -rf "$srcdir/_libsystemd"
   install -dm755 "$srcdir"/_libsystemd/usr/lib
   cd "$srcdir"/_libsystemd
-  mv "$pkgdir"/usr/lib/lib{systemd,{g,}udev}*.so* usr/lib
+  mv "$pkgdir"/usr/lib/lib{systemd,udev}*.so* usr/lib
 
-  # include MIT license, since it's technically custom
-  install -Dm644 "$srcdir/$pkgname-$pkgver/LICENSE.MIT" \
-      "$pkgdir/usr/share/licenses/systemd/LICENSE.MIT"
+  # add example bootctl configuration
+  install -Dm644 "$srcdir/arch.conf" "$pkgdir"/usr/share/systemd/bootctl/arch.conf
+  install -Dm644 "$srcdir/loader.conf" "$pkgdir"/usr/share/systemd/bootctl/loader.conf
+  install -Dm644 "$srcdir/splash-arch.bmp" "$pkgdir"/usr/share/systemd/bootctl/splash-arch.bmp
 }
 
 package_libsystemd() {
   pkgdesc="systemd client libraries"
   depends=('glib2' 'glibc' 'libgcrypt' 'lz4' 'xz')
   license=('GPL2')
-  provides=('libgudev-1.0.so' 'libsystemd.so' 'libsystemd-daemon.so' 'libsystemd-id128.so'
+  provides=('libsystemd.so' 'libsystemd-daemon.so' 'libsystemd-id128.so'
             'libsystemd-journal.so' 'libsystemd-login.so' 'libudev.so')
 
   mv "$srcdir/_libsystemd"/* "$pkgdir"
