@@ -1,0 +1,110 @@
+From a4a1d285e508db9cc72d213be528a3d74d7573d8 Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Tue, 23 Jun 2015 18:02:40 -0600
+Subject: [PATCH] gcc 5.1 fix for mac address
+
+Signed-off-by: Kevin Mihelich <kevin@archlinuxarm.org>
+---
+ drivers/amlogic/efuse/efuse.c         | 25 +++++++++++--------------
+ drivers/amlogic/ethernet/am_net8218.c | 14 +++++++-------
+ 2 files changed, 18 insertions(+), 21 deletions(-)
+
+diff --git a/drivers/amlogic/efuse/efuse.c b/drivers/amlogic/efuse/efuse.c
+index a29a742..2a1d547 100644
+--- a/drivers/amlogic/efuse/efuse.c
++++ b/drivers/amlogic/efuse/efuse.c
+@@ -242,19 +242,16 @@ static const struct file_operations efuse_fops = {
+ #define MACCHAR(x)	(('A' <= (x) && (x) <= 'F') \
+ 				? (x) - 'A' + 'a' : (x))
+ 
+-static char *aml_efuse_mac(void)
++void aml_efuse_mac(unsigned char* hwmac)
+ {
+-	char hwmac[20];
+ 	char buf[80];
+         char mac_mask;
+ 	efuseinfo_item_t info;
+-
+-	if (efuse_getinfo_byID(EFUSE_MAC_ID, &info) < 0)
+-		return 0;
+-
+-	if (efuse_read_item(buf, info.data_len,
+-				(loff_t*)&info.offset) < 0)
+-		return 0;
++	if (efuse_getinfo_byID(EFUSE_MAC_ID, &info) < 0
++		|| efuse_read_item(buf, info.data_len, (loff_t*)&info.offset) < 0) {
++		hwmac[0] = '\0';
++		return;
++	}
+ 
+ 	sprintf(hwmac, "%02x:%02x:%02x:%02x:%02x:%02x",
+ 			buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]);
+@@ -275,11 +272,9 @@ static char *aml_efuse_mac(void)
+                         MACCHAR(buf[11]), MACCHAR(buf[12]), MACCHAR(buf[13]),
+                         MACCHAR(buf[14]), MACCHAR(buf[15]));
+         }
+-
+-	return hwmac;
+ }
+ 
+-unsigned char *aml_efuse_get_item(unsigned char* key_name)
++unsigned char *aml_efuse_get_item(unsigned char* key_name, unsigned char* value)
+ {
+         unsigned char *ret = 0;
+ 	int id;
+@@ -294,7 +289,7 @@ unsigned char *aml_efuse_get_item(unsigned char* key_name)
+         }
+ 
+ 	if (id == EFUSE_MAC_ID) {
+-		return aml_efuse_mac();
++		aml_efuse_mac(value);
+ 	}
+ 
+         return ret;
+@@ -304,7 +299,9 @@ EXPORT_SYMBOL(aml_efuse_get_item);
+ /* Sysfs Files */
+ static ssize_t mac_show(struct class *cla, struct class_attribute *attr, char *buf)
+ {
+-	return sprintf(buf, "%s\n", aml_efuse_mac());
++	char hwmac[20];
++	aml_efuse_mac(hwmac);
++	return sprintf(buf, "%s\n", hwmac);
+ }
+ 
+ static ssize_t mac_wifi_show(struct class *cla, struct class_attribute *attr, char *buf)
+diff --git a/drivers/amlogic/ethernet/am_net8218.c b/drivers/amlogic/ethernet/am_net8218.c
+index c39df30..a192128 100644
+--- a/drivers/amlogic/ethernet/am_net8218.c
++++ b/drivers/amlogic/ethernet/am_net8218.c
+@@ -117,7 +117,7 @@ static int reset_mac(struct net_device *dev);
+ static void am_net_dump_macreg(void);
+ static void read_macreg(void);
+ void hardware_reset_phy(void);
+-extern char *aml_efuse_get_item(unsigned char* key_name);
++extern char *aml_efuse_get_item(unsigned char* key_name, unsigned char *value);
+ 
+ /* --------------------------------------------------------------------------*/
+ /**
+@@ -1351,13 +1351,13 @@ static void config_mac_addr(struct net_device *dev, void *mac)
+ static void mac_from_efuse_to_DEFMAC(void)
+ {
+ 	unsigned char mac[6];
+-	unsigned char *efuse_mac;
+-	int i;
++	unsigned char efuse_mac[20];
++	int i, j;
+ 	
+-	efuse_mac = aml_efuse_get_item("mac");
+-	for (i = 0; i < 6 && efuse_mac[0] != '\0' && efuse_mac[1] != '\0'; i++) {
+-		mac[i] = chartonum(efuse_mac[0]) << 4 | chartonum(efuse_mac[1]);
+-		efuse_mac += 3;
++	aml_efuse_get_item("mac", efuse_mac);
++	for (i = 0, j = 0; i < 6 && efuse_mac[j] != '\0' && efuse_mac[j+1] != '\0'; i++) {
++		mac[i] = chartonum(efuse_mac[j]) << 4 | chartonum(efuse_mac[j+1]);
++		j += 3;
+ 	}
+ 	memcpy(DEFMAC, mac, 6);
+ 	g_mac_addr_setup++;
+-- 
+2.4.4
+
