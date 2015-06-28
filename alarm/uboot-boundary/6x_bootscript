@@ -1,3 +1,45 @@
+echo "checking for U-Boot upgrades..";
+setenv offset 0x400
+if load ${dtype} ${disk}:1 12000000 /boot/u-boot.imx; then
+  echo "  found u-boot.imx $filesize bytes)";
+  if sf probe || sf probe || sf probe 1 27000000 || sf probe 1 27000000; then
+    echo "probed SPI ROM";
+    if sf read 0x12400000 $offset $filesize; then
+      if cmp.b 0x12000000 0x12400000 $filesize; then
+        echo "  no upgrade needed";
+      else
+        echo "  need U-Boot upgrade, flashing in 5 seconds..";
+        for n in 5 4 3 2 1; do
+          echo $n;
+          sleep 1;
+        done
+        echo "  erasing flash..";
+        sf erase 0 0xC0000;
+        # two steps to prevent bricking
+        echo "  writing flash..";
+        sf write 0x12000000 $offset $filesize;
+        echo "  verifying flash..";
+        if sf read 0x12400000 $offset $filesize; then
+          if cmp.b 0x12000000 0x12400000 $filesize; then
+            echo "---- U-Boot upgraded. resetting..";
+            reset;
+          else
+            echo "  read verification error";
+          fi
+        else
+          echo "  error re-reading EEPROM";
+        fi
+      fi
+    else
+      echo "  error reading boot loader from EEPROM";
+    fi
+  else
+    echo "  error initializing EEPROM";
+  fi;
+else
+  echo "  no U-Boot image found on SD card";
+fi
+
 setenv bootargs
 setenv nextcon 0;
 
@@ -53,7 +95,9 @@ done
 
 setenv bootargs $bootargs $fbmem
 
-setenv bootargs $bootargs console=ttymxc1,115200 vmalloc=400M root=/dev/mmcblk0p1 rw rootwait consoleblank=0
+part uuid ${dtype} ${disk}:1 uuid
+
+setenv bootargs $bootargs console=ttymxc1,115200 vmalloc=400M root=PARTUUID=${uuid} rw rootwait consoleblank=0
 
 setenv fdtfile imx6q-nitrogen6x.dtb
 load ${dtype} ${disk}:1 10800000 /boot/zImage && load ${dtype} ${disk}:1 11000000 /boot/dtbs/${fdtfile} && bootz 10800000 - 11000000
