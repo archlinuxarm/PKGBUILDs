@@ -1,0 +1,87 @@
+Index: gcc/testsuite/g++.dg/cpp0x/alias-decl-49.C
+===================================================================
+--- gcc/testsuite/g++.dg/cpp0x/alias-decl-49.C	(revision 0)
++++ gcc/testsuite/g++.dg/cpp0x/alias-decl-49.C	(revision 224921)
+@@ -0,0 +1,54 @@
++// PR c++/66647
++// { dg-do compile { target c++11 } }
++
++template <typename _Tp> struct A
++{
++  static constexpr _Tp value = 1;
++};
++template <typename> class B
++{
++public:
++  template <typename> struct rebind
++  {
++  };
++};
++
++template <typename _Alloc, typename _Tp> class C
++{
++  template <typename _Alloc2, typename _Tp2>
++  static A<int> _S_chk (typename _Alloc2::template rebind<_Tp2> *);
++
++public:
++  using __type = decltype (_S_chk<_Alloc, _Tp> (0));
++};
++
++template <typename _Alloc, typename _Tp, int = C<_Alloc, _Tp>::__type::value>
++struct D;
++template <typename _Alloc, typename _Tp> struct D<_Alloc, _Tp, 1>
++{
++  typedef typename _Alloc::template rebind<_Tp> __type;
++};
++template <typename _Alloc> struct F
++{
++  template <typename _Tp> using rebind_alloc = typename D<_Alloc, _Tp>::__type;
++};
++template <typename _Alloc> struct __alloc_traits
++{
++  template <typename> struct rebind
++  {
++    typedef typename F<_Alloc>::template rebind_alloc<int> other;
++  };
++};
++template <typename _Alloc> struct G
++{
++  typename __alloc_traits<_Alloc>::template rebind<int>::other _Tp_alloc_type;
++};
++template <typename _Tp, typename _Alloc = B<_Tp> > class vector : G<_Alloc>
++{
++};
++
++template <int> using tfuncptr = void();
++template <int d> struct H
++{
++  vector<tfuncptr<d> > funcs;
++};
+Index: gcc/cp/pt.c
+===================================================================
+--- gcc/cp/pt.c	(revision 224920)
++++ gcc/cp/pt.c	(revision 224921)
+@@ -20975,6 +20975,12 @@
+ 	names a dependent type.  */
+   if (TREE_CODE (type) == TYPENAME_TYPE)
+     return true;
++
++  /* An alias template specialization can be dependent even if the
++     resulting type is not.  */
++  if (dependent_alias_template_spec_p (type))
++    return true;
++
+   /* -- a cv-qualified type where the cv-unqualified type is
+ 	dependent.
+      No code is necessary for this bullet; the code below handles
+@@ -21026,10 +21032,6 @@
+ 	   && (any_dependent_template_arguments_p
+ 	       (INNERMOST_TEMPLATE_ARGS (CLASSTYPE_TI_ARGS (type)))))
+     return true;
+-  /* For an alias template specialization, check the arguments both to the
+-     class template and the alias template.  */
+-  else if (dependent_alias_template_spec_p (type))
+-    return true;
+ 
+   /* All TYPEOF_TYPEs, DECLTYPE_TYPEs, and UNDERLYING_TYPEs are
+      dependent; if the argument of the `typeof' expression is not
