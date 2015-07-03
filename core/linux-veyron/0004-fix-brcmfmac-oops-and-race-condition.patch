@@ -1,0 +1,114 @@
+From 6dc781566c97f06b5c0d491f34c9b23e72cb74be Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Thu, 2 Jul 2015 17:48:41 -0600
+Subject: [PATCH 4/4] fix brcmfmac oops and race condition
+
+This fixes a potential null pointer dereference by checking if null before
+freeing the vif struct.
+
+Also works around a race condition between brcm_patchram_plus loading the BT
+firmware, which exposes the wireless device, and the kernel loading bcrmfmac.
+100ms delay loops up to 1s are added around the first three initialization
+functions to hold off a failure until the device is actually ready. This is a
+hack.
+
+Signed-off-by: Kevin Mihelich <kevin@archlinuxarm.org>
+---
+ .../wireless-3.8/brcm80211/brcmfmac/dhd_common.c   | 47 ++++++++++++++--------
+ .../wireless-3.8/brcm80211/brcmfmac/dhd_linux.c    |  4 +-
+ 2 files changed, 32 insertions(+), 19 deletions(-)
+
+diff --git a/drivers/net/wireless-3.8/brcm80211/brcmfmac/dhd_common.c b/drivers/net/wireless-3.8/brcm80211/brcmfmac/dhd_common.c
+index 05d4042..7006d19 100644
+--- a/drivers/net/wireless-3.8/brcm80211/brcmfmac/dhd_common.c
++++ b/drivers/net/wireless-3.8/brcm80211/brcmfmac/dhd_common.c
+@@ -252,25 +252,34 @@ int brcmf_c_preinit_dcmds(struct brcmf_if *ifp)
+ 	struct brcmf_join_pref_params join_pref_params[2];
+ 	char *ptr;
+ 	s32 err;
++	int i;
+ 
+ 	/* retreive mac address */
+-	err = brcmf_fil_iovar_data_get(ifp, "cur_etheraddr", ifp->mac_addr,
+-				       sizeof(ifp->mac_addr));
+-	if (err < 0) {
+-		brcmf_err("Retreiving cur_etheraddr failed, %d\n",
+-			  err);
+-		goto done;
++	for (i = 0; i < 9; i++) {
++		err = brcmf_fil_iovar_data_get(ifp, "cur_etheraddr", ifp->mac_addr,
++					       sizeof(ifp->mac_addr));
++		if (err < 0 && i == 9) {
++			brcmf_err("Retreiving cur_etheraddr failed, %d\n",
++				  err);
++			goto done;
++		} else {
++			msleep(100);
++		}
+ 	}
+ 	memcpy(ifp->drvr->mac, ifp->mac_addr, sizeof(ifp->drvr->mac));
+ 
+ 	/* query for 'ver' to get version info from firmware */
+-	memset(buf, 0, sizeof(buf));
+-	strcpy(buf, "ver");
+-	err = brcmf_fil_iovar_data_get(ifp, "ver", buf, sizeof(buf));
+-	if (err < 0) {
+-		brcmf_err("Retreiving version information failed, %d\n",
+-			  err);
+-		goto done;
++	for (i = 0; i < 10; i++) {
++		memset(buf, 0, sizeof(buf));
++		strcpy(buf, "ver");
++		err = brcmf_fil_iovar_data_get(ifp, "ver", buf, sizeof(buf));
++		if (err < 0 && i == 9) {
++			brcmf_err("Retreiving version information failed, %d\n",
++				  err);
++			goto done;
++		} else {
++			msleep(100);
++		}
+ 	}
+ 	ptr = (char *)buf;
+ 	strsep(&ptr, "\n");
+@@ -283,10 +292,14 @@ int brcmf_c_preinit_dcmds(struct brcmf_if *ifp)
+ 	strlcpy(ifp->drvr->fwver, ptr, sizeof(ifp->drvr->fwver));
+ 
+ 	/* set mpc */
+-	err = brcmf_fil_iovar_int_set(ifp, "mpc", 1);
+-	if (err) {
+-		brcmf_err("failed setting mpc\n");
+-		goto done;
++	for (i = 0; i < 10; i++) {
++		err = brcmf_fil_iovar_int_set(ifp, "mpc", 1);
++		if (err && i == 9) {
++			brcmf_err("failed setting mpc\n");
++			goto done;
++		} else {
++			msleep(100);
++		}
+ 	}
+ 
+ 	/*
+diff --git a/drivers/net/wireless-3.8/brcm80211/brcmfmac/dhd_linux.c b/drivers/net/wireless-3.8/brcm80211/brcmfmac/dhd_linux.c
+index 128161c..d3db8f7 100644
+--- a/drivers/net/wireless-3.8/brcm80211/brcmfmac/dhd_linux.c
++++ b/drivers/net/wireless-3.8/brcm80211/brcmfmac/dhd_linux.c
+@@ -974,13 +974,13 @@ fail:
+ 			brcmf_fws_deinit(drvr);
+ 		}
+ 		if (drvr->iflist[0]) {
+-			if (ifp->ndev->destructor == NULL)
++			if (ifp->ndev->destructor == NULL && ifp->vif)
+ 				brcmf_free_vif(ifp->vif);
+ 			free_netdev(ifp->ndev);
+ 			drvr->iflist[0] = NULL;
+ 		}
+ 		if (p2p_ifp) {
+-			if (p2p_ifp->ndev->destructor == NULL)
++			if (p2p_ifp->ndev->destructor == NULL && p2p_ifp->vif)
+ 				brcmf_free_vif(p2p_ifp->vif);
+ 			free_netdev(p2p_ifp->ndev);
+ 			drvr->iflist[1] = NULL;
+-- 
+2.4.4
+
