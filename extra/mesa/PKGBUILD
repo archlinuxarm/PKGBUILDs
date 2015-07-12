@@ -9,7 +9,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=10.6.1
+pkgver=10.6.2
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
@@ -20,7 +20,7 @@ license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE)
-sha256sums=('6c80a2b647e57c85dc36e609d9aed17f878f0d8e0cf9ace86d14cf604101e1eb'
+sha256sums=('05753d3db4212900927b9894221a1669a10f56786e86a7e818b6e18a0817dca9'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
@@ -36,7 +36,6 @@ build() {
     --with-gallium-drivers=nouveau,swrast \
     --with-dri-drivers=nouveau,swrast \
     --with-egl-platforms=x11,drm,wayland \
-    --with-sha1=libgcrypt \
     --enable-llvm-shared-libs \
     --enable-egl \
     --enable-gbm \
@@ -63,7 +62,7 @@ build() {
 
 package_libva-mesa-driver() {
   pkgdesc="VA-API implementation for gallium"
-  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'elfutils' 'libgcrypt')
+  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'elfutils')
 
   install -m755 -d ${pkgdir}/usr/lib
   mv -v ${srcdir}/fakeinstall/usr/lib/dri ${pkgdir}/usr/lib
