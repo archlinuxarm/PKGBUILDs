@@ -8,6 +8,7 @@
 #  - disabled distcc - bad things happen
 #  - added -fno-strict-volatile-bitfields to CXXFLAGS to fix ARM bug
 #  - no libfbclient/ibase, issues building on ARM
+#  - patch for AArch64, define platform as linux-g++, reduce concurrency
 
 pkgname=qt4
 pkgver=4.8.7
@@ -41,7 +42,8 @@ source=("http://download.qt.io/official_releases/qt/4.8/${pkgver}/${_pkgfqn}.tar
         'improve-cups-support.patch'
         'moc-boost-workaround.patch'
         'kubuntu_14_systemtrayicon.diff'
-        'kde4-settings.patch')
+        'kde4-settings.patch'
+        'qt-aarch64.patch')
 md5sums=('d990ee66bf7ab0c785589776f35ba6ad'
          'a16638f4781e56e7887ff8212a322ecc'
          '8a28b3f52dbeb685d4b69440b520a3e1'
@@ -51,10 +53,14 @@ md5sums=('d990ee66bf7ab0c785589776f35ba6ad'
          'c439c7731c25387352d8453ca7574971'
          'da387bde22ae1c446f12525d2a31f070'
          'a523644faa8f98a73f55c4aa23c114a6'
-         '66dfea63916c8dbf47b23cb012ffdccc')
+         '66dfea63916c8dbf47b23cb012ffdccc'
+         '2a9572f3b758fc3ca9ff5fc40012a2a4')
 
 prepare() {
   cd ${_pkgfqn}
+
+  # AArch64 support
+  patch -p1 -i "${srcdir}"/qt-aarch64.patch
 
   # (FS#28381) (KDEBUG#180051)
   patch -p1 -i "${srcdir}"/improve-cups-support.patch
@@ -73,6 +79,7 @@ prepare() {
   sed -i "s|-O2|${CXXFLAGS}|" mkspecs/common/{g++,gcc}-base.conf
   sed -i "/^QMAKE_LFLAGS_RPATH/s| -Wl,-rpath,||g" mkspecs/common/gcc-base-unix.conf
   sed -i "/^QMAKE_LFLAGS\s/s|+=|+= ${LDFLAGS}|g" mkspecs/common/gcc-base.conf
+
   cp mkspecs/common/linux{,32}.conf
   sed -i "/^QMAKE_LIBDIR\s/s|=|= /usr/lib32|g" mkspecs/common/linux32.conf
   sed -i "s|common/linux.conf|common/linux32.conf|" mkspecs/linux-g++-32/qmake.conf
@@ -82,6 +89,11 @@ build() {
   export QT4DIR="${srcdir}"/${_pkgfqn}
   export LD_LIBRARY_PATH=${QT4DIR}/lib:${LD_LIBRARY_PATH}
   
+  if [[ $CARCH == "aarch64" ]]; then
+    MAKEFLAGS="-j3"
+    CONFIG="-platform linux-g++"
+  fi
+
   cd ${_pkgfqn}
 
   ./configure -confirm-license -opensource \
@@ -121,7 +133,7 @@ build() {
     -no-sse4.1 \
     -no-sse4.2 \
     -no-avx \
-    -no-neon
+    -no-neon $CONFIG
 
   make
 }
