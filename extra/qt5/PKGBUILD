@@ -1,4 +1,4 @@
-# $Id: PKGBUILD 179039 2013-03-01 20:22:01Z andrea $
+# $Id$
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
@@ -10,7 +10,7 @@
 #  - added Raspberry Pi patches for armv6h
 #  - icu makedepend so qtwebkit can build
 #  - drop webengine package and skip in configure
-#  - remove docs for now
+#  - patch for AArch64 support in qtwebkit
 
 pkgbase=qt5
 pkgname=('qt5-3d'
@@ -18,6 +18,7 @@ pkgname=('qt5-3d'
          'qt5-canvas3d'
          'qt5-connectivity'
          'qt5-declarative'
+         'qt5-doc'
          'qt5-enginio'
          'qt5-graphicaleffects'
          'qt5-imageformats'
@@ -48,13 +49,14 @@ makedepends=('libxcb' 'xcb-proto' 'xcb-util' 'xcb-util-image' 'xcb-util-wm' 'xcb
             'libmariadbclient' 'sqlite' 'unixodbc' 'libmng' 'python2' 'ruby'
             'gperf' 'libxslt' 'libxcomposite' 'fontconfig' 'bluez-libs' 'openal' 'gtk2'
             'libxkbcommon-x11' 'mtdev' 'harfbuzz' 'libwebp' 'leveldb' 'geoclue' 'pciutils'
-            'libinput')
+            'libinput' 'icu')
 groups=('qt' 'qt5')
 _pkgfqn="qt-everywhere-opensource-src-${pkgver}"
 source=("http://download.qt-project.org/official_releases/qt/${pkgver%.*}/${pkgver}/single/${_pkgfqn}.tar.xz"
         'assistant.desktop' 'designer.desktop' 'linguist.desktop' 'qdbusviewer.desktop'
         'keypad-shortcuts.patch'
-        'qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch')
+        'qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch'
+        '0001-Add-ARM-64-support.patch')
 md5sums=('65d5282f3dee0336da9ed1f77148952f'
          'b2897dd6a2967bccf8f10e397aafee55'
          '76e150b20178d2d43801f7367232e5f7'
@@ -69,21 +71,24 @@ prepare() {
   # https://bugs.archlinux.org/task/44676
   (cd qtbase; patch -p1 -i "$srcdir/keypad-shortcuts.patch")
 
+  # Build qmake using Arch {C,LD}FLAGS
+  # This also sets default {C,CXX,LD}FLAGS for projects built using qmake
+  sed -i -e "s|^\(QMAKE_CFLAGS_RELEASE.*\)|\1 ${CFLAGS}|" \
+    qtbase/mkspecs/common/gcc-base.conf
+  sed -i -e "s|^\(QMAKE_LFLAGS_RELEASE.*\)|\1 ${LDFLAGS}|" \
+    qtbase/mkspecs/common/g++-unix.conf
+
   MAKEFLAGS="-j3"
 
   # Fix building on armv5
-  cd qtwebkit
-  patch -p1 -i "${srcdir}"/qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch
-  cd ..
+  patch -p1 -d qtwebkit -i "${srcdir}"/qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch
 
-  sed -i "s|-O2|${CXXFLAGS}|" qtbase/mkspecs/common/{g++,gcc}-base.conf
-  sed -i "/^QMAKE_LFLAGS_RPATH/s| -Wl,-rpath,||g" qtbase/mkspecs/common/gcc-base-unix.conf
-  sed -i "/^QMAKE_LFLAGS\s/s|+=|+= ${LDFLAGS}|g" qtbase/mkspecs/common/gcc-base.conf
+  # Fix AArch64 support
+  patch -p1 -d qtwebkit -i "${srcdir}"/0001-Add-ARM-64-support.patch
 
   # Use python2 for Python 2.x
   find . -name '*.py' -exec sed -i \
     's|#![ ]*/usr/bin/python$|&2|;s|#![ ]*/usr/bin/env python$|&2|' {} +
-
   # in qtwebengine there are still a lot of relative calls which need a workaround
   mkdir "${srcdir}"/python2-path
   ln -s /usr/bin/python2 "${srcdir}"/python2-path/python
@@ -129,9 +134,25 @@ build() {
     -no-avx \
     -no-avx2 \
     -opengl es2 \
-    -skip webengine
+    -skip qtwebengine
 
   make
+
+  # Fix docs build when qt is not installed
+  sed -i "s|/usr/lib/qt/bin/qdoc|${QTDIR}/qtbase/bin/qdoc|g" \
+    "${QTDIR}"/qtbase/qmake/Makefile.qmake-docs
+  find "${QTDIR}" -name Makefile \
+    -exec sed -i "s|/usr/lib/qt/bin/qdoc|${QTDIR}/qtbase/bin/qdoc|g" {} +
+  sed -i "s|/usr/lib/qt/bin/qhelpgenerator|${QTDIR}/qttools/bin/qhelpgenerator|g" \
+    "${QTDIR}"/qtbase/qmake/Makefile.qmake-docs
+  find "${QTDIR}" -name Makefile \
+    -exec sed -i "s|/usr/lib/qt/bin/qhelpgenerator|${QTDIR}/qttools/bin/qhelpgenerator|g" {} +
+  sed -i "s|/usr/lib/qt/bin/qhelpgenerator|${QTDIR}/qttools/bin/qhelpgenerator|g" \
+    qtwebkit/Source/Makefile.api
+  find "${QTDIR}" -name Makefile \
+    -exec sed -i "s|/usr/lib/qt/bin/qmlplugindump|${QTDIR}/qtdeclarative/bin/qmlplugindump|g" {} +
+
+  make docs
 }
 
 package_qt5-3d() {
@@ -156,6 +177,7 @@ package_qt5-base() {
               'postgresql-libs: PostgreSQL driver'
               'libmariadbclient: MariaDB driver'
               'unixodbc: ODBC driver'
+              'libfbclient: Firebird/iBase driver'
               'mtdev: evdev plugin'
               'libxkbcommon-x11: xcb plugin'
               'libsm: xcb plugin'
@@ -164,7 +186,7 @@ package_qt5-base() {
 
   cd ${_pkgfqn}/qtbase
   make INSTALL_ROOT="${pkgdir}" install
-  
+
   install -D -m644 LGPL_EXCEPTION.txt \
     "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 
@@ -218,16 +240,33 @@ package_qt5-declarative() {
 
   cd ${_pkgfqn}/qtdeclarative
   make INSTALL_ROOT="${pkgdir}" install
-  
+
   # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
-  
+
   # Useful symlinks
   install -d "${pkgdir}"/usr/bin
   for b in "${pkgdir}"/usr/lib/qt/bin/*; do
     ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
   done
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
+}
+
+package_qt5-doc() {
+  pkgdesc='A cross-platform application and UI framework (Documentation)'
+  depends=('qt5-base')
+#  arch=('any')
+  conflicts=('qt-doc')
+  replaces=('qt-doc')
+  provides=('qt-doc')
+  options=('docs' '!emptydirs')
+  groups=()
+
+  cd ${_pkgfqn}
+  make INSTALL_ROOT="${pkgdir}" install_docs
 
   install -D -m644 LGPL_EXCEPTION.txt \
     "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
@@ -307,11 +346,10 @@ package_qt5-quick1() {
   pkgdesc='Qt Declarative is provided for Qt 4 compatibility'
   depends=('qt5-webkit' 'qt5-script')
   conflicts=('qt')
-  license=('LGPL')
 
   cd ${_pkgfqn}/qtquick1
   make INSTALL_ROOT="${pkgdir}" install
-  
+
   # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
@@ -321,11 +359,15 @@ package_qt5-quick1() {
   for b in "${pkgdir}"/usr/lib/qt/bin/*; do
     ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
   done
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
 
 package_qt5-quickcontrols() {
   pkgdesc='Reusable Qt Quick based UI controls to create classic desktop-style user interfaces'
   depends=('qt5-declarative')
+  license=('LGPL')
 
   cd ${_pkgfqn}/qtquickcontrols
   make INSTALL_ROOT="${pkgdir}" install
@@ -338,7 +380,7 @@ package_qt5-script() {
 
   cd ${_pkgfqn}/qtscript
   make INSTALL_ROOT="${pkgdir}" install
-  
+
   # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
@@ -353,7 +395,7 @@ package_qt5-sensors() {
 
   cd ${_pkgfqn}/qtsensors
   make INSTALL_ROOT="${pkgdir}" install
-  
+
   # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
@@ -365,10 +407,10 @@ package_qt5-sensors() {
 package_qt5-serialport() {
   pkgdesc='Provides access to hardware and virtual serial ports'
   depends=('qt5-base')
-  
+
   cd ${_pkgfqn}/qtserialport
   make INSTALL_ROOT="${pkgdir}" install
-  
+
   # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
@@ -384,7 +426,7 @@ package_qt5-svg() {
 
   cd ${_pkgfqn}/qtsvg
   make INSTALL_ROOT="${pkgdir}" install
-  
+
   # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
@@ -392,7 +434,7 @@ package_qt5-svg() {
   install -D -m644 LGPL_EXCEPTION.txt \
     "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
-  
+
 package_qt5-tools() {
   pkgdesc='A cross-platform application and UI framework (Development Tools, QtHelp)'
   depends=('qt5-webkit' 'desktop-file-utils' 'qt5-translations' 'hicolor-icon-theme'
@@ -400,11 +442,11 @@ package_qt5-tools() {
   optdepends=('qt5-doc: documentation')
   install='qt5-tools.install'
   conflicts=('qt')
-  options=('staticlibs') # libQt5UiTools builds as static only
+  options=('staticlibs') # libQt5UiTools builds as static only$
 
   cd ${_pkgfqn}/qttools
   make INSTALL_ROOT="${pkgdir}" install
-  
+
   # install missing icons and desktop files
   for icon in src/linguist/linguist/images/icons/linguist-*-32.png ; do
     size=$(echo $(basename ${icon}) | cut -d- -f2)
@@ -429,7 +471,7 @@ package_qt5-tools() {
   # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
-  
+
   # Useful symlinks
   install -d "${pkgdir}"/usr/bin
   for b in "${pkgdir}"/usr/lib/qt/bin/*; do
@@ -447,7 +489,7 @@ package_qt5-translations() {
 
   cd ${_pkgfqn}/qttranslations
   make INSTALL_ROOT="${pkgdir}" install
-  
+
   install -D -m644 LGPL_EXCEPTION.txt \
     "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
 }
@@ -518,10 +560,10 @@ package_qt5-websockets() {
 package_qt5-x11extras() {
   pkgdesc='Provides platform-specific APIs for X11'
   depends=('qt5-base')
-  
+
   cd ${_pkgfqn}/qtx11extras
   make INSTALL_ROOT="${pkgdir}" install
-  
+
   # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
   find "${pkgdir}/usr/lib" -type f -name '*.prl' \
     -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
