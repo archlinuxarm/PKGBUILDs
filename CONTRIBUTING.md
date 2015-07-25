@@ -24,7 +24,7 @@ package-name: short description
 Field | Description
 ---- | -----
 Package | The package name of the package with the problem (eg. linux-armv7)
-Architecture | The architecture this package is from (armv5, armv6, armv7)
+Architecture | The architecture this package is from (armv5, armv6, armv7, armv8)
 Device | The ARM device used where the problem occurred (eg. Wandboard)
 What it isn't doing | A **detailed** account of the problem, including all relevant error messages
 What it should be doing | A **detailed** description of what correct operation looks like
