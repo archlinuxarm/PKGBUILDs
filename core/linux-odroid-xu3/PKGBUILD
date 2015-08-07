@@ -4,12 +4,12 @@
 buildarch=4
 
 pkgbase=linux-odroid-xu3
-_commit=ee90457b05739a03346e3f1d2a454650b359a080
+_commit=d39df457d5bead75c9565238bd9078e2e2d89fee
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.82
-pkgrel=2
+pkgrel=3
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
@@ -19,8 +19,8 @@ source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         'config'
         '0001-remove-thermal-messages.patch'
         '0002-remove-rtc-messages.patch')
-md5sums=('b5a7d9b4ea591d502cb03b43c249a08f'
-         'c4cf1f9f571085baf8bdda46cd50e844'
+md5sums=('28efd28a4e01b16f96a35ae5b34877cd'
+         'ba3c8666cdb3d8e23dbb1fa736f353b5'
          '16173f5fbda2d6749c2c4dc91e1cb079'
          'c32251285da70e7885f79e7f1919f26a')
 
