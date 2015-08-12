@@ -15,28 +15,26 @@
 noautobuild=1
 
 pkgname=glibc
-pkgver=2.21
-pkgrel=4
+pkgver=2.22
+pkgrel=1
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
 url="http://www.gnu.org/software/libc"
 license=('GPL' 'LGPL')
 groups=('base')
-depends=('linux-api-headers>=4.0' 'tzdata' 'filesystem')
-makedepends=('gcc>=4.9')
+depends=('linux-api-headers>=4.1' 'tzdata' 'filesystem')
+makedepends=('gcc>=5.2')
 backup=(etc/gai.conf
         etc/locale.gen
         etc/nscd.conf)
 options=('!strip' 'staticlibs' '!distcc')
 install=glibc.install
 source=(http://ftp.gnu.org/gnu/libc/${pkgname}-${pkgver}.tar.xz{,.sig}
-        glibc-2.21-roundup.patch
         local-soname-hack.diff
         locale.gen.txt
         locale-gen)
-md5sums=('9cb398828e8f84f57d1f7d5588cf40cd'
+md5sums=('e51e02bf552a0a1fbbdc948fb2f5e83c'
          'SKIP'
-         'feb826d5f4965e9892ee6e851fec43a9'
          '905370139382428ef2b97b247c0970bf'
          '07ac979b6ab5eeb778d55f041529d623'
          '476e9113489f93b348b21e144b6a8fcf')
@@ -46,7 +44,7 @@ prepare() {
   cd ${srcdir}/${pkgname}-${pkgver}
 
   # glibc-2.21..01b07c70
-  patch -p1 -i $srcdir/glibc-2.21-roundup.patch
+  #patch -p1 -i $srcdir/glibc-2.21-roundup.patch
 
   # ALARM: patch for hard-float ld-linux soname
   if [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]]; then
@@ -106,12 +104,9 @@ build() {
 }
 
 check() {
-  # the linker commands need to be reordered - fixed in 2.19
-  LDFLAGS=${LDFLAGS/--as-needed,/}
-
   cd ${srcdir}/glibc-build
 
-  # tst-cleanupx4 failure on i686 is "expected"
+  # some failures are "expected"
   make check || true
 }
 
@@ -144,6 +139,9 @@ package() {
   # libc, libdl, libm and libpthread are required for toolchain testsuites
   # in addition libcrypt appears widely required
   rm $pkgdir/usr/lib/lib{anl,BrokenLocale,nsl,resolv,rt,util}.a
+  if [[ $CARCH = "x86_64" ]]; then
+    rm $pkgdir/usr/lib/libmvec.a
+  fi
 
   # ALARM: symlink ld-linux.so.3 for hard-float
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && ln -s /lib/ld-${pkgver}.so ${pkgdir}/usr/lib/ld-linux.so.3
@@ -160,13 +158,18 @@ package() {
                         usr/bin/{ldconfig,locale,localedef,nscd,makedb} \
                         usr/bin/{pcprofiledump,pldd,rpcgen,sln,sprof} \
                         usr/lib/getconf/*
-  [[ $CARCH = "i686" ]] && strip $STRIP_BINARIES usr/bin/lddlibc4
+  if [[ $CARCH = "i686" ]]; then
+    strip $STRIP_BINARIES usr/bin/lddlibc4
+  fi
 
   strip $STRIP_STATIC usr/lib/*.a
 
-  strip $STRIP_SHARED usr/lib/{libanl,libBrokenLocale,libcidn,libcrypt}-*.so \
+  strip $STRIP_SHARED usr/lib/lib{anl,BrokenLocale,cidn,crypt}-*.so \
                       usr/lib/libnss_{compat,db,dns,files,hesiod,nis,nisplus}-*.so \
-                      usr/lib/{libdl,libm,libnsl,libresolv,librt,libutil}-*.so \
-                      usr/lib/{libmemusage,libpcprofile,libSegFault}.so \
-                      usr/lib/{audit,gconv}/*.so
+                      usr/lib/lib{dl,m,nsl,resolv,rt,util}-*.so \
+                      usr/lib/lib{memusage,pcprofile,SegFault}.so \
+                      usr/lib/{audit,gconv}/*.so || true
+  if [[ $CARCH = "x86_64" ]]; then
+    strip $STRIP_SHARED usr/lib/libmvec-*.so
+  fi
 }
