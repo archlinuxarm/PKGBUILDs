@@ -9,7 +9,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=10.6.3
+pkgver=10.6.4
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
@@ -19,12 +19,20 @@ url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
-        LICENSE)
-sha256sums=('58592e07c350cd2e8969b73fa83048c657a39fe2f13f3b88f5e5818fe2e4676d'
+        LICENSE
+        0001-i965-Remove-early-release-of-DRI2-miptree.patch)
+sha256sums=('8f5ac103f0f503de2f7a985b0df349bd4ecdfe7f51c714be146fa5a9a3c07b77'
             'SKIP'
-            '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
+            '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
+            'a3f520ea13c923841c646a5b1627927744938ff691aa08e1aeaf14cce12bd1f7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 
+prepare() {
+  cd ${srcdir}/?esa-*
+
+  # Should fix FS#45750, tested by heftig - Not merged upstream
+  patch -Np1 -i ../0001-i965-Remove-early-release-of-DRI2-miptree.patch
+}
 build() {
   cd ${srcdir}/?esa-*
 
