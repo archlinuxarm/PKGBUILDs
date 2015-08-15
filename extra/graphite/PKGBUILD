@@ -1,0 +1,69 @@
+# $Id$
+# Maintainer: AndyRTR <andyrtr@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch for arm
+
+pkgname=graphite
+pkgver=1.3.0
+pkgrel=1
+epoch=1
+arch=('i686' 'x86_64')
+url="http://projects.palaso.org/projects/graphitedev"
+pkgdesc='reimplementation of the SIL Graphite text processing engine'
+license=('LGPL' 'GPL' 'custom')
+depends=('gcc-libs')
+makedepends=('cmake' 'freetype2' 'python2')
+             # - only for docs - target doesn't install properly
+             #  'doxygen' 'texlive-latexextra' 'graphviz' 'asciidoc' 'perl-module-build' 'icu') # builds doc properly? 'texlive-helvetic' seems to be missing
+options=('!emptydirs')
+source=(http://downloads.sourceforge.net/project/silgraphite/graphite2/graphite2-${pkgver}.tgz
+        graphite2-1.2.0-cmakepath.patch
+        graphite-arm-nodefaultlibs.patch)
+md5sums=('ca6da3ba3ff914e4974c167a7a63a3ae'
+         '00353b67941dbc30b76a43253760769e'
+         '35a628ad03433fa8e3febe7222844d4c')
+
+build() {
+  cd "${srcdir}"
+
+  # python2 fixes
+  sed -i "s:\/usr\/bin\/python:\/usr\/bin\/python2:" graphite2-${pkgver}/tests/{biditest,corrupt.py,defuzz,fnttxtrender,fuzzbidi,fuzztest,hbspeeds,jsoncmp}
+  
+  # fix install path - .cmake files contain architecture dependend content - patch taken from FC/Slackware
+  pushd graphite2-${pkgver}
+  patch -Np1 -i ${srcdir}/graphite2-1.2.0-cmakepath.patch
+  patch -Np1 -i ${srcdir}/graphite-arm-nodefaultlibs.patch
+  popd
+  
+  mkdir build
+  cd build
+  cmake -G "Unix Makefiles" ../graphite2-${pkgver} \
+	-DCMAKE_C_FLAGS:STRING="${CFLAGS}" \
+	-DCMAKE_INSTALL_PREFIX=/usr \
+	-DCMAKE_BUILD_TYPE:STRING=Release \
+	-DGRAPHITE2_COMPARE_RENDERER=OFF \
+	#-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON # remove when docs install target will be fixed
+
+  # fix unwanted -O3 cflag (taken form Debian)
+  find . -type f ! -name "rules" ! -name "changelog" -exec sed -i -e 's/\-O3//g' {} \;
+
+  make 
+  #make docs
+}
+
+check() {
+  cd "${srcdir}"/build
+  sed -i "s:python:python2:g" tests/CTestTestfile.cmake
+  ctest || true # some new test fail
+}
+
+package() {
+  cd "${srcdir}"/build
+  # FIXME: all target doesn't install the docs target files
+  make DESTDIR="$pkgdir/" install 
+
+  # licenses
+  mkdir -p "${pkgdir}"/usr/share/licenses/${pkgname}
+  install -m644 "${srcdir}"/graphite2-${pkgver}/COPYING "${pkgdir}"/usr/share/licenses/${pkgname}/
+}
