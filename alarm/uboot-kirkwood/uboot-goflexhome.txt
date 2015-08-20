@@ -1,0 +1,26 @@
+bootcmd=run startboot;run bootubi
+bootdir=/boot
+bootfilem=uImage
+bootfilez=zImage
+bootubi=echo Trying to boot from NAND ...;if run mountubi; then ubifsload ${loadaddr} /boot/zImage;ubifsload ${fdtaddr} /boot/dtbs/${fdtfile};ubifsumount; setenv bootargs console=${console} ubi.mtd=1 root=ubi0:rootfs ro rootfstype=ubifs  rootwait ${mtdparts};bootz ${loadaddr} - ${fdtaddr};fi
+console=ttyS0,115200
+ethact=egiga0
+fdtaddr=0x800000
+fdtdir=/boot/dtbs
+fdtfile=kirkwood-goflexhome.dtb
+ipaddr=10.10.10.3
+loadaddr=0x810000
+loadfdt=echo loading ${fdtdir}/${fdtfile} ...; load ${devtype} ${bootpart} ${fdtaddr} ${fdtdir}/${fdtfile}
+loadimage=load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/${bootfilez} || load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/${bootfilem}
+loadrd=load ${devtype} ${bootpart} ${rdaddr} ${bootdir}/${rdfile}
+mainargs=setenv bootargs console=${console} ${mtdparts} root=${root} rw rootwait ${optargs} ${ncargs}
+mountubi=ubi part rootfs; ubifsmount ubi0:rootfs
+mtdids=nand0=orion_nand
+mtdparts=mtdparts=orion_nand:1M(u-boot),-(rootfs)
+ncip=10.10.10.5
+ncipk=10.10.10.4
+netconsole=on
+preboot=if env exists netconsole && test ${netconsole} = on; then if ping ${ncip}; then  setenv stdin nc; setenv stdout nc;  setenv stderr nc; version; if env exists ncargsusr; then echo ncargs has been defined by user; setenv ncargs ${ncargsusr}; else setenv ncargs ignore_loglevel netconsole=6665@${ipaddr}/eth0,6666@${ncipk}/; fi; fi; else echo Netconsole has been turned off.; echo To turn it on, set netconsole variable to on.; setenv stdin; setenv stdout; setenv stderr; setenv ncargs; fi
+rdaddr=0x1100000
+rdfile=initramfs-linux.img
+startboot=usb start; ide reset; for devtype in usb ide; do  setenv devnum 0; while ${devtype} dev ${devnum}; do  echo ${devtype} found on device ${devnum}; setenv bootpart ${devnum}:1; echo Checking for: ${bootdir}/uEnv.txt ...; if test -e ${devtype} ${bootpart} ${bootdir}/uEnv.txt; then  load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/uEnv.txt; env import -t ${loadaddr} ${filesize}; echo Loaded environment from ${bootdir}/uEnv.txt; echo Checking if uenvcmd is set ...; if test -n ${uenvcmd}; then  echo Running uenvcmd ...; run uenvcmd; fi; fi; if run loadimage; then if env exists root; then echo root has been defined by user; else part uuid ${devtype} ${bootpart} uuid; setenv root PARTUUID=${uuid}; fi;  run mainargs; if run loadfdt; then  if run loadrd; then  bootz ${loadaddr} ${rdaddr}:${filesize} ${fdtaddr}; else  bootz ${loadaddr} - ${fdtaddr}; fi; else  if run loadrd; then echo Booting uImage with initrd;  bootm ${loadaddr} ${rdaddr}:${filesize}; else  bootm ${loadaddr}; fi; fi; else  echo No kernel found; fi; setexpr devnum ${devnum} + 1; done; done;
