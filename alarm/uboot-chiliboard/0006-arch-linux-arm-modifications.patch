@@ -1,0 +1,184 @@
+From b08bd8f1ab63ea9039dcd65655c7e59cf3bae61d Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Sat, 29 Aug 2015 10:33:56 -0600
+Subject: [PATCH 6/6] arch linux arm modifications
+
+---
+ include/configs/chiliboard.h | 100 +++++++++++++++++++------------------------
+ 1 file changed, 44 insertions(+), 56 deletions(-)
+
+diff --git a/include/configs/chiliboard.h b/include/configs/chiliboard.h
+index eacc9af..9045db4 100644
+--- a/include/configs/chiliboard.h
++++ b/include/configs/chiliboard.h
+@@ -124,7 +124,6 @@
+  * as that will normally be within the kernel lowmem and thus visible via
+  * bootm_size and we only run on platforms with 256MB or more of memory.
+  */
+-#ifdef CONFIG_RAM128MB
+ #define DEFAULT_LINUX_BOOT_ENV \
+ 	"loadaddr=0x82000000\0" \
+ 	"kernel_addr_r=0x82000000\0" \
+@@ -133,16 +132,6 @@
+ 	"rdaddr=0x84080000\0" \
+ 	"ramdisk_addr_r=0x84080000\0" \
+ 	"bootm_size=0x8000000\0"
+-#else
+-#define DEFAULT_LINUX_BOOT_ENV \
+-	"loadaddr=0x82000000\0" \
+-	"kernel_addr_r=0x82000000\0" \
+-	"fdtaddr=0x88000000\0" \
+-	"fdt_addr_r=0x88000000\0" \
+-	"rdaddr=0x88080000\0" \
+-	"ramdisk_addr_r=0x88080000\0" \
+-	"bootm_size=0x10000000\0"
+-#endif
+ 
+ /*
+  * Default to a quick boot delay.
+@@ -258,6 +247,7 @@
+ #define CONFIG_CMD_ASKENV
+ #define CONFIG_CMD_ECHO
+ #define CONFIG_CMD_BOOTZ
++#define CONFIG_SUPPORT_RAW_INITRD
+ 
+ /*
+  * Common filesystems support.  When we have removable storage we
+@@ -398,6 +388,9 @@
+ #define CONFIG_EFI_PARTITION
+ #define CONFIG_PARTITION_UUIDS
+ #define CONFIG_CMD_PART
++#define CONFIG_CMD_SETEXPR
++
++#define CONFIG_IDENT_STRING 	" Arch Linux ARM"
+ 
+ #ifdef CONFIG_NAND
+ #ifndef CONFIG_NAND512MB
+@@ -441,8 +434,9 @@
+ #define CONFIG_EXTRA_ENV_SETTINGS \
+ 	DEFAULT_LINUX_BOOT_ENV \
+ 	"boot_fdt=try\0" \
+-	"bootpart=0:2\0" \
++	"bootpart=0:1\0" \
+ 	"bootdir=/boot\0" \
++	"fdtdir=/boot/dtbs\0" \
+ 	"bootfile=zImage\0" \
+ 	"fdtfile=undefined\0" \
+ 	"console=ttyO0,115200n8\0" \
+@@ -450,9 +444,6 @@
+ 		"uuid_disk=${uuid_gpt_disk};" \
+ 		"name=rootfs,start=2MiB,size=-,uuid=${uuid_gpt_rootfs}\0" \
+ 	"optargs=\0" \
+-	"mmcdev=0\0" \
+-	"mmcroot=/dev/mmcblk0p2 rw\0" \
+-	"mmcrootfstype=ext4 rootwait\0" \
+ 	"rootpath=/export/rootfs\0" \
+ 	"nfsopts=nolock\0" \
+ 	"static_ip=${ipaddr}:${serverip}:${gatewayip}:${netmask}:${hostname}" \
+@@ -461,8 +452,7 @@
+ 	"ramrootfstype=ext2\0" \
+ 	"mmcargs=setenv bootargs console=${console} " \
+ 		"${optargs} " \
+-		"root=${mmcroot} " \
+-		"rootfstype=${mmcrootfstype}\0" \
++		"root=${root}\0" \
+ 	"spiroot=/dev/mtdblock4 rw\0" \
+ 	"spirootfstype=jffs2\0" \
+ 	"spisrcaddr=0xe0000\0" \
+@@ -477,46 +467,47 @@
+ 		"root=/dev/nfs " \
+ 		"nfsroot=${serverip}:${rootpath},${nfsopts} rw " \
+ 		"ip=dhcp\0" \
+-	"bootenv=uEnv.txt\0" \
+-	"loadbootenv=load mmc ${mmcdev} ${loadaddr} ${bootenv}\0" \
+-	"importbootenv=echo Importing environment from mmc ...; " \
+-		"env import -t $loadaddr $filesize\0" \
+ 	"ramargs=setenv bootargs console=${console} " \
+ 		"${optargs} " \
+ 		"root=${ramroot} " \
+ 		"rootfstype=${ramrootfstype}\0" \
+-	"loadramdisk=load mmc ${mmcdev} ${rdaddr} ramdisk.gz\0" \
+-	"loadimage=load mmc ${bootpart} ${loadaddr} ${bootdir}/${bootfile}\0" \
+-	"loadfdt=load mmc ${bootpart} ${fdtaddr} ${bootdir}/${fdtfile}\0" \
+-	"mmcloados=run mmcargs; " \
+-		"if test ${boot_fdt} = yes || test ${boot_fdt} = try; then " \
+-			"if run loadfdt; then " \
+-				"bootz ${loadaddr} - ${fdtaddr}; " \
+-			"else " \
+-				"if test ${boot_fdt} = try; then " \
+-					"bootz; " \
+-				"else " \
+-					"echo WARN: Cannot load the DT; " \
+-				"fi; " \
+-			"fi; " \
+-		"else " \
+-			"bootz; " \
+-		"fi;\0" \
+-	"mmcboot=mmc dev ${mmcdev}; " \
+-		"if mmc rescan; then " \
+-			"echo SD/MMC found on device ${mmcdev};" \
+-			"if run loadbootenv; then " \
+-				"echo Loaded environment from ${bootenv};" \
+-				"run importbootenv;" \
+-			"fi;" \
+-			"if test -n $uenvcmd; then " \
+-				"echo Running uenvcmd ...;" \
+-				"run uenvcmd;" \
+-			"fi;" \
+-			"if run loadimage; then " \
+-				"run mmcloados;" \
+-			"fi;" \
+-		"fi;\0" \
++	"loadimage=load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/${bootfile}\0" \
++	"loadrd=load ${devtype} ${bootpart} ${rdaddr} ${bootdir}/${rdfile}\0" \
++	"loadfdt=echo loading ${fdtdir}/${fdtfile} ...; load ${devtype} ${bootpart} ${fdtaddr} ${fdtdir}/${fdtfile}\0" \
++	"mmcboot=for devtype in mmc; do " \
++			"for devnum in 0 1; do " \
++				"if ${devtype} dev ${devnum}; then " \
++					"echo ${devtype} found on device ${devnum};" \
++					"setenv bootpart ${devnum}:1;" \
++					"part uuid ${devtype} ${bootpart} uuid;" \
++					"setenv root PARTUUID=${uuid} rw rootwait;" \
++					"echo Checking for: ${bootdir}/uEnv.txt ...;" \
++					"if test -e ${devtype} ${bootpart} ${bootdir}/uEnv.txt; then " \
++						"load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/uEnv.txt;" \
++						"env import -t ${loadaddr} ${filesize};" \
++						"echo Loaded environment from ${bootdir}/uEnv.txt;" \
++						"echo Checking if uenvcmd is set ...;" \
++						"if test -n ${uenvcmd}; then " \
++							"echo Running uenvcmd ...;" \
++							"run uenvcmd;" \
++						"fi;" \
++					"fi;" \
++					"if run loadimage; then " \
++						"run mmcargs;" \
++						"if run loadfdt; then " \
++							"if run loadrd; then " \
++								"bootz ${loadaddr} ${rdaddr}:${filesize} ${fdtaddr};" \
++							"else " \
++								"bootz ${loadaddr} - ${fdtaddr};" \
++							"fi;" \
++						"fi;" \
++					"else " \
++						"echo No kernel found;" \
++					"fi;" \
++					"setexpr devnum ${devnum} + 1;" \
++				"fi;" \
++			"done;" \
++		"done;\0" \
+ 	"spiboot=echo Booting from spi ...; " \
+ 		"run spiargs; " \
+ 		"sf probe ${spibusno}:0; " \
+@@ -541,9 +532,6 @@
+ #define CONFIG_BOOTCOMMAND \
+ 	"run findfdt; " \
+ 	"run mmcboot;" \
+-	"setenv mmcdev 1; " \
+-	"setenv bootpart 1:2; " \
+-	"run mmcboot;" \
+ 	"run nandboot;"
+ 
+ /* NS16550 Configuration */
+-- 
+2.5.0
+
