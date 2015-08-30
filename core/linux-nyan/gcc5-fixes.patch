@@ -1,0 +1,183 @@
+diff --git a/arch/arm/include/asm/ftrace.h b/arch/arm/include/asm/ftrace.h
+index f89515a..2bb8cac 100644
+--- a/arch/arm/include/asm/ftrace.h
++++ b/arch/arm/include/asm/ftrace.h
+@@ -45,7 +45,7 @@ void *return_address(unsigned int);
+ 
+ #else
+ 
+-extern inline void *return_address(unsigned int level)
++static inline void *return_address(unsigned int level)
+ {
+ 	return NULL;
+ }
+diff --git a/arch/arm/kernel/return_address.c b/arch/arm/kernel/return_address.c
+index a6012ac..f984082 100644
+--- a/arch/arm/kernel/return_address.c
++++ b/arch/arm/kernel/return_address.c
+@@ -63,10 +63,12 @@ void *return_address(unsigned int level)
+ #warning "TODO: return_address should use unwind tables"
+ #endif
+ 
++/*
+ void *return_address(unsigned int level)
+ {
+ 	return NULL;
+ }
++*/
+ 
+ #endif /* if defined(CONFIG_FRAME_POINTER) && !defined(CONFIG_ARM_UNWIND) / else */
+ 
+diff --git a/drivers/md/md.c b/drivers/md/md.c
+index 51f0345..4aa19e7 100644
+--- a/drivers/md/md.c
++++ b/drivers/md/md.c
+@@ -6212,7 +6212,7 @@ static int update_array_info(struct mddev *mddev, mdu_array_info_t *info)
+ 	    mddev->ctime         != info->ctime         ||
+ 	    mddev->level         != info->level         ||
+ /*	    mddev->layout        != info->layout        || */
+-	    !mddev->persistent	 != info->not_persistent||
++	    mddev->persistent	 == info->not_persistent||
+ 	    mddev->chunk_sectors != info->chunk_size >> 9 ||
+ 	    /* ignore bottom 8 bits of state, and allow SB_BITMAP_PRESENT to change */
+ 	    ((state^info->state) & 0xfffffe00)
+diff --git a/drivers/net/wireless-3.8/zd1201.c b/drivers/net/wireless-3.8/zd1201.c
+index 48273dd..4941f20 100644
+--- a/drivers/net/wireless-3.8/zd1201.c
++++ b/drivers/net/wireless-3.8/zd1201.c
+@@ -309,7 +309,6 @@ static void zd1201_usbrx(struct urb *urb)
+ 	if (data[urb->actual_length-1] == ZD1201_PACKET_RXDATA) {
+ 		int datalen = urb->actual_length-1;
+ 		unsigned short len, fc, seq;
+-		struct hlist_node *node;
+ 
+ 		len = ntohs(*(__be16 *)&data[datalen-2]);
+ 		if (len>datalen)
+@@ -362,7 +361,7 @@ static void zd1201_usbrx(struct urb *urb)
+ 				hlist_add_head(&frag->fnode, &zd->fraglist);
+ 				goto resubmit;
+ 			}
+-			hlist_for_each_entry(frag, node, &zd->fraglist, fnode)
++			hlist_for_each_entry(frag, &zd->fraglist, fnode)
+ 				if (frag->seq == (seq&IEEE80211_SCTL_SEQ))
+ 					break;
+ 			if (!frag)
+@@ -1831,14 +1830,14 @@ err_zd:
+ static void zd1201_disconnect(struct usb_interface *interface)
+ {
+ 	struct zd1201 *zd = usb_get_intfdata(interface);
+-	struct hlist_node *node, *node2;
++	struct hlist_node *node2;
+ 	struct zd1201_frag *frag;
+ 
+ 	if (!zd)
+ 		return;
+ 	usb_set_intfdata(interface, NULL);
+ 
+-	hlist_for_each_entry_safe(frag, node, node2, &zd->fraglist, fnode) {
++	hlist_for_each_entry_safe(frag, node2, &zd->fraglist, fnode) {
+ 		hlist_del_init(&frag->fnode);
+ 		kfree_skb(frag->skb);
+ 		kfree(frag);
+diff --git a/drivers/staging/wlan-ng/prism2fw.c b/drivers/staging/wlan-ng/prism2fw.c
+index 0dfd2a4..54a3bf5 100644
+--- a/drivers/staging/wlan-ng/prism2fw.c
++++ b/drivers/staging/wlan-ng/prism2fw.c
+@@ -767,30 +767,35 @@ static int plugimage(struct imgchunk *fchunk, unsigned int nfchunks,
+ static int read_cardpda(struct pda *pda, wlandevice_t *wlandev)
+ {
+ 	int result = 0;
+-	struct p80211msg_p2req_readpda msg;
++	struct p80211msg_p2req_readpda *msg;
++
++	msg = kzalloc(sizeof(*msg), GFP_KERNEL);
++	if (!msg)
++		return -ENOMEM;
+ 
+ 	/* set up the msg */
+-	msg.msgcode = DIDmsg_p2req_readpda;
+-	msg.msglen = sizeof(msg);
+-	strcpy(msg.devname, wlandev->name);
+-	msg.pda.did = DIDmsg_p2req_readpda_pda;
+-	msg.pda.len = HFA384x_PDA_LEN_MAX;
+-	msg.pda.status = P80211ENUM_msgitem_status_no_value;
+-	msg.resultcode.did = DIDmsg_p2req_readpda_resultcode;
+-	msg.resultcode.len = sizeof(u32);
+-	msg.resultcode.status = P80211ENUM_msgitem_status_no_value;
+-
+-	if (prism2mgmt_readpda(wlandev, &msg) != 0) {
++	msg->msgcode = DIDmsg_p2req_readpda;
++	msg->msglen = sizeof(msg);
++	strcpy(msg->devname, wlandev->name);
++	msg->pda.did = DIDmsg_p2req_readpda_pda;
++	msg->pda.len = HFA384x_PDA_LEN_MAX;
++	msg->pda.status = P80211ENUM_msgitem_status_no_value;
++	msg->resultcode.did = DIDmsg_p2req_readpda_resultcode;
++	msg->resultcode.len = sizeof(u32);
++	msg->resultcode.status = P80211ENUM_msgitem_status_no_value;
++
++	if (prism2mgmt_readpda(wlandev, msg) != 0) {
+ 		/* prism2mgmt_readpda prints an errno if appropriate */
+ 		result = -1;
+-	} else if (msg.resultcode.data == P80211ENUM_resultcode_success) {
+-		memcpy(pda->buf, msg.pda.data, HFA384x_PDA_LEN_MAX);
++	} else if (msg->resultcode.data == P80211ENUM_resultcode_success) {
++		memcpy(pda->buf, msg->pda.data, HFA384x_PDA_LEN_MAX);
+ 		result = mkpdrlist(pda);
+ 	} else {
+ 		/* resultcode must've been something other than success */
+ 		result = -1;
+ 	}
+ 
++	kfree(msg);
+ 	return result;
+ }
+ 
+diff --git a/lib/decompress_unlzo.c b/lib/decompress_unlzo.c
+index 960183d..7ae2c04 100644
+--- a/lib/decompress_unlzo.c
++++ b/lib/decompress_unlzo.c
+@@ -51,7 +51,7 @@ static const unsigned char lzop_magic[] = {
+ #define HEADER_SIZE_MIN       (9 + 7     + 4 + 8     + 1       + 4)
+ #define HEADER_SIZE_MAX       (9 + 7 + 1 + 8 + 8 + 4 + 1 + 255 + 4)
+ 
+-STATIC inline int INIT parse_header(u8 *input, int *skip, int in_len)
++static inline int INIT parse_header(u8 *input, int *skip, int in_len)
+ {
+ 	int l;
+ 	u8 *parse = input;
+diff --git a/mm/rmap.c b/mm/rmap.c
+index 743cef5..5b0dd20 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -523,7 +523,7 @@ __vma_address(struct page *page, struct vm_area_struct *vma)
+ 	return vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+ }
+ 
+-inline unsigned long
++static inline unsigned long
+ vma_address(struct page *page, struct vm_area_struct *vma)
+ {
+ 	unsigned long address = __vma_address(page, vma);
+diff --git a/net/netfilter/nfnetlink_cthelper.c b/net/netfilter/nfnetlink_cthelper.c
+index a191b6d..a9da433 100644
+--- a/net/netfilter/nfnetlink_cthelper.c
++++ b/net/netfilter/nfnetlink_cthelper.c
+@@ -83,7 +83,7 @@ nfnl_cthelper_parse_tuple(struct nf_conntrack_tuple *tuple,
+ static int
+ nfnl_cthelper_from_nlattr(struct nlattr *attr, struct nf_conn *ct)
+ {
+-	const struct nf_conn_help *help = nfct_help(ct);
++	struct nf_conn_help *help = nfct_help(ct);
+ 
+ 	if (attr == NULL)
+ 		return -EINVAL;
+@@ -91,7 +91,7 @@ nfnl_cthelper_from_nlattr(struct nlattr *attr, struct nf_conn *ct)
+ 	if (help->helper->data_len == 0)
+ 		return -EINVAL;
+ 
+-	memcpy(&help->data, nla_data(attr), help->helper->data_len);
++	memcpy(help->data, nla_data(attr), help->helper->data_len);
+ 	return 0;
+ }
+ 
