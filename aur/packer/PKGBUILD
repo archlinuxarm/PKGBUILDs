@@ -2,7 +2,7 @@
 # Contributor: Gilrain <pierre.buard+aur gmail com>
 # Contributor: bruenig
 pkgname=packer
-pkgver=20140810
+pkgver=20150808
 pkgrel=1
 pkgdesc="Bash wrapper for pacman and aur"
 url="http://github.com/keenerd/packer"
@@ -12,7 +12,6 @@ makedepends=('git')
 depends=('grep' 'sed' 'bash' 'curl' 'pacman' 'jshon' 'expac')
 optdepends=('sudo: install and update packages as non-root'
             'customizepkg: apply customizepkg modifications')
-#source=('git://github.com/keenerd/packer.git')
 source=('git+https://github.com/keenerd/packer.git')
 md5sums=('SKIP')
 

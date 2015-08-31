@@ -4,12 +4,12 @@
 
 pkgname=gmrender-resurrect-git
 _gitname=gmrender-resurrect
-pkgver=275.61f5a8f
-pkgrel=2
+pkgver=277.aa3d02c
+pkgrel=1
 pkgdesc="Application to stream music from a UPnP server using gstreamer."
 arch=('i686' 'x86_64')
 url="https://github.com/hzeller/gmrender-resurrect"
-license=('GPL2')
+license=('GPL')
 conflicts=('gmediarender')
 depends=('libupnp' 'gst-plugins-good' 'gst-plugins-base')
 optdepends=(
