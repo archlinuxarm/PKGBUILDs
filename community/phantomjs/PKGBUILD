@@ -1,0 +1,56 @@
+# $Id$
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: grimsock <lord.grimsock at gmail dot com>
+# Contributor: Dieter Plaetinck <dieter@plaetinck.be>
+# Contributor: Vladimir Chizhov <jagoterr@gmail.com>
+# Contributor: Henry Tang <henryykt@gmail.com>
+
+# ALARM: Barnaby Colby <barnaby.colby@gmail.com>
+# - Added '--jobs 2' argument to build.sh invocation to allow ARM devices with low memory to build this
+
+pkgname=phantomjs
+pkgver=2.0.0
+pkgrel=4.1
+pkgdesc="Headless WebKit with JavaScript API"
+url="http://www.phantomjs.org/"
+license=('BSD' 'LGPL' 'MIT')
+arch=('i686' 'x86_64')
+depends=('icu' 'libjpeg-turbo' 'libpng' 'fontconfig' 'gperf' 'ruby' 'python2' 'gstreamer0.10-base')
+makedepends=('git')
+source=("git+https://github.com/ariya/${pkgname}.git#tag=$pkgver"
+        gcc-5.patch)
+
+prepare() {
+  mkdir "$srcdir/python2-path"
+  ln -s /usr/bin/python2 "$srcdir/python2-path/python"
+
+  # https://bugreports.qt.io/browse/QTBUG-44829 / https://github.com/ariya/phantomjs/issues/13265
+  (cd $pkgname/src/qt/qtwebkit; patch -p1 -i "$srcdir/gcc-5.patch")
+}
+
+build() {
+  cd $pkgname
+  export PATH="$srcdir/python2-path:$PATH" PYTHON=/usr/bin/python2 
+  
+  # shared build requires qt 5.3
+  #sed -i "s/export QMAKE=qmake/export QMAKE=qmake-qt5/" build.sh
+  # ARM devices tend to have less memory available, limiting the number of jobs to 2 helps prevent the compilation from running out
+  if [ "$CARCH" = "armv7h" ]; then
+    ./build.sh --confirm --qtdeps=system --qt-config '-no-rpath' --jobs 2 # --qtwebkit=system
+  else
+    ./build.sh --confirm --qtdeps=system --qt-config '-no-rpath' # --qtwebkit=system
+  fi
+}
+
+package() {
+  install -Dm755 "$srcdir/$pkgname/bin/phantomjs" "$pkgdir/usr/bin/phantomjs"
+
+  mkdir -p "$pkgdir/usr/share/$pkgname"
+  cp -r "$srcdir/$pkgname/examples" "$pkgdir/usr/share/$pkgname"/
+
+  install -Dm644 "$srcdir/$pkgname/LICENSE.BSD" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.BSD"
+  install -Dm644 "$srcdir/$pkgname/third-party.txt" "$pkgdir/usr/share/licenses/$pkgname/third-party.txt"
+}
+
+sha512sums=('SKIP'
+            '9c584fb049c1c32d9ca640c44ed42beb0706833ee11d689fa738f9b6543f24e315fa707a61efaefe7fccaa88478cbe5bdcc6d490c2b0cfac580bd96e534bc2eb')
