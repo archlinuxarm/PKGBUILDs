@@ -7,32 +7,41 @@
 
 pkgname=argyllcms
 _pkgname=Argyll
-pkgver=1.7.0
+pkgver=1.8.2
 _pkgver="V${pkgver}"
 pkgrel=1
 pkgdesc="An ICC compatible color management system with support for different colorimeter hardware"
 arch=(i686 x86_64)
-depends=('libxss' 'libxinerama' 'libxxf86vm' 'libxrandr' 'zlib')
+depends=('libtiff' 'libxss' 'libxinerama' 'libxxf86vm' 'libxrandr' 'openssl')
 makedepends=('ftjam' 'zip' 'unzip')
 # You need to fake an UserAgent or it doesn't download
-source=(http://www.argyllcms.com/${_pkgname}_${_pkgver}_src.zip)
+DLAGENTS=('http::/usr/bin/curl -fLC - --retry 3 --retry-delay 3 -A "Mozilla/4.0" -o %o %u')
+source=(http://www.argyllcms.com/${_pkgname}_${_pkgver}_src.zip
+        argyllcms-1.8.0-gcc5.patch)
 url="http://www.argyllcms.com/"
 license=("GPL" "AGPL")
 install=${pkgname}.install
-sha256sums=('dac51cf5d8f6d04bb02f2f5b119fa0e8b773a010e6377116768b082ef018f663')
+sha256sums=('59bdfaeace35d2007c90fc53234ba33bf8a64cffc08f7b27a297fc5f85455377'
+            'de9b8a90e249070d457291c29ae3c732f89c51bc6f6296cb6aa7e800ba31a0e5')
 
 prepare() {
-  sed -i 's:^TEST=="/lib/udev/usb-db", IMPORT{program}="usb-db %p":IMPORT{builtin}="hwdb --subsystem=usb":' ${_pkgname}_${_pkgver}/usb/55-Argyll.rules
+  cd ${_pkgname}_${_pkgver}
+  sed -i 's:^TEST=="/lib/udev/usb-db", IMPORT{program}="usb-db %p":IMPORT{builtin}="hwdb --subsystem=usb":' usb/55-Argyll.rules
+  patch -Np1 -i "$srcdir"/argyllcms-1.8.0-gcc5.patch
+
+  sed -i 's/-j${NUMBER_OF_PROCESSORS:-2}/$MAKEFLAGS/' makeall.sh
+
+  # From Gentoo argyllcms ebuild
+  echo "LINKFLAGS += ${LDFLAGS} ;" >> Jamtop
+  echo "STDLIBS += -ldl -lrt -lX11 -lXext -lXxf86vm -lXinerama -lXrandr -lXau -lXdmcp -lXss -ltiff -ljpeg ;" >> Jamtop
 }
 
 build() {
   cd ${_pkgname}_${_pkgver}
-  echo "***running makeall.sh***"
-  sh ./makeall.sh
-  echo "***running makeinstall.sh***"
-  sh ./makeinstall.sh
-  #echo "***running makepackagebin.sh***"
-  #sh ./makepackagebin.sh
+
+  CCOPTFLAG="$CFLAGS" ./makeall.sh
+  ./makeinstall.sh
+  #./makepackagebin.sh
   rm {bin,ref}/License.txt
   rm {doc,ref}/afiles
 }
