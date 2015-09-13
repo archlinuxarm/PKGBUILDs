@@ -1,0 +1,71 @@
+# Maintainer: Florian Pritz <bluewind@xinu.at>
+# Contributor: Giuseppe Borzi <gborzi@ieee.org>
+# Contributor: Brice M<E9>alier <mealier_brice@yahoo.fr>
+# Contributor: Michele Mocciola <mickele>
+
+# ALARM: Fredrik Söderström <tirithen@gmail.com>
+#  - Adds armv7h arch
+#  - Adds subdir-objects to all Makefile.am
+#  - Removes all mmmx, msse, msse2, mfpmath=sse options from configure.ac
+#  - Patch src/Standard/Standard.cxx to use malloc.h over mm_malloc.h (like Android config) since it's not avaliable on the system
+#  - Adds optimization -O2 to CPPFLAGS
+
+pkgname=opencascade
+pkgver=6.9.0
+pkgrel=1
+pkgdesc="Open CASCADE Technology, 3D modeling & numerical simulation"
+arch=('i686' 'x86_64' 'armv7h')
+url="http://www.opencascade.org"
+license=('custom')
+depends=('tk' 'mesa' 'java-runtime' 'libxmu' 'ftgl' 'vtk')
+makedepends=('java-environment')
+source=("http://files.opencascade.com/OCCT/OCC_${pkgver}_release/$pkgname-${pkgver}.tgz" "env.sh" "opencascade.sh" "opencascade.conf")
+md5sums=('ba87fe9f5ca47e3dfd62aad7223f0e7f'
+         'a96f28ee7f4273ae1771ee033a2a3af3'
+         'd9368b8d348ced3ec4462012977552d2'
+         '2924ecf57c95d25888f51071fdc72ad0')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  # Get rid of "but option 'subdir-objects' is disabled" warnings
+  find . -name "Makefile.am" -print0 | xargs -0 sed -i '1 i\AUTOMAKE_OPTIONS = subdir-objects'
+
+  # fix for automake 1.13
+  sed -i -e 's/AM_CONFIG_HEADER/AC_CONFIG_HEADERS/' configure.ac
+
+  # Remove mmmx msse msse2 mfpmath=sse from config files as not supported by arm
+  sed -i -e 's/ -\(mmmx\|msse2\|msse\|mfpmath=sse\)//g' configure.ac
+
+  # mm_malloc.h are missing on this system, define a constant in src/Standard/Standard.cxx to have it select malloc.h (same as Android)
+  STANDARD_FILENAME=src/Standard/Standard.cxx
+  sed -i '1 i\#ifndef __ARCH_ARMV7H__' $STANDARD_FILENAME
+  sed -i '2 i\#define __ARCH_ARMV7H__ 1' $STANDARD_FILENAME
+  sed -i '3 i\#endif' $STANDARD_FILENAME
+  sed -i -e 's/defined(__ANDROID__)/defined(__ANDROID__) || defined(__ARCH_ARMV7H__)/g' $STANDARD_FILENAME
+
+  # https://bbs.archlinux.org/viewtopic.php?id=182812
+  CPPFLAGS="$CPPFLAGS -O2"
+
+  ./build_configure
+  ./configure --disable-debug --enable-production \
+    --with-java-include=/usr/lib/jvm/default/include \
+    --with-vtk-library=/usr/lib/ --with-vtk-include=/usr/include/vtk-6.1/ \
+    --prefix=/opt/$pkgname
+  make
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  # no DESTDIR support so use prefix. This has to suffix match the prefix in ./configure
+  make prefix="$pkgdir/opt/$pkgname" install
+  cp -r src/UnitsAPI/ "${pkgdir}/opt/$pkgname/src"
+  install -D -m644 "${srcdir}/opencascade.conf" "${pkgdir}/etc/ld.so.conf.d/opencascade.conf"
+  install -D -m 755 "${srcdir}/opencascade.sh" "${pkgdir}/etc/profile.d/opencascade.sh"
+  install -m 755 "${srcdir}/env.sh" "${pkgdir}/opt/$pkgname"
+  install -dm755 "$pkgdir/usr/share/licenses/$pkgname/"
+  install -m644 LICENSE_LGPL_21.txt OCCT_LGPL_EXCEPTION.txt "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+# vim:set ts=2 sw=2 et:
