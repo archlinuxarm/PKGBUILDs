@@ -8,12 +8,12 @@ _srcname=linux-4.2
 _kernelname=${pkgbase#linux}
 _desc="ARMv7 multi-platform"
 pkgver=4.2.1
-pkgrel=1
+pkgrel=2
 rcnrel=armv7-x2
 arch=('armv7h')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' 'vboot-utils' 'dtc')
 options=('!strip')
 source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
         "http://www.kernel.org/pub/linux/kernel/v4.x/patch-${pkgver}.xz"
@@ -28,7 +28,11 @@ source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
         '0006-ARM-TLV320AIC23-SoC-Audio-Codec-Fix-errors-reported-.patch'
         '0007-set-default-cubietruck-led-triggers.patch'
         '0008-USB-armory-support.patch'
-        'config')
+        'config'
+        'cmdline'
+        'kernel.its'
+        'kernel.keyblock'
+        'kernel_data_key.vbprivk')
 md5sums=('3d5ea06d767e2f35c999eeadafc76523'
          '3e1cc007d930f8760ef0730609dca035'
          '442d9d927633bc61d9e7fd2d0d7e047a'
@@ -40,7 +44,11 @@ md5sums=('3d5ea06d767e2f35c999eeadafc76523'
          '3be6a6ddf93b89e90cc127268721845e'
          'fe20decabf6b7d94cf2ecb4d15a07ba7'
          '50dca48291316e4c0a7e918f08d5e3f5'
-         '36cc9dcd9d479c35d362b852a00d6d74')
+         '36cc9dcd9d479c35d362b852a00d6d74'
+         '1813b39074d01af6548951764a0f6444'
+         'b550d900d162a34eb5e14b4a6f409afb'
+         '61c5ff73c136ed07a7aadbf58db3d96a'
+         '584777ae88bce2c5659960151b64c7d8')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
@@ -129,10 +137,10 @@ _package() {
   _basekernel=${_kernver%%-*}
   _basekernel=${_basekernel%.*}
 
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/dtbs}
+  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
+  make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
   cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
-  cp arch/$KARCH/boot/dts/*.dtb "${pkgdir}/boot/dtbs"
 
   # set correct depmod command for install
   sed \
@@ -350,7 +358,30 @@ _package-cubox() {
   mkimage -A arm -O linux -T kernel -C none -a 0x00008000 -e 0x00008000 -n "${pkgname}" -d myimage "${pkgdir}/boot/uImage"
 }
 
-pkgname=("${pkgbase}" "${pkgbase}-headers" "${pkgbase}-smileplug" "${pkgbase}-mirabox" "${pkgbase}-ax3" "${pkgbase}-d3plug" "${pkgbase}-cubox")
+_package-chromebook() {
+  pkgdesc="The Linux Kernel - ${_desc} - Exynos Chromebooks"
+  depends=('linux-armv7')
+
+  cd "${srcdir}/${_srcname}"
+
+  cp ../kernel.its .
+  mkimage -D "-I dts -O dtb -p 2048" -f kernel.its vmlinux.uimg
+  dd if=/dev/zero of=bootloader.bin bs=512 count=1
+  vbutil_kernel \
+    --pack vmlinux.kpart \
+    --version 1 \
+    --vmlinuz vmlinux.uimg \
+    --arch arm \
+    --keyblock ../kernel.keyblock \
+    --signprivate ../kernel_data_key.vbprivk \
+    --config ../cmdline \
+    --bootloader bootloader.bin
+
+  mkdir -p "${pkgdir}/boot"
+  cp vmlinux.kpart "${pkgdir}/boot"
+}
+
+pkgname=("${pkgbase}" "${pkgbase}-headers" "${pkgbase}-smileplug" "${pkgbase}-mirabox" "${pkgbase}-ax3" "${pkgbase}-d3plug" "${pkgbase}-cubox" "${pkgbase}-chromebook")
 for _p in ${pkgname[@]}; do
   eval "package_${_p}() {
     _package${_p#${pkgbase}}
