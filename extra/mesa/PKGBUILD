@@ -9,7 +9,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=11.0.1
+pkgver=11.0.2
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
@@ -21,7 +21,7 @@ options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
         0001-i965-Remove-early-release-of-DRI2-miptree.patch)
-sha256sums=('43d0dfcd1f1e36f07f8228cd76d90175d3fc74c1ed25d7071794a100a98ef2a6'
+sha256sums=('fce11fb27eb87adf1e620a76455d635c6136dfa49ae58c53b34ef8d0c7b7eae4'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
             'a3f520ea13c923841c646a5b1627927744938ff691aa08e1aeaf14cce12bd1f7')
