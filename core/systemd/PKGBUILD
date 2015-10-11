@@ -2,13 +2,13 @@
 # Maintainer: Tom Gundersen <teg@jklm.no>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - disable optimization, currently breaks many things
+#  - disable gold/LTO
 #  - removed makedepend on gnu-efi-libs, --enable-gnuefi configure option
 
 pkgbase=systemd
 pkgname=('systemd' 'libsystemd' 'systemd-sysvcompat')
-pkgver=224
-pkgrel=1
+pkgver=226
+pkgrel=3.1
 arch=('i686' 'x86_64')
 url="http://www.freedesktop.org/wiki/Software/systemd"
 makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam'
@@ -32,22 +32,19 @@ md5sums=('SKIP'
          '1e2f9a8b0fa32022bf0a8f39123e5f4e')
 
 prepare() {
-  cd "$pkgname"
-
-  # networkd: fix neworkd crash
-  # https://github.com/systemd/systemd/commit/49f6e11e89b4
-  git cherry-pick -n 49f6e11e89b4
+  cd "$pkgbase"
 
   ./autogen.sh
 }
 
 build() {
-  cd "$pkgname"
+  cd "$pkgbase"
 
   local timeservers=({0..3}.arch.pool.ntp.org)
 
-  CFLAGS=`echo $CFLAGS | sed -e 's/-O2/-O0/'` && CXXFLAGS="$CFLAGS"
-  unset CPPFLAGS
+  LDFLAGS+=" -Wl,-fuse-ld=bfd"
+  CFLAGS+=" -fno-lto"
+  CXXFLAGS+=" -fno-lto"
 
   ./configure \
       --libexecdir=/usr/lib \
@@ -101,7 +98,7 @@ package_systemd() {
           etc/udev/udev.conf)
   install="systemd.install"
 
-  make -C "$pkgname" DESTDIR="$pkgdir" install
+  make -C "$pkgbase" DESTDIR="$pkgdir" install
 
   # don't write units to /etc by default. some of these will be re-enabled on
   # post_install.
@@ -111,7 +108,7 @@ package_systemd() {
   rm -r "$pkgdir/usr/lib/rpm"
 
   # add back tmpfiles.d/legacy.conf
-  install -m644 "$pkgname/tmpfiles.d/legacy.conf" "$pkgdir/usr/lib/tmpfiles.d"
+  install -m644 "$pkgbase/tmpfiles.d/legacy.conf" "$pkgdir/usr/lib/tmpfiles.d"
 
   # Replace dialout/tape/cdrom group in rules with uucp/storage/optical group
   sed -i 's#GROUP="dialout"#GROUP="uucp"#g;
@@ -139,17 +136,11 @@ package_systemd() {
   # ship default policy to leave services disabled
   echo 'disable *' >"$pkgdir"/usr/lib/systemd/system-preset/99-default.preset
 
-  ### split out manpages for sysvcompat
-  rm -rf "$srcdir/_sysvcompat"
-  install -dm755 "$srcdir"/_sysvcompat/usr/share/man/man8/
-  mv "$pkgdir"/usr/share/man/man8/{telinit,halt,reboot,poweroff,runlevel,shutdown}.8 \
-     "$srcdir"/_sysvcompat/usr/share/man/man8
+  ### manpages shipped with systemd-sysvcompat
+  rm "$pkgdir"/usr/share/man/man8/{telinit,halt,reboot,poweroff,runlevel,shutdown}.8
 
-  ### split off runtime libraries
-  rm -rf "$srcdir/_libsystemd"
-  install -dm755 "$srcdir"/_libsystemd/usr/lib
-  cd "$srcdir"/_libsystemd
-  mv "$pkgdir"/usr/lib/lib{systemd,udev}*.so* usr/lib
+  ### runtime libraries shipped with libsystemd
+  rm "$pkgdir"/usr/lib/lib{nss,systemd,udev}*.so*
 
   # add example bootctl configuration
   install -Dm644 "$srcdir/arch.conf" "$pkgdir"/usr/share/systemd/bootctl/arch.conf
@@ -164,7 +155,7 @@ package_libsystemd() {
   provides=('libsystemd.so' 'libsystemd-daemon.so' 'libsystemd-id128.so'
             'libsystemd-journal.so' 'libsystemd-login.so' 'libudev.so')
 
-  mv "$srcdir/_libsystemd"/* "$pkgdir"
+  make -C "$pkgbase" DESTDIR="$pkgdir" install-libLTLIBRARIES
 }
 
 package_systemd-sysvcompat() {
@@ -174,7 +165,10 @@ package_systemd-sysvcompat() {
   conflicts=('sysvinit')
   depends=('systemd')
 
-  mv "$srcdir/_sysvcompat"/* "$pkgdir"
+  install -dm755 "$pkgdir"/usr/share/man/man8
+  cp -d --no-preserve=ownership,timestamp \
+    "$pkgbase"/man/{telinit,halt,reboot,poweroff,runlevel,shutdown}.8 \
+    "$pkgdir"/usr/share/man/man8
 
   install -dm755 "$pkgdir/usr/bin"
   for tool in runlevel reboot shutdown poweroff halt telinit; do

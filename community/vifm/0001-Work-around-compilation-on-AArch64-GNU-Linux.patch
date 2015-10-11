@@ -1,0 +1,119 @@
+From a3bfb7b99d4f7b43a9b995a2dfa2601086a5dec9 Mon Sep 17 00:00:00 2001
+From: xaizek <xaizek@openmailbox.org>
+Date: Mon, 20 Jul 2015 20:36:52 +0300
+Subject: [PATCH] Work around compilation on AArch64 GNU/Linux
+
+Or in general on systems where MAX_ARG_STRLEN is defined, but is
+unusable (it's either shouldn't be defined or should work, not the
+way it is at the moment).  Thanks to Marcin Juszkiewicz (a.k.a.
+hrw).
+---
+ THANKS                |  1 +
+ config.h.in           |  3 +++
+ configure             | 17 +++++++++++++++++
+ configure.ac          | 11 +++++++++++
+ src/utils/utils_nix.c |  5 +++--
+ 5 files changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/THANKS b/THANKS
+index 7f4ae95..93c4322 100644
+--- a/THANKS
++++ b/THANKS
+@@ -53,6 +53,7 @@ lcj
+ Lomov Vladimir (lomov_vl)
+ lyuts
+ MadMaverick9
++Marcin Juszkiewicz (hrw)
+ Martin Fischer
+ Marton Balazs (balmar)
+ Merovius
+diff --git a/config.h.in b/config.h.in
+index 0098847..d4532ae 100644
+--- a/config.h.in
++++ b/config.h.in
+@@ -43,6 +43,9 @@
+ /* malloc.h header is available. */
+ #undef HAVE_MALLOC_H
+ 
++/* MAX_ARG_STRLEN is available. */
++#undef HAVE_MAX_ARG_STRLEN
++
+ /* Define to 1 if you have the <memory.h> header file. */
+ #undef HAVE_MEMORY_H
+ 
+diff --git a/configure b/configure
+index 0d4203a..1eee704 100755
+--- a/configure
++++ b/configure
+@@ -6315,6 +6315,23 @@ fi
+ 
+ done
+ 
++if test "$ac_cv_header_sys_user_h" = yes -a "$ac_cv_header_linux_binfmts_h" = yes; then
++    cat confdefs.h - <<_ACEOF >conftest.$ac_ext
++/* end confdefs.h.  */
++
++             #include <linux/binfmts.h>
++             #include <sys/user.h>
++             int main() { (void)MAX_ARG_STRLEN; return 0; }
++
++
++_ACEOF
++if ac_fn_c_try_compile "$LINENO"; then :
++
++$as_echo "#define HAVE_MAX_ARG_STRLEN 1" >>confdefs.h
++
++fi
++rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
++fi
+ 
+ ac_fn_c_check_type "$LINENO" "uid_t" "ac_cv_type_uid_t" "$ac_includes_default"
+ if test "x$ac_cv_type_uid_t" = xyes; then :
+diff --git a/configure.ac b/configure.ac
+index 2cfdac8..3928714 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -74,6 +74,17 @@ AC_CHECK_HEADER([wchar.h], [], [AC_MSG_ERROR([wchar.h header not found.])])
+ AC_CHECK_HEADER([wctype.h], [], [AC_MSG_ERROR([wctype.h header not found.])])
+ dnl Headers required for breaking too long command-lines.
+ AC_CHECK_HEADERS([sys/user.h linux/binfmts.h])
++if test "$ac_cv_header_sys_user_h" = yes -a "$ac_cv_header_linux_binfmts_h" = yes; then
++    AC_COMPILE_IFELSE(
++        AC_LANG_SOURCE(
++            [[
++             #include <linux/binfmts.h>
++             #include <sys/user.h>
++             int main() { (void)MAX_ARG_STRLEN; return 0; }
++            ]]
++        ),
++        [AC_DEFINE([HAVE_MAX_ARG_STRLEN], [1], [MAX_ARG_STRLEN is available.])])
++fi
+ 
+ dnl Check for various system types.
+ AC_CHECK_TYPE([uid_t])
+diff --git a/src/utils/utils_nix.c b/src/utils/utils_nix.c
+index 2ccb857..137e95c 100644
+--- a/src/utils/utils_nix.c
++++ b/src/utils/utils_nix.c
+@@ -20,7 +20,8 @@
+ #include "utils_nix.h"
+ #include "utils_int.h"
+ 
+-#if defined (HAVE_LINUX_BINFMTS_H) && defined (HAVE_SYS_USER_H)
++#ifdef HAVE_MAX_ARG_STRLEN
++/* MAX_ARG_STRLEN is the only reason we need these headers. */
+ #include <linux/binfmts.h>
+ #include <sys/user.h>
+ #endif
+@@ -260,7 +261,7 @@ run_from_fork(int pipe[2], int err_only, char cmd[])
+ char **
+ make_execv_array(char shell[], char cmd[])
+ {
+-#ifdef MAX_ARG_STRLEN
++#ifdef HAVE_MAX_ARG_STRLEN
+ 	/* Don't use maximum length, leave some room or commands fail to run. */
+ 	const size_t safe_arg_len = MIN(MAX_ARG_STRLEN, MAX_ARG_STRLEN - 4096U);
+ 	const size_t npieces = DIV_ROUND_UP(strlen(cmd), safe_arg_len);
+-- 
+2.5.2
+

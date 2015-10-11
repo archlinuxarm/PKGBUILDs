@@ -9,10 +9,10 @@
 # Contributor: Jason Plum <jplum@archlinuxarm.org>
 
 pkgname=nodejs
-pkgver=0.12.7
+pkgver=4.1.2
 pkgrel=1
 pkgdesc='Evented I/O for V8 javascript'
-arch=('i686' 'x86_64' 'arm')
+arch=('i686' 'x86_64')
 url='http://nodejs.org/'
 license=('MIT')
 provides=('nodejs-node-gyp')
@@ -20,23 +20,23 @@ depends=('openssl' 'zlib' 'icu') # 'libuv' 'v8' 'c-ares')
 makedepends=('python2' 'procps-ng')
 optdepends=('npm: nodejs package manager')
 source=("http://nodejs.org/dist/v$pkgver/node-v$pkgver.tar.gz"
-        'arm.patch')
-sha256sums=('b23d64df051c9c969b0c583f802d5d71de342e53067127a5061415be7e12f39d'
-            '37cec64b8364c1ecb13f914b44dc86eb12a72be985f78e6d07b5ced91edfe246')
+        '0001-arm-fixes.patch')
+sha256sums=('febec3703a3fea9b64c46100a7b6a4408250027aa8259a2a815fd2275d502c49'
+            '13f14499c0a83d282ac07d1116a2d9196b4ae37dbd6914865f0b6549158789c4')
 
 set_flags_for_arm() {
   if [ "$CARCH" == "arm" ]; then
     # CXXFLAGS is here to bash it over the head. It has a bad habit.
-    EABI=soft
+    CONFIG="--with-arm-float-abi=soft"
     CXXFLAGS="$CXXFLAGS -march=armv5t -mno-unaligned-access" ;
     GYPFLAGS="-Darm_thumb -Darm_float_abi=soft -Darm_version=5 -Darm_fpu= -Darm_test_noprobe=on"
   fi
   if [ "$CARCH" == "armv6h" ]; then
-    EABI=hard
+    CONFIG="--with-arm-float-abi=hard"
     GYPFLAGS="-Darm_thumb -Darm_float_abi=hard -Darm_version=6 -Darm_fpu=vfpv2"
   fi
   if [ "$CARCH" == "armv7h" ]; then
-    EABI=hard
+    CONFIG="--with-arm-float-abi=hard"
     GYPFLAGS="-Darm_thumb -Darm_float_abi=hard -Darm_version=7 -Darm_fpu=vfpv3-d16"
   fi
   export CXXFLAGS
@@ -46,12 +46,17 @@ set_flags_for_arm() {
 prepare() {
   cd node-v$pkgver
 
-  patch -p1 -i ../arm.patch
+  patch -p1 -i ../0001-arm-fixes.patch
 
-  msg 'fixing for python2 name'
-  find -type f -exec sed -e 's_^#!/usr/bin/env python$_&2_' -e 's_^\(#!/usr/bin/python2\).[45]$_\1_' -e 's_^#!/usr/bin/python$_&2_' -e "s_'python'_'python2'_" -i {} \;
-  find test -type f -exec sed -e "s|python |python2 |" -i {} \;
-  sed -i "s|python |python2 |" Makefile
+  msg 'Fixing for python2 name'
+  find -type f -exec sed \
+    -e 's_^#!/usr/bin/env python$_&2_' \
+    -e 's_^\(#!/usr/bin/python2\).[45]$_\1_' \
+    -e 's_^#!/usr/bin/python$_&2_' \
+    -e 's_^\( *exec \+\)python\( \+.*\)$_\1python2\2_'\
+    -e 's_^\(.*\)python\( \+-c \+.*\)$_\1python2\2_'\
+    -e "s_'python'_'python2'_" -i {} \;
+  find test/ -type f -exec sed 's_python _python2 _' -i {} \;
 }
 
 build() {
@@ -78,9 +83,9 @@ build() {
     --with-intl=system-icu \
     --without-npm \
     --without-snapshot \
-    --with-arm-float-abi=$EABI \
     --shared-openssl \
-    --shared-zlib
+    --shared-zlib \
+    ${CONFIG}
 #    --shared-libuv
 #    --shared-v8 \
 #    --shared-v8-libpath=/usr/lib \

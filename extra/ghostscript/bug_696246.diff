@@ -1,0 +1,89 @@
+From: Chris Liddell <chris.liddell@artifex.com>
+Date: Fri, 9 Oct 2015 09:54:10 +0000 (+0100)
+Subject: Bug 696246: devijs account for device sublassing.
+X-Git-Url: http://git.ghostscript.com/?p=ghostpdl.git;a=commitdiff_plain;h=b68e05c3
+
+Bug 696246: devijs account for device sublassing.
+
+The IJS device wasn't coping with the possibility it had been subclassed.
+
+No cluster differences
+---
+
+diff --git a/devices/gdevijs.c b/devices/gdevijs.c
+index 5520716..a2e21ea 100644
+--- a/devices/gdevijs.c
++++ b/devices/gdevijs.c
+@@ -827,6 +827,10 @@ gsijs_open(gx_device *dev)
+     if (code < 0)
+         return code;
+ 
++    while (dev->child)
++        dev = dev->child;
++    ijsdev = (gx_device_ijs *)dev;
++
+     if (use_outputfd) {
+         /* Note: dup() may not be portable to all interesting IJS
+            platforms. In that case, this branch should be #ifdef'ed out.
+From: Chris Liddell <chris.liddell@artifex.com>
+Date: Fri, 9 Oct 2015 11:54:44 +0000 (+0100)
+Subject: Bug 696246: patch the memory manager fields for sublassed devices.
+X-Git-Url: http://git.ghostscript.com/?p=ghostpdl.git;a=commitdiff_plain;h=95553954
+
+Bug 696246: patch the memory manager fields for sublassed devices.
+
+When we subclass a device, we were patching the "visible" type field - that is,
+the one referenced directly in the device structure. We were not patching
+the type information in the memory object header so, in particular, the
+garbage collector could end up calling the wrong methods for the subclassed
+device.
+
+No cluster differences.
+---
+
+diff --git a/base/gdevdflt.c b/base/gdevdflt.c
+index 5768937..305f89d 100644
+--- a/base/gdevdflt.c
++++ b/base/gdevdflt.c
+@@ -17,6 +17,8 @@
+ #include "math_.h"
+ #include "memory_.h"
+ #include "gx.h"
++#include "gsstruct.h"
++#include "gxobj.h"
+ #include "gserrors.h"
+ #include "gsropt.h"
+ #include "gxcomp.h"
+@@ -26,6 +28,7 @@
+ #include "gstrans.h"        /* For gs_pdf14trans_t */
+ #include "gxistate.h"       /* for gs_image_state_s */
+ 
++
+ /* defined in gsdpram.c */
+ int gx_default_get_param(gx_device *dev, char *Param, void *list);
+ 
+@@ -1294,6 +1297,11 @@ int gx_device_subclass(gx_device *dev_to_subclass, gx_device *new_prototype, uns
+     ptr1 = ((char *)new_prototype) + sizeof(gx_device);
+     memcpy(ptr, ptr1, new_prototype->params_size - sizeof(gx_device));
+ 
++    /* We have to patch up the "type" parameters that the memory manage/garbage
++     * collector will use, as well.
++     */
++    (((obj_header_t *)dev_to_subclass) - 1)->o_type = new_prototype->stype;
++
+     /* If the original device's stype structure was dynamically allocated, we need
+      * to 'fixup' the contents, it's procs need to point to the new device's procs
+      * for instance.
+diff --git a/base/lib.mak b/base/lib.mak
+index de78333..09b70e5 100644
+--- a/base/lib.mak
++++ b/base/lib.mak
+@@ -1210,7 +1210,7 @@ $(GLOBJ)gdevdsha.$(OBJ) : $(GLSRC)gdevdsha.c $(AK) $(gx_h)\
+ 
+ $(GLOBJ)gdevdflt.$(OBJ) : $(GLSRC)gdevdflt.c $(AK) $(gx_h)\
+  $(gserrors_h) $(gsropt_h) $(gxcomp_h) $(gxdevice_h) $(gxdevsop_h) $(math__h)\
+- $(MAKEDIRS)
++ $(gsstruct_h) $(gxobj_h) $(MAKEDIRS)
+ 	$(GLCC) $(GLO_)gdevdflt.$(OBJ) $(C_) $(GLSRC)gdevdflt.c
+ 
+ $(GLOBJ)gdevdgbr.$(OBJ) : $(GLSRC)gdevdgbr.c $(AK) $(gx_h)\

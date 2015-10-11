@@ -1,0 +1,87 @@
+# $Id$
+# Maintainer: Sébastien "Seblu" Luttringer <seblu@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to remove neon detection in configure
+
+pkgname=ceph
+pkgver=0.94.3
+pkgrel=2
+pkgdesc='Distributed, fault-tolerant storage platform delivering object, block, and file system'
+arch=('x86_64' 'i686')
+url='http://ceph.com/'
+license=('GPL')
+makedepends=('boost' 'systemd' 'xfsprogs')
+depends=('boost-libs'
+         'curl'
+         'expat'
+         'fcgi'
+         'fuse'
+         'gcc-libs'
+         'glibc'
+         'gperftools'
+         'keyutils'
+         'leveldb'
+         'libaio'
+         'libatomic_ops'
+         'libedit'
+         'libsystemd'
+         'libutil-linux'
+         'ncurses'
+         'nss'
+         'python2'
+         'snappy')
+optdepends=('xfsprogs: support xfs backend')
+options=('emptydirs')
+source=("http://ceph.com/download/$pkgname-$pkgver.tar.bz2"
+        'ceph-osd@.service'
+        'ceph-mon@.service'
+        'ceph-mds@.service'
+        'no-neon.patch')
+md5sums=('ccbaba6cad56cf71719661a0cdcc6ad6'
+         '9104b5b90349d2aa7802eb89158456e8'
+         '63a584aa2a4e2b0efbee4e8fd32593f0'
+         'd2411c41208d95743baa6d899cc1e0b0'
+         '7bc1737bb952b08db8e9a0780aee21d8')
+
+prepare() {
+#  patch -p1 -d $pkgname-$pkgver < 01-boost-158.patch
+  patch -p1 -d $pkgname-$pkgver -i ../no-neon.patch
+}
+
+build() {
+  cd $pkgname-$pkgver
+  export PYTHON=/usr/bin/python2
+  ./configure \
+    --prefix=/usr \
+    --sbindir=/usr/bin \
+    --libexecdir=/usr/lib \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --with-radosgw
+  make
+}
+
+package() {
+  make -C $pkgname-$pkgver DESTDIR="$pkgdir" install
+
+  cd "$pkgdir"
+
+  # systemd
+  install -dm755 usr/lib/{systemd/system,udev/rules.d}
+  install -Dm644 "$srcdir"/ceph-{osd,mon,mds}@.service usr/lib/systemd/system
+  install -Dm644 "$srcdir"/$pkgname-$pkgver/udev/* usr/lib/udev/rules.d
+
+  # fix directories path
+  mv sbin/* usr/bin
+  rmdir sbin
+  install -d -m 755 usr/share/bash-completion
+  mv etc/bash_completion.d usr/share/bash-completion/completions
+
+  # fix python2 shebang, did not do it in prepare() anymore because it
+  # confuse automake
+  find . -type f -exec \
+    sed -i '1s,^#! \?/usr/bin/\(env \|\)python$,#!/usr/bin/python2,' {} \;
+}
+
+# vim:set ts=2 sw=2 et:

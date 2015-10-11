@@ -1,0 +1,78 @@
+
+# HG changeset patch
+# User Victor Stinner <victor.stinner@gmail.com>
+# Date 1442581594 -7200
+# Node ID d4fcb362f7c66b25b22ddc0d27db0cc96acc727b
+# Parent  d04a0954e142f873adee88ec5bc1c1d81cd46bc4
+Issue #25150: Hide the private _Py_atomic_xxx symbols from the public
+Python.h header to fix a compilation error with OpenMP. PyThreadState_GET()
+becomes an alias to PyThreadState_Get() to avoid ABI incompatibilies.
+
+It is important that the _PyThreadState_Current variable is always accessed
+with the same implementation of pyatomic.h. Use the PyThreadState_Get()
+function so extension modules will all reuse the same implementation.
+
+diff --git a/Include/pyatomic.h b/Include/pyatomic.h
+--- a/Include/pyatomic.h
++++ b/Include/pyatomic.h
+@@ -1,8 +1,6 @@
+-/* Issue #23644: <stdatomic.h> is incompatible with C++, see:
+-   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=60932 */
+-#if !defined(Py_LIMITED_API) && !defined(__cplusplus)
+ #ifndef Py_ATOMIC_H
+ #define Py_ATOMIC_H
++#ifdef Py_BUILD_CORE
+ 
+ #include "dynamic_annotations.h"
+ 
+@@ -248,5 +246,5 @@ static __inline__ void
+ #define _Py_atomic_load_relaxed(ATOMIC_VAL) \
+     _Py_atomic_load_explicit(ATOMIC_VAL, _Py_memory_order_relaxed)
+ 
++#endif  /* Py_BUILD_CORE */
+ #endif  /* Py_ATOMIC_H */
+-#endif  /* Py_LIMITED_API */
+diff --git a/Include/pystate.h b/Include/pystate.h
+--- a/Include/pystate.h
++++ b/Include/pystate.h
+@@ -177,20 +177,13 @@ PyAPI_FUNC(int) PyThreadState_SetAsyncEx
+ /* Variable and macro for in-line access to current thread state */
+ 
+ /* Assuming the current thread holds the GIL, this is the
+-   PyThreadState for the current thread.
+-
+-   Issue #23644: pyatomic.h is incompatible with C++ (yet). Disable
+-   PyThreadState_GET() optimization: declare it as an alias to
+-   PyThreadState_Get(), as done for limited API. */
+-#if !defined(Py_LIMITED_API) && !defined(__cplusplus)
++   PyThreadState for the current thread. */
++#ifdef Py_BUILD_CORE
+ PyAPI_DATA(_Py_atomic_address) _PyThreadState_Current;
+-#endif
+-
+-#if defined(Py_DEBUG) || defined(Py_LIMITED_API) || defined(__cplusplus)
+-#define PyThreadState_GET() PyThreadState_Get()
++#  define PyThreadState_GET() \
++             ((PyThreadState*)_Py_atomic_load_relaxed(&_PyThreadState_Current))
+ #else
+-#define PyThreadState_GET() \
+-    ((PyThreadState*)_Py_atomic_load_relaxed(&_PyThreadState_Current))
++#  define PyThreadState_GET() PyThreadState_Get()
+ #endif
+ 
+ typedef
+diff --git a/Misc/NEWS b/Misc/NEWS
+--- a/Misc/NEWS
++++ b/Misc/NEWS
+@@ -11,6 +11,10 @@ Release date: TBA
+ Core and Builtins
+ -----------------
+ 
++- Issue #25150: Hide the private _Py_atomic_xxx symbols from the public
++  Python.h header to fix a compilation error with OpenMP. PyThreadState_GET()
++  becomes an alias to PyThreadState_Get() to avoid ABI incompatibilies.
++
+ Library
+ -------
+ 
+
