@@ -9,7 +9,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=11.0.3
+pkgver=11.0.4
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
@@ -19,19 +19,14 @@ url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
-        LICENSE
-        0001-i965-Remove-early-release-of-DRI2-miptree.patch)
-sha256sums=('ab2992eece21adc23c398720ef8c6933cb69ea42e1b2611dc09d031e17e033d6'
+        LICENSE)
+sha256sums=('40201bf7fc6fa12a6d9edfe870b41eb4dd6669154e3c42c48a96f70805f5483d'
             'SKIP'
-            '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
-            'a3f520ea13c923841c646a5b1627927744938ff691aa08e1aeaf14cce12bd1f7')
+            '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 
 prepare() {
   cd ${srcdir}/?esa-*
-
-  # Should fix FS#45750, tested by heftig - Not merged upstream
-  patch -Np1 -i ../0001-i965-Remove-early-release-of-DRI2-miptree.patch
 
   # Fix detection of libLLVM when built with CMake
   sed -i 's/LLVM_SO_NAME=.*/LLVM_SO_NAME=LLVM/' configure
