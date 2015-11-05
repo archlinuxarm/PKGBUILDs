@@ -3,4 +3,4 @@
 #setenv SAL_USE_VCLPLUGIN gen
 #setenv SAL_USE_VCLPLUGIN kde4
 #setenv SAL_USE_VCLPLUGIN gtk
-#setenv SAL_USE_VCLPLUGIN gtk3
+#setenv SAL_USE_VCLPLUGIN gtk3 # currently broken and not available
