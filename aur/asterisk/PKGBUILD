@@ -4,7 +4,7 @@
 
 pkgname=asterisk
 pkgver=13.5.0
-pkgrel=2
+pkgrel=3
 pkgdesc="A complete PBX solution"
 arch=('i686' 'x86_64')
 backup=('etc/asterisk/acl.conf'
@@ -81,6 +81,7 @@ backup=('etc/asterisk/acl.conf'
 	'etc/asterisk/phoneprov.conf'
 	'etc/asterisk/pjsip.conf'
 	'etc/asterisk/pjsip_notify.conf'
+	'etc/asterisk/pjsip_wizard.conf'
 	'etc/asterisk/queuerules.conf'
 	'etc/asterisk/queues.conf'
 	'etc/asterisk/res_config_mysql.conf'
