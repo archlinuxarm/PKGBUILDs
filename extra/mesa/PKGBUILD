@@ -9,7 +9,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=11.0.4
+pkgver=11.0.5
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
@@ -20,7 +20,7 @@ license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE)
-sha256sums=('40201bf7fc6fa12a6d9edfe870b41eb4dd6669154e3c42c48a96f70805f5483d'
+sha256sums=('9c255a2a6695fcc6ef4a279e1df0aeaf417dc142f39ee59dfb533d80494bb67a'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
