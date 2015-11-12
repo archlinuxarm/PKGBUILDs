@@ -40,7 +40,7 @@ build() {
   ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-gallium-drivers=nouveau,swrast \
+    --with-gallium-drivers=freedreno,nouveau,swrast \
     --with-dri-drivers=nouveau,swrast \
     --with-egl-platforms=x11,drm,wayland \
     --enable-llvm-shared-libs \
