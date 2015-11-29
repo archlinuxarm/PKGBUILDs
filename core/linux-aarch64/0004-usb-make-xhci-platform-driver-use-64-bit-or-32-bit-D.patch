@@ -1,0 +1,44 @@
+From 244a166ec33d083b65b6883e88249e191698d5a5 Mon Sep 17 00:00:00 2001
+From: Mark Langsdorf <mlangsdo@redhat.com>
+Date: Wed, 25 Mar 2015 14:12:51 -0400
+Subject: [PATCH 4/7] usb: make xhci platform driver use 64 bit or 32 bit DMA
+
+The xhci platform driver needs to work on systems that either only
+support 64-bit DMA or only support 32-bit DMA. Attempt to set a
+coherent dma mask for 64-bit DMA, and attempt again with 32-bit
+DMA if that fails.
+
+Signed-off-by: Mark Langsdorf <mlangsdo@redhat.com>
+---
+ drivers/usb/host/xhci-plat.c | 15 +++++++--------
+ 1 file changed, 7 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/usb/host/xhci-plat.c b/drivers/usb/host/xhci-plat.c
+index 890ad9d..122b1fb 100644
+--- a/drivers/usb/host/xhci-plat.c
++++ b/drivers/usb/host/xhci-plat.c
+@@ -93,14 +93,13 @@ static int xhci_plat_probe(struct platform_device *pdev)
+ 	if (irq < 0)
+ 		return -ENODEV;
+ 
+-	/* Initialize dma_mask and coherent_dma_mask to 32-bits */
+-	ret = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+-	if (ret)
+-		return ret;
+-	if (!pdev->dev.dma_mask)
+-		pdev->dev.dma_mask = &pdev->dev.coherent_dma_mask;
+-	else
+-		dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
++	/* Try setting the coherent_dma_mask to 64 bits, then try 32 bits */
++	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
++	if (ret) {
++		ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
++		if (ret)
++			return ret;
++	}
+ 
+ 	hcd = usb_create_hcd(driver, &pdev->dev, dev_name(&pdev->dev));
+ 	if (!hcd)
+-- 
+2.6.1
+

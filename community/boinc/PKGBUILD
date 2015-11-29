@@ -1,0 +1,136 @@
+# $Id$
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Jaroslav Lichtblau <dragonlord@aur.archlinux.org>
+# Contributor: Michal Krenek <mikos@sg1.cz>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - set boinc alternate platform to match their platforms:
+#    https://boinc.berkeley.edu/trac/wiki/BoincPlatforms
+
+pkgbase=boinc
+pkgname=(boinc boinc-nox)
+pkgver=7.6.17
+_tag="client_release/7.6/$pkgver"
+pkgrel=1
+arch=('i686' 'x86_64')
+url="http://boinc.berkeley.edu/"
+license=('LGPL')
+makedepends=('libxslt' 'perl-xml-sax' 'git' 'libxss' 'libnotify' 'wxgtk' 'webkitgtk2' 'sqlite3' 'curl' 'inetutils' 'libxmu' 'freeglut' 'glu' 'mesa')
+install=$pkgbase.install
+options=('!staticlibs')
+source=("git+https://github.com/BOINC/boinc.git#tag=$_tag"
+         boinc.bash
+         boinc.desktop
+         boinc.service
+         boinc.sysusers
+         boinc-AM_CONDITIONAL.patch)
+md5sums=('SKIP'
+         '4d00e1aa4090a3f51feb20f5a541b9ee'
+         'db62de2f08117e6379a3c613b58fa7ff'
+         '3d5cbab785cc8b004661b17c65883fd5'
+         '240f952d38c5814cc3d8cd1668fe2154'
+         'e27047518dec54d4db38816487a28661')
+
+prepare() {
+  cd "$srcdir/$pkgbase"
+  patch -Np1 -i "${srcdir}/boinc-AM_CONDITIONAL.patch"
+
+  ./_autosetup
+
+  cp -r "$srcdir/$pkgbase" "$srcdir/$pkgbase-nox"
+}
+
+build() {
+  if [[ $CARCH == "arm" ]]; then
+    CONFIG="--with-boinc-alt-platform=arm-linux-gnueabisf"
+  else
+    CONFIG="--with-boinc-alt-platform=arm-linux-gnueabihf"
+  fi
+
+  cd "$srcdir/$pkgbase"
+  LDFLAGS='-lX11' ./configure \
+    --prefix=/usr \
+    --enable-libraries \
+    --enable-unicode \
+    --enable-shared \
+    --enable-dynamic-client-linkage \
+    --enable-client \
+    --enable-manager \
+    --disable-static \
+    --disable-server \
+    --with-ssl \
+    --with-x \
+    --with-wxdir=/usr/lib \
+    --with-wx-config=$(which wx-config) \
+    ${CONFIG}
+  make
+
+  # Build boinc-nox
+  cd "$srcdir/$pkgbase-nox"
+  PKG_CONFIG=/usr/bin/pkg-config ./configure \
+    --prefix=/usr \
+    --enable-libraries \
+    --enable-unicode \
+    --enable-shared \
+    --enable-dynamic-client-linkage \
+    --enable-client \
+    --disable-server \
+    --disable-xss \
+    --disable-static \
+    --disable-manager \
+    --with-ssl \
+    --without-wxdir \
+    --without-x \
+    ${CONFIG}
+  make
+}
+
+package_boinc() {
+  pkgdesc="Berkeley Open Infrastructure for Network Computing for desktop"
+  depends=("libxss" "libnotify" "wxgtk" "webkitgtk2" "curl" "sqlite3")
+
+  cd $pkgbase
+
+  make DESTDIR="$pkgdir" install
+
+  #install systemd unit
+  install -Dm644 "${srcdir}/$pkgbase.service" "${pkgdir}/usr/lib/systemd/system/$pkgbase.service"
+
+  #install sysusers conf
+  install -Dm644 "${srcdir}/$pkgbase.sysusers" "${pkgdir}/usr/lib/sysusers.d/$pkgbase.conf"
+
+  #install bash-completion
+  install -Dm644 "${srcdir}/$pkgbase.bash" "${pkgdir}/usr/share/bash-completion/completions/$pkgbase"
+
+  #install .desktop File
+  install -Dm644 "${srcdir}/${pkgbase}.desktop" "${pkgdir}/usr/share/applications/${pkgbase}.desktop"
+
+  #install icons
+  install -Dm644 "${srcdir}/${pkgbase}/packages/generic/sea/boincmgr.48x48.png" "${pkgdir}/usr/share/pixmaps/$pkgbase.png"
+
+  #remove initscripts stuff
+  rm -rf "$pkgdir/etc"
+}
+
+package_boinc-nox() {
+  pkgdesc="Berkeley Open Infrastructure for Network Computing for desktop without Xorg dependencies"
+  depends=("curl" "libjpeg-turbo")
+  provides=("boinc")
+  conflicts=("boinc")
+
+  cd $pkgbase-nox
+
+  make DESTDIR="$pkgdir" install
+
+  #install systemd unit
+  install -Dm644 "${srcdir}/$pkgbase.service" "${pkgdir}/usr/lib/systemd/system/$pkgbase.service"
+
+  #install sysusers conf
+  install -Dm644 "${srcdir}/$pkgbase.sysusers" "${pkgdir}/usr/lib/sysusers.d/$pkgbase.conf"
+
+  #install bash-completion
+  install -Dm644 "${srcdir}/$pkgbase.bash" "${pkgdir}/usr/share/bash-completion/completions/$pkgbase"
+
+  #remove initscripts stuff
+  rm -rf "$pkgdir/etc"
+}

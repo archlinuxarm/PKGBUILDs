@@ -87,3 +87,117 @@ index de78333..09b70e5 100644
  	$(GLCC) $(GLO_)gdevdflt.$(OBJ) $(C_) $(GLSRC)gdevdflt.c
  
  $(GLOBJ)gdevdgbr.$(OBJ) : $(GLSRC)gdevdgbr.c $(AK) $(gx_h)\
+From 007bd77d08d800e6b07274d62e3c91be7c4a3f47 Mon Sep 17 00:00:00 2001
+From: Ken Sharp <ken.sharp@artifex.com>
+Date: Mon, 12 Oct 2015 16:36:11 +0100
+Subject: [PATCH] Guard against NULL 'base' for non-clist devices
+
+Bug #696246 "Ghostscript 9.18 with -dFirstPage/-dLastPage fails for ijs and some x11 devices"
+
+This is actually for the plib device. This device is currently (this will
+change in the next commit) set to BandingAuto, despite the fact that the
+device only works in banding mode.
+
+This can lead to use arriving in gdev_mem_open_scan_lines with all of
+mdev->bitmap_memory, mdev->line_pointers_memory and mdev->base being set to
+NULL. The code didn't check and assumed that mdev->base was valid, which
+led to a later seg fault.
+
+Here we just check to make sure it isn't NULL and return an error if it is.
+This doesn't prevent the possibility of garbage uninitialised values, but
+there's not much we can do to check that at this stage, devices are supposed
+to be initialised to 0 so this 'shouldn't' happen.
+
+No differences expected.
+---
+ base/gdevmem.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/base/gdevmem.c b/base/gdevmem.c
+index 3019451f..507fa19 100644
+--- a/base/gdevmem.c
++++ b/base/gdevmem.c
+@@ -471,6 +471,9 @@ gdev_mem_open_scan_lines(gx_device_memory *mdev, int setup_height)
+         line_pointers_adjacent = false;
+     }
+     if (line_pointers_adjacent) {
++        if (mdev->base == 0)
++            return_error(gs_error_rangecheck);
++
+         gdev_mem_bits_size(mdev, mdev->width, mdev->height, &size);
+         mdev->line_ptrs = (byte **)(mdev->base + size);
+     }
+-- 
+2.5.1
+
+From 1bdbe4f87dc57648821e613ebcc591b84e8b35b3 Mon Sep 17 00:00:00 2001
+From: Ken Sharp <ken.sharp@artifex.com>
+Date: Mon, 12 Oct 2015 16:38:09 +0100
+Subject: [PATCH] Ensure plib devices always use the clist
+
+Bug #696246 "Ghostscript 9.18 with -dFirstPage/-dLastPage fails for ijs and some x11 devices"
+
+the plib* class of devices only work if clist is present, but previously
+they left the banding_type set to 'auto', which meant that under some
+conditions we did not use the clist, leading to a seg fault.
+
+This commit simply forces banding_type to be 'BandingAlways'.
+
+No differences expected.
+---
+ devices/gdevplib.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/devices/gdevplib.c b/devices/gdevplib.c
+index 51bd7ea..87c6f46 100644
+--- a/devices/gdevplib.c
++++ b/devices/gdevplib.c
+@@ -691,6 +691,8 @@ plib_open(gx_device * pdev)
+     bdev->printer_procs.buf_procs.size_buf_device = plib_size_buf_device;
+     pdev->is_planar = 1;
+ 
++    bdev->space_params.banding_type = BandingAlways;
++
+     /* You might expect us to call gdev_prn_open_planar rather than
+      * gdev_prn_open, but if we do that, it overwrites the 2 function
+      * pointers we've just overwritten! */
+-- 
+2.5.1
+
+From 5571ddfa377c5d7d98f55af40e693814ac287ae4 Mon Sep 17 00:00:00 2001
+From: Ken Sharp <ken.sharp@artifex.com>
+Date: Mon, 12 Oct 2015 16:40:10 +0100
+Subject: [PATCH] prevent rinkj device crash when misconfigured (no SetupFile)
+
+Bug #696246 "Ghostscript 9.18 with -dFirstPage/-dLastPage fails for ijs and some x11 devices"
+
+The rinkj device requires a SetupFile to be given as a device parameter,
+however it doesn't actually check to see if one is given, and just tries
+to open the filename, with a predictable crash when none is given.
+
+Here we check the filename and attempt to ensure it is both present and
+minimally valid.
+
+No differences expected.
+---
+ devices/gdevrinkj.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/devices/gdevrinkj.c b/devices/gdevrinkj.c
+index f55bc60..12c396a 100644
+--- a/devices/gdevrinkj.c
++++ b/devices/gdevrinkj.c
+@@ -1193,6 +1193,10 @@ rinkj_print_page(gx_device_printer *pdev, FILE *file)
+     int code = 0;
+     RinkjDevice *cmyk_dev;
+ 
++    if (rdev->setup_fn == 0 || rdev->setup_fn[0] == 0) {
++        emprintf(rdev->memory, "Error, SetupFile not defined, output aborted\n");
++        return 0;
++    }
+     cmyk_dev = rinkj_init(rdev, file);
+     if (cmyk_dev == 0)
+         return gs_note_error(gs_error_ioerror);
+-- 
+2.5.1
+
