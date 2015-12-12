@@ -32,11 +32,11 @@ fi
 # fusing images
 
 echo "u-boot fusing"
-dd if=/boot/u-boot-clearfog.mmc of=/dev/mmcblk0 bs=512 seek=1
+dd if=./u-boot-clearfog.mmc of=$1 bs=512 seek=1
 
 echo "u-boot environemnt fusing"
-dd if=/dev/zero of=/dev/mmcblk0 bs=512 seek=1920 count=128
-dd if=/boot/clearfog.env of=/dev/mmcblk0 bs=512 seek=1920
+dd if=/dev/zero of=$1 bs=512 seek=1920 count=128
+dd if=./clearfog.env of=$1 bs=512 seek=1920
 
 ####################################
 #<Message Display>
