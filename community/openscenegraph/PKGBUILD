@@ -1,0 +1,86 @@
+# $Id$
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Maintainer: Hans Janssen <janserv@gmail.com>
+# Contributor: my64 <packages@obordes.com>
+# Contributor: Colin Pitrat <colin.pitrat@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - build v5/6/7 for GLES
+
+pkgname=openscenegraph
+pkgver=3.2.3
+pkgrel=1
+pkgdesc="An Open Source, high performance real-time graphics toolkit"
+arch=('i686' 'x86_64')
+license=('custom:OSGPL')
+url="http://www.openscenegraph.org"
+depends=('giflib' 'jasper' 'librsvg' 'xine-lib' 'curl' 'pth')
+makedepends=('cmake' 'libvncserver' 'qt5-base' 'ffmpeg-compat' 'mesa')
+optdepends=('libvncserver' 'gdal' 'openexr' 'poppler-glib' 'qt5-base' 'ffmpeg-compat')
+conflicts=('openthreads')
+provides=('openthreads')
+#source=(http://www.openscenegraph.org/downloads/stable_releases/OpenSceneGraph-$pkgver/source/OpenSceneGraph-$pkgver.zip
+source=(http://trac.openscenegraph.org/downloads/developer_releases/OpenSceneGraph-$pkgver.zip
+	https://github.com/openscenegraph/osg/commit/49d560f4d9d0641c98df67264b7ace4733c6b9a9.patch
+	giflib.patch)
+md5sums=('02ffdad7744c747d8fad0d7babb58427'
+         '6e3c75677f87113f18912916352c6cbd'
+         '8c06c8410e8840e83c242b8b401cdad7')
+
+prepare() {
+  cd OpenSceneGraph-$pkgver
+#  patch -p1 <$srcdir/giflib.patch
+#  patch -p1 <$srcdir/49d560f4d9d0641c98df67264b7ace4733c6b9a9.patch
+}
+
+build() {
+  cd OpenSceneGraph-$pkgver
+  export PKG_CONFIG_PATH=/usr/lib/ffmpeg-compat/pkgconfig:$PKG_CONFIG_PATH
+  LDFLAGS="$LDFLAGS -Wl,-rpath -Wl,/usr/lib/ffmpeg-compat"
+  CFLAGS="$CFLAGS -D__STDC_CONSTANT_MACROS"
+  CXXFLAGS="$CXXFLAGS -D__STDC_CONSTANT_MACROS"
+
+  if [[ $CARCH != "aarch64" ]]; then
+    GLES_ONLY=(
+      -DOSG_GL1_AVAILABLE=OFF
+      -DOSG_GL2_AVAILABLE=OFF
+      -DOSG_GL3_AVAILABLE=OFF
+      -DOSG_GLES1_AVAILABLE=OFF
+      -DOSG_GLES2_AVAILABLE=ON
+      -DOSG_GL_DISPLAYLISTS_AVAILABLE=OFF
+      -DSG_GL_MATRICES_AVAILABLE=OFF
+      -DOSG_GL_VERTEX_FUNCS_AVAILABLE=OFF
+      -DOSG_GL_VERTEX_ARRAY_FUNCS_AVAILABLE=OFF
+      -DOSG_GL_FIXED_FUNCTION_AVAILABLE=OFF
+      -DOSG_CPP_EXCEPTIONS_AVAILABLE=OFF
+      -DOPENGL_INCLUDE_DIR=/usr/include
+      -DOPENGL_LIBRARY=/usr/lib/libGLESv2.so
+      -DOPENGL_egl_LIBRARY=/usr/lib/libEGL.so
+    )
+  fi
+
+  [ $NOEXTRACT -eq 1 ] || cmake . \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DFFMPEG_LIBAVCODEC_INCLUDE_DIRS=/usr/include/ffmpeg-compat \
+    -DFFMPEG_LIBAVCODEC_LIBRARIES=/usr/lib/ffmpeg-compat/libavcodec.so \
+    -DFFMPEG_LIBAVDEVICE_INCLUDE_DIRS=/usr/include/ffmpeg-compat \
+    -DFFMPEG_LIBAVDEVICE_LIBRARIES=/usr/lib/ffmpeg-compat/libavdevice.so \
+    -DFFMPEG_LIBAVFORMAT_INCLUDE_DIRS=/usr/include/ffmpeg-compat \
+    -DFFMPEG_LIBAVFORMAT_LIBRARIES=/usr/lib/ffmpeg-compat/libavformat.so \
+    -DFFMPEG_LIBAVUTIL_INCLUDE_DIRS=/usr/include/ffmpeg-compat \
+    -DFFMPEG_LIBAVUTIL_LIBRARIES=/usr/lib/ffmpeg-compat/libavutil.so \
+    -DFFMPEG_LIBSWSCALE_INCLUDE_DIRS=/usr/include/ffmpeg-compat \
+    -DFFMPEG_LIBSWSCALE_LIBRARIES=/usr/lib/ffmpeg-compat/libswscale.so \
+    ${GLES_ONLY[@]}
+
+#  sed -i 's|#include <curl/types.h>|//#include <curl/types.h>|' src/osgPlugins/curl/ReaderWriterCURL.cpp
+  make
+}
+
+package() {
+  cd OpenSceneGraph-$pkgver
+  make DESTDIR="$pkgdir" install
+  install -D -m644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  [ -d "$pkgdir/usr/lib64" ] && mv "$pkgdir/usr/lib64" "$pkgdir/usr/lib" || true
+}
