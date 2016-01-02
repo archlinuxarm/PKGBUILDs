@@ -1,0 +1,169 @@
+From 4d79e13acaf13acdf8f8a84cfa3fdda211f8aa81 Mon Sep 17 00:00:00 2001
+From: Unbit <info@unbit.it>
+Date: Tue, 29 Dec 2015 08:53:19 +0100
+Subject: [PATCH 12/12] official php7 support (beta) #1124
+
+---
+ plugins/php/common.h       |  4 ++++
+ plugins/php/php_plugin.c   | 20 ++++++++++++++++++++
+ plugins/php/session.c      | 19 ++++++++++++++++++-
+ plugins/php/uwsgiplugin.py |  4 +++-
+ 4 files changed, 45 insertions(+), 2 deletions(-)
+
+diff --git a/plugins/php/common.h b/plugins/php/common.h
+index 8c1ed13..9bf1c06 100644
+--- a/plugins/php/common.h
++++ b/plugins/php/common.h
+@@ -3,7 +3,11 @@
+ #include "php_main.h"
+ #include "php_variables.h"
+ 
++#if (PHP_MAJOR_VERSION < 7)
+ #include "ext/standard/php_smart_str.h"
++#else
++#define UWSGI_PHP7
++#endif
+ #include "ext/standard/info.h"
+ 
+ #include "ext/session/php_session.h"
+diff --git a/plugins/php/php_plugin.c b/plugins/php/php_plugin.c
+index b1b6f7a..6d9e952 100644
+--- a/plugins/php/php_plugin.c
++++ b/plugins/php/php_plugin.c
+@@ -65,7 +65,11 @@ struct uwsgi_option uwsgi_php_options[] = {
+ };
+ 
+ 
++#ifdef UWSGI_PHP7
++static size_t sapi_uwsgi_ub_write(const char *str, size_t str_length TSRMLS_DC)
++#else
+ static int sapi_uwsgi_ub_write(const char *str, uint str_length TSRMLS_DC)
++#endif
+ {
+ 	struct wsgi_request *wsgi_req = (struct wsgi_request *) SG(server_context);
+ 
+@@ -111,7 +115,11 @@ static int sapi_uwsgi_send_headers(sapi_headers_struct *sapi_headers TSRMLS_DC)
+ 	return SAPI_HEADER_SENT_SUCCESSFULLY;
+ }
+ 
++#ifdef UWSGI_PHP7
++static size_t sapi_uwsgi_read_post(char *buffer, size_t count_bytes TSRMLS_DC)
++#else
+ static int sapi_uwsgi_read_post(char *buffer, uint count_bytes TSRMLS_DC)
++#endif
+ {
+ 	uint read_bytes = 0;
+ 	
+@@ -235,7 +243,11 @@ PHP_MINIT_FUNCTION(uwsgi_php_minit) {
+ }
+ 
+ PHP_FUNCTION(uwsgi_version) {
++#ifdef UWSGI_PHP7
++	RETURN_STRING(UWSGI_VERSION);
++#else
+ 	RETURN_STRING(UWSGI_VERSION, 1);
++#endif
+ }
+ 
+ PHP_FUNCTION(uwsgi_worker_id) {
+@@ -321,7 +333,11 @@ PHP_FUNCTION(uwsgi_cache_get) {
+ 	if (value) {
+ 		char *ret = estrndup(value, valsize);
+ 		free(value);
++#ifdef UWSGI_PHP7
++		RETURN_STRING(ret);
++#else
+ 		RETURN_STRING(ret, 0);
++#endif
+ 	}
+ 	RETURN_NULL();
+ }
+@@ -425,7 +441,11 @@ PHP_FUNCTION(uwsgi_rpc) {
+ 		// here we do not free varargs for performance reasons
+ 		char *ret = estrndup(response, size);
+ 		free(response);
++#ifdef UWSGI_PHP7
++		RETURN_STRING(ret);
++#else
+ 		RETURN_STRING(ret, 0);
++#endif
+         }
+ 
+ clear:
+diff --git a/plugins/php/session.c b/plugins/php/session.c
+index 40f9ef7..2312b6b 100644
+--- a/plugins/php/session.c
++++ b/plugins/php/session.c
+@@ -12,21 +12,34 @@ PS_CLOSE_FUNC(uwsgi) {
+ PS_READ_FUNC(uwsgi) {
+ 	char *cache = PS_GET_MOD_DATA();
+ 	uint64_t valsize = 0;
+-	char *value = uwsgi_cache_magic_get((char *)key, strlen(key), &valsize, NULL, cache);
++#ifdef UWSGI_PHP7
++	char *value = uwsgi_cache_magic_get(key->val, key->len , &valsize, NULL, cache);
++#else
++	char *value = uwsgi_cache_magic_get((char *)key, strlen((char *)key), &valsize, NULL, cache);
++#endif
+         if (!value) return FAILURE;
++#ifdef UWSGI_PHP7
++	*val = zend_string_init(value, valsize, 0);
++#else
+ 	char *new_val = emalloc(valsize);
+ 	memcpy(new_val, value, valsize);
+ 	free(value);
+ 	*val = new_val;
+ 	*vallen = valsize;
++#endif
+ 	return SUCCESS;
+ 	
+ }
+ 
+ PS_WRITE_FUNC(uwsgi) {
+ 	char *cache = PS_GET_MOD_DATA();
++#ifdef UWSGI_PHP7
++	if (val->len == 0) return SUCCESS;
++	if (!uwsgi_cache_magic_set(key->val, key->len, val->val, val->len, 0, UWSGI_CACHE_FLAG_UPDATE, cache)) {
++#else
+ 	if (vallen == 0) return SUCCESS;
+ 	if (!uwsgi_cache_magic_set((char *)key, strlen(key), (char *)val, vallen, 0, UWSGI_CACHE_FLAG_UPDATE, cache)) {
++#endif
+ 		return SUCCESS;	
+ 	}
+ 	return FAILURE;
+@@ -34,7 +47,11 @@ PS_WRITE_FUNC(uwsgi) {
+ 
+ PS_DESTROY_FUNC(uwsgi) {
+ 	char *cache = PS_GET_MOD_DATA();
++#ifdef UWSGI_PHP7
++	if (!uwsgi_cache_magic_del(key->val, key->len, cache)) {
++#else
+ 	if (!uwsgi_cache_magic_del((char *)key, strlen(key), cache)) {
++#endif
+ 		return SUCCESS;
+ 	}
+ 	return FAILURE;
+diff --git a/plugins/php/uwsgiplugin.py b/plugins/php/uwsgiplugin.py
+index e7ce425..45c58e5 100644
+--- a/plugins/php/uwsgiplugin.py
++++ b/plugins/php/uwsgiplugin.py
+@@ -12,6 +12,8 @@ if phpdir:
+ 
+ PHPPATH = os.environ.get('UWSGICONFIG_PHPPATH', PHPPATH)
+ 
++php_version = os.popen(PHPPATH + ' --version').read().rstrip().split('.')[0]
++
+ CFLAGS = [os.popen(PHPPATH + ' --includes').read().rstrip(), '-Wno-sign-compare']
+ LDFLAGS = os.popen(PHPPATH + ' --ldflags').read().rstrip().split()
+ 
+@@ -19,7 +21,7 @@ if ld_run_path:
+     LDFLAGS.append('-L%s' % ld_run_path)
+     os.environ['LD_RUN_PATH'] = ld_run_path
+ 
+-LIBS = [os.popen(PHPPATH + ' --libs').read().rstrip(), '-lphp5']
++LIBS = [os.popen(PHPPATH + ' --libs').read().rstrip(), '-lphp' + php_version]
+ 
+ phplibdir = os.environ.get('UWSGICONFIG_PHPLIBDIR')
+ if phplibdir:
+-- 
+2.6.4
+
