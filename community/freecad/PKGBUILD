@@ -1,0 +1,77 @@
+# Maintainer: Florian Pritz <bluewind@xinu.at>
+# Contributor: Jonas Heinrich <onny@project-insanity.org>
+# Contributor: Jonas Heinrich <onny@project-insanity.org>
+# Contributor: Jordi De Groof <jordi (dot) degroof (at) gmail (dot) com>
+# Contributor: mickele
+# Contributor: manwithgrenade
+# Contributor: bricem13
+# Contributor: gborzi
+
+# ALARM: Fredrik Söderström <tirithen@gmail.com>
+#  - Adds armv7h to arch array
+
+pkgname=freecad
+pkgver=0.15.4671
+pkgrel=3
+pkgdesc='A general purpose 3D CAD modeler'
+arch=('i686' 'x86_64' 'armv7h')
+url='http://www.freecadweb.org/'
+license=('LGPL')
+depends=('boost-libs' 'curl' 'opencascade>=6.6.0' 'python2-pivy' 'xerces-c'
+         'libspnav' 'shared-mime-info' 'hicolor-icon-theme'
+         'python2-matplotlib' 'python2-shiboken' 'python2-pyside-tools' 'pyside-tools-common' 'qtwebkit')
+makedepends=('boost' 'eigen' 'gcc-fortran' 'swig' 'xerces-c' 'desktop-file-utils' 'cmake' 'coin>=3.1.3-9')
+# TODO add reasons
+optdepends=('python2-matplotlib' 'pycollada-git' 'python2-pyqt4')
+install=freecad.install
+source=("http://downloads.sourceforge.net/sourceforge/free-cad/freecad_${pkgver}.tar.gz"
+	"${pkgname}.desktop"
+	"${pkgname}.xml")
+md5sums=('7afa95d3e8cd845bef83202e76db7f24'
+         '382cd66757dae635b53105d207679fce'
+         'c2f4154c8e4678825411de8e7fa54c6b')
+
+prepare() {
+  sed -i \
+    -e "46i\\\tModDir = '/usr/share/freecad/Mod'" \
+    -e "50i\\\tLibDir = '/usr/lib/freecad'" \
+    "${srcdir}/freecad-${pkgver}/src/App/FreeCADInit.py"
+
+  sed -i \
+	  -e 's|\bpyside-uic\b|python2-pyside-uic|' \
+	  $srcdir/freecad-$pkgver/cMake/FindPySideTools.cmake
+}
+
+build() {
+  cd "${srcdir}/freecad-${pkgver}/"
+  cmake \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX:PATH="/usr" \
+    -DCMAKE_INSTALL_DOCDIR:PATH="share/freecad/doc" \
+    -DCMAKE_INSTALL_DATADIR:PATH="share/freecad" \
+    -DCMAKE_INSTALL_LIBDIR:PATH="lib/freecad" \
+    -DOCC_INCLUDE_DIR:PATH=/opt/opencascade/inc/ \
+    -DPYTHON_EXECUTABLE:FILEPATH=/usr/bin/python2 \
+    -DFREECAD_USE_EXTERNAL_PIVY:BOOL=ON
+  make
+}
+
+package() {
+  cd "${srcdir}/freecad-${pkgver}"
+  make DESTDIR="${pkgdir}" install
+
+  # Symlink to /usr/bin
+  ln -sf "FreeCAD" "${pkgdir}/usr/bin/freecad"
+  ln -sf "FreeCADCmd" "${pkgdir}/usr/bin/freecadcmd"
+
+  cp -ra "${pkgdir}/usr/Mod" "${pkgdir}/usr/share/freecad/"
+  rm -r "${pkgdir}/usr/Mod"
+
+  # Install pixmaps and desktop shortcut
+  desktop-file-install \
+    --dir="${pkgdir}/usr/share/applications" \
+    "${srcdir}/${pkgname}.desktop"
+
+  # Mime info
+  install -D -m644 "${srcdir}/${pkgname}.xml" "${pkgdir}/usr/share/mime/packages/${pkgname}.xml"
+}
