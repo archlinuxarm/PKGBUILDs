@@ -5,9 +5,9 @@ buildarch=4
 
 pkgbase=odroid-xu3-libgl
 pkgname=("${pkgbase}-x11" "${pkgbase}-fb" "${pkgbase}-headers")
-pkgver=r5p0
+pkgver=r9p0
 pkgrel=1
-_commit=d735a24bfe654a27c124f2928ff16ee69d544f25
+_commit=543eb787af5719224c2231490d5ebda71c1ec7a8
 arch=('armv7h')
 url="http://www.hardkernel.com/"
 license=('Proprietary')
@@ -46,5 +46,5 @@ package_odroid-xu3-libgl-headers() {
   provides=('opencl-headers')
 
   install -d "${pkgdir}"/usr/include
-  cp -a 5422_mali/headers/CL{,_1_2} "${pkgdir}"/usr/include
+  cp -a 5422_mali/headers/CL{,_1_2,_2_0} "${pkgdir}"/usr/include
 }
