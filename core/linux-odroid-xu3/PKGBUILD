@@ -9,19 +9,24 @@ _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.92
-pkgrel=4
+pkgrel=5
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
+        'kernel-CVE-2016-0728.patch'
         'config')
 md5sums=('30c36a14f8be4fd73f072e5d4f2e13ad'
+         '6470e9783bd1c7a8feddc2d67f07afd5'
          'e7c4efba98b936c656f91205626f0346')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
+
+  # CVE-2016-0728
+  git apply ../kernel-CVE-2016-0728.patch
 
   cat "${srcdir}/config" > ./.config
 
