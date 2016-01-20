@@ -10,16 +10,20 @@
 
 pkgname=mysql-workbench
 pkgver=6.3.6
-pkgrel=1
+pkgrel=2
+_mysql_version=5.7.10
+_connector_version=1.1.6
+_gdal_version=2.0.1
+_boost_version=1.59.0
 pkgdesc='A cross-platform, visual database design tool developed by MySQL'
 arch=('i686' 'x86_64')
 url='https://www.mysql.com/products/workbench/'
 license=('GPL2')
-depends=('python2' 'libzip' 'libmariadbclient' 'gtkmm' 'ctemplate'
-	'libgnome-keyring' 'libgl' 'python2-paramiko' 'python2-pexpect' 'gdal'
+depends=('python2' 'libzip' 'gtkmm' 'ctemplate'
+	'libgnome-keyring' 'libgl' 'python2-paramiko' 'python2-pexpect'
 	'pcre' 'tinyxml' 'libxml2' 'mysql-python' 'cairo'
 	'python2-cairo' 'hicolor-icon-theme' 'desktop-file-utils' 'libiodbc'
-	'mysql-connector-c++' 'vsqlite++' 'unixodbc' 'freetype2'
+	'vsqlite++' 'unixodbc' 'freetype2'
 	'libantlr3c')
 optdepends=('gnome-keyring: store SSH/MySQL passwords in GNOME password manager'
 	'python2-pyodbc: database migration')
@@ -27,22 +31,26 @@ makedepends=('cmake' 'boost' 'curl' 'mesa' 'swig' 'java-runtime' 'imagemagick')
 install=mysql-workbench.install
 validpgpkeys=('A4A9406876FCBD3C456770C88C718D3B5072E1F5')
 source=("http://cdn.mysql.com/Downloads/MySQLGUITools/mysql-workbench-community-${pkgver}-src.tar.gz"{,.asc}
+	"http://cdn.mysql.com/Downloads/MySQL-5.7/mysql-${_mysql_version}.tar.gz"{,.asc}
+	"http://cdn.mysql.com/Downloads/Connector-C++/mysql-connector-c++-${_connector_version}.tar.gz"{,.asc}
+	"http://download.osgeo.org/gdal/${_gdal_version}/gdal-${_gdal_version}.tar.gz"
+	"https://downloads.sourceforge.net/project/boost/boost/${_boost_version}/boost_${_boost_version//./_}.tar.bz2"
 	'http://www.antlr3.org/download/antlr-3.4-complete.jar'
 	'0001-mysql-workbench-no-check-for-updates.patch'
-	'0007-mysql-workbench-no-set-gtid-purged.patch'
-	'0009-mysql-workbench-gnome-keyring.patch'
-	'0010-mysql-workbench-object.patch'
-	'0013-mysql-workbench-no-json.patch'
+	'0002-mysql-connector-c++-json.patch'
 	'arch_linux_profile.xml')
 sha256sums=('c51fce1a3fd9425dd9adf4d16e24e84f92e2f8374b43a956f580fd84d03afe62'
             'SKIP'
+            '1ea1644884d086a23eafd8ccb04d517fbd43da3a6a06036f23c5c3a111e25c74'
+            'SKIP'
+            'ad710b3900cae3be94656825aa70319cf7a96e1ad46bf93e07275f3606f69447'
+            'SKIP'
+            'b55f794768e104a2fd0304eaa61bb8bda3dc7c4e14f2c9d0913baca3e55b83ab'
+            '727a932322d94287b62abb1bd2d41723eec4356a7728909e38adb65ca25241ca'
             '9d3e866b610460664522520f73b81777b5626fb0a282a5952b9800b751550bf7'
             'b189e15c6b6f5a707357d9a9297f39ee3a33264fd28b44d5de6f537f851f82cf'
-            'b49d4ea352d2c2013b9c5834668c44521a0a2c5f9c7e3fe746ad94ce0d2bb865'
-            '9c2ae2fe7a4f59502bdcf591a07353c350b0ba29c3935c8242d97848cc0e50d3'
-            '2bc79f935cd5059409d32aa64832b7aa2c49ba533cc93d40a063bcbfe01a4485'
-            '663b6eed3715988e16a695f5810bdfb7e76aaeb28baaf4b11b2a73ee2bcb403d'
-            '28724c4b4cec29ce19aada08279df1b086381cd788fef7ae07c1860f7d17af7e')
+            '4beb8b6c92f6b2b2189bfdd2f1a073ad54d501f05ef4686e47c661b40f63b9d3'
+            '2ade582ca25f6d6d748bc84a913de39b34dcaa6e621a77740fe143007f2833af')
 
 prepare() {
 	cd "${srcdir}/mysql-workbench-community-${pkgver}-src/"
@@ -51,56 +59,83 @@ prepare() {
 	# Updates are provided via Arch Linux packages
 	patch -Np1 < "${srcdir}"/0001-mysql-workbench-no-check-for-updates.patch
 
-	# mysqldump from mariadb (currently 1.0.16) does not support --set-gtid-purged
-	patch -Np1 < "${srcdir}"/0007-mysql-workbench-no-set-gtid-purged.patch
-
-	# fix gnome-keyring
-	patch -Np1 < "${srcdir}"/0009-mysql-workbench-gnome-keyring.patch
-
-	# fix cannot call member function without object
-	patch -Np1 < "${srcdir}"/0010-mysql-workbench-object.patch
-
-	# we have no JSON, probably missing in mariadb
-	patch -Np1 < "${srcdir}"/0013-mysql-workbench-no-json.patch
-
-	# make cmake happy with mariadb
-	sed -i '/^find_package(MySQL /c find_package(MySQL REQUIRED)' \
-		CMakeLists.txt
-
 	# we need python 2.x
 	sed -i '/^FIND_PROGRAM(PYTHON_EXEC /c FIND_PROGRAM(PYTHON_EXEC "python2")' \
 		CMakeLists.txt
 
-	# fix the swig workaround
-	sed -i '/SWIG_VERSION/s/0x030008/0x030006/' \
-		library/forms/mforms/textbox.h \
-		library/forms/swig/mforms.i
-
-	# fix GDAL
-	sed -i '/#include/s|gdal/||' \
-		backend/wbpublic/grtui/geom_draw_box.h \
-		backend/wbpublic/grt/spatial_handler.h \
-		backend/wbpublic/objimpl/db.query/db_query_Resultset.cpp
-
+	# MySQL connector C++ is lagging behind and misses JSON support
+	cd "${srcdir}/mysql-connector-c++-${_connector_version}/"
+	patch -Np1 < "${srcdir}"/0002-mysql-connector-c++-json.patch
 
 	# put antlr into place
 	install -D ${srcdir}/antlr-3.4-complete.jar ${srcdir}/linux-res/bin/antlr-3.4-complete.jar
 }
 
 build() {
-	cd "${srcdir}/mysql-workbench-community-${pkgver}-src/"
+	# Build mysql
+	cd "${srcdir}/mysql-${_mysql_version}"
+	cmake . \
+		-DBUILD_CONFIG=mysql_release \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_INSTALL_LIBDIR=lib \
+		-DSYSCONFDIR=/etc/mysql \
+		-DMYSQL_DATADIR=/var/lib/mysql \
+		-DWITH_BOOST="${srcdir}/boost_${_boost_version//./_}"
+	make
+	make DESTDIR="${srcdir}/install-bundle/" install
 
-	# link to libsigc++, which requires ISO C++ 2011 standard
-	# so add the flag to enable c++11
+	# Build mysql-connector-c++
+	cd "${srcdir}/mysql-connector-c++-${_connector_version}/"
+	cmake . \
+		-Wno-dev \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_LIBDIR=lib \
+		-DMYSQLCPPCONN_BUILD_EXAMPLES=OFF \
+		-DMYSQL_DIR="${srcdir}/install-bundle/" \
+		-DMYSQL_CONFIG_EXECUTABLE="${srcdir}/install-bundle/usr/bin/mysql_config" \
+		-DBOOST_ROOT:STRING="${srcdir}/boost_${_boost_version//./_}"
+
+	make DESTDIR="${srcdir}/install-bundle/" install
+
+	# Build gdal
+	cd "${srcdir}/gdal-${_gdal_version}/"
+	./configure \
+		--prefix=/usr \
+		--includedir=/usr/include/gdal \
+		--with-sqlite3 \
+		--with-mysql="${srcdir}/install-bundle/usr/bin/mysql_config" \
+		--with-curl
+	make
+	make DESTDIR="${srcdir}/install-bundle/" install
+
+	# Build MySQL Workbench itself with bundled libs
+	cd "${srcdir}/mysql-workbench-community-${pkgver}-src/"
 	cmake . \
 		-DCMAKE_INSTALL_PREFIX:PATH=/usr \
 		-DCMAKE_CXX_FLAGS="${CXXFLAGS} -std=c++11 -fsigned-char"
-
+		-DCMAKE_BUILD_TYPE=Release \
+		-DMySQL_CONFIG_PATH="${srcdir}/install-bundle/usr/bin/mysql_config" \
+		-DMYSQLCPPCONN_LIBRARY="-L${srcdir}/install-bundle/usr/lib -lmysqlcppconn" \
+		-DMYSQLCPPCONN_INCLUDE_DIR="${srcdir}/install-bundle/usr/include" \
+		-DGDAL_INCLUDE_DIR="${srcdir}/install-bundle/usr/include" \
+		-DGDAL_LIBRARY="${srcdir}/install-bundle/usr/lib/libgdal.so" \
+		-DUSE_BUNDLED_MYSQLDUMP=1
 	make
 }
 
 package() {
-	cd "${srcdir}/mysql-workbench-community-${pkgver}-src"
+	# install bundled libraries files and files
+	for LIBRARY in $(find "${srcdir}/install-bundle/usr/lib/" -type f -regex '.*/lib\(gdal\|mysql\(client\|cppconn\)\)\.so\..*'); do
+		install -D -m0755 "${LIBRARY}" "${pkgdir}"/usr/lib/mysql-workbench/"$(basename "${LIBRARY}")"
+	done
+	for SYMLINK in $(find "${srcdir}/install-bundle/usr/lib/" -type l -regex '.*/lib\(gdal\|mysql\(client\|cppconn\)\)\.so\..*'); do
+		ln -s "$(readlink "${SYMLINK}")" "${pkgdir}"/usr/lib/mysql-workbench/"$(basename "${SYMLINK}")"
+	done
+	install -m0755 "${srcdir}/install-bundle/usr/bin/mysql"{,dump} "${pkgdir}"/usr/lib/mysql-workbench/
+
+	# install MySQL Workbench itself
+	cd "${srcdir}/mysql-workbench-community-${pkgver}-src/"
 
 	make DESTDIR="${pkgdir}" install
 
@@ -113,6 +148,6 @@ package() {
 	done
 
 	install -D -m 0644 "${srcdir}"/arch_linux_profile.xml \
-		"${pkgdir}"/usr/share/mysql-workbench/mysql.profiles/Arch_Linux_\(MariaDB_5.5_Package\).xml
+		"${pkgdir}"/usr/share/mysql-workbench/mysql.profiles/Arch_Linux_\(MariaDB\).xml
 }
 
