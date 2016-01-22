@@ -5,39 +5,36 @@
 #  - patch for arm
 
 pkgname=graphite
-pkgver=1.3.3
-pkgrel=3
+pkgver=1.3.5
+pkgrel=1
 epoch=1
 arch=('i686' 'x86_64')
-url="http://projects.palaso.org/projects/graphitedev"
+url="https://github.com/silnrsi/graphite"
 pkgdesc='reimplementation of the SIL Graphite text processing engine'
 license=('LGPL' 'GPL' 'custom')
 depends=('gcc-libs')
-makedepends=('cmake' 'freetype2' 'python2')
-             # - only for docs - target doesn't install properly
-             #  'doxygen' 'texlive-latexextra' 'graphviz' 'asciidoc' 'perl-module-build' 'icu') # builds doc properly? 'texlive-helvetic' seems to be missing
+makedepends=('cmake' 'freetype2' 'python2'
+             # for documentation
+             'doxygen' 'dblatex' 'graphviz' 'asciidoc')
+checkdepends=('python2-fonttools')
 options=('!emptydirs')
-source=(http://downloads.sourceforge.net/project/silgraphite/graphite2/graphite2-${pkgver}.tgz
-        graphite2-1.2.0-cmakepath.patch
+source=(https://github.com/silnrsi/graphite/releases/download/${pkgver}/graphite2-${pkgver}.tgz
         graphite-arm-nodefaultlibs.patch)
-sha1sums=('54b04c283bab4695de63ae2dd6cff392dd49d7f0'
-          '7283d73e21f28a0b4221af9ce7998d68fcced16a'
-          '67b4fb81303484a65ab5bfa183da999d14169157')
+md5sums=('5b8d22a8bbf031838e31432868c0109c'
+         '35a628ad03433fa8e3febe7222844d4c')
+
 
 prepare() {
   cd "${srcdir}"
 
   # python2 fixes
   sed -i "s:\/usr\/bin\/python:\/usr\/bin\/python2:" graphite2-${pkgver}/tests/{corrupt.py,defuzz,fnttxtrender,fuzzbidi,fuzztest,hbspeeds,jsoncmp}
-  
-  # fix install path - .cmake files contain architecture dependend content - patch taken from FC/Slackware
-  pushd graphite2-${pkgver}
-  patch -Np1 -i ${srcdir}/graphite2-1.2.0-cmakepath.patch
+
+  cd graphite2-${pkgver}
   patch -Np1 -i ${srcdir}/graphite-arm-nodefaultlibs.patch
-  popd
 }
 
-build() { 
+build() {
   mkdir build
   cd build
   cmake -G "Unix Makefiles" ../graphite2-${pkgver} \
@@ -45,25 +42,28 @@ build() {
 	-DCMAKE_INSTALL_PREFIX=/usr \
 	-DCMAKE_BUILD_TYPE:STRING=Release \
 	-DGRAPHITE2_COMPARE_RENDERER=OFF \
-	#-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON # remove when docs install target will be fixed
 
   # fix unwanted -O3 cflag (taken form Debian)
   find . -type f ! -name "rules" ! -name "changelog" -exec sed -i -e 's/\-O3//g' {} \;
 
   make 
-  #make docs
+  make -j1 docs
 }
 
 check() {
   cd "${srcdir}"/build
+  # python2 fixes
   sed -i "s:python:python2:g" tests/CTestTestfile.cmake
-  ctest || true # some new test fail
+  ctest || true
 }
 
 package() {
   cd "${srcdir}"/build
-  # FIXME: all target doesn't install the docs target files
-  make DESTDIR="$pkgdir/" install 
+  make DESTDIR="$pkgdir/" install
+  # install doc files
+  mkdir -p "${pkgdir}"/usr/share/doc/graphite2/api
+  cp -vrf doc/doxygen/{html,latex/refman.pdf} "${pkgdir}"/usr/share/doc/graphite2/api
+  cp -vrf doc/{GTF,manual}.html "${pkgdir}"/usr/share/doc/graphite2
 
   # licenses
   mkdir -p "${pkgdir}"/usr/share/licenses/${pkgname}
