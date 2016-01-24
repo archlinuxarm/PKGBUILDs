@@ -18,7 +18,7 @@
 buildarch=4
 
 pkgname=chromium
-pkgver=46.0.2490.86
+pkgver=48.0.2564.82
 pkgrel=1
 _launcher_ver=3
 pkgdesc="The open-source project behind Google Chrome, an attempt at creating a safer, faster, and more stable browser"
@@ -33,24 +33,26 @@ depends=('gtk2' 'nss' 'alsa-lib' 'xdg-utils' 'bzip2' 'libevent' 'libxss' 'icu'
 makedepends=('python2' 'gperf' 'yasm' 'mesa' 'ninja')
 optdepends=('kdebase-kdialog: needed for file dialogs in KDE'
             'gnome-keyring: for storing passwords in GNOME keyring'
-            'kdeutils-kwalletmanager: for storing passwords in KWallet')
+            'kwallet: for storing passwords in KWallet')
 provides=('chromium-browser')
 conflicts=('chromium-browser')
 install=chromium.install
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
         chromium-launcher-$_launcher_ver.tar.gz::https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver.tar.gz
         chromium.desktop
-        0001-Add-FPDFAPIJPEG_-prefix-to-more-libjpeg-functions.patch
+        chromium-use-non-versioned-icu-namespace.patch
+        chromium-fix-print-preview-on-en_GB-locale.patch
         arm-webrtc-fix.patch
         chromium-arm-r0.patch
         chromium-widevine.patch)
-sha256sums=('ee18d28ac80ff958e8a6c770bfc0d7d770b55452ed91a87f731e1b432a7d1d92'
+sha256sums=('cda64bf427d01bae7d45863812edcd7fa43176238ec07c7752e42afd3e1714fd'
             '8b01fb4efe58146279858a754d90b49e5a38c9a0b36a1f84cbb7d12f92b84c28'
             '028a748a5c275de9b8f776f97909f999a8583a4b77fd1cd600b4fc5c0c3e91e9'
-            'd114def156d60d5f4c9e42f2955ba19bdebe38037a330ef947af24ace25db39d'
+            'e4192446cc0ab6a5c540599c8a149f4f2208f0014da2786ada6c9544913d7426'
+            '6fff45aafa31fb35a032b4e2175a341e08f9d2a9b37c5cf080c318180f558378'
             '9db0f01517c52e3236ff52e8a664840542a19144a54923ae6aabea3dcfa92c52'
             'df4be49770d508b772f98eda9fc5f37fa71d4c0459437e12f7f3db5892aa1611'
-            '379b746e187de28f80f5a7cd19edcfa31859656826f802a1ede054fcb6dfb221')
+            '4660344789c45c9b9e52cb6d86f7cb6edb297b39320d04f6947e5216d6e5f64c')
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -67,13 +69,17 @@ prepare() {
   # https://groups.google.com/a/chromium.org/d/topic/chromium-packagers/9JX1N2nf4PU/discussion
   touch chrome/test/data/webui/i18n_process_css_test.html
 
-  # https://code.google.com/p/chromium/issues/detail?id=505226
-  patch -d third_party/pdfium -Np1 <../0001-Add-FPDFAPIJPEG_-prefix-to-more-libjpeg-functions.patch
+  # https://code.google.com/p/chromium/issues/detail?id=541273
+  sed -i "/'target_name': 'libvpx'/s/libvpx/&_new/" build/linux/unbundle/libvpx.gyp
+
+  # https://codereview.chromium.org/1505763002
+  patch -Np1 -i ../chromium-use-non-versioned-icu-namespace.patch
+
+  # https://code.google.com/p/chromium/issues/detail?id=480415
+  patch -Np1 -i ../chromium-fix-print-preview-on-en_GB-locale.patch
 
   # Enable support for the Widevine CDM plugin
-  # The actual libraries are not included, but can be copied over from Chrome:
-  #   libwidevinecdmadapter.so
-  #   libwidevinecdm.so
+  # libwidevinecdm.so is not included, but can be copied over from Chrome
   # (Version string doesn't seem to matter so let's go with "Pinkie Pie")
   sed "s/@WIDEVINE_VERSION@/Pinkie Pie/" ../chromium-widevine.patch |
     patch -Np1
@@ -95,8 +101,8 @@ prepare() {
   find . -name '*.py' -exec sed -i -r 's|/usr/bin/python$|&2|g' {} +
 
   # There are still a lot of relative calls which need a workaround
-  mkdir "$srcdir/python2-path"
-  ln -s /usr/bin/python2 "$srcdir/python2-path/python"
+  mkdir -p "$srcdir/python2-path"
+  ln -sf /usr/bin/python2 "$srcdir/python2-path/python"
 }
 
 build() {
@@ -119,7 +125,6 @@ build() {
     -Dgoogle_default_client_secret=$_google_default_client_secret
     -Dwerror=
     -Dclang=0
-    -Dclang_use_chrome_plugins=0
     -Dpython_ver=2.7
     -Dlinux_link_gsettings=1
     -Dlinux_link_libpci=1
@@ -130,6 +135,9 @@ build() {
     -Dlinux_use_bundled_gold=0
     -Dlinux_use_gold_flags=0
     -Dicu_use_data_file_flag=0
+    -Dlogging_like_official_build=1
+    -Dtracing_like_official_build=1
+    -Dfieldtrial_testing_like_official_build=1
     -Drelease_extra_cflags="$CFLAGS -DUSE_EABI_HARDFLOAT"
     -Dlibspeechd_h_prefix=speech-dispatcher/
     -Dffmpeg_branding=Chrome
@@ -137,7 +145,6 @@ build() {
     -Duse_gnome_keyring=0
     -Duse_system_bzip2=1
     -Duse_system_flac=1
-    -Duse_system_protobuf=0
     -Duse_system_ffmpeg=0
     -Duse_system_harfbuzz=1
     -Duse_system_icu=1
@@ -152,16 +159,15 @@ build() {
     -Duse_system_yasm=1
     -Duse_system_zlib=0
     -Dusb_ids_path=/usr/share/hwdata/usb.ids
+    -Duse_mojo=0
     -Duse_gconf=0
     -Denable_hangout_services_extension=1
+    -Denable_widevine=1
     -Ddisable_fatal_linker_warnings=1
     -Ddisable_glibc=1
     -Ddisable_sse2=1
     -Dtarget_arch=arm
     -Darm_neon=1
-    -Dlogging_like_official_build=1
-    -Dtracing_like_official_build=1
-    -Dfieldtrial_testing_like_official_build=1
     -Ddisable_nacl=1
     -Ddisable_pnacl=1
     -Dv8_use_arm_eabi_hardfloat=true
@@ -196,7 +202,10 @@ package() {
   install -Dm4755 out/Release/chrome_sandbox \
     "$pkgdir/usr/lib/chromium/chrome-sandbox"
 
-  cp out/Release/{*.pak,*.bin} "$pkgdir/usr/lib/chromium/"
+  cp out/Release/{*.pak,*.bin,libwidevinecdmadapter.so} \
+    "$pkgdir/usr/lib/chromium/"
+
+  strip $STRIP_SHARED "$pkgdir/usr/lib/chromium/libwidevinecdmadapter.so"
 
   cp -a out/Release/locales "$pkgdir/usr/lib/chromium/"
 
