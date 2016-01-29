@@ -1,13 +1,14 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
 pkgname=targetcli-fb
 pkgver=2.1.fb42
-pkgrel=1
+pkgrel=2
 pkgdesc="free branch of the targetcli LIO administration shell (iSCSI + Co)"
 arch=('any')
 url="https://github.com/agrover/targetcli-fb"
 license=('Apache')
 groups=()
-depends=('python-rtslib-fb>=2.1.fb52' 'python-configshell-fb>=1.1.fb17')
+depends=('python-rtslib-fb>=2.1.fb52' 'python-configshell-fb>=1.1.fb17'
+         'python-dbus')
 makedepends=('python-setuptools')
 # TODO: optdepend on python-ethtool when available for python3
 optdepends=()
