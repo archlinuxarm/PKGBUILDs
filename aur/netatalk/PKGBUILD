@@ -5,7 +5,7 @@
 # Contributor: Farhan Yousaf <farhany at xaviya dot com>
 
 pkgname=netatalk
-pkgver=3.1.7
+pkgver=3.1.8
 pkgrel=1
 pkgdesc='Open-source implementation of the Apple Filing Protocol'
 arch=('i686' 'x86_64' 'armv6h' 'armv7h')
@@ -17,16 +17,13 @@ backup=('etc/afp.conf'
 	'etc/extmap.conf')
 install=$pkgname.install
 source=(http://downloads.sourceforge.net/project/$pkgname/$pkgname/$pkgver/$pkgname-$pkgver.tar.bz2
-	avahi-client.patch
 	python2.patch)
-md5sums=('831ec8bf9e084b64f965d16c528af299'
-	'00379aacb88dcac8c1e0513da1a5f24c'
+md5sums=('9cab934ca32b8979f389da52d44c69c2'
 	'97bc0467dd8a866d9f0835d6440e3c19')
 
 prepare() {
 	cd "$srcdir/$pkgname-$pkgver"
 	patch -p0 < "$srcdir/python2.patch"
-	patch -p0 < "$srcdir/avahi-client.patch"
 }
 
 build() {

@@ -1,0 +1,74 @@
+# $Id$
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Zerial <fernando@zerial.org>
+
+# ALAMR: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to fix AArch64 FTBFS
+
+pkgname=unrealircd
+pkgver=4.0.1
+pkgrel=2
+pkgdesc="Open Source IRC Server"
+arch=('i686' 'x86_64')
+url="http://unrealircd.com"
+license=('GPL2')
+depends=('openssl' 'curl' 'c-ares')
+conflicts=('ircd')
+provides=('ircd')
+backup=('etc/unrealircd/unrealircd.conf')
+install=unrealircd.install
+source=(https://www.unrealircd.org/unrealircd4/unrealircd-$pkgver.tar.gz
+	unrealircd.service
+	unrealircd.tmpfiles.d
+	install.pl
+	0001-run-autoreconf-on-TRE-library.patch)
+md5sums=('f513a190d5549f00ab030373b912e861'
+         '677d8de0bae770488a2c1730f9475a51'
+         '3ec519ea7dbe99696eb6c51dfc0d382a'
+         '3a23792b03420fc578cf6688b1574ae3'
+         '28bd33be158f5c494601b6b3026803fa')
+
+prepare() {
+  cd $srcdir/unrealircd-$pkgver
+  sed -i \
+    -e 's|$(INSTALL) -m 0700|$(INSTALL) -m 0755|g' \
+    -e 's|$(INSTALL) -m 0600|$(INSTALL) -m 0644|g' \
+    Makefile.in
+  patch -p1 -i ../0001-run-autoreconf-on-TRE-library.patch
+}
+
+build() {
+  cd $srcdir/unrealircd-$pkgver
+  ./configure \
+    --with-pidfile=/run/unrealircd/ircd.pid \
+    --with-showlistmodes \
+    --enable-ssl=/usr \
+    --with-bindir=/usr/bin \
+    --with-datadir=/var/lib/unrealircd \
+    --with-confdir=/etc/unrealircd \
+    --with-modulesdir=/usr/lib/unrealircd \
+    --with-logdir=/var/log/unrealircd \
+    --with-cachedir=/var/cache/unrealircd \
+    --with-docdir=/usr/share/doc/unrealircd \
+    --with-tmpdir=/tmp \
+    --with-scriptdir=/usr \
+    --with-nick-history=2000 \
+    --with-sendq=3000000 \
+    --with-permissions=0644 \
+    --with-fd-setsize=1024 \
+    --enable-dynamic-linking
+  make
+}
+
+package() {
+  cd $srcdir/unrealircd-$pkgver
+
+  export pkgdir
+  make INSTALL=$srcdir/install.pl install
+  mv $pkgdir/usr/unrealircd $pkgdir/etc/unrealircd/unrealircd
+  cp $pkgdir/etc/unrealircd/examples/example.conf $pkgdir/etc/unrealircd/unrealircd.conf
+  rm -rf $pkgdir/tmp
+
+  install -Dm0644 $srcdir/unrealircd.service $pkgdir/usr/lib/systemd/system/unrealircd.service
+  install -Dm0644 $srcdir/unrealircd.tmpfiles.d $pkgdir/usr/lib/tmpfiles.d/unrealircd.conf
+}
