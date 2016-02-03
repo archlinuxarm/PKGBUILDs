@@ -6,6 +6,7 @@
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
 #  - Removed libgles, libegl and khrplatform-devel from conflicts for marvell-libgfx compatibility.
 #  - Moved .pc files to mesa-libgl that reference libraries in mesa-libgl
+#  - Build vc4 gallium driver for v6/v7
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
