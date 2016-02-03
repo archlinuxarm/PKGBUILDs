@@ -10,7 +10,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
 pkgver=11.1.1
-pkgrel=1
+pkgrel=1.1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
@@ -37,10 +37,12 @@ build() {
 
   #autoreconf -vfi # our automake is far too new for their build system :)
 
+  [[ $CARCH == "armv7h" || $CARCH == "armv6h" ]] && VC4=',vc4'
+
   ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-gallium-drivers=freedreno,nouveau,swrast \
+    --with-gallium-drivers=freedreno,nouveau,swrast${VC4} \
     --with-dri-drivers=nouveau,swrast \
     --with-egl-platforms=x11,drm,wayland \
     --with-sha1=libgcrypt \
