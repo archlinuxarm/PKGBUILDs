@@ -1,0 +1,67 @@
+# $Id$
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Maintainer: SpepS <dreamspepser at yahoo dot it>
+# Contributor: Ionut Biru <ibiru@archlinux.org>
+# Contributor: DonVla <donvla@users.sourceforge.net>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - don't build with neon (-DNoNeonPlease=1)
+
+pkgname=zynaddsubfx
+pkgver=2.5.3
+pkgrel=1
+pkgdesc="Opensource software synthesizer capable of making a countless number of instruments."
+arch=('i686' 'x86_64')
+url="http://zynaddsubfx.sourceforge.net"
+license=('GPL')
+depends=('fltk' 'portaudio' 'fftw' 'lash' 'mxml' 'jack' 'libxpm' 'gcc-libs' 'liblo')
+makedepends=('cmake' 'pkgconfig' 'mesa' 'setconf' 'gendesk')
+options=('!emptydirs')
+source=("https://downloads.sourceforge.net/project/$pkgname/$pkgname/$pkgver/$pkgname-$pkgver.tar.bz2"
+	"$pkgname.svg")
+md5sums=('05cd7e8aa99d502913ce4bc09712abb8'
+         '6f7e9c3ce3947088a10c99c46a65431f')
+
+build() {
+  cd "$srcdir"
+  gendesk $startdir/PKGBUILD
+  setconf "$pkgname.desktop" Icon "$pkgname.svg"
+
+  cd "zynaddsubfx-$pkgver"
+
+  sed -i '1,1i#include <unistd.h>' src/Nio/NulEngine.cpp
+
+  [ -d build ] || mkdir build && cd build
+  cmake \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DDefaultOutput=jack \
+    -DDefaultInput=jack \
+    -DGuiModule=fltk \
+    -DNoNeonPlease=1 \
+    ..
+  make
+
+  # build external programs
+  cd ../ExternalPrograms/Spliter && make
+  cd ../Controller && sed -i "s|Box\.h|Box\.H|" ControllerUI.fl && make
+}
+
+package() {
+  cd "$srcdir/zynaddsubfx-$pkgver/build"
+
+  make DESTDIR="$pkgdir/" install
+
+  # install external programs
+  install -Dm755 ../ExternalPrograms/Spliter/spliter "$pkgdir/usr/bin/spliter"
+  install -Dm755 ../ExternalPrograms/Controller/controller "$pkgdir/usr/bin/controller"
+  install -Dm644 ../ExternalPrograms/Spliter/readme.txt "$pkgdir/usr/share/doc/$pkgname/SPLITER.txt"
+
+  # banks and examples
+  install -d "$pkgdir/usr/share/$pkgname"
+  cp -a ../instruments/banks "$pkgdir/usr/share/$pkgname"
+  cp -a ../instruments/examples "$pkgdir/usr/share/$pkgname"
+
+  # desktop file and icon
+  install -Dm644 "$srcdir/$pkgname.svg" "$pkgdir/usr/share/pixmaps/$pkgname.svg"
+  install -Dm644 "$srcdir/$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
+}
