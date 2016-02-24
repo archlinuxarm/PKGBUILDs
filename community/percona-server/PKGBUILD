@@ -1,0 +1,170 @@
+# $Id$
+# Maintainer: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - drop valgrind makedepend, bug requiring it has been fixed
+
+pkgbase=percona-server
+pkgname=('libperconaserverclient' 'percona-server-clients' 'percona-server')
+pkgver=5.7.10_3
+_boost_ver=1.59.0
+_pkgver=${pkgver/_/-}
+_myver=${pkgver/_rel*}
+pkgrel=2
+arch=('i686' 'x86_64')
+# valgrind necessary for bug https://bugs.launchpad.net/percona-server/+bug/1494283
+makedepends=('cmake' 'openssl' 'zlib' 'libaio' 'systemd-tools' 'pam')
+license=('GPL' 'AGPL')
+url="http://www.percona.com/software/percona-server/"
+source=("http://www.percona.com/downloads/Percona-Server-${pkgver%.*_*}/Percona-Server-$_pkgver/source/tarball/percona-server-$_pkgver.tar.gz"
+        "http://sourceforge.net/projects/boost/files/boost/${_boost_ver}/boost_${_boost_ver//./_}.tar.gz"
+        'my.cnf'
+        'mysql-user.conf')
+
+prepare() {
+	cd $pkgbase-$_pkgver
+	rm -v sql/sql_yacc.{cc,h}
+
+	sed 's|${fullhostname}|"archbuild"|' \
+		-i storage/tokudb/PerconaFT/cmake_modules/TokuSetupCTest.cmake
+}
+
+build() {
+	rm -rf build
+	mkdir build
+	cd build
+
+	cmake ../$pkgbase-$_pkgver \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_CONFIG=mysql_release \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DSYSCONFDIR=/etc/mysql \
+		-DMYSQL_DATADIR=/var/lib/mysql \
+		-DMYSQL_UNIX_ADDR=/run/mysqld/mysqld.sock \
+		-DDEFAULT_CHARSET=utf8 \
+		-DDEFAULT_COLLATION=utf8_general_ci \
+		-DENABLED_LOCAL_INFILE=ON \
+		-DINSTALL_INFODIR=share/mysql/docs \
+		-DINSTALL_MANDIR=share/man \
+		-DINSTALL_PLUGINDIR=lib/mysql/plugin \
+		-DINSTALL_SCRIPTDIR=bin \
+		-DINSTALL_INCLUDEDIR=include/perconaserver \
+		-DINSTALL_DOCREADMEDIR=share/mysql \
+		-DINSTALL_SUPPORTFILESDIR=share/mysql \
+		-DINSTALL_MYSQLSHAREDIR=share/mysql \
+		-DINSTALL_DOCDIR=share/mysql/docs \
+		-DINSTALL_SHAREDIR=share/mysql \
+		-DWITH_ZLIB=system \
+		-DWITH_SSL=system \
+		-DWITH_LIBWRAP=OFF \
+		-DWITH_UNIT_TESTS=OFF \
+		-DWITH_PAM=ON \
+		-DWITH_EXTRA_CHARSETS=complex \
+		-DWITH_EMBEDDED_SERVER=ON \
+	  -DWITH_EMBEDDED_SHARED_LIBRARY=ON \
+		-DWITH_INNODB_MEMCACHED=ON \
+		-DWITH_INNOBASE_STORAGE_ENGINE=ON \
+		-DWITH_PARTITION_STORAGE_ENGINE=ON \
+		-DWITH_PERFSCHEMA_STORAGE_ENGINE=ON \
+		-DWITH_ARCHIVE_STORAGE_ENGINE=ON \
+		-DWITH_BLACKHOLE_STORAGE_ENGINE=ON \
+		-DWITH_FEDERATED_STORAGE_ENGINE=OFF \
+		-DWITH_EXAMPLE_STORAGE_ENGINE=OFF \
+	  -DWITH_SYSTEMD=1 \
+		-DCMAKE_C_FLAGS="-fPIC $CFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -fomit-frame-pointer -fno-delete-null-pointer-checks" \
+		-DCMAKE_CXX_FLAGS="-fPIC $CXXFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -felide-constructors -fno-delete-null-pointer-checks" \
+		-DWITH_MYSQLD_LDFLAGS="-pie ${LDFLAGS},-z,now" \
+		-DWITH_BOOST="../boost_${_boost_ver//./_}"
+
+	make
+}
+
+package_libperconaserverclient() {
+	pkgdesc='Percona Server client libraries'
+	depends=('openssl' 'libaio')
+
+	cd build
+	for dir in include libmysql libmysqld libservices; do
+		make -C $dir DESTDIR="$pkgdir" install
+	done
+
+  # Conflicting files with libmariadbclient
+	rm "$pkgdir"/usr/lib/libmysql*
+
+	install -Dm755 scripts/mysql_config "$pkgdir"/usr/bin/perconaserver_config
+	install -d "$pkgdir"/usr/share/man/man1
+	install -m644 "$srcdir"/$pkgbase-$_pkgver/man/mysql_config.1 "$pkgdir"/usr/share/man/man1/perconaserver_config.1
+}
+
+package_percona-server-clients() {
+	pkgdesc='Percona Server client tools'
+	depends=('libperconaserverclient' 'zlib' 'openssl')
+	conflicts=('mysql-clients')
+	provides=("mysql-clients=$_myver" "mariadb-clients=$_myver")
+
+	cd build
+	make -C client DESTDIR="$pkgdir" install
+
+	# install man pages
+	install -d "$pkgdir"/usr/share/man/man1
+	for man in mysql mysqladmin mysqlcheck mysqldump mysqlimport mysqlshow mysqlslap; do
+		install -m644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
+	done
+
+	# provided by percona-server
+	rm "$pkgdir"/usr/bin/mysql{_plugin,_upgrade,binlog,test,_config_editor,_install_db,_secure_installation,_ssl_rsa_setup}
+}
+
+package_percona-server() {
+	pkgdesc='Drop-in replacement for MySQL that provides improved performance, diagnostics, instrumentation and TokuDB storage engine'
+	backup=('etc/mysql/my.cnf')
+	install=percona.install
+	depends=('libaio' 'systemd-tools' 'pam')
+	optdepends=('perl-dbd-mysql')
+	conflicts=('mysql')
+	provides=("mysql=$_myver" "mariadb=$_myver")
+	options=('emptydirs')
+
+	cd build
+	make DESTDIR="$pkgdir" install
+
+	install -Dm644 ../my.cnf "$pkgdir"/etc/mysql/my.cnf
+	install -Dm644 ../mysql-user.conf "$pkgdir"/usr/lib/sysusers.d/mysql.conf
+
+  cd "$pkgdir"
+  mv usr/usr/lib/* usr/lib
+  rm -rf usr/usr
+
+	# Move documentation
+	install -dm755 usr/share/doc
+	mv usr/share/mysql/docs usr/share/doc/$pkgname
+	mv usr/share/mysql/{COPYING,INSTALL-BINARY,README.MySQL} usr/share/doc/$pkgname/
+
+	if [ -f usr/PATENTS ]; then
+		mv usr/{PATENTS,README.md} usr/share/doc/$pkgname/
+		rm usr/COPYING.*
+	fi
+
+	# provided by libperconaserverclient
+	rm usr/bin/mysql_config
+	rm usr/lib/lib{mysql,perconaserver}*
+	rm -r usr/include/
+	rm usr/share/man/man1/{mysql_config,mysql_client_test_embedded,mysqltest_embedded}.1
+
+	# provided by percona-server-clients
+	rm usr/bin/mysql{,admin,check,dump,import,show,slap,pump}
+	rm usr/share/man/man1/mysql{,admin,check,dump,import,show,slap,pump}.1
+
+	# deprecated/unused
+	rm usr/bin/replace
+	rm usr/share/man/man1/replace.1
+
+	# not needed
+	rm -r usr/mysql-test
+	rm usr/share/man/man1/mysql-test-run.pl.1
+}
+
+sha256sums=('d28e05f942c540aedad55eb17debfa40f0715c3222dec19e378f1d3cc6cfbb97'
+            '47f11c8844e579d02691a607fbd32540104a9ac7a2534a8ddaef50daf502baac'
+            'ae451839c368f0db25a63bb0a6a890194897a8e74818bd4245140933c29e5f83'
+            'e638a2657085f15b6728f43c1fd6aa551b27608fbf6b435e33afd3606a0cfb0e')
