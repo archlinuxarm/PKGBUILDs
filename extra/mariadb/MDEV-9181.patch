@@ -1,0 +1,458 @@
+From ce40ccaf24af2fe395f541cb1079256de8727ccd Mon Sep 17 00:00:00 2001
+From: Alexander Barkov <bar@mariadb.org>
+Date: Thu, 28 Jan 2016 13:58:39 +0400
+Subject: [PATCH] MDEV-9181 (NULLIF(count(table.col)), 0) gives wrong result on
+ 10.1.x Wrapping args[0] and args[2] into an Item_cache for aggregate
+ functions.
+
+---
+ mysql-test/r/null.result |  60 ++++++++++++++++++++
+ mysql-test/t/null.test   |  39 +++++++++++++
+ sql/item.h               |  45 ++++++++++++---
+ sql/item_cmpfunc.cc      | 144 +++++++++++++++++++++++++++++++++++++++++++++--
+ sql/item_cmpfunc.h       |   8 ++-
+ 5 files changed, 281 insertions(+), 15 deletions(-)
+
+diff --git a/mysql-test/r/null.result b/mysql-test/r/null.result
+index b4cebac..af24ad4 100644
+--- a/mysql-test/r/null.result
++++ b/mysql-test/r/null.result
+@@ -1465,5 +1465,65 @@ Warnings:
+ Note	1003	select `test`.`t1`.`a` AS `a` from `test`.`t1` where ((`test`.`t1`.`a` = 2020) and ((case when 2020 = 2010 then NULL else `test`.`t1`.`a` end) = concat('2020',rand())))
+ DROP TABLE t1;
+ #
++# MDEV-9181 (NULLIF(count(table.col)), 0) gives wrong result on 10.1.x
++#
++CREATE TABLE t1 (c1 varchar(50) DEFAULT NULL);
++INSERT INTO t1 (c1) VALUES ('hello'), ('hello\r\n'), ('hello'),('hello');
++SELECT NULLIF(COUNT(c1),0) FROM t1;
++NULLIF(COUNT(c1),0)
++4
++SELECT CASE WHEN COUNT(c1)=0 THEN NULL ELSE COUNT(c1) END  FROM t1;
++CASE WHEN COUNT(c1)=0 THEN NULL ELSE COUNT(c1) END
++4
++SELECT NULLIF(COUNT(c1)+0,0) AS c1,NULLIF(CAST(COUNT(c1) AS SIGNED),0) AS c2,NULLIF(CONCAT(COUNT(c1)),0) AS c3 FROM t1;
++c1	c2	c3
++4	4	4
++SELECT NULLIF(COUNT(DISTINCT c1),0) FROM t1;
++NULLIF(COUNT(DISTINCT c1),0)
++2
++SELECT CASE WHEN COUNT(DISTINCT c1)=0 THEN NULL ELSE COUNT(DISTINCT c1) END  FROM t1;
++CASE WHEN COUNT(DISTINCT c1)=0 THEN NULL ELSE COUNT(DISTINCT c1) END
++2
++DROP TABLE t1;
++CREATE TABLE  t1 (
++id INT NOT NULL,
++c1 INT DEFAULT NULL
++);
++INSERT INTO t1 VALUES (1,1),(1,2),(2,3),(2,4);
++SELECT NULLIF(COUNT(c1),0) AS c1,NULLIF(COUNT(c1)+0,0) AS c1_wrapped,CASE WHEN COUNT(c1) IS NULL THEN 0 ELSE COUNT(c1) END AS c1_case FROM t1 GROUP BY id;
++c1	c1_wrapped	c1_case
++2	2	2
++2	2	2
++DROP TABLE t1;
++CREATE TABLE t1 (a INT);
++INSERT INTO t1 VALUES (1),(2),(3);
++SET @a=0;
++SELECT NULLIF(LAST_VALUE(@a:=@a+1,a),0) FROM t1;
++NULLIF(LAST_VALUE(@a:=@a+1,a),0)
++1
++2
++3
++SELECT @a;
++@a
++6
++SET @a=0;
++SELECT NULLIF(AVG(a),0), NULLIF(AVG(LAST_VALUE(@a:=@a+1,a)),0) FROM t1;
++NULLIF(AVG(a),0)	NULLIF(AVG(LAST_VALUE(@a:=@a+1,a)),0)
++2.0000	2.0000
++SELECT @a;
++@a
++3
++EXPLAIN EXTENDED SELECT NULLIF(a,0) FROM t1;
++id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
++1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	3	100.00	
++Warnings:
++Note	1003	select nullif(`test`.`t1`.`a`,0) AS `NULLIF(a,0)` from `test`.`t1`
++EXPLAIN EXTENDED SELECT NULLIF(AVG(a),0) FROM t1;
++id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
++1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	3	100.00	
++Warnings:
++Note	1003	select nullif(<cache>(avg(`test`.`t1`.`a`)),0) AS `NULLIF(AVG(a),0)` from `test`.`t1`
++DROP TABLE t1;
++#
+ # End of 10.1 tests
+ #
+diff --git a/mysql-test/t/null.test b/mysql-test/t/null.test
+index 5347a96..b60f11a 100644
+--- a/mysql-test/t/null.test
++++ b/mysql-test/t/null.test
+@@ -909,6 +909,45 @@ EXPLAIN EXTENDED
+ SELECT * FROM t1 WHERE a=2020 AND NULLIF(a,2010)=CONCAT('2020',RAND());
+ DROP TABLE t1;
+ 
++--echo #
++--echo # MDEV-9181 (NULLIF(count(table.col)), 0) gives wrong result on 10.1.x
++--echo #
++CREATE TABLE t1 (c1 varchar(50) DEFAULT NULL);
++INSERT INTO t1 (c1) VALUES ('hello'), ('hello\r\n'), ('hello'),('hello');
++SELECT NULLIF(COUNT(c1),0) FROM t1;
++SELECT CASE WHEN COUNT(c1)=0 THEN NULL ELSE COUNT(c1) END  FROM t1;
++SELECT NULLIF(COUNT(c1)+0,0) AS c1,NULLIF(CAST(COUNT(c1) AS SIGNED),0) AS c2,NULLIF(CONCAT(COUNT(c1)),0) AS c3 FROM t1;
++SELECT NULLIF(COUNT(DISTINCT c1),0) FROM t1;
++SELECT CASE WHEN COUNT(DISTINCT c1)=0 THEN NULL ELSE COUNT(DISTINCT c1) END  FROM t1;
++DROP TABLE t1;
++
++CREATE TABLE  t1 (
++  id INT NOT NULL,
++  c1 INT DEFAULT NULL
++);
++INSERT INTO t1 VALUES (1,1),(1,2),(2,3),(2,4);
++SELECT NULLIF(COUNT(c1),0) AS c1,NULLIF(COUNT(c1)+0,0) AS c1_wrapped,CASE WHEN COUNT(c1) IS NULL THEN 0 ELSE COUNT(c1) END AS c1_case FROM t1 GROUP BY id;
++DROP TABLE t1;
++
++# Testing with side effects
++
++CREATE TABLE t1 (a INT);
++INSERT INTO t1 VALUES (1),(2),(3);
++SET @a=0;
++SELECT NULLIF(LAST_VALUE(@a:=@a+1,a),0) FROM t1;
++SELECT @a;
++SET @a=0;
++SELECT NULLIF(AVG(a),0), NULLIF(AVG(LAST_VALUE(@a:=@a+1,a)),0) FROM t1;
++SELECT @a;
++
++# There should not be cache in here:
++
++EXPLAIN EXTENDED SELECT NULLIF(a,0) FROM t1;
++
++# But there should be a cache in here:
++EXPLAIN EXTENDED SELECT NULLIF(AVG(a),0) FROM t1;
++
++DROP TABLE t1;
+ 
+ --echo #
+ --echo # End of 10.1 tests
+diff --git a/sql/item.h b/sql/item.h
+index d5b6463..9c57628 100644
+--- a/sql/item.h
++++ b/sql/item.h
+@@ -3629,6 +3629,11 @@ class Used_tables_and_const_cache
+     used_tables_cache|= item->used_tables();
+     const_item_cache&= item->const_item();
+   }
++  void used_tables_and_const_cache_update_and_join(Item *item)
++  {
++    item->update_used_tables();
++    used_tables_and_const_cache_join(item);
++  }
+   /*
+     Call update_used_tables() for all "argc" items in the array "argv"
+     and join with the current cache.
+@@ -3638,10 +3643,7 @@ class Used_tables_and_const_cache
+   void used_tables_and_const_cache_update_and_join(uint argc, Item **argv)
+   {
+     for (uint i=0 ; i < argc ; i++)
+-    {
+-      argv[i]->update_used_tables();
+-      used_tables_and_const_cache_join(argv[i]);
+-    }
++      used_tables_and_const_cache_update_and_join(argv[i]);
+   }
+   /*
+     Call update_used_tables() for all items in the list
+@@ -3654,10 +3656,7 @@ class Used_tables_and_const_cache
+     List_iterator_fast<Item> li(list);
+     Item *item;
+     while ((item=li++))
+-    {
+-      item->update_used_tables();
+-      used_tables_and_const_cache_join(item);
+-    }
++      used_tables_and_const_cache_update_and_join(item);
+   }
+ };
+ 
+@@ -5073,6 +5072,12 @@ class Item_cache: public Item_basic_constant
+     return (this->*processor)(arg);
+   }
+   virtual Item *safe_charset_converter(THD *thd, CHARSET_INFO *tocs);
++  void split_sum_func2_example(THD *thd, Item **ref_pointer_array,
++                               List<Item> &fields, uint flags)
++  {
++    example->split_sum_func2(thd, ref_pointer_array, fields, &example, flags);
++  }
++  Item *get_example() const { return example; }
+ };
+ 
+ 
+@@ -5177,6 +5182,30 @@ class Item_cache_str: public Item_cache
+   bool cache_value();
+ };
+ 
++
++class Item_cache_str_for_nullif: public Item_cache_str
++{
++public:
++  Item_cache_str_for_nullif(THD *thd, const Item *item)
++   :Item_cache_str(thd, item)
++  { }
++  Item *safe_charset_converter(THD *thd, CHARSET_INFO *tocs)
++  {
++    /**
++      Item_cache_str::safe_charset_converter() returns a new Item_cache
++      with Item_func_conv_charset installed on "example". The original
++      Item_cache is not referenced (neither directly nor recursively)
++      from the result of Item_cache_str::safe_charset_converter().
++
++      For NULLIF() purposes we need a different behavior:
++      we need a new instance of Item_func_conv_charset,
++      with the original Item_cache referenced in args[0]. See MDEV-9181.
++    */
++    return Item::safe_charset_converter(thd, tocs);
++  }
++};
++
++
+ class Item_cache_row: public Item_cache
+ {
+   Item_cache  **values;
+diff --git a/sql/item_cmpfunc.cc b/sql/item_cmpfunc.cc
+index 87be0f9..135c443 100644
+--- a/sql/item_cmpfunc.cc
++++ b/sql/item_cmpfunc.cc
+@@ -2531,12 +2531,137 @@ bool Item_func_if::date_op(MYSQL_TIME *ltime, uint fuzzydate)
+ }
+ 
+ 
++void Item_func_nullif::split_sum_func(THD *thd, Item **ref_pointer_array,
++                                      List<Item> &fields, uint flags)
++{
++  if (m_cache)
++  {
++    flags|= SPLIT_SUM_SKIP_REGISTERED; // See Item_func::split_sum_func
++    m_cache->split_sum_func2_example(thd, ref_pointer_array, fields, flags);
++    args[1]->split_sum_func2(thd, ref_pointer_array, fields, &args[1], flags);
++  }
++  else
++  {
++    Item_func::split_sum_func(thd, ref_pointer_array, fields, flags);
++  }
++}
++
++
++void Item_func_nullif::update_used_tables()
++{
++  if (m_cache)
++  {
++    used_tables_and_const_cache_init();
++    used_tables_and_const_cache_update_and_join(m_cache->get_example());
++    used_tables_and_const_cache_update_and_join(arg_count, args);
++  }
++  else
++  {
++    Item_func::update_used_tables();
++  }
++}
++
++
++
+ void
+ Item_func_nullif::fix_length_and_dec()
+ {
+   if (!args[2])					// Only false if EOM
+     return;
+ 
++  DBUG_ASSERT(args[0] == args[2]);
++  THD *thd= current_thd;
++  if (args[0]->type() == SUM_FUNC_ITEM)
++  {
++    /*
++      NULLIF(l_expr, r_expr)
++
++        is calculated in the way to return a result equal to:
++
++      CASE WHEN l_expr = r_expr THEN NULL ELSE r_expr END.
++
++      There's nothing special with r_expr, because it's referenced
++      only by args[1] and nothing else.
++
++      l_expr needs a special treatment, as it's referenced by both
++      args[0] and args[2] initially.
++
++      args[0] and args[2] can be replaced:
++
++      - to Item_func_conv_charset by character set aggregation routines
++      - to a constant Item by equal field propagation routines
++        (in case of Item_field)
++
++      For aggregate functions we have to wrap the original args[0]/args[2]
++      into Item_cache (see MDEV-9181). In this case the Item_cache
++      instance becomes the subject to character set conversion instead of
++      the original args[0]/args[2], while the original args[0]/args[2] get
++      hidden inside the cache.
++
++      Some examples of what NULLIF can end up with after argument
++      substitution (we don't mention args[1] here for simplicity):
++
++      1. l_expr is not an aggragate function:
++
++        a. No conversion happened.
++           args[0] and args[2] were not replaced to something else
++           (i.e. neither by character set conversion, nor by propagation):
++
++          args[0] \
++                   l_expr
++          args[2] /
++
++        b. Conversion of args[0] happened.
++           args[0] was replaced, e.g. to Item_func_conv_charset:
++
++           args[0] > Item_func_conv_charset \
++                                             l_expr
++           args[2] >------------------------/
++
++        c. Conversion of args[2] happened:
++
++           args[0] >------------------------\
++                                             l_expr
++           args[2] > Item_func_conv_charset /
++
++        d. Conversion of both args[0] and args[2] happened
++           (e.g. by equal field propagation).
++
++           args[0] > Item_int
++           args[2] > Item_int
++
++      2. In case if l_expr is an aggregate function:
++
++        a. No conversion happened:
++
++          args[0] \
++                   Item_cache > l_expr
++          args[2] /
++
++        b. Conversion of args[0] happened:
++
++          args[0] > Item_func_conv_charset \
++                                            Item_cache > l_expr
++          args[2] >------------------------/
++
++        c. Conversion of args[2] happened:
++
++           args[0] >------------------------\
++                                             Item_cache > l_expr
++           args[2] > Item_func_conv_charset /
++
++        d. Conversion of both args[0] and args[2] happened.
++           (e.g. by equal expression propagation)
++           TODO: check if it's possible (and add an example query if so).
++    */
++    m_cache= args[0]->cmp_type() == STRING_RESULT ?
++             new (thd->mem_root) Item_cache_str_for_nullif(thd, args[0]) :
++             Item_cache::get_cache(thd, args[0]);
++    m_cache->setup(current_thd, args[0]);
++    m_cache->store(args[0]);
++    m_cache->set_used_tables(args[0]->used_tables());
++    args[0]= args[2]= m_cache;
++  }
+   set_handler_by_field_type(args[2]->field_type());
+   collation.set(args[2]->collation);
+   decimals= args[2]->decimals;
+@@ -2611,6 +2736,13 @@ void Item_func_nullif::print(String *str, enum_query_type query_type)
+ }
+ 
+ 
++int Item_func_nullif::compare()
++{
++  if (m_cache)
++    m_cache->cache_value();
++  return cmp.compare();
++}
++
+ /**
+   @note
+   Note that we have to evaluate the first argument twice as the compare
+@@ -2626,7 +2758,7 @@ Item_func_nullif::real_op()
+ {
+   DBUG_ASSERT(fixed == 1);
+   double value;
+-  if (!cmp.compare())
++  if (!compare())
+   {
+     null_value=1;
+     return 0.0;
+@@ -2641,7 +2773,7 @@ Item_func_nullif::int_op()
+ {
+   DBUG_ASSERT(fixed == 1);
+   longlong value;
+-  if (!cmp.compare())
++  if (!compare())
+   {
+     null_value=1;
+     return 0;
+@@ -2656,7 +2788,7 @@ Item_func_nullif::str_op(String *str)
+ {
+   DBUG_ASSERT(fixed == 1);
+   String *res;
+-  if (!cmp.compare())
++  if (!compare())
+   {
+     null_value=1;
+     return 0;
+@@ -2672,7 +2804,7 @@ Item_func_nullif::decimal_op(my_decimal * decimal_value)
+ {
+   DBUG_ASSERT(fixed == 1);
+   my_decimal *res;
+-  if (!cmp.compare())
++  if (!compare())
+   {
+     null_value=1;
+     return 0;
+@@ -2687,7 +2819,7 @@ bool
+ Item_func_nullif::date_op(MYSQL_TIME *ltime, uint fuzzydate)
+ {
+   DBUG_ASSERT(fixed == 1);
+-  if (!cmp.compare())
++  if (!compare())
+     return (null_value= true);
+   return (null_value= args[2]->get_date(ltime, fuzzydate));
+ }
+@@ -2696,7 +2828,7 @@ Item_func_nullif::date_op(MYSQL_TIME *ltime, uint fuzzydate)
+ bool
+ Item_func_nullif::is_null()
+ {
+-  return (null_value= (!cmp.compare() ? 1 : args[2]->null_value));
++  return (null_value= (!compare() ? 1 : args[2]->null_value));
+ }
+ 
+ 
+diff --git a/sql/item_cmpfunc.h b/sql/item_cmpfunc.h
+index b7c51cd..16f8a24 100644
+--- a/sql/item_cmpfunc.h
++++ b/sql/item_cmpfunc.h
+@@ -995,10 +995,13 @@ class Item_func_nullif :public Item_func_hybrid_field_type
+     - Item_field::propagate_equal_fields(ANY_SUBST) for the left "a"
+     - Item_field::propagate_equal_fields(IDENTITY_SUBST) for the right "a"
+   */
++  Item_cache *m_cache;
++  int compare();
+ public:
+   // Put "a" to args[0] for comparison and to args[2] for the returned value.
+   Item_func_nullif(THD *thd, Item *a, Item *b):
+-    Item_func_hybrid_field_type(thd, a, b, a)
++    Item_func_hybrid_field_type(thd, a, b, a),
++    m_cache(NULL)
+   {}
+   bool date_op(MYSQL_TIME *ltime, uint fuzzydate);
+   double real_op();
+@@ -1009,6 +1012,9 @@ class Item_func_nullif :public Item_func_hybrid_field_type
+   uint decimal_precision() const { return args[2]->decimal_precision(); }
+   const char *func_name() const { return "nullif"; }
+   void print(String *str, enum_query_type query_type);
++  void split_sum_func(THD *thd, Item **ref_pointer_array, List<Item> &fields,
++                      uint flags);
++  void update_used_tables();
+   table_map not_null_tables() const { return 0; }
+   bool is_null();
+   Item* propagate_equal_fields(THD *thd, const Context &ctx, COND_EQUAL *cond)
