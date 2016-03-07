@@ -10,12 +10,13 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - removed NaCl, not for ARM
-#  - adjusted gyp flags for v7h
-#  - patch to fix webrtc code for non-android ARM
-#  - patch (hack) to fix skia
-#  - makeflags to -j3, seems to barf higher
+#  - adjusted gyp flags for v7/aarch64
+#  - makeflags to -j4 on v7, RAM constraints
+#  - Gentoo patch to remove lingering built-in ffmpeg code
+#  - upstream patches to fix AArch64
 
-buildarch=4
+buildarch=12
+highmem=1
 
 pkgname=chromium
 pkgver=49.0.2623.75
@@ -29,7 +30,7 @@ depends=('gtk2' 'nss' 'alsa-lib' 'xdg-utils' 'bzip2' 'libevent' 'libxss' 'icu'
          'libexif' 'libgcrypt' 'ttf-font' 'systemd' 'dbus' 'flac' 'snappy'
          'speech-dispatcher' 'pciutils' 'libpulse' 'harfbuzz' 'libsecret'
          'libvpx' 'perl' 'perl-file-basedir' 'desktop-file-utils'
-         'hicolor-icon-theme')
+         'hicolor-icon-theme' 'ffmpeg')
 makedepends=('python2' 'gperf' 'yasm' 'mesa' 'ninja')
 optdepends=('kdebase-kdialog: needed for file dialogs in KDE'
             'gnome-keyring: for storing passwords in GNOME keyring'
@@ -40,15 +41,17 @@ install=chromium.install
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
         chromium-launcher-$_launcher_ver.tar.gz::https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver.tar.gz
         chromium.desktop
-        arm-webrtc-fix.patch
-        chromium-arm-r0.patch
-        chromium-widevine.patch)
+        chromium-widevine.patch
+        0001-system-ffmpeg-fixes.patch
+        0002-sandbox-arm64-align-stack-16-bytes.patch
+        0003-Linux-Sandbox-whitelist-arm64-syscalls.patch)
 sha256sums=('a4fd4c85b12b021789d8afc33b27555396e47d9f67c8a062ee3609c4d6b582f5'
             '8b01fb4efe58146279858a754d90b49e5a38c9a0b36a1f84cbb7d12f92b84c28'
             '028a748a5c275de9b8f776f97909f999a8583a4b77fd1cd600b4fc5c0c3e91e9'
-            '9db0f01517c52e3236ff52e8a664840542a19144a54923ae6aabea3dcfa92c52'
-            'df4be49770d508b772f98eda9fc5f37fa71d4c0459437e12f7f3db5892aa1611'
-            '4660344789c45c9b9e52cb6d86f7cb6edb297b39320d04f6947e5216d6e5f64c')
+            '4660344789c45c9b9e52cb6d86f7cb6edb297b39320d04f6947e5216d6e5f64c'
+            '9f0d843fcda221b97386f8686a00918a5e165e65e9eb34df19ba6bc11ec91eee'
+            '48e83c69c33d5b0882982e71c1a3c55a093d2c0416374db6159a87fd4b836ece'
+            'c5b6a12756eb50ecf9bf0763b9ab3e6822fe6365083b73595ca8c593c963145b')
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -74,18 +77,19 @@ prepare() {
   sed "s/@WIDEVINE_VERSION@/Pinkie Pie/" ../chromium-widevine.patch |
     patch -Np1
 
-  # Fix WebRTC for ARM
-  patch -Np0 -i "$srcdir/arm-webrtc-fix.patch"
+  # Fix building with system ffmpeg
+  patch -Np1 -i ../0001-system-ffmpeg-fixes.patch
 
-  # Fix icu build on ARM
-  patch -Np0 -i ../chromium-arm-r0.patch
+  # Upstream AArch64 fixes
+  patch -Np1 -i ../0002-sandbox-arm64-align-stack-16-bytes.patch
+  patch -Np1 -i ../0003-Linux-Sandbox-whitelist-arm64-syscalls.patch
 
   # Remove bundled ICU; its header files appear to get picked up instead of
   # the system ones, leading to errors during the final link stage.
   # https://groups.google.com/a/chromium.org/d/topic/chromium-packagers/BNGvJc08B6Q
   find third_party/icu -type f \! -regex '.*\.\(gyp\|gypi\|isolate\)' -delete
 
-  MAKEFLAGS=-j4
+  [[ $CARCH == "armv7h" ]] && MAKEFLAGS=-j4
 
   # Use Python 2
   find . -name '*.py' -exec sed -i -r 's|/usr/bin/python$|&2|g' {} +
@@ -135,7 +139,7 @@ build() {
     -Duse_gnome_keyring=0
     -Duse_system_bzip2=1
     -Duse_system_flac=1
-    -Duse_system_ffmpeg=0
+    -Duse_system_ffmpeg=1
     -Duse_system_harfbuzz=1
     -Duse_system_icu=1
     -Duse_system_libevent=1
@@ -156,15 +160,22 @@ build() {
     -Ddisable_fatal_linker_warnings=1
     -Ddisable_glibc=1
     -Ddisable_sse2=1
-    -Dtarget_arch=arm
-    -Darm_neon=1
     -Ddisable_nacl=1
     -Ddisable_pnacl=1
+    -Dsysroot=)
+
+  [[ $CARCH == "armv7h" ]] && _chromium_conf+=(
+    -Dtarget_arch=arm
+    -Darm_neon=1
     -Dv8_use_arm_eabi_hardfloat=true
     -Darm_float_abi=hard
-    -Dsysroot=
     -Darmv7=1
     -Darm_fpu=neon)
+
+  [[ $CARCH == "aarch64" ]] && _chromium_conf+=(
+    -Dtarget_arch=arm64
+    -Darm_neon=0
+    -Duse_allocator=none)
 
   # Re-configure bundled ffmpeg.
   #pushd third_party/ffmpeg > /dev/null || exit 1
