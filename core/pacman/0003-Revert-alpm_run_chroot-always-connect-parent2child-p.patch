@@ -1,0 +1,60 @@
+From 2c2a442ba21223de93b1927f8829dbf4ab4c495c Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Fri, 11 Mar 2016 20:11:24 -0700
+Subject: [PATCH 3/3] Revert "alpm_run_chroot: always connect parent2child
+ pipe"
+
+This reverts commit 1d6583a58da0904fb7feafd4a666391087955a7b.
+---
+ lib/libalpm/util.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/lib/libalpm/util.c b/lib/libalpm/util.c
+index 5e74462..f2d43ee 100644
+--- a/lib/libalpm/util.c
++++ b/lib/libalpm/util.c
+@@ -586,7 +586,7 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
+ 		goto cleanup;
+ 	}
+ 
+-	if(pipe(parent2child_pipefd) == -1) {
++	if(stdin_cb && pipe(parent2child_pipefd) == -1) {
+ 		_alpm_log(handle, ALPM_LOG_ERROR, _("could not create pipe (%s)\n"), strerror(errno));
+ 		retval = 1;
+ 		goto cleanup;
+@@ -606,9 +606,11 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
+ 		close(2);
+ 		while(dup2(child2parent_pipefd[1], 1) == -1 && errno == EINTR);
+ 		while(dup2(child2parent_pipefd[1], 2) == -1 && errno == EINTR);
+-		while(dup2(parent2child_pipefd[0], 0) == -1 && errno == EINTR);
+-		close(parent2child_pipefd[0]);
+-		close(parent2child_pipefd[1]);
++		if(stdin_cb) {
++			while(dup2(parent2child_pipefd[0], 0) == -1 && errno == EINTR);
++			close(parent2child_pipefd[0]);
++			close(parent2child_pipefd[1]);
++		}
+ 		close(child2parent_pipefd[0]);
+ 		close(child2parent_pipefd[1]);
+ 		if(cwdfd >= 0) {
+@@ -643,16 +645,15 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
+ 		child2parent->events = POLLIN;
+ 		fcntl(child2parent->fd, F_SETFL, O_NONBLOCK);
+ 		close(child2parent_pipefd[1]);
+-		close(parent2child_pipefd[0]);
+ 
+ 		if(stdin_cb) {
+ 			parent2child->fd = parent2child_pipefd[1];
+ 			parent2child->events = POLLOUT;
+ 			fcntl(parent2child->fd, F_SETFL, O_NONBLOCK);
++			close(parent2child_pipefd[0]);
+ 		} else {
+ 			parent2child->fd = -1;
+ 			parent2child->events = 0;
+-			close(parent2child_pipefd[1]);
+ 		}
+ 
+ #define STOP_POLLING(p) do { close(p->fd); p->fd = -1; } while(0)
+-- 
+2.7.1
+
