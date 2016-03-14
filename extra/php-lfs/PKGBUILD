@@ -1,0 +1,369 @@
+# $Id: PKGBUILD 261071 2016-03-06 10:48:44Z pierre $
+# Maintainer: Pierre Schmitz <pierre@archlinux.de>
+# Compiled with large file support for 32-bit ARM platforms
+# Incompatible with Apache, so php-apache removed
+
+pkgbase=php
+pkgname=('php-lfs'
+         'php-lfs-cgi'
+         'php-lfs-fpm'
+         'php-lfs-embed'
+         'php-lfs-phpdbg'
+         'php-lfs-dblib'
+         'php-lfs-enchant'
+         'php-lfs-gd'
+         'php-lfs-imap'
+         'php-lfs-intl'
+         'php-lfs-mcrypt'
+         'php-lfs-odbc'
+         'php-lfs-pgsql'
+         'php-lfs-pspell'
+         'php-lfs-snmp'
+         'php-lfs-sqlite'
+         'php-lfs-tidy'
+         'php-lfs-xsl')
+pkgver=7.0.4
+pkgrel=1
+arch=('armv5' 'armv6h' 'armv7h')
+buildarch=22 # only for 32-bit ARM platforms
+license=('PHP')
+url='http://www.php.net'
+makedepends=('aspell' 'c-client' 'db' 'enchant' 'gd' 'gmp' 'icu' 'libmcrypt' 'libxslt' 'libzip' 'net-snmp'
+             'postgresql-libs' 'sqlite' 'systemd' 'tidy' 'unixodbc' 'curl' 'libtool' 'postfix' 'freetds')
+checkdepends=('procps-ng')
+source=("https://www.php.net/distributions/${pkgbase}-${pkgver}.tar.xz"{,.asc}
+        'php-fpm.patch' 'php-fpm.tmpfiles' 'php.ini.patch')
+sha256sums=('584e0e374e357a71b6e95175a2947d787453afc7f9ab7c55651c10491c4df532'
+            'SKIP'
+            '136e197384255420c73678aef812e70aa86320f6dbefcc5a952df1a65fdd53fa'
+            '640dba0d960bfeaae9ad38d2826d3f6b5d6c175a4d3e16664eefff29141faad5'
+            '3ee1d4696ccbc8850db19dbf3ac1275ce40debea3b2402c7316d86f7028407da')
+validpgpkeys=('1A4E8B7277C42E53DBA9C7B9BCAA30EA9C0D5763'
+              '6E4F6AB321FDC07F2C332E3AC2BF0BC433CFC8B3')
+
+prepare() {
+	cd ${srcdir}/${pkgbase}-${pkgver}
+
+	patch -p0 -i ${srcdir}/php-fpm.patch
+	patch -p0 -i ${srcdir}/php.ini.patch
+}
+
+build() {
+	local _phpconfig="--srcdir=../${pkgbase}-${pkgver} \
+		--config-cache \
+		--prefix=/usr \
+		--sbindir=/usr/bin \
+		--sysconfdir=/etc/php \
+		--localstatedir=/var \
+		--with-layout=GNU \
+		--with-config-file-path=/etc/php \
+		--with-config-file-scan-dir=/etc/php/conf.d \
+		--disable-rpath \
+		--mandir=/usr/share/man \
+		--without-pear \
+		--enable-zend-signals \
+		"
+
+	local _phpextensions="\
+		--enable-bcmath=shared \
+		--enable-calendar=shared \
+		--enable-dba=shared \
+		--enable-exif=shared \
+		--enable-ftp=shared \
+		--enable-gd-native-ttf \
+		--enable-intl=shared \
+		--enable-mbstring \
+		--enable-shmop=shared \
+		--enable-soap=shared \
+		--enable-sockets=shared \
+		--enable-sysvmsg=shared \
+		--enable-sysvsem=shared \
+		--enable-sysvshm=shared \
+		--enable-zip=shared \
+		--with-bz2=shared \
+		--with-curl=shared \
+		--with-db4=/usr \
+		--with-enchant=shared,/usr \
+		--with-freetype-dir=/usr \
+		--with-gd=shared,/usr \
+		--with-gdbm \
+		--with-gettext=shared \
+		--with-gmp=shared \
+		--with-iconv=shared \
+		--with-imap-ssl \
+		--with-imap=shared \
+		--with-kerberos=/usr \
+		--with-ldap=shared \
+		--with-ldap-sasl \
+		--with-libzip \
+		--with-mcrypt=shared \
+		--with-mhash \
+		--with-mysql-sock=/run/mysqld/mysqld.sock \
+		--with-mysqli=shared,mysqlnd \
+		--with-openssl \
+		--with-pcre-regex=/usr \
+		--with-pdo-dblib=shared,/usr \
+		--with-pdo-mysql=shared,mysqlnd \
+		--with-pdo-odbc=shared,unixODBC,/usr \
+		--with-pdo-pgsql=shared \
+		--with-pdo-sqlite=shared,/usr \
+		--with-pgsql=shared \
+		--with-pspell=shared \
+		--with-readline \
+		--with-snmp=shared \
+		--with-sqlite3=shared,/usr \
+		--with-tidy=shared \
+		--with-unixODBC=shared,/usr \
+		--with-xmlrpc=shared \
+		--with-xsl=shared \
+		--with-zlib \
+		--enable-pcntl \
+		"
+
+	EXTENSION_DIR=/usr/lib/php/modules
+	export EXTENSION_DIR
+
+	# Enable large file support
+	export CFLAGS="$CFLAGS -D_FILE_OFFSET_BITS=64"
+
+	mkdir ${srcdir}/build
+	cd ${srcdir}/build
+	ln -s ../${pkgbase}-${pkgver}/configure
+	./configure ${_phpconfig} \
+		--enable-cgi \
+		--enable-fpm \
+		--with-fpm-systemd \
+		--with-fpm-acl \
+		--with-fpm-user=http \
+		--with-fpm-group=http \
+		--enable-embed=shared \
+		${_phpextensions}
+	make
+
+	# phpdbg
+	cp -a ${srcdir}/build ${srcdir}/build-phpdbg
+	cd ${srcdir}/build-phpdbg
+	./configure ${_phpconfig} \
+		--enable-phpdbg \
+		${_phpextensions}
+	make
+}
+
+check() {
+	cd ${srcdir}/${pkgbase}-${pkgver}
+
+	# Check if sendmail was configured correctly (FS#47600)
+	${srcdir}/build/sapi/cli/php -n -r 'echo ini_get("sendmail_path");' | grep -q '/usr/bin/sendmail'
+
+	export REPORT_EXIT_STATUS=1
+	export NO_INTERACTION=1
+	export SKIP_ONLINE_TESTS=1
+	export SKIP_SLOW_TESTS=1
+
+	${srcdir}/build/sapi/cli/php -n run-tests.php -n -P {tests,Zend}
+}
+
+package_php-lfs() {
+	pkgdesc='A general-purpose scripting language that is especially suited to web development'
+	depends=('libxml2' 'curl' 'libzip')
+	replaces=('php-ldap' 'php')
+	conflicts=('php-ldap' 'php')
+	provides=("php=${pkgver}" "php-ldap=${pkgver}")
+	backup=('etc/php/php.ini')
+
+	cd ${srcdir}/build
+	make -j1 INSTALL_ROOT=${pkgdir} install-{modules,cli,build,headers,programs,pharcmd}
+	install -D -m644 ${srcdir}/${pkgbase}-${pkgver}/php.ini-production ${pkgdir}/etc/php/php.ini
+	install -d -m755 ${pkgdir}/etc/php/conf.d/
+
+	# remove static modules
+	rm -f ${pkgdir}/usr/lib/php/modules/*.a
+	# remove modules provided by sub packages
+	rm -f ${pkgdir}/usr/lib/php/modules/{enchant,gd,imap,intl,mcrypt,odbc,pdo_dblib,pdo_odbc,pgsql,pdo_pgsql,pspell,snmp,sqlite3,pdo_sqlite,tidy,xsl}.so
+	# remove empty directory
+	rmdir ${pkgdir}/usr/include/php/include
+}
+
+package_php-lfs-cgi() {
+	pkgdesc='CGI and FCGI SAPI for PHP'
+	depends=('php-lfs')
+	replaces=('php-cgi')
+	conflicts=('php-cgi')
+	provides=("php-cgi=${pkgver}")
+
+	cd ${srcdir}/build
+	make -j1 INSTALL_ROOT=${pkgdir} install-cgi
+}
+
+package_php-lfs-fpm() {
+	pkgdesc='FastCGI Process Manager for PHP'
+	depends=('php-lfs' 'systemd')
+	replaces=('php-fpm')
+	conflicts=('php-fpm')
+	provides=("php-fpm=${pkgver}")
+	backup=('etc/php/php-fpm.conf' 'etc/php/php-fpm.d/www.conf')
+	install='php-fpm.install'
+	options=('!emptydirs')
+
+	cd ${srcdir}/build
+	make -j1 INSTALL_ROOT=${pkgdir} install-fpm
+	install -D -m644 sapi/fpm/php-fpm.service ${pkgdir}/usr/lib/systemd/system/php-fpm.service
+	install -D -m644 ${srcdir}/php-fpm.tmpfiles ${pkgdir}/usr/lib/tmpfiles.d/php-fpm.conf
+}
+
+package_php-lfs-embed() {
+	pkgdesc='Embedded PHP SAPI library'
+	depends=('php-lfs' 'libsystemd')
+	replaces=('php-embed')
+	conflicts=('php-embed')
+	provides=("php-embed=${pkgver}")
+	options=('!emptydirs')
+
+	cd ${srcdir}/build
+	make -j1 INSTALL_ROOT=${pkgdir} PHP_SAPI=embed install-sapi
+}
+
+package_php-lfs-phpdbg() {
+	pkgdesc='Interactive PHP debugger'
+	depends=('php-lfs')
+	replaces=('php-phpdbg')
+	conflicts=('php-phpdbg')
+	provides=("php-phpdbg=${pkgver}")
+	options=('!emptydirs')
+
+	cd ${srcdir}/build-phpdbg
+	make -j1 INSTALL_ROOT=${pkgdir} install-phpdbg
+}
+
+package_php-lfs-dblib() {
+	pkgdesc='dblib module for PHP'
+	depends=('php-lfs' 'freetds')
+	replaces=('php-dblib')
+	conflicts=('php-dblib')
+	provides=("php-dblib=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/pdo_dblib.so ${pkgdir}/usr/lib/php/modules/pdo_dblib.so
+}
+
+package_php-lfs-enchant() {
+	pkgdesc='enchant module for PHP'
+	depends=('php-lfs' 'enchant')
+	replaces=('php-enchant')
+	conflicts=('php-enchant')
+	provides=("php-enchant=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/enchant.so ${pkgdir}/usr/lib/php/modules/enchant.so
+}
+
+package_php-lfs-gd() {
+	pkgdesc='gd module for PHP'
+	depends=('php-lfs' 'gd')
+	replaces=('php-gd')
+	conflicts=('php-gd')
+	provides=("php-gd=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/gd.so ${pkgdir}/usr/lib/php/modules/gd.so
+}
+
+package_php-lfs-imap() {
+	pkgdesc='imap module for PHP'
+	depends=('php-lfs' 'c-client')
+	replaces=('php-imap')
+	conflicts=('php-imap')
+	provides=("php-imap=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/imap.so ${pkgdir}/usr/lib/php/modules/imap.so
+}
+
+package_php-lfs-intl() {
+	pkgdesc='intl module for PHP'
+	depends=('php-lfs' 'icu')
+	replaces=('php-intl')
+	conflicts=('php-intl')
+	provides=("php-intl=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/intl.so ${pkgdir}/usr/lib/php/modules/intl.so
+}
+
+package_php-lfs-mcrypt() {
+	pkgdesc='mcrypt module for PHP'
+	depends=('php-lfs' 'libmcrypt' 'libtool')
+	replaces=('php-mcrypt')
+	conflicts=('php-mcrypt')
+	provides=("php-mcrypt=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/mcrypt.so ${pkgdir}/usr/lib/php/modules/mcrypt.so
+}
+
+package_php-lfs-odbc() {
+	pkgdesc='ODBC modules for PHP'
+	depends=('php-lfs' 'unixodbc')
+	replaces=('php-odbc')
+	conflicts=('php-odbc')
+	provides=("php-odbc=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/odbc.so ${pkgdir}/usr/lib/php/modules/odbc.so
+	install -D -m755 ${srcdir}/build/modules/pdo_odbc.so ${pkgdir}/usr/lib/php/modules/pdo_odbc.so
+}
+
+package_php-lfs-pgsql() {
+	pkgdesc='PostgreSQL modules for PHP'
+	depends=('php-lfs' 'postgresql-libs')
+	replaces=('php-pgsql')
+	conflicts=('php-pgsql')
+	provides=("php-pgsql=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/pgsql.so ${pkgdir}/usr/lib/php/modules/pgsql.so
+	install -D -m755 ${srcdir}/build/modules/pdo_pgsql.so ${pkgdir}/usr/lib/php/modules/pdo_pgsql.so
+}
+
+package_php-lfs-pspell() {
+	pkgdesc='pspell module for PHP'
+	depends=('php-lfs' 'aspell')
+	replaces=('php-pspell')
+	conflicts=('php-pspell')
+	provides=("php-pspell=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/pspell.so ${pkgdir}/usr/lib/php/modules/pspell.so
+}
+
+package_php-lfs-snmp() {
+	pkgdesc='snmp module for PHP'
+	depends=('php-lfs' 'net-snmp')
+	replaces=('php-snmp')
+	conflicts=('php-snmp')
+	provides=("php-snmp=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/snmp.so ${pkgdir}/usr/lib/php/modules/snmp.so
+}
+
+package_php-lfs-sqlite() {
+	pkgdesc='sqlite module for PHP'
+	depends=('php-lfs' 'sqlite')
+	replaces=('php-sqlite')
+	conflicts=('php-sqlite')
+	provides=("php-sqlite=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/sqlite3.so ${pkgdir}/usr/lib/php/modules/sqlite3.so
+	install -D -m755 ${srcdir}/build/modules/pdo_sqlite.so ${pkgdir}/usr/lib/php/modules/pdo_sqlite.so
+}
+
+package_php-lfs-tidy() {
+	pkgdesc='tidy module for PHP'
+	depends=('php-lfs' 'tidy')
+	replaces=('php-tidy')
+	conflicts=('php-tidy')
+	provides=("php-tidy=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/tidy.so ${pkgdir}/usr/lib/php/modules/tidy.so
+}
+
+package_php-lfs-xsl() {
+	pkgdesc='xsl module for PHP'
+	depends=('php-lfs' 'libxslt')
+	replaces=('php-xsl')
+	conflicts=('php-xsl')
+	provides=("php-xsl=${pkgver}")
+
+	install -D -m755 ${srcdir}/build/modules/xsl.so ${pkgdir}/usr/lib/php/modules/xsl.so
+}
