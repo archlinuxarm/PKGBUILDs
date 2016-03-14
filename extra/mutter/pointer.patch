@@ -1,0 +1,96 @@
+From 70f20c90bd627be842b40396cf0c898b357f2dd0 Mon Sep 17 00:00:00 2001
+From: Rui Matos <tiagomatos@gmail.com>
+Date: Mon, 7 Mar 2016 17:24:13 +0100
+Subject: Handle meta_screen_get_monitor_for_point() returning NULL
+
+On the X11 backend we don't track the pointer position in
+priv->current_x/y which remain set to zero. That means we never set
+the clutter stage cursor if point 0,0 isn't covered by any monitor
+since we return early.
+
+Commit 4bebc5e5fa8aade8a96c769bf2365abe0948f6ce introduced this to
+avoid crashing on the prepare-at handlers when the cursor position
+doesn't fall inside any monitor area but we can handle that higher up
+in the stack. In that case, the sprite's scale doesn't matter since
+the cursor won't be shown anyway so we can skip setting it.
+
+https://bugzilla.gnome.org/show_bug.cgi?id=763159
+---
+ src/backends/meta-cursor-renderer.c | 15 ---------------
+ src/core/screen.c                   |  3 ++-
+ src/wayland/meta-wayland-pointer.c  |  5 +++--
+ 3 files changed, 5 insertions(+), 18 deletions(-)
+
+diff --git a/src/backends/meta-cursor-renderer.c b/src/backends/meta-cursor-renderer.c
+index a76241b..48cd239 100644
+--- a/src/backends/meta-cursor-renderer.c
++++ b/src/backends/meta-cursor-renderer.c
+@@ -27,8 +27,6 @@
+ #include "meta-cursor-renderer.h"
+ 
+ #include <meta/meta-backend.h>
+-#include <backends/meta-backend-private.h>
+-#include <backends/meta-monitor-manager-private.h>
+ #include <meta/util.h>
+ 
+ #include <cogl/cogl.h>
+@@ -118,14 +116,6 @@ meta_cursor_renderer_calculate_rect (MetaCursorRenderer *renderer,
+   };
+ }
+ 
+-static gboolean
+-is_cursor_in_monitors_area (int x, int y)
+-{
+-  MetaMonitorManager *monitor_manager = meta_backend_get_monitor_manager (meta_get_backend ());
+-  return meta_monitor_manager_get_monitor_at_point (monitor_manager,
+-                                                    (gfloat) x, (gfloat) y) >= 0;
+-}
+-
+ static void
+ update_cursor (MetaCursorRenderer *renderer,
+                MetaCursorSprite   *cursor_sprite)
+@@ -134,11 +124,6 @@ update_cursor (MetaCursorRenderer *renderer,
+   gboolean handled_by_backend;
+   gboolean should_redraw = FALSE;
+ 
+-  /* do not render cursor if it is not on any monitor. Such situation
+-   * can occur e. g. after monitor hot-plug */
+-  if (!is_cursor_in_monitors_area (priv->current_x, priv->current_y))
+-    return;
+-
+   if (cursor_sprite)
+     meta_cursor_sprite_prepare_at (cursor_sprite,
+                                    priv->current_x,
+diff --git a/src/core/screen.c b/src/core/screen.c
+index 19f7db5..7e098d7 100644
+--- a/src/core/screen.c
++++ b/src/core/screen.c
+@@ -1267,7 +1267,8 @@ root_cursor_prepare_at (MetaCursorSprite *cursor_sprite,
+   monitor = meta_screen_get_monitor_for_point (screen, x, y);
+ 
+   /* Reload the cursor texture if the scale has changed. */
+-  meta_cursor_sprite_set_theme_scale (cursor_sprite, monitor->scale);
++  if (monitor)
++    meta_cursor_sprite_set_theme_scale (cursor_sprite, monitor->scale);
+ }
+ 
+ static void
+diff --git a/src/wayland/meta-wayland-pointer.c b/src/wayland/meta-wayland-pointer.c
+index 894a64d..651e38b 100644
+--- a/src/wayland/meta-wayland-pointer.c
++++ b/src/wayland/meta-wayland-pointer.c
+@@ -823,8 +823,9 @@ cursor_sprite_prepare_at (MetaCursorSprite *cursor_sprite,
+   if (!meta_xwayland_is_xwayland_surface (surface))
+     {
+       monitor = meta_screen_get_monitor_for_point (screen, x, y);
+-      meta_cursor_sprite_set_texture_scale (cursor_sprite,
+-                                            (float)monitor->scale / surface->scale);
++      if (monitor)
++        meta_cursor_sprite_set_texture_scale (cursor_sprite,
++                                              (float)monitor->scale / surface->scale);
+     }
+   meta_wayland_surface_update_outputs (surface);
+ }
+-- 
+cgit v0.12
+
