@@ -1,0 +1,87 @@
+From 026b3cec564af35100ec9c3bdd7ce949768575b8 Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Wed, 16 Mar 2016 07:39:26 -0600
+Subject: [PATCH 09/10] Revert "stmmac: Fix 'eth0: No PHY found' regression"
+
+This reverts commit 88f8b1bb41c6208f81b6a480244533ded7b59493.
+---
+ drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c     | 11 ++++++++++-
+ drivers/net/ethernet/stmicro/stmmac/stmmac_platform.c |  9 +--------
+ include/linux/stmmac.h                                |  1 -
+ 3 files changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
+index efb54f3..0faf163 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
++++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
+@@ -199,12 +199,21 @@ int stmmac_mdio_register(struct net_device *ndev)
+ 	struct stmmac_priv *priv = netdev_priv(ndev);
+ 	struct stmmac_mdio_bus_data *mdio_bus_data = priv->plat->mdio_bus_data;
+ 	int addr, found;
+-	struct device_node *mdio_node = priv->plat->mdio_node;
++	struct device_node *mdio_node = NULL;
++	struct device_node *child_node = NULL;
+ 
+ 	if (!mdio_bus_data)
+ 		return 0;
+ 
+ 	if (IS_ENABLED(CONFIG_OF)) {
++		for_each_child_of_node(priv->device->of_node, child_node) {
++			if (of_device_is_compatible(child_node,
++						    "snps,dwmac-mdio")) {
++				mdio_node = child_node;
++				break;
++			}
++		}
++
+ 		if (mdio_node) {
+ 			netdev_dbg(ndev, "FOUND MDIO subnode\n");
+ 		} else {
+diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_platform.c b/drivers/net/ethernet/stmicro/stmmac/stmmac_platform.c
+index 4514ba7..6a52fa1 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/stmmac_platform.c
++++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_platform.c
+@@ -110,7 +110,6 @@ stmmac_probe_config_dt(struct platform_device *pdev, const char **mac)
+ 	struct device_node *np = pdev->dev.of_node;
+ 	struct plat_stmmacenet_data *plat;
+ 	struct stmmac_dma_cfg *dma_cfg;
+-	struct device_node *child_node = NULL;
+ 
+ 	plat = devm_kzalloc(&pdev->dev, sizeof(*plat), GFP_KERNEL);
+ 	if (!plat)
+@@ -141,19 +140,13 @@ stmmac_probe_config_dt(struct platform_device *pdev, const char **mac)
+ 		plat->phy_node = of_node_get(np);
+ 	}
+ 
+-	for_each_child_of_node(np, child_node)
+-		if (of_device_is_compatible(child_node,	"snps,dwmac-mdio")) {
+-			plat->mdio_node = child_node;
+-			break;
+-		}
+-
+ 	/* "snps,phy-addr" is not a standard property. Mark it as deprecated
+ 	 * and warn of its use. Remove this when phy node support is added.
+ 	 */
+ 	if (of_property_read_u32(np, "snps,phy-addr", &plat->phy_addr) == 0)
+ 		dev_warn(&pdev->dev, "snps,phy-addr property is deprecated\n");
+ 
+-	if ((plat->phy_node && !of_phy_is_fixed_link(np)) || !plat->mdio_node)
++	if ((plat->phy_node && !of_phy_is_fixed_link(np)) || plat->phy_bus_name)
+ 		plat->mdio_bus_data = NULL;
+ 	else
+ 		plat->mdio_bus_data =
+diff --git a/include/linux/stmmac.h b/include/linux/stmmac.h
+index 881a79d..eead8ab 100644
+--- a/include/linux/stmmac.h
++++ b/include/linux/stmmac.h
+@@ -100,7 +100,6 @@ struct plat_stmmacenet_data {
+ 	int interface;
+ 	struct stmmac_mdio_bus_data *mdio_bus_data;
+ 	struct device_node *phy_node;
+-	struct device_node *mdio_node;
+ 	struct stmmac_dma_cfg *dma_cfg;
+ 	int clk_csr;
+ 	int has_gmac;
+-- 
+2.7.3
+
