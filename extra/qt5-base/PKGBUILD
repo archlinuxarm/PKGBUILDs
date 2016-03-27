@@ -1,0 +1,126 @@
+# $Id: PKGBUILD 240297 2015-06-03 10:22:03Z fyan $
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - -no-reduce-relocations -- not available on ARM
+#  - explicitly disable x86 optimizations
+#  - use OpenGLES 2.0
+
+pkgname=qt5-base
+_qtver=5.6.0
+pkgver=${_qtver/-/}
+pkgrel=2
+arch=('i686' 'x86_64')
+url='http://qt-project.org/'
+license=('GPL3' 'LGPL' 'FDL' 'custom')
+pkgdesc='A cross-platform application and UI framework'
+depends=('libjpeg-turbo' 'xcb-util-keysyms' 'libgl' 'fontconfig'
+         'xcb-util-wm' 'libxrender' 'libxi' 'sqlite' 'xcb-util-image' 'icu'
+         'qtchooser' 'tslib' 'libinput' 'libsm' 'libxkbcommon-x11')
+makedepends=('mtdev' 'libfbclient' 'libmariadbclient' 'sqlite' 'unixodbc' 'postgresql-libs' 'alsa-lib' 'gst-plugins-base-libs'
+             'gtk2' 'libpulse' 'cups' 'freetds')
+optdepends=('qt5-svg: to use SVG icon themes'
+            'postgresql-libs: PostgreSQL driver'
+            'libmariadbclient: MariaDB driver'
+            'unixodbc: ODBC driver'
+            'libfbclient: Firebird/iBase driver'
+            'mtdev: evdev plugin'
+            'gtk2: GTK2 plugin')
+conflicts=('qt')
+groups=('qt' 'qt5')
+_pkgfqn="${pkgname/5-/}-opensource-src-${_qtver}"
+source=("http://download.qt.io/official_releases/qt/${pkgver%.*}/${_qtver}/submodules/${_pkgfqn}.tar.xz" qt5-alsa1.11.patch
+        qtbug-51648.patch qtbug-51649.patch qtbug-51676.patch)
+md5sums=('d6b6cfd333c22829c6c85fc52ceed019'
+         '5e96b5cfa248b8b071919adb27abc715'
+         'b09aa4f5763f013b06153fbdbc844404'
+         'ef981ff6892337cdab424ebb113b3c39'
+         'f59a1ea0f10a055ba930a53832933482')
+
+prepare() {
+  cd ${_pkgfqn}
+
+  # Build qmake using Arch {C,LD}FLAGS
+  # This also sets default {C,CXX,LD}FLAGS for projects built using qmake
+  sed -i -e "s|^\(QMAKE_CFLAGS_RELEASE.*\)|\1 ${CFLAGS}|" \
+    mkspecs/common/gcc-base.conf
+  sed -i -e "s|^\(QMAKE_LFLAGS_RELEASE.*\)|\1 ${LDFLAGS}|" \
+    mkspecs/common/g++-unix.conf
+
+  # Use python2 for Python 2.x
+  find . -name '*.py' -exec sed -i \
+    's|#![ ]*/usr/bin/python$|&2|;s|#![ ]*/usr/bin/env python$|&2|' {} +
+
+  # Fix libsystemd-journal detection
+  sed -e 's|libsystemd-journal|libsystemd|' -i config.tests/unix/journald/journald.pro -i src/corelib/global/global.pri
+
+  # Fix ALSA 1.11 detection
+  patch -p1 -i ../qt5-alsa1.11.patch
+
+  # Backport fixes for QtDBus deadlocks
+  patch -p1 -i ../qtbug-51648.patch
+  patch -p1 -i ../qtbug-51649.patch
+  patch -p1 -i ../qtbug-51676.patch
+}
+
+build() {
+  cd ${_pkgfqn}
+
+#  export QTDIR="${srcdir}"/${_pkgfqn}
+#  export LD_LIBRARY_PATH="${QTDIR}"/lib:"${LD_LIBRARY_PATH}"
+#  export QT_PLUGIN_PATH="${QTDIR}"/qtbase/plugins
+
+  PYTHON=/usr/bin/python2 ./configure -confirm-license -opensource -v \
+    -prefix /usr \
+    -bindir /usr/lib/qt/bin \
+    -docdir /usr/share/doc/qt \
+    -headerdir /usr/include/qt \
+    -archdatadir /usr/lib/qt \
+    -datadir /usr/share/qt \
+    -sysconfdir /etc/xdg \
+    -examplesdir /usr/share/doc/qt/examples \
+    -plugin-sql-{psql,mysql,sqlite,odbc,ibase} \
+    -system-sqlite \
+    -openssl-linked \
+    -nomake examples \
+    -no-rpath \
+    -optimized-qmake \
+    -dbus-linked \
+    -system-harfbuzz \
+    -journald \
+    -no-use-gold-linker \
+    -no-reduce-relocations \
+    -no-sse2 \
+    -no-sse3 \
+    -no-ssse3 \
+    -no-sse4.1 \
+    -no-sse4.2 \
+    -no-avx \
+    -no-avx2 \
+    -opengl es2
+
+  make
+}
+
+package() {
+  cd ${_pkgfqn}
+  make INSTALL_ROOT="${pkgdir}" install
+
+  install -D -m644 LGPL_EXCEPTION.txt \
+    "${pkgdir}"/usr/share/licenses/${pkgname}/LGPL_EXCEPTION.txt
+
+  # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
+  find "${pkgdir}/usr/lib" -type f -name '*.prl' \
+    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
+
+  # Fix wrong qmake path in pri file
+  sed -i "s|${srcdir}/${_pkgfqn}|/usr|" \
+    "${pkgdir}"/usr/lib/qt/mkspecs/modules/qt_lib_bootstrap_private.pri
+
+  # Useful symlinks
+  install -d "${pkgdir}"/usr/bin
+  for b in "${pkgdir}"/usr/lib/qt/bin/*; do
+    ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
+  done
+}

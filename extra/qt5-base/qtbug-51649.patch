@@ -1,0 +1,159 @@
+From acde2e69df5dedc624674107596f276125e22864 Mon Sep 17 00:00:00 2001
+From: Weng Xuetian <wengxt@gmail.com>
+Date: Thu, 3 Mar 2016 21:56:53 -0800
+Subject: [PATCH] QtDBus: finish all pending call with error if disconnected
+
+libdbus will send a local signal if connection gets disconnected. When
+this happens, end all pending calls with QDBusError::Disconnected.
+
+Task-number: QTBUG-51649
+Change-Id: I5c7d2a468bb5da746d0c0e53e458c1e376f186a9
+---
+ src/dbus/dbus_minimal_p.h                          |  2 ++
+ src/dbus/qdbusintegrator.cpp                       | 26 +++++++++++++++++-----
+ src/dbus/qdbusutil_p.h                             |  6 +++++
+ .../dbus/qdbusconnection/tst_qdbusconnection.cpp   | 22 ++++++++++++++++++
+ .../dbus/qdbusconnection/tst_qdbusconnection.h     |  1 +
+ 5 files changed, 51 insertions(+), 6 deletions(-)
+
+diff --git a/src/dbus/dbus_minimal_p.h b/src/dbus/dbus_minimal_p.h
+index f0a2954..8f25b24 100644
+--- a/src/dbus/dbus_minimal_p.h
++++ b/src/dbus/dbus_minimal_p.h
+@@ -99,9 +99,11 @@ typedef dbus_uint32_t  dbus_bool_t;
+ /* dbus-shared.h */
+ #define DBUS_SERVICE_DBUS      "org.freedesktop.DBus"
+ #define DBUS_PATH_DBUS  "/org/freedesktop/DBus"
++#define DBUS_PATH_LOCAL "/org/freedesktop/DBus/Local"
+ #define DBUS_INTERFACE_DBUS           "org.freedesktop.DBus"
+ #define DBUS_INTERFACE_INTROSPECTABLE "org.freedesktop.DBus.Introspectable"
+ #define DBUS_INTERFACE_PROPERTIES     "org.freedesktop.DBus.Properties"
++#define DBUS_INTERFACE_LOCAL "org.freedesktop.DBus.Local"
+ 
+ #define DBUS_NAME_FLAG_ALLOW_REPLACEMENT 0x1 /**< Allow another service to become the primary owner if requested */
+ #define DBUS_NAME_FLAG_REPLACE_EXISTING  0x2 /**< Request to replace the current primary owner */
+diff --git a/src/dbus/qdbusintegrator.cpp b/src/dbus/qdbusintegrator.cpp
+index cd44861..320419f 100644
+--- a/src/dbus/qdbusintegrator.cpp
++++ b/src/dbus/qdbusintegrator.cpp
+@@ -519,6 +519,14 @@ bool QDBusConnectionPrivate::handleMessage(const QDBusMessage &amsg)
+     switch (amsg.type()) {
+     case QDBusMessage::SignalMessage:
+         handleSignal(amsg);
++        // Check local disconnected signal from libdbus
++        if (amsg.interface() == QDBusUtil::dbusInterfaceLocal()
++            && amsg.path() == QDBusUtil::dbusPathLocal()
++            && amsg.member() == QDBusUtil::disconnected()
++            && !QDBusMessagePrivate::isLocal(amsg)) {
++            while (!pendingCalls.isEmpty())
++                processFinishedCall(pendingCalls.first());
++        }
+         // if there are any other filters in this DBusConnection,
+         // let them see the signal too
+         return false;
+@@ -1767,10 +1775,16 @@ void QDBusConnectionPrivate::processFinishedCall(QDBusPendingCallPrivate *call)
+ 
+     QDBusMessage &msg = call->replyMessage;
+     if (call->pending) {
+-        // decode the message
+-        DBusMessage *reply = q_dbus_pending_call_steal_reply(call->pending);
+-        msg = QDBusMessagePrivate::fromDBusMessage(reply, connection->capabilities);
+-        q_dbus_message_unref(reply);
++        // when processFinishedCall is called and pending call is not completed,
++        // it means we received disconnected signal from libdbus
++        if (q_dbus_pending_call_get_completed(call->pending)) {
++            // decode the message
++            DBusMessage *reply = q_dbus_pending_call_steal_reply(call->pending);
++            msg = QDBusMessagePrivate::fromDBusMessage(reply, connection->capabilities);
++            q_dbus_message_unref(reply);
++        } else {
++            msg = QDBusMessage::createError(QDBusError::Disconnected, QDBusUtil::disconnectedErrorMessage());
++        }
+     }
+     qDBusDebug() << connection << "got message reply:" << msg;
+ 
+@@ -2070,8 +2084,8 @@ void QDBusConnectionPrivate::sendInternal(QDBusPendingCallPrivate *pcall, void *
+             pcall->pending = pending;
+             q_dbus_pending_call_set_notify(pending, qDBusResultReceived, pcall, 0);
+ 
+-            // DBus won't notify us when a peer disconnects so we need to track these ourselves
+-            if (mode == QDBusConnectionPrivate::PeerMode)
++            // DBus won't notify us when a peer disconnects or server terminates so we need to track these ourselves
++            if (mode == QDBusConnectionPrivate::PeerMode || mode == QDBusConnectionPrivate::ClientMode)
+                 pendingCalls.append(pcall);
+ 
+             return;
+diff --git a/src/dbus/qdbusutil_p.h b/src/dbus/qdbusutil_p.h
+index 8f5ae92..ca70ff9 100644
+--- a/src/dbus/qdbusutil_p.h
++++ b/src/dbus/qdbusutil_p.h
+@@ -155,6 +155,8 @@ namespace QDBusUtil
+     { return QStringLiteral(DBUS_SERVICE_DBUS); }
+     inline QString dbusPath()
+     { return QStringLiteral(DBUS_PATH_DBUS); }
++    inline QString dbusPathLocal()
++    { return QStringLiteral(DBUS_PATH_LOCAL); }
+     inline QString dbusInterface()
+     {
+         // it's the same string, but just be sure
+@@ -165,8 +167,12 @@ namespace QDBusUtil
+     { return QStringLiteral(DBUS_INTERFACE_PROPERTIES); }
+     inline QString dbusInterfaceIntrospectable()
+     { return QStringLiteral(DBUS_INTERFACE_INTROSPECTABLE); }
++    inline QString dbusInterfaceLocal()
++    { return QStringLiteral(DBUS_INTERFACE_LOCAL); }
+     inline QString nameOwnerChanged()
+     { return QStringLiteral("NameOwnerChanged"); }
++    inline QString disconnected()
++    { return QStringLiteral("Disconnected"); }
+     inline QString disconnectedErrorMessage()
+     { return QStringLiteral("Not connected to D-Bus server"); }
+ }
+diff --git a/tests/auto/dbus/qdbusconnection/tst_qdbusconnection.cpp b/tests/auto/dbus/qdbusconnection/tst_qdbusconnection.cpp
+index e91f87d..6c7e6b1 100644
+--- a/tests/auto/dbus/qdbusconnection/tst_qdbusconnection.cpp
++++ b/tests/auto/dbus/qdbusconnection/tst_qdbusconnection.cpp
+@@ -1218,6 +1218,28 @@ void tst_QDBusConnection::callVirtualObjectLocal()
+     QCOMPARE(obj.replyArguments, subPathReply.arguments());
+ }
+ 
++void tst_QDBusConnection::pendingCallWhenDisconnected()
++{
++    QDBusServer *server = new QDBusServer;
++    QDBusConnection con = QDBusConnection::connectToPeer(server->address(), "disconnect");
++    QTestEventLoop::instance().enterLoop(2);
++    QVERIFY(!QTestEventLoop::instance().timeout());
++    QVERIFY(con.isConnected());
++
++    delete server;
++
++    // Make sure we call the method before we know it is disconnected.
++    QVERIFY(con.isConnected());
++    QDBusMessage message = QDBusMessage::createMethodCall("", "/", QString(), "method");
++    QDBusPendingCall reply = con.asyncCall(message);
++
++    QTestEventLoop::instance().enterLoop(2);
++    QVERIFY(!con.isConnected());
++    QVERIFY(reply.isFinished());
++    QVERIFY(reply.isError());
++    QVERIFY(reply.error().type() == QDBusError::Disconnected);
++}
++
+ QString MyObject::path;
+ QString MyObjectWithoutInterface::path;
+ QString MyObjectWithoutInterface::interface;
+diff --git a/tests/auto/dbus/qdbusconnection/tst_qdbusconnection.h b/tests/auto/dbus/qdbusconnection/tst_qdbusconnection.h
+index a53ba32..720e484 100644
+--- a/tests/auto/dbus/qdbusconnection/tst_qdbusconnection.h
++++ b/tests/auto/dbus/qdbusconnection/tst_qdbusconnection.h
+@@ -121,6 +121,7 @@ private slots:
+     void registerVirtualObject();
+     void callVirtualObject();
+     void callVirtualObjectLocal();
++    void pendingCallWhenDisconnected();
+ 
+ public:
+     QString serviceName() const { return "org.qtproject.Qt.Autotests.QDBusConnection"; }
+-- 
+2.7.1
+
