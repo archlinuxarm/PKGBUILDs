@@ -1,0 +1,68 @@
+# $Id: PKGBUILD 240297 2015-06-03 10:22:03Z fyan $
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - icu makedepend
+#  - patch for soft-float armv5
+#  - patch for AArch64 support in qtwebkit
+
+pkgname=qt5-webkit
+_qtver=5.6.0
+pkgver=${_qtver/-/}
+pkgrel=2
+arch=('i686' 'x86_64')
+url='http://qt-project.org/'
+license=('GPL3' 'LGPL' 'FDL' 'custom')
+pkgdesc='Classes for a WebKit2 based implementation and a new QML API'
+depends=('qt5-location' 'qt5-sensors' 'qt5-webchannel' 'libwebp' 'libxslt' 'libxcomposite' 'gst-plugins-base')
+makedepends=('ruby' 'gperf' 'python2' 'icu')
+optdepends=('gst-plugins-good: Webm codec support')
+conflicts=('qt')
+groups=('qt' 'qt5')
+_pkgfqn="${pkgname/5-/}-opensource-src-${pkgver}"
+source=("http://download.qt.io/community_releases/${pkgver%.*}/${pkgver}/qtwebkit-opensource-src-${pkgver}.tar.xz"
+        qt5-webkit-pthread.patch
+        qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch
+        0001-Add-ARM-64-support.patch)
+md5sums=('eba1382587add1c9b1293a532e7dd161'
+         'f65286024f65ca87837171272fc8975d')
+
+prepare() {
+  mkdir -p build
+
+# Hack to force python2
+  mkdir -p bin
+  ln -s /usr/bin/python2 bin/python
+
+# Fix linking to pthread
+  cd ${_pkgfqn}
+  patch -p1 -i ../qt5-webkit-pthread.patch
+
+# ARM fixes
+  patch -p1 -i ../qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch
+  patch -p1 -i ../0001-Add-ARM-64-support.patch
+
+# Generate headers
+  syncqt.pl-qt5 -version 5.6.0 Source/sync.profile
+}
+
+build() {
+  cd build  
+
+  export PATH="${srcdir}/bin:$PATH"
+  qmake ../${_pkgfqn}
+  make
+}
+
+package() {
+  cd build
+  make INSTALL_ROOT="$pkgdir" install
+
+  # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
+  find "$pkgdir/usr/lib" -type f -name '*.prl' \
+    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
+
+  install -d "$pkgdir"/usr/share/licenses
+  ln -s /usr/share/licenses/qt5-base "$pkgdir"/usr/share/licenses/${pkgname}
+}
