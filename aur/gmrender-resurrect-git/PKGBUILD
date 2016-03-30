@@ -4,7 +4,7 @@
 
 pkgname=gmrender-resurrect-git
 _gitname=gmrender-resurrect
-pkgver=277.aa3d02c
+pkgver=279.4003616
 pkgrel=1
 pkgdesc="Application to stream music from a UPnP server using gstreamer."
 arch=('i686' 'x86_64')
@@ -23,9 +23,11 @@ install='gmrender-resurrect.install'
 source=(
 	'git+https://github.com/hzeller/gmrender-resurrect.git'
 	'gmediarender.service'
+	'gmediarender-user.service'
 	'gmediarender')
 md5sums=('SKIP'
          'a3fa4bedc6e0853cf40b48c80269736f'
+         'cb7ee011b08d37db1a2f5253da8e18e3'
          '979798ff9cac610930f13fb922ca95d4')
 
 
@@ -45,5 +47,6 @@ package() {
 	cd $_gitname
 	make DESTDIR=$pkgdir install
 	install -D -m 644 $srcdir/gmediarender.service "$pkgdir/usr/lib/systemd/system/gmediarender.service"
+	install -D -m 644 $srcdir/gmediarender-user.service "$pkgdir/usr/lib/systemd/user/gmediarender.service"
 	install -D -m 644 $srcdir/gmediarender "$pkgdir/etc/conf.d/gmediarender"
 }
