@@ -1,0 +1,1215 @@
+From a86ab98d50e3aa15fbdc65cb3bd220fc86f18cad Mon Sep 17 00:00:00 2001
+From: Nigel Croxon <nigel.croxon@hpe.com>
+Date: Wed, 23 Dec 2015 08:33:02 -0500
+Subject: [PATCH 06/10] From: Ard Biesheuvel <ard.biesheuvel@linaro.org>
+ Subject: [PATCH 2/2] Replace ARM arithmetic support routines with EDK2
+ versions.
+
+Replace the incomplete GPL licensed ARM arithmetic support routines
+with the ones from the EDK2 project. These cover long long multiplication
+and long long logical shift as well.
+
+Also remove the special case for small dividends in DivU64x32: we can
+simply let the compiler handle this, and emit calls to the support
+routines where appropriate.
+
+Signed-off-by: Ard Biesheuvel <ard.biesheuvel@linaro.org>
+Signed-off-by: Nigel Croxon <nigel.croxon@hpe.com>
+---
+ inc/arm/efibind.h   |   9 +-
+ lib/Makefile        |   3 +-
+ lib/arm/div.S       | 155 +++++++++++++++++++++++++++++
+ lib/arm/div64.S     | 193 ------------------------------------
+ lib/arm/edk2asm.h   |   6 ++
+ lib/arm/ldivmod.S   |  61 ++++++++++++
+ lib/arm/lib1funcs.S | 279 ----------------------------------------------------
+ lib/arm/llsl.S      |  41 ++++++++
+ lib/arm/llsr.S      |  41 ++++++++
+ lib/arm/mullu.S     |  33 +++++++
+ lib/arm/uldiv.S     | 267 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 11 files changed, 608 insertions(+), 480 deletions(-)
+ create mode 100644 lib/arm/div.S
+ delete mode 100644 lib/arm/div64.S
+ create mode 100644 lib/arm/edk2asm.h
+ create mode 100644 lib/arm/ldivmod.S
+ delete mode 100644 lib/arm/lib1funcs.S
+ create mode 100644 lib/arm/llsl.S
+ create mode 100644 lib/arm/llsr.S
+ create mode 100644 lib/arm/mullu.S
+ create mode 100644 lib/arm/uldiv.S
+
+diff --git a/inc/arm/efibind.h b/inc/arm/efibind.h
+index 798212c..cc4b5c5 100644
+--- a/inc/arm/efibind.h
++++ b/inc/arm/efibind.h
+@@ -125,13 +125,8 @@ typedef uint32_t   UINTN;
+ #define uefi_call_wrapper(func, va_num, ...) func(__VA_ARGS__)
+ #define EFI_FUNCTION
+ 
+-extern UINT64 __DivU64x32(UINT64 Dividend, UINTN Divisor, UINTN *Remainder);
+-
+ static inline UINT64 DivU64x32(UINT64 Dividend, UINTN Divisor, UINTN *Remainder)
+ {
+-    if (Dividend >> 32)
+-        return __DivU64x32(Dividend, Divisor, Remainder);
+-
+     /*
+      * GCC turns a division into a multiplication and shift with precalculated
+      * constants if the divisor is constant and the dividend fits into a 32 bit
+@@ -139,7 +134,7 @@ static inline UINT64 DivU64x32(UINT64 Dividend, UINTN Divisor, UINTN *Remainder)
+      * library functions.
+      */
+     if (Remainder)
+-        *Remainder = (UINTN)Dividend % Divisor;
+-    Dividend = (UINTN)Dividend / Divisor;
++        *Remainder = Dividend % Divisor;
++    Dividend = Dividend / Divisor;
+     return Dividend;
+ }
+diff --git a/lib/Makefile b/lib/Makefile
+index 622730f..a9ba4e2 100644
+--- a/lib/Makefile
++++ b/lib/Makefile
+@@ -58,7 +58,8 @@ FILES += $(ARCH)/callwrap $(ARCH)/efi_stub
+ endif
+ 
+ ifeq ($(ARCH),arm)
+-FILES += $(ARCH)/lib1funcs $(ARCH)/div64
++FILES += $(ARCH)/uldiv $(ARCH)/ldivmod $(ARCH)/div $(ARCH)/llsl $(ARCH)/llsr \
++	 $(ARCH)/mullu
+ endif
+ 
+ OBJS  = $(FILES:%=%.o)
+diff --git a/lib/arm/div.S b/lib/arm/div.S
+new file mode 100644
+index 0000000..71158b6
+--- /dev/null
++++ b/lib/arm/div.S
+@@ -0,0 +1,155 @@
++#------------------------------------------------------------------------------
++#
++# Copyright (c) 2011, ARM. All rights reserved.<BR>
++#
++# This program and the accompanying materials
++# are licensed and made available under the terms and conditions of the BSD License
++# which accompanies this distribution.  The full text of the license may be found at
++# http://opensource.org/licenses/bsd-license.php
++#
++# THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
++# WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
++#
++#------------------------------------------------------------------------------
++
++#include "edk2asm.h"
++
++.text
++.align 2
++GCC_ASM_EXPORT(__aeabi_uidiv)
++GCC_ASM_EXPORT(__aeabi_uidivmod)
++GCC_ASM_EXPORT(__aeabi_idiv)
++GCC_ASM_EXPORT(__aeabi_idivmod)
++
++#    AREA  Math, CODE, READONLY
++
++#
++#UINT32
++#EFIAPI
++#__aeabi_uidivmode (
++#  IN UINT32  Dividen
++#  IN UINT32  Divisor
++#  );
++#
++
++ASM_PFX(__aeabi_uidiv):
++ASM_PFX(__aeabi_uidivmod):
++  rsbs    r12, r1, r0, LSR #4
++  mov     r2, #0
++  bcc     ASM_PFX(__arm_div4)
++  rsbs    r12, r1, r0, LSR #8
++  bcc     ASM_PFX(__arm_div8)
++  mov     r3, #0
++  b       ASM_PFX(__arm_div_large)
++
++#
++#INT32
++#EFIAPI
++#__aeabi_idivmode (
++#  IN INT32  Dividen
++#  IN INT32  Divisor
++#  );
++#
++ASM_PFX(__aeabi_idiv):
++ASM_PFX(__aeabi_idivmod):
++  orrs    r12, r0, r1
++  bmi     ASM_PFX(__arm_div_negative)
++  rsbs    r12, r1, r0, LSR #1
++  mov     r2, #0
++  bcc     ASM_PFX(__arm_div1)
++  rsbs    r12, r1, r0, LSR #4
++  bcc     ASM_PFX(__arm_div4)
++  rsbs    r12, r1, r0, LSR #8
++  bcc     ASM_PFX(__arm_div8)
++  mov     r3, #0
++  b       ASM_PFX(__arm_div_large)
++ASM_PFX(__arm_div8):
++  rsbs    r12, r1, r0, LSR #7
++  subcs   r0, r0, r1, LSL #7
++  adc     r2, r2, r2
++  rsbs    r12, r1, r0,LSR #6
++  subcs   r0, r0, r1, LSL #6
++  adc     r2, r2, r2
++  rsbs    r12, r1, r0, LSR #5
++  subcs   r0, r0, r1, LSL #5
++  adc     r2, r2, r2
++  rsbs    r12, r1, r0, LSR #4
++  subcs   r0, r0, r1, LSL #4
++  adc     r2, r2, r2
++ASM_PFX(__arm_div4):
++  rsbs    r12, r1, r0, LSR #3
++  subcs   r0, r0, r1, LSL #3
++  adc     r2, r2, r2
++  rsbs    r12, r1, r0, LSR #2
++  subcs   r0, r0, r1, LSL #2
++  adcs    r2, r2, r2
++  rsbs    r12, r1, r0, LSR #1
++  subcs   r0, r0, r1, LSL #1
++  adc     r2, r2, r2
++ASM_PFX(__arm_div1):
++  subs    r1, r0, r1
++  movcc   r1, r0
++  adc     r0, r2, r2
++  bx      r14
++ASM_PFX(__arm_div_negative):
++  ands    r2, r1, #0x80000000
++  rsbmi   r1, r1, #0
++  eors    r3, r2, r0, ASR #32
++  rsbcs   r0, r0, #0
++  rsbs    r12, r1, r0, LSR #4
++  bcc     label1
++  rsbs    r12, r1, r0, LSR #8
++  bcc     label2
++ASM_PFX(__arm_div_large):
++  lsl     r1, r1, #6
++  rsbs    r12, r1, r0, LSR #8
++  orr     r2, r2, #0xfc000000
++  bcc     label2
++  lsl     r1, r1, #6
++  rsbs    r12, r1, r0, LSR #8
++  orr     r2, r2, #0x3f00000
++  bcc     label2
++  lsl     r1, r1, #6
++  rsbs    r12, r1, r0, LSR #8
++  orr     r2, r2, #0xfc000
++  orrcs   r2, r2, #0x3f00
++  lslcs   r1, r1, #6
++  rsbs    r12, r1, #0
++  bcs     ASM_PFX(__aeabi_idiv0)
++label3:
++  lsrcs   r1, r1, #6
++label2:
++  rsbs    r12, r1, r0, LSR #7
++  subcs   r0, r0, r1, LSL #7
++  adc     r2, r2, r2
++  rsbs    r12, r1, r0, LSR #6
++  subcs   r0, r0, r1, LSL #6
++  adc     r2, r2, r2
++  rsbs    r12, r1, r0, LSR #5
++  subcs   r0, r0, r1, LSL #5
++  adc     r2, r2, r2
++  rsbs    r12, r1, r0, LSR #4
++  subcs   r0, r0, r1, LSL #4
++  adc     r2, r2, r2
++label1:
++  rsbs    r12, r1, r0, LSR #3
++  subcs   r0, r0, r1, LSL #3
++  adc     r2, r2, r2
++  rsbs    r12, r1, r0, LSR #2
++  subcs   r0, r0, r1, LSL #2
++  adcs    r2, r2, r2
++  bcs     label3
++  rsbs    r12, r1, r0, LSR #1
++  subcs   r0, r0, r1, LSL #1
++  adc     r2, r2, r2
++  subs    r1, r0, r1
++  movcc   r1, r0
++  adc     r0, r2, r2
++  asrs    r3, r3, #31
++  rsbmi   r0, r0, #0
++  rsbcs   r1, r1, #0
++  bx      r14
++
++  @ What to do about division by zero?  For now, just return.
++ASM_PFX(__aeabi_idiv0):
++  bx      r14
+diff --git a/lib/arm/div64.S b/lib/arm/div64.S
+deleted file mode 100644
+index f67ba77..0000000
+--- a/lib/arm/div64.S
++++ /dev/null
+@@ -1,193 +0,0 @@
+-/*
+- *  linux/arch/arm/lib/div64.S
+- *
+- *  Optimized computation of 64-bit dividend / 32-bit divisor
+- *
+- *  Author:	Nicolas Pitre
+- *  Created:	Oct 5, 2003
+- *  Copyright:	Monta Vista Software, Inc.
+- *
+- *  This program is free software; you can redistribute it and/or modify
+- *  it under the terms of the GNU General Public License version 2 as
+- *  published by the Free Software Foundation.
+- */
+-
+-#define xl r0
+-#define xh r1
+-#define yl r2
+-#define yh r3
+-
+-#define UNWIND(x...)
+-#define ARM(x...)	x
+-#define THUMB(x...)
+-
+-#define ENTRY(__f)			\
+-	.align		3		;\
+-	.globl		__f		;\
+-	.type		__f,%function	;\
+-__f:
+-#define ENDPROC(__f)			;\
+-	.size		__f, . - __f
+-
+-
+-/*
+-UINT64
+-DivU64x32 (
+-    IN UINT64   Dividend,
+-    IN UINTN    Divisor,
+-    OUT UINTN   *Remainder OPTIONAL
+-    )
+-// divide 64bit by 32bit and get a 64bit result
+-// N.B. only works for 31bit divisors!!
+-{
+-}
+-*/
+-
+-ENTRY(__DivU64x32)
+-	stmfd	sp!, {r4-r6, lr}
+-
+-	mov	r5, r4			@ preserve Remainder
+-	mov	r4, r2			@ divisor in r4
+-	bl	__do_div64
+-
+-	teq	r5, #0
+-	strne	xh, [r5]
+-	mov	r0, yl
+-	mov	r1, yh
+-	ldmfd	sp!, {r4-r6, pc}
+-ENDPROC(__DivU64x32)
+-
+-/*
+- * __do_div64: perform a division with 64-bit dividend and 32-bit divisor.
+- *
+- * Note: Calling convention is totally non standard for optimal code.
+- *       This is meant to be used by do_div() from include/asm/div64.h only.
+- *
+- * Input parameters:
+- * 	xh-xl	= dividend (clobbered)
+- * 	r4	= divisor (preserved)
+- *
+- * Output values:
+- * 	yh-yl	= result
+- * 	xh	= remainder
+- *
+- * Clobbered regs: xl, ip
+- */
+-
+-ENTRY(__do_div64)
+-UNWIND(.fnstart)
+-
+-	@ Test for easy paths first.
+-	subs	ip, r4, #1
+-	bls	9f			@ divisor is 0 or 1
+-	tst	ip, r4
+-	beq	8f			@ divisor is power of 2
+-
+-	@ See if we need to handle upper 32-bit result.
+-	cmp	xh, r4
+-	mov	yh, #0
+-	blo	3f
+-
+-	@ Align divisor with upper part of dividend.
+-	@ The aligned divisor is stored in yl preserving the original.
+-	@ The bit position is stored in ip.
+-
+-	clz	yl, r4
+-	clz	ip, xh
+-	sub	yl, yl, ip
+-	mov	ip, #1
+-	mov	ip, ip, lsl yl
+-	mov	yl, r4, lsl yl
+-
+-	@ The division loop for needed upper bit positions.
+- 	@ Break out early if dividend reaches 0.
+-2:	cmp	xh, yl
+-	orrcs	yh, yh, ip
+-	subcss	xh, xh, yl
+-	movnes	ip, ip, lsr #1
+-	mov	yl, yl, lsr #1
+-	bne	2b
+-
+-	@ See if we need to handle lower 32-bit result.
+-3:	cmp	xh, #0
+-	mov	yl, #0
+-	cmpeq	xl, r4
+-	movlo	xh, xl
+-	movlo	pc, lr
+-
+-	@ The division loop for lower bit positions.
+-	@ Here we shift remainer bits leftwards rather than moving the
+-	@ divisor for comparisons, considering the carry-out bit as well.
+-	mov	ip, #0x80000000
+-4:	movs	xl, xl, lsl #1
+-	adcs	xh, xh, xh
+-	beq	6f
+-	cmpcc	xh, r4
+-5:	orrcs	yl, yl, ip
+-	subcs	xh, xh, r4
+-	movs	ip, ip, lsr #1
+-	bne	4b
+-	mov	pc, lr
+-
+-	@ The top part of remainder became zero.  If carry is set
+-	@ (the 33th bit) this is a false positive so resume the loop.
+-	@ Otherwise, if lower part is also null then we are done.
+-6:	bcs	5b
+-	cmp	xl, #0
+-	moveq	pc, lr
+-
+-	@ We still have remainer bits in the low part.  Bring them up.
+-
+-	clz	xh, xl			@ we know xh is zero here so...
+-	add	xh, xh, #1
+-	mov	xl, xl, lsl xh
+-	mov	ip, ip, lsr xh
+-
+-	@ Current remainder is now 1.  It is worthless to compare with
+-	@ divisor at this point since divisor can not be smaller than 3 here.
+-	@ If possible, branch for another shift in the division loop.
+-	@ If no bit position left then we are done.
+-	movs	ip, ip, lsr #1
+-	mov	xh, #1
+-	bne	4b
+-	mov	pc, lr
+-
+-8:	@ Division by a power of 2: determine what that divisor order is
+-	@ then simply shift values around
+-
+-	clz	ip, r4
+-	rsb	ip, ip, #31
+-
+-	mov	yh, xh, lsr ip
+-	mov	yl, xl, lsr ip
+-	rsb	ip, ip, #32
+- ARM(	orr	yl, yl, xh, lsl ip	)
+- THUMB(	lsl	xh, xh, ip		)
+- THUMB(	orr	yl, yl, xh		)
+-	mov	xh, xl, lsl ip
+-	mov	xh, xh, lsr ip
+-	mov	pc, lr
+-
+-	@ eq -> division by 1: obvious enough...
+-9:	moveq	yl, xl
+-	moveq	yh, xh
+-	moveq	xh, #0
+-	moveq	pc, lr
+-UNWIND(.fnend)
+-
+-UNWIND(.fnstart)
+-UNWIND(.pad #4)
+-UNWIND(.save {lr})
+-Ldiv0_64:
+-	@ Division by 0:
+-	str	lr, [sp, #-8]!
+-	bl	__div0
+-
+-	@ as wrong as it could be...
+-	mov	yl, #0
+-	mov	yh, #0
+-	mov	xh, #0
+-	ldr	pc, [sp], #8
+-
+-UNWIND(.fnend)
+-ENDPROC(__do_div64)
+diff --git a/lib/arm/edk2asm.h b/lib/arm/edk2asm.h
+new file mode 100644
+index 0000000..9515eaf
+--- /dev/null
++++ b/lib/arm/edk2asm.h
+@@ -0,0 +1,6 @@
++
++#define ASM_PFX(x)			x
++#define GCC_ASM_EXPORT(x)		\
++	.globl		x		; \
++	.type		x, %function
++
+diff --git a/lib/arm/ldivmod.S b/lib/arm/ldivmod.S
+new file mode 100644
+index 0000000..edbf89e
+--- /dev/null
++++ b/lib/arm/ldivmod.S
+@@ -0,0 +1,61 @@
++//------------------------------------------------------------------------------
++//
++// Copyright (c) 2008 - 2009, Apple Inc. All rights reserved.<BR>
++//
++// This program and the accompanying materials
++// are licensed and made available under the terms and conditions of the BSD License
++// which accompanies this distribution.  The full text of the license may be found at
++// http://opensource.org/licenses/bsd-license.php
++//
++// THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
++// WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
++//
++//------------------------------------------------------------------------------
++
++
++#include "edk2asm.h"
++
++  .text
++  .align 2
++  GCC_ASM_EXPORT(__aeabi_ldivmod)
++
++//
++// A pair of (unsigned) long longs is returned in {{r0, r1}, {r2, r3}},
++//  the quotient in {r0, r1}, and the remainder in {r2, r3}.
++//
++//__value_in_regs lldiv_t
++//EFIAPI
++//__aeabi_ldivmod (
++//  IN UINT64  Dividen
++//  IN UINT64  Divisor
++//  )//
++//
++
++ASM_PFX(__aeabi_ldivmod):
++    push     {r4,lr}
++    asrs     r4,r1,#1
++    eor      r4,r4,r3,LSR #1
++    bpl      L_Test1
++    rsbs     r0,r0,#0
++    rsc      r1,r1,#0
++L_Test1:
++    tst      r3,r3
++    bpl      L_Test2
++    rsbs     r2,r2,#0
++    rsc      r3,r3,#0
++L_Test2:
++    bl       ASM_PFX(__aeabi_uldivmod)
++    tst      r4,#0x40000000
++    beq      L_Test3
++    rsbs     r0,r0,#0
++    rsc      r1,r1,#0
++L_Test3:
++    tst      r4,#0x80000000
++    beq      L_Exit
++    rsbs     r2,r2,#0
++    rsc      r3,r3,#0
++L_Exit:
++    pop      {r4,pc}
++
++
++
+diff --git a/lib/arm/lib1funcs.S b/lib/arm/lib1funcs.S
+deleted file mode 100644
+index 6b4d4bf..0000000
+--- a/lib/arm/lib1funcs.S
++++ /dev/null
+@@ -1,279 +0,0 @@
+-/*
+- * linux/arch/arm/lib/lib1funcs.S: Optimized ARM division routines
+- *
+- * Author: Nicolas Pitre <nico@fluxnic.net>
+- *   - contributed to gcc-3.4 on Sep 30, 2003
+- *   - adapted for the Linux kernel on Oct 2, 2003
+- */
+-
+-/* Copyright 1995, 1996, 1998, 1999, 2000, 2003 Free Software Foundation, Inc.
+-
+-This file is free software; you can redistribute it and/or modify it
+-under the terms of the GNU General Public License as published by the
+-Free Software Foundation; either version 2, or (at your option) any
+-later version.
+-
+-In addition to the permissions in the GNU General Public License, the
+-Free Software Foundation gives you unlimited permission to link the
+-compiled version of this file into combinations with other programs,
+-and to distribute those combinations without any restriction coming
+-from the use of this file.  (The General Public License restrictions
+-do apply in other respects; for example, they cover modification of
+-the file, and distribution when not linked into a combine
+-executable.)
+-
+-This file is distributed in the hope that it will be useful, but
+-WITHOUT ANY WARRANTY; without even the implied warranty of
+-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-General Public License for more details.
+-
+-You should have received a copy of the GNU General Public License
+-along with this program; see the file COPYING.  If not, write to
+-the Free Software Foundation, 59 Temple Place - Suite 330,
+-Boston, MA 02111-1307, USA.  */
+-
+-#define UNWIND(x...)
+-
+-#define ENTRY(__f)			\
+-	.align		3		;\
+-	.globl		__f		;\
+-	.type		__f,%function	;\
+-__f:
+-#define ENDPROC(__f)			;\
+-	.size		__f, . - __f
+-
+-.macro ARM_DIV_BODY dividend, divisor, result, curbit
+-
+-	clz	\curbit, \divisor
+-	clz	\result, \dividend
+-	sub	\result, \curbit, \result
+-	mov	\curbit, #1
+-	mov	\divisor, \divisor, lsl \result
+-	mov	\curbit, \curbit, lsl \result
+-	mov	\result, #0
+-
+-	@ Division loop
+-1:	cmp	\dividend, \divisor
+-	subhs	\dividend, \dividend, \divisor
+-	orrhs	\result,   \result,   \curbit
+-	cmp	\dividend, \divisor,  lsr #1
+-	subhs	\dividend, \dividend, \divisor, lsr #1
+-	orrhs	\result,   \result,   \curbit,  lsr #1
+-	cmp	\dividend, \divisor,  lsr #2
+-	subhs	\dividend, \dividend, \divisor, lsr #2
+-	orrhs	\result,   \result,   \curbit,  lsr #2
+-	cmp	\dividend, \divisor,  lsr #3
+-	subhs	\dividend, \dividend, \divisor, lsr #3
+-	orrhs	\result,   \result,   \curbit,  lsr #3
+-	cmp	\dividend, #0			@ Early termination?
+-	movnes	\curbit,   \curbit,  lsr #4	@ No, any more bits to do?
+-	movne	\divisor,  \divisor, lsr #4
+-	bne	1b
+-
+-.endm
+-
+-
+-.macro ARM_DIV2_ORDER divisor, order
+-
+-	clz	\order, \divisor
+-	rsb	\order, \order, #31
+-
+-.endm
+-
+-
+-.macro ARM_MOD_BODY dividend, divisor, order, spare
+-
+-	clz	\order, \divisor
+-	clz	\spare, \dividend
+-	sub	\order, \order, \spare
+-	mov	\divisor, \divisor, lsl \order
+-
+-	@ Perform all needed substractions to keep only the reminder.
+-	@ Do comparisons in batch of 4 first.
+-	subs	\order, \order, #3		@ yes, 3 is intended here
+-	blt	2f
+-
+-1:	cmp	\dividend, \divisor
+-	subhs	\dividend, \dividend, \divisor
+-	cmp	\dividend, \divisor,  lsr #1
+-	subhs	\dividend, \dividend, \divisor, lsr #1
+-	cmp	\dividend, \divisor,  lsr #2
+-	subhs	\dividend, \dividend, \divisor, lsr #2
+-	cmp	\dividend, \divisor,  lsr #3
+-	subhs	\dividend, \dividend, \divisor, lsr #3
+-	cmp	\dividend, #1
+-	mov	\divisor, \divisor, lsr #4
+-	subges	\order, \order, #4
+-	bge	1b
+-
+-	tst	\order, #3
+-	teqne	\dividend, #0
+-	beq	5f
+-
+-	@ Either 1, 2 or 3 comparison/substractions are left.
+-2:	cmn	\order, #2
+-	blt	4f
+-	beq	3f
+-	cmp	\dividend, \divisor
+-	subhs	\dividend, \dividend, \divisor
+-	mov	\divisor,  \divisor,  lsr #1
+-3:	cmp	\dividend, \divisor
+-	subhs	\dividend, \dividend, \divisor
+-	mov	\divisor,  \divisor,  lsr #1
+-4:	cmp	\dividend, \divisor
+-	subhs	\dividend, \dividend, \divisor
+-5:
+-.endm
+-
+-
+-ENTRY(__aeabi_uidiv)
+-ENTRY(__udivsi3)
+-
+-	subs	r2, r1, #1
+-	moveq	pc, lr
+-	bcc	Ldiv0
+-	cmp	r0, r1
+-	bls	11f
+-	tst	r1, r2
+-	beq	12f
+-
+-	ARM_DIV_BODY r0, r1, r2, r3
+-
+-	mov	r0, r2
+-	mov	pc, lr
+-
+-11:	moveq	r0, #1
+-	movne	r0, #0
+-	mov	pc, lr
+-
+-12:	ARM_DIV2_ORDER r1, r2
+-
+-	mov	r0, r0, lsr r2
+-	mov	pc, lr
+-
+-UNWIND(.fnend)
+-ENDPROC(__udivsi3)
+-ENDPROC(__aeabi_uidiv)
+-
+-ENTRY(__umodsi3)
+-UNWIND(.fnstart)
+-
+-	subs	r2, r1, #1			@ compare divisor with 1
+-	bcc	Ldiv0
+-	cmpne	r0, r1				@ compare dividend with divisor
+-	moveq   r0, #0
+-	tsthi	r1, r2				@ see if divisor is power of 2
+-	andeq	r0, r0, r2
+-	movls	pc, lr
+-
+-	ARM_MOD_BODY r0, r1, r2, r3
+-
+-	mov	pc, lr
+-
+-UNWIND(.fnend)
+-ENDPROC(__umodsi3)
+-
+-ENTRY(__divsi3)
+-ENTRY(__aeabi_idiv)
+-UNWIND(.fnstart)
+-
+-	cmp	r1, #0
+-	eor	ip, r0, r1			@ save the sign of the result.
+-	beq	Ldiv0
+-	rsbmi	r1, r1, #0			@ loops below use unsigned.
+-	subs	r2, r1, #1			@ division by 1 or -1 ?
+-	beq	10f
+-	movs	r3, r0
+-	rsbmi	r3, r0, #0			@ positive dividend value
+-	cmp	r3, r1
+-	bls	11f
+-	tst	r1, r2				@ divisor is power of 2 ?
+-	beq	12f
+-
+-	ARM_DIV_BODY r3, r1, r0, r2
+-
+-	cmp	ip, #0
+-	rsbmi	r0, r0, #0
+-	mov	pc, lr
+-
+-10:	teq	ip, r0				@ same sign ?
+-	rsbmi	r0, r0, #0
+-	mov	pc, lr
+-
+-11:	movlo	r0, #0
+-	moveq	r0, ip, asr #31
+-	orreq	r0, r0, #1
+-	mov	pc, lr
+-
+-12:	ARM_DIV2_ORDER r1, r2
+-
+-	cmp	ip, #0
+-	mov	r0, r3, lsr r2
+-	rsbmi	r0, r0, #0
+-	mov	pc, lr
+-
+-UNWIND(.fnend)
+-ENDPROC(__divsi3)
+-ENDPROC(__aeabi_idiv)
+-
+-ENTRY(__modsi3)
+-UNWIND(.fnstart)
+-
+-	cmp	r1, #0
+-	beq	Ldiv0
+-	rsbmi	r1, r1, #0			@ loops below use unsigned.
+-	movs	ip, r0				@ preserve sign of dividend
+-	rsbmi	r0, r0, #0			@ if negative make positive
+-	subs	r2, r1, #1			@ compare divisor with 1
+-	cmpne	r0, r1				@ compare dividend with divisor
+-	moveq	r0, #0
+-	tsthi	r1, r2				@ see if divisor is power of 2
+-	andeq	r0, r0, r2
+-	bls	10f
+-
+-	ARM_MOD_BODY r0, r1, r2, r3
+-
+-10:	cmp	ip, #0
+-	rsbmi	r0, r0, #0
+-	mov	pc, lr
+-
+-UNWIND(.fnend)
+-ENDPROC(__modsi3)
+-
+-ENTRY(__aeabi_uidivmod)
+-UNWIND(.fnstart)
+-UNWIND(.save {r0, r1, ip, lr}	)
+-
+-	stmfd	sp!, {r0, r1, ip, lr}
+-	bl	__aeabi_uidiv
+-	ldmfd	sp!, {r1, r2, ip, lr}
+-	mul	r3, r0, r2
+-	sub	r1, r1, r3
+-	mov	pc, lr
+-
+-UNWIND(.fnend)
+-ENDPROC(__aeabi_uidivmod)
+-
+-ENTRY(__aeabi_idivmod)
+-UNWIND(.fnstart)
+-UNWIND(.save {r0, r1, ip, lr}	)
+-	stmfd	sp!, {r0, r1, ip, lr}
+-	bl	__aeabi_idiv
+-	ldmfd	sp!, {r1, r2, ip, lr}
+-	mul	r3, r0, r2
+-	sub	r1, r1, r3
+-	mov	pc, lr
+-
+-UNWIND(.fnend)
+-ENDPROC(__aeabi_idivmod)
+-
+-Ldiv0:
+-UNWIND(.fnstart)
+-UNWIND(.pad #4)
+-UNWIND(.save {lr})
+-	str	lr, [sp, #-8]!
+-	bl	__div0
+-	mov	r0, #0			@ About as wrong as it could be.
+-	ldr	pc, [sp], #8
+-UNWIND(.fnend)
+-ENDPROC(Ldiv0)
+diff --git a/lib/arm/llsl.S b/lib/arm/llsl.S
+new file mode 100644
+index 0000000..0f5c407
+--- /dev/null
++++ b/lib/arm/llsl.S
+@@ -0,0 +1,41 @@
++#------------------------------------------------------------------------------
++#
++# Copyright (c) 2013, ARM. All rights reserved.<BR>
++#
++# This program and the accompanying materials
++# are licensed and made available under the terms and conditions of the BSD License
++# which accompanies this distribution.  The full text of the license may be found at
++# http://opensource.org/licenses/bsd-license.php
++#
++# THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
++# WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
++#
++#------------------------------------------------------------------------------
++
++#include "edk2asm.h"
++
++.text
++.align 2
++GCC_ASM_EXPORT(__aeabi_llsl)
++
++#
++#VOID
++#EFIAPI
++#__aeabi_llsl (
++# IN  VOID    *Destination,
++# IN  VOID    *Source,
++# IN  UINT32  Size
++# );
++#
++ASM_PFX(__aeabi_llsl):
++    subs     r3,r2,#0x20
++    bpl      1f
++    rsb      r3,r2,#0x20
++    lsl      r1,r1,r2
++    orr      r1,r1,r0,lsr r3
++    lsl      r0,r0,r2
++    bx       lr
++1:
++    lsl      r1,r0,r3
++    mov      r0,#0
++    bx       lr
+diff --git a/lib/arm/llsr.S b/lib/arm/llsr.S
+new file mode 100644
+index 0000000..432b27d
+--- /dev/null
++++ b/lib/arm/llsr.S
+@@ -0,0 +1,41 @@
++#------------------------------------------------------------------------------
++#
++# Copyright (c) 2013, ARM. All rights reserved.<BR>
++#
++# This program and the accompanying materials
++# are licensed and made available under the terms and conditions of the BSD License
++# which accompanies this distribution.  The full text of the license may be found at
++# http://opensource.org/licenses/bsd-license.php
++#
++# THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
++# WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
++#
++#------------------------------------------------------------------------------
++
++#include "edk2asm.h"
++
++.text
++.align 2
++GCC_ASM_EXPORT(__aeabi_llsr)
++
++#
++#VOID
++#EFIAPI
++#__aeabi_llsr (
++# IN  VOID    *Destination,
++# IN  VOID    *Source,
++# IN  UINT32  Size
++# );
++#
++ASM_PFX(__aeabi_llsr):
++    subs     r3,r2,#0x20
++    bpl      1f
++    rsb      r3,r2,#0x20
++    lsr      r0,r0,r2
++    orr      r0,r0,r1,lsl r3
++    lsr      r1,r1,r2
++    bx       lr
++1:
++    lsr      r0,r1,r3
++    mov      r1,#0
++    bx       lr
+diff --git a/lib/arm/mullu.S b/lib/arm/mullu.S
+new file mode 100644
+index 0000000..39b9a80
+--- /dev/null
++++ b/lib/arm/mullu.S
+@@ -0,0 +1,33 @@
++#------------------------------------------------------------------------------
++#
++# Copyright (c) 2008 - 2009, Apple Inc. All rights reserved.<BR>
++#
++# This program and the accompanying materials
++# are licensed and made available under the terms and conditions of the BSD License
++# which accompanies this distribution.  The full text of the license may be found at
++# http://opensource.org/licenses/bsd-license.php
++#
++# THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
++# WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
++#
++#------------------------------------------------------------------------------
++
++#include "edk2asm.h"
++
++.text
++GCC_ASM_EXPORT(__aeabi_lmul)
++#
++#INT64
++#EFIAPI
++#__aeabi_lmul (
++#  IN INT64   Multiplicand
++#  IN INT64   Multiplier
++#  );
++#
++ASM_PFX(__aeabi_lmul):
++  stmdb   sp!, {lr}
++  mov     lr, r0
++  umull   r0, ip, r2, lr
++  mla     r1, r2, r1, ip
++  mla     r1, r3, lr, r1
++  ldmia   sp!, {pc}
+diff --git a/lib/arm/uldiv.S b/lib/arm/uldiv.S
+new file mode 100644
+index 0000000..f478898
+--- /dev/null
++++ b/lib/arm/uldiv.S
+@@ -0,0 +1,267 @@
++//------------------------------------------------------------------------------
++//
++// Copyright (c) 2008 - 2009, Apple Inc. All rights reserved.<BR>
++//
++// This program and the accompanying materials
++// are licensed and made available under the terms and conditions of the BSD License
++// which accompanies this distribution.  The full text of the license may be found at
++// http://opensource.org/licenses/bsd-license.php
++//
++// THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
++// WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
++//
++//------------------------------------------------------------------------------
++
++#include "edk2asm.h"
++
++  .text
++  .align 2
++  GCC_ASM_EXPORT(__aeabi_uldivmod)
++
++//
++//UINT64
++//EFIAPI
++//__aeabi_uldivmod (
++//  IN  UINT64   Dividend
++//  IN  UINT64   Divisor
++//  )
++//
++ASM_PFX(__aeabi_uldivmod):
++  stmdb   sp!, {r4, r5, r6, lr}
++  mov     r4, r1
++  mov     r5, r0
++  mov     r6, #0  // 0x0
++  orrs    ip, r3, r2, lsr #31
++  bne     ASM_PFX(__aeabi_uldivmod_label1)
++  tst     r2, r2
++  beq     ASM_PFX(_ll_div0)
++  movs    ip, r2, lsr #15
++  addeq   r6, r6, #16     // 0x10
++  mov     ip, r2, lsl r6
++  movs    lr, ip, lsr #23
++  moveq   ip, ip, lsl #8
++  addeq   r6, r6, #8      // 0x8
++  movs    lr, ip, lsr #27
++  moveq   ip, ip, lsl #4
++  addeq   r6, r6, #4      // 0x4
++  movs    lr, ip, lsr #29
++  moveq   ip, ip, lsl #2
++  addeq   r6, r6, #2      // 0x2
++  movs    lr, ip, lsr #30
++  moveq   ip, ip, lsl #1
++  addeq   r6, r6, #1      // 0x1
++  b       ASM_PFX(_ll_udiv_small)
++ASM_PFX(__aeabi_uldivmod_label1):
++  tst     r3, #-2147483648        // 0x80000000
++  bne     ASM_PFX(__aeabi_uldivmod_label2)
++  movs    ip, r3, lsr #15
++  addeq   r6, r6, #16     // 0x10
++  mov     ip, r3, lsl r6
++  movs    lr, ip, lsr #23
++  moveq   ip, ip, lsl #8
++  addeq   r6, r6, #8      // 0x8
++  movs    lr, ip, lsr #27
++  moveq   ip, ip, lsl #4
++  addeq   r6, r6, #4      // 0x4
++  movs    lr, ip, lsr #29
++  moveq   ip, ip, lsl #2
++  addeq   r6, r6, #2      // 0x2
++  movs    lr, ip, lsr #30
++  addeq   r6, r6, #1      // 0x1
++  rsb     r3, r6, #32     // 0x20
++  moveq   ip, ip, lsl #1
++  orr     ip, ip, r2, lsr r3
++  mov     lr, r2, lsl r6
++  b       ASM_PFX(_ll_udiv_big)
++ASM_PFX(__aeabi_uldivmod_label2):
++  mov     ip, r3
++  mov     lr, r2
++  b       ASM_PFX(_ll_udiv_ginormous)
++
++ASM_PFX(_ll_udiv_small):
++  cmp     r4, ip, lsl #1
++  mov     r3, #0  // 0x0
++  subcs   r4, r4, ip, lsl #1
++  addcs   r3, r3, #2      // 0x2
++  cmp     r4, ip
++  subcs   r4, r4, ip
++  adcs    r3, r3, #0      // 0x0
++  add     r2, r6, #32     // 0x20
++  cmp     r2, #32 // 0x20
++  rsb     ip, ip, #0      // 0x0
++  bcc     ASM_PFX(_ll_udiv_small_label1)
++  orrs    r0, r4, r5, lsr #30
++  moveq   r4, r5
++  moveq   r5, #0  // 0x0
++  subeq   r2, r2, #32     // 0x20
++ASM_PFX(_ll_udiv_small_label1):
++  mov     r1, #0  // 0x0
++  cmp     r2, #16 // 0x10
++  bcc     ASM_PFX(_ll_udiv_small_label2)
++  movs    r0, r4, lsr #14
++  moveq   r4, r4, lsl #16
++  addeq   r1, r1, #16     // 0x10
++ASM_PFX(_ll_udiv_small_label2):
++  sub     lr, r2, r1
++  cmp     lr, #8  // 0x8
++  bcc     ASM_PFX(_ll_udiv_small_label3)
++  movs    r0, r4, lsr #22
++  moveq   r4, r4, lsl #8
++  addeq   r1, r1, #8      // 0x8
++ASM_PFX(_ll_udiv_small_label3):
++  rsb     r0, r1, #32     // 0x20
++  sub     r2, r2, r1
++  orr     r4, r4, r5, lsr r0
++  mov     r5, r5, lsl r1
++  cmp     r2, #1  // 0x1
++  bcc     ASM_PFX(_ll_udiv_small_label5)
++  sub     r2, r2, #1      // 0x1
++  and     r0, r2, #7      // 0x7
++  eor     r0, r0, #7      // 0x7
++  adds    r0, r0, r0, lsl #1
++  add     pc, pc, r0, lsl #2
++  nop                     // (mov r0,r0)
++ASM_PFX(_ll_udiv_small_label4):
++  adcs    r5, r5, r5
++  adcs    r4, ip, r4, lsl #1
++  rsbcc   r4, ip, r4
++  adcs    r5, r5, r5
++  adcs    r4, ip, r4, lsl #1
++  rsbcc   r4, ip, r4
++  adcs    r5, r5, r5
++  adcs    r4, ip, r4, lsl #1
++  rsbcc   r4, ip, r4
++  adcs    r5, r5, r5
++  adcs    r4, ip, r4, lsl #1
++  rsbcc   r4, ip, r4
++  adcs    r5, r5, r5
++  adcs    r4, ip, r4, lsl #1
++  rsbcc   r4, ip, r4
++  adcs    r5, r5, r5
++  adcs    r4, ip, r4, lsl #1
++  rsbcc   r4, ip, r4
++  adcs    r5, r5, r5
++  adcs    r4, ip, r4, lsl #1
++  rsbcc   r4, ip, r4
++  adcs    r5, r5, r5
++  adcs    r4, ip, r4, lsl #1
++  sub     r2, r2, #8      // 0x8
++  tst     r2, r2
++  rsbcc   r4, ip, r4
++  bpl     ASM_PFX(_ll_udiv_small_label4)
++ASM_PFX(_ll_udiv_small_label5):
++  mov     r2, r4, lsr r6
++  bic     r4, r4, r2, lsl r6
++  adcs    r0, r5, r5
++  adc     r1, r4, r4
++  add     r1, r1, r3, lsl r6
++  mov     r3, #0  // 0x0
++  ldmia   sp!, {r4, r5, r6, pc}
++
++ASM_PFX(_ll_udiv_big):
++  subs    r0, r5, lr
++  mov     r3, #0  // 0x0
++  sbcs    r1, r4, ip
++  movcs   r5, r0
++  movcs   r4, r1
++  adcs    r3, r3, #0      // 0x0
++  subs    r0, r5, lr
++  sbcs    r1, r4, ip
++  movcs   r5, r0
++  movcs   r4, r1
++  adcs    r3, r3, #0      // 0x0
++  subs    r0, r5, lr
++  sbcs    r1, r4, ip
++  movcs   r5, r0
++  movcs   r4, r1
++  adcs    r3, r3, #0      // 0x0
++  mov     r1, #0  // 0x0
++  rsbs    lr, lr, #0      // 0x0
++  rsc     ip, ip, #0      // 0x0
++  cmp     r6, #16 // 0x10
++  bcc     ASM_PFX(_ll_udiv_big_label1)
++  movs    r0, r4, lsr #14
++  moveq   r4, r4, lsl #16
++  addeq   r1, r1, #16     // 0x10
++ASM_PFX(_ll_udiv_big_label1):
++  sub     r2, r6, r1
++  cmp     r2, #8  // 0x8
++  bcc     ASM_PFX(_ll_udiv_big_label2)
++  movs    r0, r4, lsr #22
++  moveq   r4, r4, lsl #8
++  addeq   r1, r1, #8      // 0x8
++ASM_PFX(_ll_udiv_big_label2):
++  rsb     r0, r1, #32     // 0x20
++  sub     r2, r6, r1
++  orr     r4, r4, r5, lsr r0
++  mov     r5, r5, lsl r1
++  cmp     r2, #1  // 0x1
++  bcc     ASM_PFX(_ll_udiv_big_label4)
++  sub     r2, r2, #1      // 0x1
++  and     r0, r2, #3      // 0x3
++  rsb     r0, r0, #3      // 0x3
++  adds    r0, r0, r0, lsl #1
++  add     pc, pc, r0, lsl #3
++  nop                     // (mov r0,r0)
++ASM_PFX(_ll_udiv_big_label3):
++  adcs    r5, r5, r5
++  adcs    r4, r4, r4
++  adcs    r0, lr, r5
++  adcs    r1, ip, r4
++  movcs   r5, r0
++  movcs   r4, r1
++  adcs    r5, r5, r5
++  adcs    r4, r4, r4
++  adcs    r0, lr, r5
++  adcs    r1, ip, r4
++  movcs   r5, r0
++  movcs   r4, r1
++  adcs    r5, r5, r5
++  adcs    r4, r4, r4
++  adcs    r0, lr, r5
++  adcs    r1, ip, r4
++  movcs   r5, r0
++  movcs   r4, r1
++  sub     r2, r2, #4      // 0x4
++  adcs    r5, r5, r5
++  adcs    r4, r4, r4
++  adcs    r0, lr, r5
++  adcs    r1, ip, r4
++  tst     r2, r2
++  movcs   r5, r0
++  movcs   r4, r1
++  bpl     ASM_PFX(_ll_udiv_big_label3)
++ASM_PFX(_ll_udiv_big_label4):
++  mov     r1, #0  // 0x0
++  mov     r2, r5, lsr r6
++  bic     r5, r5, r2, lsl r6
++  adcs    r0, r5, r5
++  adc     r1, r1, #0      // 0x0
++  movs    lr, r3, lsl r6
++  mov     r3, r4, lsr r6
++  bic     r4, r4, r3, lsl r6
++  adc     r1, r1, #0      // 0x0
++  adds    r0, r0, lr
++  orr     r2, r2, r4, ror r6
++  adc     r1, r1, #0      // 0x0
++  ldmia   sp!, {r4, r5, r6, pc}
++
++ASM_PFX(_ll_udiv_ginormous):
++  subs    r2, r5, lr
++  mov     r1, #0  // 0x0
++  sbcs    r3, r4, ip
++  adc     r0, r1, r1
++  movcc   r2, r5
++  movcc   r3, r4
++  ldmia   sp!, {r4, r5, r6, pc}
++
++ASM_PFX(_ll_div0):
++  ldmia   sp!, {r4, r5, r6, lr}
++  mov     r0, #0  // 0x0
++  mov     r1, #0  // 0x0
++  b       ASM_PFX(__aeabi_ldiv0)
++
++ASM_PFX(__aeabi_ldiv0):
++  bx      r14
++
++
+-- 
+2.5.0
+
