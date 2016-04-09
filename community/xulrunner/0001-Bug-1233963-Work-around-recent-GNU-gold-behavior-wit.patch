@@ -1,0 +1,49 @@
+From 4d0fe8f40364c170226f1ef3bc98975630463e87 Mon Sep 17 00:00:00 2001
+From: Mike Hommey <mh+mozilla@glandium.org>
+Date: Tue, 19 Jan 2016 14:31:04 +0900
+Subject: [PATCH] Bug 1233963 - Work around recent GNU gold behavior with
+ segments starting before the first section they contain
+
+---
+ build/unix/elfhack/elf.cpp | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/build/unix/elfhack/elf.cpp b/build/unix/elfhack/elf.cpp
+index 666b535..743afde 100644
+--- a/build/unix/elfhack/elf.cpp
++++ b/build/unix/elfhack/elf.cpp
+@@ -253,26 +253,29 @@ Elf::Elf(std::ifstream &file)
+         }
+         if (phdr.p_type == PT_PHDR)
+             segment->addSection(phdr_section);
+         for (int j = 1; j < ehdr->e_shnum; j++)
+             if (phdr.contains(sections[j]))
+                 segment->addSection(sections[j]);
+         // Make sure that our view of segments corresponds to the original
+         // ELF file.
+-        assert(segment->getFileSize() == phdr.p_filesz);
++        // GNU gold likes to start some segments before the first section
++        // they contain. https://sourceware.org/bugzilla/show_bug.cgi?id=19392
++        unsigned int gold_adjustment = segment->getAddr() - phdr.p_vaddr;
++        assert(segment->getFileSize() == phdr.p_filesz - gold_adjustment);
+         // gold makes TLS segments end on an aligned virtual address, even
+         // when the underlying section ends before that, while bfd ld
+         // doesn't. It's fine if we don't keep that alignment.
+         unsigned int memsize = segment->getMemSize();
+         if (phdr.p_type == PT_TLS && memsize != phdr.p_memsz) {
+             unsigned int align = segment->getAlign();
+             memsize = (memsize + align - 1) & ~(align - 1);
+         }
+-        assert(memsize == phdr.p_memsz);
++        assert(memsize == phdr.p_memsz - gold_adjustment);
+         segments.push_back(segment);
+     }
+ 
+     new (&eh_entry) ElfLocation(ehdr->e_entry, this);
+ }
+ 
+ Elf::~Elf()
+ {
+-- 
+2.7.0
+
