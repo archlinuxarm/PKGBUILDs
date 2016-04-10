@@ -11,7 +11,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
 pkgver=11.2.0
-pkgrel=1
+pkgrel=1.1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
@@ -108,9 +108,6 @@ package_mesa() {
 
   cp -rv ${srcdir}/fakeinstall/usr/include ${pkgdir}/usr
 
-  install -m755 -d ${pkgdir}/usr/lib/pkgconfig
-  cp -rv ${srcdir}/fakeinstall/usr/lib/pkgconfig/{osmesa,gbm,dri,wayland-egl}.pc ${pkgdir}/usr/lib/pkgconfig
-  
   install -m755 -d ${pkgdir}/usr/lib/mesa
   # move libgl/EGL/glesv*.so to not conflict with blobs - may break .pc files ?
   cp -rv ${srcdir}/fakeinstall/usr/lib/libGL.so* 	${pkgdir}/usr/lib/mesa/
