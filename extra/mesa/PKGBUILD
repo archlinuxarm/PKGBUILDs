@@ -10,7 +10,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=11.1.2
+pkgver=11.2.0
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
@@ -21,7 +21,7 @@ license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE)
-sha256sums=('8f72aead896b340ba0f7a4a474bfaf71681f5d675592aec1cb7ba698e319148b'
+sha256sums=('1c1fed2674abf3f16ed2623e9a5694d6752c293194e18462ebc644a19cfaafb2'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
@@ -36,14 +36,12 @@ prepare() {
 build() {
   cd ${srcdir}/?esa-*
 
-  #autoreconf -vfi # our automake is far too new for their build system :)
-
   [[ $CARCH == "armv7h" || $CARCH == "armv6h" ]] && VC4=',vc4'
 
   ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-gallium-drivers=freedreno,nouveau,swrast${VC4} \
+    --with-gallium-drivers=freedreno,nouveau,swrast,virgl${VC4} \
     --with-dri-drivers=nouveau,swrast \
     --with-egl-platforms=x11,drm,wayland \
     --with-sha1=libgcrypt \
@@ -62,7 +60,6 @@ build() {
     --enable-omx \
     --enable-nine \
     --with-clang-libdir=/usr/lib
-    # --help
 
   make
 
@@ -76,7 +73,7 @@ package_libva-mesa-driver() {
   depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'elfutils')
 
   install -m755 -d ${pkgdir}/usr/lib
-  mv -v ${srcdir}/fakeinstall/usr/lib/dri ${pkgdir}/usr/lib
+  cp -rv ${srcdir}/fakeinstall/usr/lib/dri ${pkgdir}/usr/lib
    
   install -m755 -d "${pkgdir}/usr/share/licenses/libva-mesa-driver"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libva-mesa-driver/"
@@ -97,26 +94,29 @@ package_mesa() {
             'ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri')
 
   install -m755 -d ${pkgdir}/etc
-  mv -v ${srcdir}/fakeinstall/etc/drirc ${pkgdir}/etc
+  cp -rv ${srcdir}/fakeinstall/etc/drirc ${pkgdir}/etc
   
   install -m755 -d ${pkgdir}/usr/lib/xorg/modules/dri
   # ati-dri, nouveau-dri, intel-dri, svga-dri, swrast
-  mv -v ${srcdir}/fakeinstall/usr/lib/xorg/modules/dri/* ${pkgdir}/usr/lib/xorg/modules/dri
+  cp -av ${srcdir}/fakeinstall/usr/lib/xorg/modules/dri/* ${pkgdir}/usr/lib/xorg/modules/dri
 
-  mv -v ${srcdir}/fakeinstall/usr/lib/bellagio  ${pkgdir}/usr/lib
-  mv -v ${srcdir}/fakeinstall/usr/lib/d3d  ${pkgdir}/usr/lib
-  mv -v ${srcdir}/fakeinstall/usr/lib/*.so* ${pkgdir}/usr/lib/
+  cp -rv ${srcdir}/fakeinstall/usr/lib/bellagio  ${pkgdir}/usr/lib
+  cp -rv ${srcdir}/fakeinstall/usr/lib/d3d  ${pkgdir}/usr/lib
+  cp -rv ${srcdir}/fakeinstall/usr/lib/lib{gbm,glapi}.so* ${pkgdir}/usr/lib/
+  cp -rv ${srcdir}/fakeinstall/usr/lib/libOSMesa.so* ${pkgdir}/usr/lib/
+  cp -rv ${srcdir}/fakeinstall/usr/lib/libwayland*.so* ${pkgdir}/usr/lib/
+  cp -rv ${srcdir}/fakeinstall/usr/lib/libxatracker.so* ${pkgdir}/usr/lib/
 
-  mv -v ${srcdir}/fakeinstall/usr/include ${pkgdir}/usr
+  cp -rv ${srcdir}/fakeinstall/usr/include ${pkgdir}/usr
 
   install -m755 -d ${pkgdir}/usr/lib/pkgconfig
-  mv -v ${srcdir}/fakeinstall/usr/lib/pkgconfig/{osmesa,gbm,dri,wayland-egl}.pc ${pkgdir}/usr/lib/pkgconfig
+  cp -rv ${srcdir}/fakeinstall/usr/lib/pkgconfig/{osmesa,gbm,dri,wayland-egl}.pc ${pkgdir}/usr/lib/pkgconfig
   
   install -m755 -d ${pkgdir}/usr/lib/mesa
   # move libgl/EGL/glesv*.so to not conflict with blobs - may break .pc files ?
-  mv -v ${pkgdir}/usr/lib/libGL.so* 	${pkgdir}/usr/lib/mesa/
-  mv -v ${pkgdir}/usr/lib/libEGL.so* 	${pkgdir}/usr/lib/mesa/
-  mv -v ${pkgdir}/usr/lib/libGLES*.so*	${pkgdir}/usr/lib/mesa/
+  cp -rv ${srcdir}/fakeinstall/usr/lib/libGL.so* 	${pkgdir}/usr/lib/mesa/
+  cp -rv ${srcdir}/fakeinstall/usr/lib/libEGL.so* 	${pkgdir}/usr/lib/mesa/
+  cp -rv ${srcdir}/fakeinstall/usr/lib/libGLES*.so*	${pkgdir}/usr/lib/mesa/
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa/"
