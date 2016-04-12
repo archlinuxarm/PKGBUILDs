@@ -4,12 +4,12 @@
 buildarch=4
 
 pkgbase=linux-odroid-xu3
-_commit=9d1cfd5682c96870f435b857be4e982ff530a28e
+_commit=acd35659d66efc81387f494d833ca5cb63b4ca9f
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.96
-pkgrel=4
+pkgrel=5
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
@@ -17,8 +17,8 @@ makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         'config')
-md5sums=('c99cb228762246d849018e1a71ae5b5c'
-         'e11bb11ef5d1c310756384d7122fbba7')
+md5sums=('dfa08fe6406fa40f32a9b618b12c92e2'
+         'af459977c85028dab014707a5fac6767')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
