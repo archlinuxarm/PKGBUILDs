@@ -107,6 +107,8 @@ package_mesa() {
   cp -rv ${srcdir}/fakeinstall/usr/lib/libwayland*.so* ${pkgdir}/usr/lib/
 
   cp -rv ${srcdir}/fakeinstall/usr/include ${pkgdir}/usr
+  cp -rv ${srcdir}/fakeinstall/usr/lib/pkgconfig ${pkgdir}/usr/lib/
+  rm ${pkgdir}/usr/lib/pkgconfig/{egl,gl,glesv1_cm,glesv2}.pc
 
   install -m755 -d ${pkgdir}/usr/lib/mesa
   # move libgl/EGL/glesv*.so to not conflict with blobs - may break .pc files ?
@@ -124,8 +126,8 @@ package_mesa-libgl() {
   provides=('libgl')
   replaces=('libgl')
 
-  install -m755 -d ${pkgdir}/usr/lib
-  mv -v ${srcdir}/fakeinstall/usr/lib/pkgconfig ${pkgdir}/usr/lib/
+  install -m755 -d ${pkgdir}/usr/lib/pkgconfig
+  cp ${srcdir}/fakeinstall/usr/lib/pkgconfig/{egl,gl,glesv1_cm,glesv2}.pc ${pkgdir}/usr/lib/pkgconfig
  
   # See FS#26284
   install -m755 -d "${pkgdir}/usr/lib/xorg/modules/extensions"
