@@ -19,14 +19,14 @@ buildarch=12
 highmem=1
 
 pkgname=chromium
-pkgver=49.0.2623.112
+pkgver=50.0.2661.75
 pkgrel=1
 _launcher_ver=3
 pkgdesc="The open-source project behind Google Chrome, an attempt at creating a safer, faster, and more stable browser"
 arch=('armv6h' 'armv7h')
 url="http://www.chromium.org/"
 license=('BSD')
-depends=('gtk2' 'nss' 'alsa-lib' 'xdg-utils' 'bzip2' 'libevent' 'libxss' 'icu'
+depends=('gtk2' 'nss' 'alsa-lib' 'xdg-utils' 'bzip2' 'libevent' 'libxss'
          'libexif' 'libgcrypt' 'ttf-font' 'systemd' 'dbus' 'flac' 'snappy'
          'speech-dispatcher' 'pciutils' 'libpulse' 'harfbuzz' 'libsecret'
          'libvpx' 'perl' 'perl-file-basedir' 'desktop-file-utils'
@@ -43,15 +43,13 @@ source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgn
         chromium.desktop
         chromium-widevine.patch
         0001-system-ffmpeg-fixes.patch
-        0002-sandbox-arm64-align-stack-16-bytes.patch
-        0003-Linux-Sandbox-whitelist-arm64-syscalls.patch)
-sha256sums=('443b6d5f0d07f336783e700edc4ecae96769e105d0f8553e98fefae747302cf0'
+        0002-Linux-Sandbox-whitelist-arm64-syscalls.patch)
+sha256sums=('c12d644e711ec85c800ab61a749d1f03ba7999e0c3cd20f8495a674d39a643da'
             '8b01fb4efe58146279858a754d90b49e5a38c9a0b36a1f84cbb7d12f92b84c28'
             '028a748a5c275de9b8f776f97909f999a8583a4b77fd1cd600b4fc5c0c3e91e9'
             '4660344789c45c9b9e52cb6d86f7cb6edb297b39320d04f6947e5216d6e5f64c'
-            '9f0d843fcda221b97386f8686a00918a5e165e65e9eb34df19ba6bc11ec91eee'
-            '48e83c69c33d5b0882982e71c1a3c55a093d2c0416374db6159a87fd4b836ece'
-            'c5b6a12756eb50ecf9bf0763b9ab3e6822fe6365083b73595ca8c593c963145b')
+            '3f6ba01852ec1b936a2e1139158880d1042515d5ec03253fcae72409dd73fa3a'
+            'd56afe7ce997e0536b6a3a0dc8417595d6b96fb7d92b9d742876308728e43cad')
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -81,13 +79,15 @@ prepare() {
   patch -Np1 -i ../0001-system-ffmpeg-fixes.patch
 
   # Upstream AArch64 fixes
-  patch -Np1 -i ../0002-sandbox-arm64-align-stack-16-bytes.patch
-  patch -Np1 -i ../0003-Linux-Sandbox-whitelist-arm64-syscalls.patch
+  patch -Np1 -i ../0002-Linux-Sandbox-whitelist-arm64-syscalls.patch
 
-  # Remove bundled ICU; its header files appear to get picked up instead of
-  # the system ones, leading to errors during the final link stage.
-  # https://groups.google.com/a/chromium.org/d/topic/chromium-packagers/BNGvJc08B6Q
-  find third_party/icu -type f \! -regex '.*\.\(gyp\|gypi\|isolate\)' -delete
+  # Commentception – use bundled ICU due to build failures (50.0.2661.75)
+  # See https://crbug.com/584920 and https://crbug.com/592268
+  # ---
+  ## Remove bundled ICU; its header files appear to get picked up instead of
+  ## the system ones, leading to errors during the final link stage.
+  ## https://groups.google.com/a/chromium.org/d/topic/chromium-packagers/BNGvJc08B6Q
+  #find third_party/icu -type f \! -regex '.*\.\(gyp\|gypi\|isolate\)' -delete
 
   [[ $CARCH == "armv7h" ]] && MAKEFLAGS=-j4
 
@@ -128,7 +128,7 @@ build() {
     -Dlinux_use_bundled_binutils=0
     -Dlinux_use_bundled_gold=0
     -Dlinux_use_gold_flags=0
-    -Dicu_use_data_file_flag=0
+    -Dicu_use_data_file_flag=1
     -Dlogging_like_official_build=1
     -Dtracing_like_official_build=1
     -Dfieldtrial_testing_like_official_build=1
@@ -141,7 +141,7 @@ build() {
     -Duse_system_flac=1
     -Duse_system_ffmpeg=1
     -Duse_system_harfbuzz=1
-    -Duse_system_icu=1
+    -Duse_system_icu=0
     -Duse_system_libevent=1
     -Duse_system_libjpeg=1
     -Duse_system_libpng=1
@@ -226,4 +226,6 @@ package() {
   done
 
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/chromium/LICENSE"
+
+  install -Dm644 out/Release/icudtl.dat "${pkgdir}/usr/lib/chromium/icudtl.dat"
 }

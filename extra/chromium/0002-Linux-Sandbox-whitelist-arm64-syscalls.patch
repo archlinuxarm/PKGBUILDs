@@ -1,7 +1,7 @@
-From 76610303d10f886c382fe6ba54f0d89ed652497f Mon Sep 17 00:00:00 2001
+From 3dafa17489a30f5e2a9d274f842a8caa9f881698 Mon Sep 17 00:00:00 2001
 From: "riku.voipio" <riku.voipio@linaro.org>
 Date: Tue, 1 Mar 2016 08:02:43 -0800
-Subject: [PATCH 3/3] Linux Sandbox: whitelist arm64 syscalls
+Subject: [PATCH 2/2] Linux Sandbox: whitelist arm64 syscalls
 
 On debian/arm64, two syscalls needed whitelisting for chromium to work with seccomp:
 
@@ -20,8 +20,9 @@ Cr-Commit-Position: refs/heads/master@{#378440}
  components/nacl/loader/sandbox_linux/nacl_bpf_sandbox_linux.cc | 3 ++-
  content/common/sandbox_linux/bpf_renderer_policy_linux.cc      | 3 ++-
  content/common/sandbox_linux/bpf_utility_policy_linux.cc       | 3 ++-
+ mojo/shell/runner/host/linux_sandbox.cc                        | 7 ++++++-
  sandbox/linux/seccomp-bpf-helpers/syscall_sets.cc              | 2 +-
- 4 files changed, 7 insertions(+), 4 deletions(-)
+ 5 files changed, 13 insertions(+), 5 deletions(-)
 
 diff --git a/components/nacl/loader/sandbox_linux/nacl_bpf_sandbox_linux.cc b/components/nacl/loader/sandbox_linux/nacl_bpf_sandbox_linux.cc
 index 66a606a..3e88304 100644
@@ -65,8 +66,47 @@ index 3ead1c8..1336796 100644
      case __NR_getrlimit:
  #endif
  #if defined(__i386__) || defined(__arm__)
+diff --git a/mojo/shell/runner/host/linux_sandbox.cc b/mojo/shell/runner/host/linux_sandbox.cc
+index 6cd3750..0d9082c 100644
+--- a/mojo/shell/runner/host/linux_sandbox.cc
++++ b/mojo/shell/runner/host/linux_sandbox.cc
+@@ -39,12 +39,14 @@ intptr_t SandboxSIGSYSHandler(const struct sandbox::arch_seccomp_data& args,
+   const sandbox::syscall_broker::BrokerProcess* broker_process =
+       static_cast<const sandbox::syscall_broker::BrokerProcess*>(aux);
+   switch (args.nr) {
++#if !defined(__aarch64__)
+     case __NR_access:
+       return broker_process->Access(reinterpret_cast<const char*>(args.args[0]),
+                                     static_cast<int>(args.args[1]));
+     case __NR_open:
+       return broker_process->Open(reinterpret_cast<const char*>(args.args[0]),
+                                   static_cast<int>(args.args[1]));
++#endif
+     case __NR_faccessat:
+       if (static_cast<int>(args.args[0]) == AT_FDCWD) {
+         return broker_process->Access(
+@@ -77,15 +79,18 @@ class SandboxPolicy : public sandbox::BaselinePolicy {
+   sandbox::bpf_dsl::ResultExpr EvaluateSyscall(int sysno) const override {
+     // This policy is only advisory/for noticing FS access for the moment.
+     switch (sysno) {
++#if !defined(__aarch64__)
+       case __NR_access:
+       case __NR_open:
++#endif
+       case __NR_faccessat:
+       case __NR_openat:
+         return sandbox::bpf_dsl::Trap(SandboxSIGSYSHandler, broker_process_);
+       case __NR_sched_getaffinity:
+         return sandbox::RestrictSchedTarget(policy_pid(), sysno);
+       case __NR_ftruncate:
+-#if defined(__i386__) || defined(__x86_64__) || defined(__mips__)
++#if defined(__i386__) || defined(__x86_64__) || defined(__mips__) || \
++    defined(__aarch64__)
+       // Per #ifdefs in
+       // content/common/sandbox_linux/bpf_renderer_policy_linux.cc
+       case __NR_getrlimit:
 diff --git a/sandbox/linux/seccomp-bpf-helpers/syscall_sets.cc b/sandbox/linux/seccomp-bpf-helpers/syscall_sets.cc
-index c217d47..21147b4 100644
+index 10278dc..b30b3e6 100644
 --- a/sandbox/linux/seccomp-bpf-helpers/syscall_sets.cc
 +++ b/sandbox/linux/seccomp-bpf-helpers/syscall_sets.cc
 @@ -414,6 +414,7 @@ bool SyscallSets::IsAllowedEpoll(int sysno) {
@@ -86,5 +126,5 @@ index c217d47..21147b4 100644
      case __NR_epoll_wait_old:
  #endif
 -- 
-2.7.2
+2.8.0
 
