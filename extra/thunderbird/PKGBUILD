@@ -1,5 +1,6 @@
 # $Id$
-# Maintainer : Ionut Biru <ibiru@archlinux.org>
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Contributor: Ionut Biru <ibiru@archlinux.org>
 # Contributor: Alexander Baldeck <alexander@archlinux.org>
 # Contributor: Dale Blount <dale@archlinux.org>
 # Contributor: Anders Bostrom <anders.bostrom@home.se>
@@ -8,46 +9,74 @@
 #  - mozconfig changes for ARM
 #  - patch to remove NEON/SIMD checks from configure
 #  - memory saving LDFLAGS
-#  - enable calendar in mozconfig
 #  - disable jemalloc on aarch64
 
 buildarch=28
 highmem=1
 
 pkgname=thunderbird
-pkgver=38.7.2
+pkgver=45.0
 pkgrel=1
-pkgdesc="Standalone Mail/News reader"
+pkgdesc="Standalone mail and news reader from mozilla.org"
 arch=('i686' 'x86_64')
 license=('MPL' 'GPL')
 url="http://www.mozilla.org/thunderbird/"
 depends=('gtk2' 'mozilla-common' 'libxt' 'startup-notification' 'mime-types'
          'dbus-glib' 'alsa-lib' 'desktop-file-utils' 'hicolor-icon-theme'
-         'libvpx' 'icu' 'libevent' 'nss' 'hunspell' 'sqlite')
-makedepends=('unzip' 'zip' 'python2' 'wireless_tools' 'yasm' 'mesa' 'libpulse')
+         'libvpx' 'icu' 'libevent' 'nss' 'hunspell' 'sqlite' 'ttf-font')
+makedepends=('unzip' 'zip' 'diffutils' 'python2' 'yasm' 'mesa' 'imake' 'gconf'
+             'libpulse' 'inetutils')
 optdepends=('libcanberra: for sound support')
 install=thunderbird.install
-source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.bz2
+options=('!emptydirs' '!makeflags')
+source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz
         mozconfig
         thunderbird.desktop
         thunderbird-install-dir.patch
         vendor.js
         no-neon.patch)
 options=('!emptydirs' '!makeflags')
-sha256sums=('e2b1453ac193615586e350bc729278db8c8a61a8d4ac089db370754af47d4493'
-            '1f5ce57ba5531d533f34407010cfa5bb0fe09f9f1d3ed859cafbc5283b3a63d9'
+sha256sums=('15693897f1e46cbb5a95932b8c087a53004635415845fb4f50d4edfbba77d667'
+            'ef963a9b1faa52343f65d61aea4db63000d789206221d02f908e4b0d0f1dc0d7'
             '3fba13d88aeb003ab0811ef739463858172ce0662a1c7d62835df3d83ddbb8fb'
             '24599eab8862476744fe1619a9a53a5b8cdcab30b3fc5767512f31d3529bd05d'
             'e4ea8e6788163d9f8db8f1f40023db3ea0a1358f9a4510169f2d4c4fe6a887ed'
-            'd46ac749f8be3250fa70a13cd67b5f9204bedf8ff8955d3a71e1b8b2f4f48382')
+            '59f40d8b2480aa67bf76f4f119826b6828a6a59cc040caf1ab5a6e19eef44c6e')
+
+# Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
+# Note: These are for Arch Linux use ONLY. For your own distribution, please
+# get your own set of keys. Feel free to contact foutrelis@archlinux.org for
+# more information.
+_google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
+_google_default_client_id=413772536636.apps.googleusercontent.com
+_google_default_client_secret=0ZChLK6AxeA3Isu96MkwqDR4
+
+# Mozilla API keys (see https://location.services.mozilla.com/api)
+# Note: These are for Arch Linux use ONLY. For your own distribution, please
+# get your own set of keys. Feel free to contact heftig@archlinux.org for
+# more information.
+_mozilla_api_key=16674381-f021-49de-8622-3021c5942aff
+
 
 prepare() {
-  cd comm-esr${pkgver%%.*}
+  cd $pkgname-$pkgver
+
+  cp ../mozconfig .mozconfig
   patch -Np1 -i ../thunderbird-install-dir.patch
 
   patch -Np0 -i ../no-neon.patch
 
-  cp "$srcdir/mozconfig" .mozconfig
+  echo -n "$_google_api_key" >google-api-key
+  echo "ac_add_options --with-google-api-keyfile=\"$PWD/google-api-key\"" >>.mozconfig
+
+  echo -n "$_google_default_client_id $_google_default_client_secret" >google-oauth-api-key
+  echo "ac_add_options --with-google-oauth-api-keyfile=\"$PWD/google-oauth-api-key\"" >>.mozconfig
+
+  echo -n "$_mozilla_api_key" >mozilla-api-key
+  echo "ac_add_options --with-mozilla-api-keyfile=\"$PWD/mozilla-api-key\"" >>.mozconfig
+
+  mkdir "$srcdir/path"
+  ln -s /usr/bin/python2 "$srcdir/path/python"
 
   [[ $CARCH == "aarch64" ]] && echo "ac_add_options --disable-jemalloc" >> .mozconfig
 
@@ -57,17 +86,18 @@ prepare() {
 }
 
 build() {
-  cd comm-esr${pkgver%%.*}
-
-  export LDFLAGS="$LDFLAGS -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
+  cd $pkgname-$pkgver
+ 
+  export PATH="$srcdir/path:$PATH"
   export PYTHON="/usr/bin/python2"
+  export LDFLAGS="$LDFLAGS -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
 
   make -f client.mk build
 }
 
 package() {
-  cd comm-esr${pkgver%%.*}
-  make -f client.mk DESTDIR="$pkgdir" install
+  cd $pkgname-$pkgver
+  make -f client.mk DESTDIR="$pkgdir" INSTALL_SDK= install
 
   install -Dm644 ../vendor.js "$pkgdir/usr/lib/thunderbird/defaults/preferences/vendor.js"
 
@@ -81,13 +111,10 @@ package() {
 
   # Use system-provided dictionaries
   rm -rf "$pkgdir"/usr/lib/thunderbird/{dictionaries,hyphenation}
-  ln -sf /usr/share/hunspell "$pkgdir/usr/lib/thunderbird/dictionaries"
-  ln -sf /usr/share/hyphen "$pkgdir/usr/lib/thunderbird/hyphenation"
+  ln -s /usr/share/hunspell "$pkgdir/usr/lib/thunderbird/dictionaries"
+  ln -s /usr/share/hyphen "$pkgdir/usr/lib/thunderbird/hyphenation"
 
   # Replace duplicate binary with symlink
   # https://bugzilla.mozilla.org/show_bug.cgi?id=658850
   ln -sf thunderbird "$pkgdir/usr/lib/thunderbird/thunderbird-bin"
-
-  # Remove development stuff
-  rm -r "$pkgdir"/usr/{include,lib/thunderbird-devel-*,share/idl}
 }
