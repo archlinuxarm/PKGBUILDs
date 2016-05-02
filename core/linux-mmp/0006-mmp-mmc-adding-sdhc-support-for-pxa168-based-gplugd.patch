@@ -1,0 +1,181 @@
+From 467a8c6aba68b033b95538419e09358ce0d99694 Mon Sep 17 00:00:00 2001
+From: Ashokkumar G <0xfee1dead.sa@gmail.com>
+Date: Mon, 26 Jan 2015 11:40:41 -0700
+Subject: [PATCH 6/8] mmp:mmc: adding sdhc support for pxa168 based gplugd
+
+Fixing can't talk to controller for sdhci PXAV2
+
+1. Fixing can't talk to controller for 8bus cycles at lowest speed
+2. Changing clock name from PXA-SDHCLK to NULL
+3. Adding MACH_GPLUGD dependency for SDHCI_PXAV2, SDHCI_IO_ACCESSORIES
+
+Signed-off-by: Ashokkumar G <0xfee1dead.sa@gmail.com>
+---
+ arch/arm/mach-mmp/Kconfig               |  1 +
+ arch/arm/mach-mmp/gplugd.c              |  8 ++++++++
+ arch/arm/mach-mmp/include/mach/pxa168.h | 21 ++++++++++++++++++++-
+ arch/arm/mach-mmp/pxa168.c              |  4 ++++
+ drivers/mmc/host/Kconfig                |  4 +++-
+ drivers/mmc/host/sdhci-pxav2.c          | 19 ++++++++++++++++++-
+ 6 files changed, 54 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mmp/Kconfig b/arch/arm/mach-mmp/Kconfig
+index ebdba87..5843def 100644
+--- a/arch/arm/mach-mmp/Kconfig
++++ b/arch/arm/mach-mmp/Kconfig
+@@ -80,6 +80,7 @@ config MACH_TETON_BGA
+ config MACH_GPLUGD
+ 	bool "Marvell's PXA168 GuruPlug Display (gplugD) Board"
+ 	select CPU_PXA168
++	select MMC
+ 	help
+ 	  Say 'Y' here if you want to support the Marvell PXA168-based
+ 	  GuruPlug Display (gplugD) Board
+diff --git a/arch/arm/mach-mmp/gplugd.c b/arch/arm/mach-mmp/gplugd.c
+index 2981c88..ba4ce4e 100644
+--- a/arch/arm/mach-mmp/gplugd.c
++++ b/arch/arm/mach-mmp/gplugd.c
+@@ -12,6 +12,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/gpio.h>
+ #include <linux/gpio-pxa.h>
++#include <linux/mmc/sdhci.h>
+ #include <linux/spi/spi.h>
+ #include <linux/spi/pxa2xx_spi.h>
+ 
+@@ -148,6 +149,10 @@ static struct i2c_board_info gplugd_i2c_board_info[] = {
+ 	}
+ };
+ 
++struct sdhci_pxa_platdata gplugd_sdh_platdata = {
++	.quirks = SDHCI_QUIRK_NO_HISPD_BIT | SDHCI_QUIRK_NO_BUSY_IRQ | SDHCI_QUIRK_32BIT_DMA_SIZE,
++};
++
+ static void __init select_disp_freq(void)
+ {
+ 	/* set GPIO 35 & clear GPIO 85 to set LCD External Clock to 74.25 MHz */
+@@ -332,6 +337,9 @@ static void __init gplugd_init(void)
+ 
+ 	pxa168_add_ssp(2);
+ 
++	pxa168_add_sdh(1, &gplugd_sdh_platdata);
++	pxa168_add_sdh(2, &gplugd_sdh_platdata);
++
+ 	pxa168_add_eth(&gplugd_eth_platform_data);
+ }
+ 
+diff --git a/arch/arm/mach-mmp/include/mach/pxa168.h b/arch/arm/mach-mmp/include/mach/pxa168.h
+index a83ba7c..def8f46 100644
+--- a/arch/arm/mach-mmp/include/mach/pxa168.h
++++ b/arch/arm/mach-mmp/include/mach/pxa168.h
+@@ -17,6 +17,7 @@ extern void pxa168_clear_keypad_wakeup(void);
+ #include <linux/platform_data/keypad-pxa27x.h>
+ #include <mach/cputype.h>
+ #include <linux/pxa168_eth.h>
++#include <linux/platform_data/pxa_sdhci.h>
+ #include <linux/platform_data/mv_usb.h>
+ 
+ extern struct pxa_device_desc pxa168_device_uart1;
+@@ -37,7 +38,10 @@ extern struct pxa_device_desc pxa168_device_nand;
+ extern struct pxa_device_desc pxa168_device_fb;
+ extern struct pxa_device_desc pxa168_device_keypad;
+ extern struct pxa_device_desc pxa168_device_eth;
+-
++extern struct pxa_device_desc pxa168_device_sdh1;
++extern struct pxa_device_desc pxa168_device_sdh2;
++extern struct pxa_device_desc pxa168_device_sdh3;
++extern struct pxa_device_desc pxa168_device_sdh4;
+ /* pdata can be NULL */
+ extern int __init pxa168_add_usb_host(struct mv_usb_platform_data *pdata);
+ 
+@@ -134,4 +138,19 @@ static inline int pxa168_add_eth(struct pxa168_eth_platform_data *data)
+ {
+ 	return pxa_register_device(&pxa168_device_eth, data, sizeof(*data));
+ }
++
++static inline int pxa168_add_sdh(int id, struct sdhci_pxa_platdata *data)
++{
++	struct pxa_device_desc *d = NULL;
++
++	switch (id) {
++	case 1: d = &pxa168_device_sdh1; break;
++	case 2: d = &pxa168_device_sdh2; break;
++	case 3: d = &pxa168_device_sdh3; break;
++	case 4: d = &pxa168_device_sdh4; break;
++	default:
++		return -EINVAL;
++	}
++	return pxa_register_device(d, data, sizeof(*data));
++}
+ #endif /* __ASM_MACH_PXA168_H */
+diff --git a/arch/arm/mach-mmp/pxa168.c b/arch/arm/mach-mmp/pxa168.c
+index 144e997..e7dee43 100644
+--- a/arch/arm/mach-mmp/pxa168.c
++++ b/arch/arm/mach-mmp/pxa168.c
+@@ -110,6 +110,10 @@ PXA168_DEVICE(ssp5, "pxa168-ssp", 4, SSP5, 0xd4021000, 0x40, 60, 61);
+ PXA168_DEVICE(fb, "pxa168-fb", -1, LCD, 0xd420b000, 0x1c8);
+ PXA168_DEVICE(keypad, "pxa27x-keypad", -1, KEYPAD, 0xd4012000, 0x4c);
+ PXA168_DEVICE(eth, "pxa168-eth", -1, MFU, 0xc0800000, 0x0fff);
++PXA168_DEVICE(sdh1, "sdhci-pxav2", 0, SDH1, 0xd4280000, 0x100);
++PXA168_DEVICE(sdh2, "sdhci-pxav2", 1, SDH1, 0xd4281000, 0x100);
++PXA168_DEVICE(sdh3, "sdhci-pxav2", 2, SDH2, 0xd427e000, 0x100);
++PXA168_DEVICE(sdh4, "sdhci-pxav2", 3, SDH2, 0xd427f000, 0x100);
+ 
+ struct resource pxa168_resource_gpio[] = {
+ 	{
+diff --git a/drivers/mmc/host/Kconfig b/drivers/mmc/host/Kconfig
+index 1386065..02f8e4d 100644
+--- a/drivers/mmc/host/Kconfig
++++ b/drivers/mmc/host/Kconfig
+@@ -240,7 +240,9 @@ config MMC_SDHCI_PXAV2
+ 	tristate "Marvell PXA9XX SD Host Controller support (PXAV2)"
+ 	depends on CLKDEV_LOOKUP
+ 	depends on MMC_SDHCI_PLTFM
+-	default CPU_PXA910
++	select MMC_SDHCI_IO_ACCESSORS if MACH_GPLUGD
++	default y if (CPU_PXA910 || MACH_GPLUGD)
++
+ 	help
+ 	  This selects the Marvell(R) PXAV2 SD Host Controller.
+ 	  If you have a PXA9XX platform with SD Host Controller
+diff --git a/drivers/mmc/host/sdhci-pxav2.c b/drivers/mmc/host/sdhci-pxav2.c
+index b4c23e9..f0f36c9 100644
+--- a/drivers/mmc/host/sdhci-pxav2.c
++++ b/drivers/mmc/host/sdhci-pxav2.c
+@@ -111,7 +111,24 @@ static void pxav2_mmc_set_bus_width(struct sdhci_host *host, int width)
+ 	writeb(ctrl, host->ioaddr + SDHCI_HOST_CONTROL);
+ }
+ 
++/*
++ * we cannot talk to controller for 8 bus cycles according to sdio spec
++ * at lowest speed this is 100,000 HZ per cycle or 800,000 cycles
++ * which is quite a LONG TIME on a fast cpu -- so delay if needed
++ */
++static inline u16 pxa168_readw(struct sdhci_host *host, int reg)
++{
++	u32 temp;
++	if (reg == SDHCI_HOST_VERSION) {
++		temp = readl (host->ioaddr + SDHCI_HOST_VERSION - 2) >> 16;
++		return temp & 0xffff;
++	}
++
++	return readw(host->ioaddr + reg);
++}
++
+ static const struct sdhci_ops pxav2_sdhci_ops = {
++	.read_w = &pxa168_readw,
+ 	.set_clock     = sdhci_set_clock,
+ 	.get_max_clock = sdhci_pltfm_clk_get_max_clock,
+ 	.set_bus_width = pxav2_mmc_set_bus_width,
+@@ -185,7 +202,7 @@ static int sdhci_pxav2_probe(struct platform_device *pdev)
+ 	pltfm_host = sdhci_priv(host);
+ 	pltfm_host->priv = pxa;
+ 
+-	clk = clk_get(dev, "PXA-SDHCLK");
++	clk = clk_get(dev, "NULL");
+ 	if (IS_ERR(clk)) {
+ 		dev_err(dev, "failed to get io clock\n");
+ 		ret = PTR_ERR(clk);
+-- 
+2.8.0
+

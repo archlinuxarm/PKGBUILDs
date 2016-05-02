@@ -1,0 +1,93 @@
+From b4db6ab77256a6761670e45fa4738fc775063d2e Mon Sep 17 00:00:00 2001
+From: Ashokkumar G <0xfee1dead.sa@gmail.com>
+Date: Mon, 27 Jan 2014 09:47:06 -0700
+Subject: [PATCH 3/8] arch:arm:mmp: Adding spi master and mtd dataflash for
+ gplugd
+
+1. Adding SPI master for gplugd
+2. Adding atmel mtd dataflash on SPI for gplugd
+---
+ arch/arm/mach-mmp/gplugd.c | 48 ++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 48 insertions(+)
+
+diff --git a/arch/arm/mach-mmp/gplugd.c b/arch/arm/mach-mmp/gplugd.c
+index 83a7019..9c441e1 100644
+--- a/arch/arm/mach-mmp/gplugd.c
++++ b/arch/arm/mach-mmp/gplugd.c
+@@ -12,6 +12,8 @@
+ #include <linux/platform_device.h>
+ #include <linux/gpio.h>
+ #include <linux/gpio-pxa.h>
++#include <linux/spi/spi.h>
++#include <linux/spi/pxa2xx_spi.h>
+ 
+ #include <asm/mach/arch.h>
+ #include <asm/mach-types.h>
+@@ -185,6 +187,46 @@ static void __init select_disp_freq(void)
+ 	}
+ }
+ 
++static struct pxa2xx_spi_master pxa_ssp_master_info = {
++	.num_chipselect	= 1,
++	.enable_dma = 1,
++};
++
++static struct pxa2xx_spi_chip AT45DB041D_spi_info = {
++	.tx_threshold = 1,
++	.rx_threshold = 1,
++	.timeout = 1000,
++	.gpio_cs = 110
++};
++
++static struct spi_board_info __initdata gplugD_spi_board_info[] = {
++	{
++		.modalias = "mtd_dataflash",
++		.mode = SPI_MODE_0,
++		.max_speed_hz = 260000,
++		.bus_num = 2,
++		.chip_select = 0,
++		.platform_data = NULL,
++		.controller_data = &AT45DB041D_spi_info,
++		.irq = -1,
++	},
++};
++
++static inline int pxa168_add_spi(int id, struct pxa2xx_spi_master *pdata)
++{
++	struct platform_device *pd;
++
++	pd = platform_device_alloc("pxa2xx-spi", id);
++	if (pd == NULL) {
++		pr_err("pxa2xx-spi: failed to allocate device (id=%d)\n", id);
++		return -ENOMEM;
++	}
++
++	platform_device_add_data(pd, pdata, sizeof(*pdata));
++
++	return platform_device_add(pd);
++}
++
+ static void __init gplugd_init(void)
+ {
+ 	mfp_config(ARRAY_AND_SIZE(gplugd_pin_config));
+@@ -196,11 +238,17 @@ static void __init gplugd_init(void)
+ 
+ 	/* on-chip devices */
+ 	pxa168_add_uart(3);
++
+ 	pxa168_add_ssp(1);
+ 
+ 	pxa168_add_twsi(0, &i2c_info, ARRAY_AND_SIZE(gplugd_i2c_board_info));
+ 
+ 	pxa168_add_eth(&gplugd_eth_platform_data);
++
++	pxa168_add_ssp(2);
++
++	pxa168_add_spi(2, &pxa_ssp_master_info);
++	spi_register_board_info(gplugD_spi_board_info, ARRAY_SIZE(gplugD_spi_board_info));
+ }
+ 
+ MACHINE_START(GPLUGD, "PXA168-based GuruPlug Display (gplugD) Platform")
+-- 
+2.8.0
+

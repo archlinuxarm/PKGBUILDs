@@ -1,0 +1,164 @@
+From e5510c9645ffce45c0f9f58c7612cb795baf514f Mon Sep 17 00:00:00 2001
+From: Ashokkumar G <0xfee1dead.sa@gmail.com>
+Date: Mon, 26 Jan 2015 11:51:13 -0700
+Subject: [PATCH 7/8] arch:arm:mmp: Adding USB Host and OTG peripheral for
+ pxa168
+
+Adding USB host, USB OTG peripherals memory, register information
+for pxa168 SOC
+
+Enable USB Host, USB OTG in gplugd
+
+Signed-off-by: Ashokkumar G <0xfee1dead.sa@gmail.com>
+---
+ arch/arm/mach-mmp/devices.c             | 35 ++++++++++++++++++
+ arch/arm/mach-mmp/gplugd.c              | 64 +++++++++++++++++++++++++++++++++
+ arch/arm/mach-mmp/include/mach/pxa168.h |  4 +++
+ 3 files changed, 103 insertions(+)
+
+diff --git a/arch/arm/mach-mmp/devices.c b/arch/arm/mach-mmp/devices.c
+index 2bcb766..7d8499f 100644
+--- a/arch/arm/mach-mmp/devices.c
++++ b/arch/arm/mach-mmp/devices.c
+@@ -241,6 +241,41 @@ void pxa_usb_phy_deinit(void __iomem *phy_reg)
+ #if IS_ENABLED(CONFIG_USB_SUPPORT)
+ static u64 usb_dma_mask = ~(u32)0;
+ 
++#if IS_ENABLED(CONFIG_USB_EHCI_MV)
++struct resource pxa168_u2h_resources[] = {
++	/* regbase */
++	[0] = {
++		.start  = PXA168_U2H_REGBASE + U2x_CAPREGS_OFFSET,
++		.end    = PXA168_U2H_REGBASE + USB_REG_RANGE,
++		.flags  = IORESOURCE_MEM,
++		.name   = "capregs",
++	},
++	/* phybase */
++	[1] = {
++		.start  = PXA168_U2H_PHYBASE,
++		.end    = PXA168_U2H_PHYBASE + USB_PHY_RANGE,
++		.flags  = IORESOURCE_MEM,
++		.name   = "phyregs",
++	},
++	[2] = {
++		.start  = IRQ_PXA168_USB2,
++		.end    = IRQ_PXA168_USB2,
++		.flags  = IORESOURCE_IRQ,
++	},
++};
++
++struct platform_device pxa168_device_u2h = {
++	.name = "pxa-sph",
++	.id   = -1,
++	.resource      = pxa168_u2h_resources,
++	.num_resources = ARRAY_SIZE(pxa168_u2h_resources),
++	.dev  = {
++		.dma_mask = &usb_dma_mask,
++		.coherent_dma_mask = 0xffffffff,
++	},
++};
++#endif
++
+ #if IS_ENABLED(CONFIG_USB_MV_UDC)
+ struct resource pxa168_u2o_resources[] = {
+ 	/* regbase */
+diff --git a/arch/arm/mach-mmp/gplugd.c b/arch/arm/mach-mmp/gplugd.c
+index ba4ce4e..b9c3c92 100644
+--- a/arch/arm/mach-mmp/gplugd.c
++++ b/arch/arm/mach-mmp/gplugd.c
+@@ -173,6 +173,56 @@ static void __init select_disp_freq(void)
+ 	}
+ }
+ 
++#ifdef CONFIG_USB_SUPPORT
++
++#if defined(CONFIG_USB_EHCI_HCD) && defined(CONFIG_USB_EHCI_MV)
++
++static char *pxa168_u2h_clock_name[] = {
++	[0] = "U2HCLK",
++};
++
++static struct mv_usb_platform_data pxa168_u2h_pdata = {
++	.mode           = MV_USB_MODE_HOST,
++	.phy_init       = pxa_usb_phy_init,
++	.phy_deinit     = pxa_usb_phy_deinit,
++	.set_vbus       = NULL,
++};
++#endif
++
++#if defined(CONFIG_USB_MV_UDC) || defined(CONFIG_USB_EHCI_MV_U2O)
++static char *pxa168_u2o_clock_name[] = {
++	[0] = "U2OCLK",
++};
++
++static struct mv_usb_platform_data pxa168_u2o_udc_pdata = {
++	.vbus			= NULL,
++	.mode			= MV_USB_MODE_OTG,
++	.otg_force_a_bus_req	= 1,
++	.phy_init		= pxa_usb_phy_init,
++	.phy_deinit		= pxa_usb_phy_deinit,
++	.set_vbus		= NULL,
++};
++static struct mv_usb_platform_data pxa168_u2o_pdata = {
++	.vbus			= NULL,
++	.mode			= MV_USB_MODE_OTG,
++	.otg_force_a_bus_req	= 1,
++	.phy_init		= pxa_usb_phy_init,
++	.phy_deinit		= pxa_usb_phy_deinit,
++	.set_vbus		= NULL,
++};
++static struct mv_usb_platform_data pxa168_u2o_otg_pdata = {
++	.vbus			= NULL,
++	.mode			= MV_USB_MODE_OTG,
++	.otg_force_a_bus_req	= 1,
++	.phy_init		= pxa_usb_phy_init,
++	.phy_deinit		= pxa_usb_phy_deinit,
++
++	.set_vbus		= NULL,
++};
++
++#endif
++#endif
++
+ static struct pxa2xx_spi_master pxa_ssp_master_info = {
+ 	.num_chipselect	= 1,
+ 	.enable_dma = 1,
+@@ -340,6 +390,20 @@ static void __init gplugd_init(void)
+ 	pxa168_add_sdh(1, &gplugd_sdh_platdata);
+ 	pxa168_add_sdh(2, &gplugd_sdh_platdata);
+ 
++#if defined(CONFIG_USB_EHCI_HCD) && defined(CONFIG_USB_EHCI_MV)
++	pxa168_device_u2h.dev.platform_data = &pxa168_u2h_pdata;
++	platform_device_register(&pxa168_device_u2h);
++#endif
++#ifdef CONFIG_USB_MV_UDC
++	pxa168_device_u2o.dev.platform_data = &pxa168_u2o_udc_pdata;
++	platform_device_register(&pxa168_device_u2o);
++#endif
++
++#ifdef CONFIG_USB_EHCI_MV_U2O
++	pxa168_device_u2oehci.dev.platform_data = &pxa168_u2o_pdata;
++	platform_device_register(&pxa168_device_u2oehci);
++#endif
++
+ 	pxa168_add_eth(&gplugd_eth_platform_data);
+ }
+ 
+diff --git a/arch/arm/mach-mmp/include/mach/pxa168.h b/arch/arm/mach-mmp/include/mach/pxa168.h
+index def8f46..feed849 100644
+--- a/arch/arm/mach-mmp/include/mach/pxa168.h
++++ b/arch/arm/mach-mmp/include/mach/pxa168.h
+@@ -42,6 +42,10 @@ extern struct pxa_device_desc pxa168_device_sdh1;
+ extern struct pxa_device_desc pxa168_device_sdh2;
+ extern struct pxa_device_desc pxa168_device_sdh3;
+ extern struct pxa_device_desc pxa168_device_sdh4;
++extern struct platform_device pxa168_device_u2o;
++extern struct platform_device pxa168_device_u2h;
++extern struct platform_device pxa168_device_u2oehci;
++extern struct platform_device pxa168_device_u2ootg;
+ /* pdata can be NULL */
+ extern int __init pxa168_add_usb_host(struct mv_usb_platform_data *pdata);
+ 
+-- 
+2.8.0
+
