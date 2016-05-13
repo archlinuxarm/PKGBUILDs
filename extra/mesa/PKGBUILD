@@ -10,7 +10,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=11.2.1
+pkgver=11.2.2
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
@@ -21,17 +21,10 @@ license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE)
-sha256sums=('a65207e9ae5c5f1c29f863c6a2cc98a7ab99762a24b82a248337f0ea9cfce01b'
+sha256sums=('40e148812388ec7c6d7b6657d5a16e2e8dabba8b97ddfceea5197947647bdfb4'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
-
-prepare() {
-  cd ${srcdir}/?esa-*
-
-  # Fix detection of libLLVM when built with CMake
-  sed -i 's/LLVM_SO_NAME=.*/LLVM_SO_NAME=LLVM/' configure
-}
 
 build() {
   cd ${srcdir}/?esa-*
