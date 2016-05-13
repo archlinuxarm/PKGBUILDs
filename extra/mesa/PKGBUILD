@@ -7,6 +7,7 @@
 #  - Removed libgles, libegl and khrplatform-devel from conflicts for marvell-libgfx compatibility.
 #  - Moved .pc files to mesa-libgl that reference libraries in mesa-libgl
 #  - Build vc4 gallium driver for v6/v7
+#  - Keep prepare function for older llvm (remove when llvm is fixed)
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
@@ -25,6 +26,13 @@ sha256sums=('40e148812388ec7c6d7b6657d5a16e2e8dabba8b97ddfceea5197947647bdfb4'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
+
+prepare() {
+  cd ${srcdir}/?esa-*
+
+  # Fix detection of libLLVM when built with CMake
+  sed -i 's/LLVM_SO_NAME=.*/LLVM_SO_NAME=LLVM/' configure
+}
 
 build() {
   cd ${srcdir}/?esa-*
