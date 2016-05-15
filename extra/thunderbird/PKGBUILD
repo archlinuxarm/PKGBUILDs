@@ -15,31 +15,34 @@ buildarch=28
 highmem=1
 
 pkgname=thunderbird
-pkgver=45.0
+pkgver=45.1.0
 pkgrel=1
 pkgdesc="Standalone mail and news reader from mozilla.org"
 arch=('i686' 'x86_64')
-license=('MPL' 'GPL')
+license=('MPL' 'GPL' 'LGPL')
 url="http://www.mozilla.org/thunderbird/"
 depends=('gtk2' 'mozilla-common' 'libxt' 'startup-notification' 'mime-types'
-         'dbus-glib' 'alsa-lib' 'desktop-file-utils' 'hicolor-icon-theme'
-         'libvpx' 'icu' 'libevent' 'nss' 'hunspell' 'sqlite' 'ttf-font')
+         'dbus-glib' 'alsa-lib' 'libvpx' 'icu' 'libevent' 'nss' 'hunspell'
+         'sqlite' 'ttf-font')
 makedepends=('unzip' 'zip' 'diffutils' 'python2' 'yasm' 'mesa' 'imake' 'gconf'
              'libpulse' 'inetutils')
 optdepends=('libcanberra: for sound support')
-install=thunderbird.install
 options=('!emptydirs' '!makeflags')
 source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz
         mozconfig
         thunderbird.desktop
         thunderbird-install-dir.patch
+        firefox-gcc-6.0.patch mozilla-1228540.patch mozilla-1228540-1.patch
         vendor.js
         no-neon.patch)
 options=('!emptydirs' '!makeflags')
-sha256sums=('15693897f1e46cbb5a95932b8c087a53004635415845fb4f50d4edfbba77d667'
-            'ef963a9b1faa52343f65d61aea4db63000d789206221d02f908e4b0d0f1dc0d7'
+sha256sums=('8ae9ebe536895d69d99f412f2b3aba645b7dd839e520959330da13892d672309'
+            'e6ab613a6d15668ac6856b591d07efa4a338671dad4ce09e9254662848462ee5'
             '3fba13d88aeb003ab0811ef739463858172ce0662a1c7d62835df3d83ddbb8fb'
             '24599eab8862476744fe1619a9a53a5b8cdcab30b3fc5767512f31d3529bd05d'
+            '4d1e1ddabc9e975ed39f49e134559a29e01cd49439e358233f1ede43bf5a52bf'
+            '2588c567fec88b44b65f0cd111e8769361c138d4c964310684f7bb80066f8f9f'
+            'd1ccbaf0973615c57f7893355e5cd3a89efb4e91071d0ec376e429b50cf6ed19'
             'e4ea8e6788163d9f8db8f1f40023db3ea0a1358f9a4510169f2d4c4fe6a887ed'
             '59f40d8b2480aa67bf76f4f119826b6828a6a59cc040caf1ab5a6e19eef44c6e')
 
@@ -64,6 +67,11 @@ prepare() {
   cp ../mozconfig .mozconfig
   patch -Np1 -i ../thunderbird-install-dir.patch
 
+  # Required for GCC 6
+  patch -d mozilla -Np1 < ../firefox-gcc-6.0.patch
+  patch -d mozilla -Np1 < ../mozilla-1228540.patch
+  patch -d mozilla -Np1 < ../mozilla-1228540-1.patch
+
   patch -Np0 -i ../no-neon.patch
 
   echo -n "$_google_api_key" >google-api-key
@@ -79,17 +87,19 @@ prepare() {
   ln -s /usr/bin/python2 "$srcdir/path/python"
 
   [[ $CARCH == "aarch64" ]] && echo "ac_add_options --disable-jemalloc" >> .mozconfig
-
-  # configure script misdetects the preprocessor without an optimization level
-  # https://bugs.archlinux.org/task/34644
-  sed -i '/ac_cpp=/s/$CPPFLAGS/& -O2/' mozilla/configure
 }
 
 build() {
   cd $pkgname-$pkgver
  
+  # _FORTIFY_SOURCE causes configure failures
+  CPPFLAGS+=" -O2"
+
+  # GCC 6
+  CFLAGS+=" -fno-delete-null-pointer-checks -fno-lifetime-dse"
+  CXXFLAGS+=" -fno-delete-null-pointer-checks -fno-lifetime-dse"
+
   export PATH="$srcdir/path:$PATH"
-  export PYTHON="/usr/bin/python2"
   export LDFLAGS="$LDFLAGS -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
 
   make -f client.mk build
