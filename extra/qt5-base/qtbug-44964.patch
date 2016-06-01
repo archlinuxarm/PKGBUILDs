@@ -1,0 +1,100 @@
+From 60cd1c67759642018ef93cc45a90714729100d9d Mon Sep 17 00:00:00 2001
+From: Shawn Rutledge <shawn.rutledge@theqtcompany.com>
+Date: Thu, 28 Apr 2016 11:30:30 +0200
+Subject: [PATCH] xcb: don't compress tablet motion events
+
+7edd10e6c added this compression feature, but it's not a good idea for
+drawing-tablet applications, because smooth drawing depends on receiving
+every movement of the stylus.
+
+Also show the device ID in qt.qpa.input.devices category logging.
+
+[ChangeLog][X11] The new X event compression feature that was added in
+5.6.0 no longer applies to motion events from drawing tablets.
+
+Task-number: QTBUG-44964
+Change-Id: Icd2ca8ca77d8f80c2f39160c74208db10e382501
+Reviewed-by: Gatis Paeglis <gatis.paeglis@theqtcompany.com>
+---
+ src/plugins/platforms/xcb/qxcbconnection.cpp     |  7 ++++++-
+ src/plugins/platforms/xcb/qxcbconnection.h       |  1 +
+ src/plugins/platforms/xcb/qxcbconnection_xi2.cpp | 21 ++++++++++++++-------
+ 3 files changed, 21 insertions(+), 8 deletions(-)
+
+diff --git a/src/plugins/platforms/xcb/qxcbconnection.cpp b/src/plugins/platforms/xcb/qxcbconnection.cpp
+index edfaf2b..669ef3a 100644
+--- a/src/plugins/platforms/xcb/qxcbconnection.cpp
++++ b/src/plugins/platforms/xcb/qxcbconnection.cpp
+@@ -1626,8 +1626,13 @@ bool QXcbConnection::compressEvent(xcb_generic_event_t *event, int currentIndex,
+         if (!m_xi2Enabled)
+             return false;
+ 
+-        // compress XI_Motion
++        // compress XI_Motion, but not from tablet devices
+         if (isXIType(event, m_xiOpCode, XI_Motion)) {
++#ifndef QT_NO_TABLETEVENT
++            xXIDeviceEvent *xdev = reinterpret_cast<xXIDeviceEvent *>(event);
++            if (const_cast<QXcbConnection *>(this)->tabletDataForDevice(xdev->sourceid))
++                return false;
++#endif // QT_NO_TABLETEVENT
+             for (int j = nextIndex; j < eventqueue->size(); ++j) {
+                 xcb_generic_event_t *next = eventqueue->at(j);
+                 if (!isValid(next))
+diff --git a/src/plugins/platforms/xcb/qxcbconnection.h b/src/plugins/platforms/xcb/qxcbconnection.h
+index 7ba9588..501da1c 100644
+--- a/src/plugins/platforms/xcb/qxcbconnection.h
++++ b/src/plugins/platforms/xcb/qxcbconnection.h
+@@ -578,6 +578,7 @@ private slots:
+     bool xi2HandleTabletEvent(void *event, TabletData *tabletData, QXcbWindowEventListener *eventListener);
+     void xi2ReportTabletEvent(TabletData &tabletData, void *event);
+     QVector<TabletData> m_tabletData;
++    TabletData *tabletDataForDevice(int id);
+ #endif // !QT_NO_TABLETEVENT
+     struct ScrollingDevice {
+         ScrollingDevice() : deviceId(0), verticalIndex(0), horizontalIndex(0), orientations(0), legacyOrientations(0) { }
+diff --git a/src/plugins/platforms/xcb/qxcbconnection_xi2.cpp b/src/plugins/platforms/xcb/qxcbconnection_xi2.cpp
+index 9911afb..025dde3 100644
+--- a/src/plugins/platforms/xcb/qxcbconnection_xi2.cpp
++++ b/src/plugins/platforms/xcb/qxcbconnection_xi2.cpp
+@@ -113,7 +113,7 @@ void QXcbConnection::xi2SetupDevices()
+         // Only non-master pointing devices are relevant here.
+         if (devices[i].use != XISlavePointer)
+             continue;
+-        qCDebug(lcQpaXInputDevices) << "input device "<< devices[i].name;
++        qCDebug(lcQpaXInputDevices) << "input device " << devices[i].name << "ID" << devices[i].deviceid;
+ #ifndef QT_NO_TABLETEVENT
+         TabletData tabletData;
+ #endif
+@@ -507,12 +507,9 @@ void QXcbConnection::xi2HandleEvent(xcb_ge_event_t *event)
+     }
+ 
+ #ifndef QT_NO_TABLETEVENT
+-    for (int i = 0; i < m_tabletData.count(); ++i) {
+-        if (m_tabletData.at(i).deviceId == sourceDeviceId) {
+-            if (xi2HandleTabletEvent(xiEvent, &m_tabletData[i], eventListener))
+-                return;
+-        }
+-    }
++    QXcbConnection::TabletData *tablet = tabletDataForDevice(sourceDeviceId);
++    if (tablet && xi2HandleTabletEvent(xiEvent, tablet, eventListener))
++        return;
+ #endif // QT_NO_TABLETEVENT
+ 
+ #ifdef XCB_USE_XINPUT21
+@@ -1198,6 +1195,16 @@ void QXcbConnection::xi2ReportTabletEvent(TabletData &tabletData, void *event)
+                                               xTilt, yTilt, tangentialPressure,
+                                               rotation, 0, tabletData.serialId);
+ }
++
++QXcbConnection::TabletData *QXcbConnection::tabletDataForDevice(int id)
++{
++    for (int i = 0; i < m_tabletData.count(); ++i) {
++        if (m_tabletData.at(i).deviceId == id)
++            return &m_tabletData[i];
++    }
++    return Q_NULLPTR;
++}
++
+ #endif // QT_NO_TABLETEVENT
+ 
+ #endif // XCB_USE_XINPUT2
