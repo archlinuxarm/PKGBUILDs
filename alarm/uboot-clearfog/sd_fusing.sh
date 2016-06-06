@@ -14,16 +14,18 @@
 #
 ####################################
 
+_device=$1
+
 sd_fuse() {
   ####################################
   # fusing images
 
   echo "u-boot fusing version $1"
-  dd if=./u-boot-clearfog.mmc of=$1 bs=512 seek=1
+  dd if=./u-boot-clearfog.$1.mmc of=$_device bs=512 seek=1
 
   echo "u-boot environemnt fusing"
-  dd if=/dev/zero of=$1 bs=512 seek=1920 count=128
-  dd if=./clearfog.env of=$1 bs=512 seek=1920
+  dd if=/dev/zero of=$_device bs=512 seek=1920 count=128
+  dd if=./clearfog.env of=$_device bs=512 seek=1920
 
   ####################################
   #<Message Display>
@@ -62,17 +64,17 @@ EOF
 }
 
 
-if [ -z $1 ]
+if [ -z $_device ]
 then
     echo "usage: ./sd_fusing.sh <SD Reader's device file>"
     exit 0
 fi
 
-if [ -b $1 ]
+if [ -b $_device ]
 then
-    echo "$1 reader is identified."
+    echo "$_device reader is identified."
 else
-    echo "$1 is NOT identified."
+    echo "$_device is NOT identified."
     exit 0
 fi
 
