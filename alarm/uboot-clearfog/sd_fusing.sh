@@ -14,6 +14,54 @@
 #
 ####################################
 
+sd_fuse() {
+  ####################################
+  # fusing images
+
+  echo "u-boot fusing version $1"
+  dd if=./u-boot-clearfog.mmc of=$1 bs=512 seek=1
+
+  echo "u-boot environemnt fusing"
+  dd if=/dev/zero of=$1 bs=512 seek=1920 count=128
+  dd if=./clearfog.env of=$1 bs=512 seek=1920
+
+  ####################################
+  #<Message Display>
+  echo "U-boot image is fused successfully."
+
+}
+
+choose_uboot() {
+  while :
+  do
+    cat<<EOF
+    Please choose uboot to flash:
+       <1st slot, 2nd slot>
+    1) PCIe, PCIe (default)
+    2) PCIe, mSata
+    3) mSata, PCIe
+    4) mSata, mSata
+EOF
+      read -n1 -s
+      case "$REPLY" in
+      "1")  sd_fuse pp 
+            break
+            ;;
+      "2")  sd_fuse ps
+            break
+            ;;
+      "3")  sd_fuse sp
+            break
+            ;;
+      "4")  sd_fuse ss
+            break
+            ;;
+       * )  echo "invalid option"     ;;
+      esac
+  done
+}
+
+
 if [ -z $1 ]
 then
     echo "usage: ./sd_fusing.sh <SD Reader's device file>"
@@ -28,16 +76,4 @@ else
     exit 0
 fi
 
-####################################
-# fusing images
-
-echo "u-boot fusing"
-dd if=./u-boot-clearfog.mmc of=$1 bs=512 seek=1
-
-echo "u-boot environemnt fusing"
-dd if=/dev/zero of=$1 bs=512 seek=1920 count=128
-dd if=./clearfog.env of=$1 bs=512 seek=1920
-
-####################################
-#<Message Display>
-echo "U-boot image is fused successfully."
+choose_uboot
