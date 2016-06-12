@@ -1,0 +1,75 @@
+From f5a811e755eee253bc34897f327e096e04ad1286 Mon Sep 17 00:00:00 2001
+From: Vincent Hanquez <vincent@snarc.org>
+Date: Fri, 3 Jun 2016 07:12:38 +0100
+Subject: [PATCH] [rdrand] add an untested workaround for i686 machine
+
+---
+ cbits/cryptonite_rdrand.c | 35 ++++++++++++++++++++++++++++-------
+ 1 file changed, 28 insertions(+), 7 deletions(-)
+
+diff --git a/cbits/cryptonite_rdrand.c b/cbits/cryptonite_rdrand.c
+index 54409fc..66501e5 100644
+--- a/cbits/cryptonite_rdrand.c
++++ b/cbits/cryptonite_rdrand.c
+@@ -65,17 +65,38 @@ static inline int crypto_random_rdrand64_step(uint64_t *buffer)
+ 	   : \
+ 	   : "cc")
+ 
++/* inline encoding of 'rdrand %eax' to cover old binutils
++ * - no inputs
++ * - 'cc' to the clobber list as we modify condition code.
++ * - output of rdrand in eax and have a 8 bit error condition
++ */
++#define inline_rdrand_eax(val, err) \
++	asm(".byte 0x0f,0xc7,0xf0; setc %1" \
++	   : "=a" (val), "=q" (err) \
++	   : \
++	   : "cc")
++
++#ifdef __x86_64__
++# define RDRAND_SZ 8
++# define RDRAND_T  uint64_t
++#define inline_rdrand(val, err) inline_rdrand_rax(val, err)
++#else
++# define RDRAND_SZ 4
++# define RDRAND_T  uint32_t
++#define inline_rdrand(val, err) inline_rdrand_eax(val, err)
++#endif
++
+ /* Returns the number of bytes succesfully generated */
+ int cryptonite_get_rand_bytes(uint8_t *buffer, size_t len)
+ {
+-	uint64_t tmp;
+-	int aligned = (intptr_t) buffer % 8;
++	RDRAND_T tmp;
++	int aligned = (intptr_t) buffer % RDRAND_SZ;
+ 	int orig_len = len;
+-	int to_alignment = 8 - aligned;
++	int to_alignment = RDRAND_SZ - aligned;
+ 	uint8_t ok;
+ 
+ 	if (aligned != 0) {
+-		inline_rdrand_rax(tmp, ok);
++		inline_rdrand(tmp, ok);
+ 		if (!ok)
+ 			return 0;
+ 		memcpy(buffer, (uint8_t *) &tmp, to_alignment);
+@@ -83,15 +104,15 @@ int cryptonite_get_rand_bytes(uint8_t *buffer, size_t len)
+ 		len -= to_alignment;
+ 	}
+ 
+-	for (; len >= 8; buffer += 8, len -= 8) {
+-		inline_rdrand_rax(tmp, ok);
++	for (; len >= RDRAND_SZ; buffer += RDRAND_SZ, len -= RDRAND_SZ) {
++		inline_rdrand(tmp, ok);
+ 		if (!ok)
+ 			return (orig_len - len);
+ 		*((uint64_t *) buffer) = tmp;
+ 	}
+ 
+ 	if (len > 0) {
+-		inline_rdrand_rax(tmp, ok);
++		inline_rdrand(tmp, ok);
+ 		if (!ok)
+ 			return (orig_len - len);
+ 		memcpy(buffer, (uint8_t *) &tmp, len);
