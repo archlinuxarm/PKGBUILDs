@@ -4,12 +4,12 @@
 buildarch=4
 
 pkgbase=linux-odroid-xu3
-_commit=acd35659d66efc81387f494d833ca5cb63b4ca9f
+_commit=ae5b5f99f06f936382edda30522787bdde1248bd
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.96
-pkgrel=5
+pkgrel=6
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
@@ -17,8 +17,8 @@ makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         'config')
-md5sums=('dfa08fe6406fa40f32a9b618b12c92e2'
-         'af459977c85028dab014707a5fac6767')
+md5sums=('3c02ec6f384ea70aaf000a6fd99f04ba'
+         'df97c8caa1791d330a38e22f04b7a9e0')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
@@ -30,6 +30,9 @@ prepare() {
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
+
+  # GCC 6 compatibility hack
+  cp include/linux/compiler-gcc5.h include/linux/compiler-gcc6.h
 }
 
 build() {
