@@ -1,7 +1,7 @@
 # Contributor: Johannes Dewender  arch at JonnyJD dot net
 pkgname=targetcli-fb
-pkgver=2.1.fb42
-pkgrel=2
+pkgver=2.1.fb43
+pkgrel=1
 pkgdesc="free branch of the targetcli LIO administration shell (iSCSI + Co)"
 arch=('any')
 url="https://github.com/agrover/targetcli-fb"
@@ -17,7 +17,7 @@ backup=()
 options=()
 install=
 source=(https://fedorahosted.org/releases/t/a/targetcli-fb/$pkgname-$pkgver.tar.gz)
-sha256sums=('b4fbae4c41e333b5aadd029f00dc59b8522d88594bea1ad6901f24daf495ecdc')
+sha256sums=('63e7c85df26ffd2b1ef34e9113585d7eb8b3fd8d4bf84ebe025a14bf518e7459')
 
 
 build() {
