@@ -1,0 +1,76 @@
+# $Id: PKGBUILD 240297 2015-06-03 10:22:03Z fyan $
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to disable neon
+#  - patch to use system ffmpeg, depend on ffmpeg, add system_ffmpeg to WEBENGINE_CONFIG
+
+buildarch=12
+
+pkgname=qt5-webengine
+_qtver=5.7.0
+pkgver=${_qtver/-/}
+pkgrel=2
+arch=('i686' 'x86_64')
+url='http://qt-project.org/'
+license=('GPL3' 'LGPL3' 'FDL' 'custom')
+pkgdesc='Provides support for web applications using the Chromium browser project'
+depends=('qt5-webchannel' 'qt5-location' 'libxcomposite' 'libxrandr' 'libxtst' 'libxcursor' 'libpulse' 'pciutils' 'libxss' 'libvpx' 'opus'
+         'libevent' 'libsrtp' 'jsoncpp' 'libwebp' 'snappy' 'nss' 'protobuf' 'ffmpeg') # minizip
+makedepends=('python2' 'git' 'gperf')
+groups=('qt' 'qt5')
+_pkgfqn="${pkgname/5-/}-opensource-src-${_qtver}"
+source=("http://download.qt.io/official_releases/qt/${pkgver%.*}/${_qtver}/submodules/${_pkgfqn}.tar.xz" qt5-webengine-nss.patch
+        qt5-webengine-fno-delete-null-pointer-checks.patch qt5-webengine-fno-delete-null-pointer-checks-2.patch
+        qtwebengine-opensource-src-5.6.0-beta-no-neon.patch
+        system-ffmpeg.patch)
+
+md5sums=('937f64886fbcb038d6fa4b44ae80cbeb'
+         '2a1610b34204102938a24154a52e5571'
+         '5671a16fef65152928789bffd1f7cf24'
+         '8145ce05fb86e762f012ca1b56f718fe'
+         '5bf00425cacab1a6580c46b9ac8b57ac'
+         '9f79b14f7c5ff603c1fcd87f37a8904f')
+
+prepare() {
+  mkdir -p build
+
+  # Hack to force using python2
+  mkdir -p bin
+  ln -s /usr/bin/python2 bin/python
+
+  # Fix opening some websites with recent NSS https://github.com/QupZilla/qupzilla/issues/1870 (KaOSx patch)
+  cd ${_pkgfqn}
+ # patch -p1 -i ../qt5-webengine-nss.patch
+
+  # Workaround for v8 segfaults with GCC 6
+  patch -p1 -i "$srcdir"/qt5-webengine-fno-delete-null-pointer-checks.patch
+  cd src/3rdparty
+  patch -p1 -i "$srcdir"/qt5-webengine-fno-delete-null-pointer-checks-2.patch
+
+  cd ../..
+  [[ $CARCH == "armv7h" ]] && patch -p1 -i ../qtwebengine-opensource-src-5.6.0-beta-no-neon.patch
+  patch -p1 -i ../system-ffmpeg.patch
+}
+
+build() {
+  cd build
+
+  export PATH="$srcdir/bin:$PATH"
+  export CXXFLAGS+=" -fno-delete-null-pointer-checks"
+  qmake WEBENGINE_CONFIG+="use_proprietary_codecs system_ffmpeg" ../${_pkgfqn}
+  make
+}
+
+package() {
+  cd build
+  make INSTALL_ROOT="$pkgdir" install
+
+  # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
+  find "$pkgdir/usr/lib" -type f -name '*.prl' \
+    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
+
+  install -d "$pkgdir"/usr/share/licenses
+  ln -s /usr/share/licenses/qt5-base "$pkgdir"/usr/share/licenses/${pkgname}
+}
