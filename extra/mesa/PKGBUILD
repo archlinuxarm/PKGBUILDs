@@ -7,31 +7,34 @@
 #  - Removed libgles, libegl and khrplatform-devel from conflicts for marvell-libgfx compatibility.
 #  - Moved .pc files to mesa-libgl that reference libraries in mesa-libgl
 #  - Build vc4 gallium driver for v6/v7
-#  - Keep prepare function for older llvm (remove when llvm is fixed)
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=11.2.2
-pkgrel=1.1
+pkgver=12.0.1
+pkgrel=1
 arch=('i686' 'x86_64')
-makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto'
+makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
              'systemd' 'libomxil-bellagio' 'libgcrypt' 'clang')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
-        LICENSE)
-sha256sums=('40e148812388ec7c6d7b6657d5a16e2e8dabba8b97ddfceea5197947647bdfb4'
+        LICENSE
+        remove-libpthread-stubs.patch)
+sha256sums=('bab24fb79f78c876073527f515ed871fc9c81d816f66c8a0b051d8d653896389'
             'SKIP'
-            '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2')
+            '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
+            'd82c329e89754266eb1538df29b94d33692a66e3b6882b2cee78f4d5aab4a39c')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 
 prepare() {
   cd ${srcdir}/?esa-*
 
-  # Fix detection of libLLVM when built with CMake
-  sed -i 's/LLVM_SO_NAME=.*/LLVM_SO_NAME=LLVM/' configure
+  # Now mesa checks for libpthread-stubs - so remove the check
+  patch -Np1 -i ../remove-libpthread-stubs.patch
+
+  autoreconf -fiv
 }
 
 build() {
@@ -46,17 +49,17 @@ build() {
     --with-dri-drivers=nouveau,swrast \
     --with-egl-platforms=x11,drm,wayland \
     --with-sha1=libgcrypt \
-    --enable-llvm-shared-libs \
-    --enable-egl \
-    --enable-gbm \
     --enable-gallium-llvm \
+    --enable-llvm-shared-libs \
     --enable-shared-glapi \
+    --enable-egl \
     --enable-glx \
     --enable-glx-tls \
-    --enable-dri \
-    --enable-osmesa \
     --enable-gles1 \
     --enable-gles2 \
+    --enable-gbm \
+    --enable-dri \
+    --enable-osmesa \
     --enable-texture-float \
     --enable-omx \
     --enable-nine \
@@ -100,7 +103,7 @@ package_mesa() {
   install -m755 -d ${pkgdir}/usr/lib/xorg/modules/dri
   # ati-dri, nouveau-dri, intel-dri, svga-dri, swrast
   cp -av ${srcdir}/fakeinstall/usr/lib/xorg/modules/dri/* ${pkgdir}/usr/lib/xorg/modules/dri
-
+   
   cp -rv ${srcdir}/fakeinstall/usr/lib/bellagio  ${pkgdir}/usr/lib
   cp -rv ${srcdir}/fakeinstall/usr/lib/d3d  ${pkgdir}/usr/lib
   cp -rv ${srcdir}/fakeinstall/usr/lib/lib{gbm,glapi}.so* ${pkgdir}/usr/lib/
@@ -110,6 +113,9 @@ package_mesa() {
   cp -rv ${srcdir}/fakeinstall/usr/include ${pkgdir}/usr
   cp -rv ${srcdir}/fakeinstall/usr/lib/pkgconfig ${pkgdir}/usr/lib/
   rm ${pkgdir}/usr/lib/pkgconfig/{egl,gl,glesv1_cm,glesv2}.pc
+
+  # remove vulkan headers
+  rm -rf ${pkgdir}/usr/include/vulkan
 
   install -m755 -d ${pkgdir}/usr/lib/mesa
   # move libgl/EGL/glesv*.so to not conflict with blobs - may break .pc files ?
