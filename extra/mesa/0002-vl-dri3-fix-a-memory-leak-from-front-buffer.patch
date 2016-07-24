@@ -1,0 +1,38 @@
+From 134d6e4e4f980d738361bfcae1daedb8cc58b5df Mon Sep 17 00:00:00 2001
+From: Leo Liu <leo.liu@amd.com>
+Date: Thu, 14 Jul 2016 09:19:59 -0400
+Subject: [PATCH] vl/dri3: fix a memory leak from front buffer
+
+Inspired by fix for mem leak of vdpau interop, resource_from_handle
+set texture reference count, that need to be decreased and released,
+recall there is a similar case for DRI3, that is with VA-API glx
+extension, there is temporary TFP(texture from pixmap), we target it
+through dma-buf. leak happens when without count down the reference.
+
+Checked and found with mpv vo=opengl case, there only one static TFP,
+the leak happens once, but for totem player using gstreamer VA-API glx,
+the dynamic TFP for each frame, so leak quite a bit.
+
+This fixes mem leak for mpv and totem.
+
+Signed-off-by: Leo Liu <leo.liu@amd.com>
+Cc: "12.0" <mesa-stable@lists.freedesktop.org>
+---
+ src/gallium/auxiliary/vl/vl_winsys_dri3.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/gallium/auxiliary/vl/vl_winsys_dri3.c b/src/gallium/auxiliary/vl/vl_winsys_dri3.c
+index f7f572e..493e645 100644
+--- a/src/gallium/auxiliary/vl/vl_winsys_dri3.c
++++ b/src/gallium/auxiliary/vl/vl_winsys_dri3.c
+@@ -89,6 +89,7 @@ dri3_free_front_buffer(struct vl_dri3_screen *scrn,
+ {
+    xcb_sync_destroy_fence(scrn->conn, buffer->sync_fence);
+    xshmfence_unmap_shm(buffer->shm_fence);
++   pipe_resource_reference(&buffer->texture, NULL);
+    FREE(buffer);
+ }
+ 
+-- 
+2.9.0
+
