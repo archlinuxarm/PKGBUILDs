@@ -11,6 +11,8 @@
 #  - add arm to _JARCH and _DOC_ARCH
 #  - configure with --with-jvm-variants=zero
 #  - adjust doc package to use linux-${_DOC_ARCH}-normal-zero-release instead of normal-server-release
+#  - upstream patch for zero
+#  - prevent downgrading hotspot optimization with CFLAGS
 
 buildarch=22
 
@@ -23,7 +25,7 @@ _jdk_update=102
 _jdk_build=14
 pkgver=${_java_ver}.u${_jdk_update}
 _repo_ver=jdk${_java_ver}u${_jdk_update}-b${_jdk_build}
-pkgrel=1
+pkgrel=1.1
 arch=('i686' 'x86_64')
 url='http://openjdk.java.net/'
 license=('custom')
@@ -39,7 +41,8 @@ source=(jdk8u-${_repo_ver}.tar.gz::${_url_src}/archive/${_repo_ver}.tar.gz
         jaxp-${_repo_ver}.tar.gz::${_url_src}/jaxp/archive/${_repo_ver}.tar.gz
         langtools-${_repo_ver}.tar.gz::${_url_src}/langtools/archive/${_repo_ver}.tar.gz
         nashorn-${_repo_ver}.tar.gz::${_url_src}/nashorn/archive/${_repo_ver}.tar.gz
-        build_with_gcc6.patch)
+        build_with_gcc6.patch
+        8154210.patch)
 
 sha256sums=('d4161e41122de3526cfe4ca4d568e79b5843e833640752fa6ba2126f6372ed96'
             'ae51aaf7b6116ca11b79985f94af4b1cfed4675db6ee848904ddfc70b0ed0376'
@@ -49,7 +52,8 @@ sha256sums=('d4161e41122de3526cfe4ca4d568e79b5843e833640752fa6ba2126f6372ed96'
             'bcff4bd5686c346e3fa676d0592e1e5b3b349f7f61636e702e999c00f940b066'
             '5cad411081130829799440f155d4f70eb3178a7a603af68202a2f6ac19d40324'
             '37050fe0525c45412f312fe88606e3c6b8cd02c0919b7695a1b94eff5dba8a42'
-            'dcf5f495620231068b0c925a33ba7246bbeb85e9ae822b30ab77a66839c2d3b6')
+            'dcf5f495620231068b0c925a33ba7246bbeb85e9ae822b30ab77a66839c2d3b6'
+            '292443358b7b7b570b3b42c3cb3dd6f1ac8bc79ada90b979aec10f52013958ae')
 
 case "${CARCH}" in
   'x86_64') _JARCH=amd64 ; _DOC_ARCH=x86_64 ;;
@@ -75,6 +79,10 @@ prepare() {
   done
 
   patch -p1 < ../build_with_gcc6.patch
+
+  # patch for zero
+  cd "${srcdir}/hotspot-${_repo_ver}"
+  patch -p2 -i ../8154210.patch
 }
 
 build() {
@@ -83,6 +91,9 @@ build() {
   unset JAVA_HOME
   # http://icedtea.classpath.org/bugzilla/show_bug.cgi?id=1346
   export MAKEFLAGS=${MAKEFLAGS/-j*}
+
+  # prevent downgrading hotspot optimization
+  CFLAGS=`echo $CFLAGS | sed -e 's/-O2//'` && CXXFLAGS="$CFLAGS"
 
   install -d -m 755 "${srcdir}/${_prefix}/"
   sh configure \
