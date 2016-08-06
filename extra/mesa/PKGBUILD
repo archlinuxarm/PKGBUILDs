@@ -11,7 +11,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
 pkgver=12.0.1
-pkgrel=7
+pkgrel=6
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
@@ -48,8 +48,7 @@ prepare() {
   # fix rendering in overlord series games - merged upstream
   patch -Np1 -i ../0001-Mesa-dev-st_glsl_to_tgsi-overlord-fix.patch
   # fix https://bugs.freedesktop.org/show_bug.cgi?id=71759 / FS#50240
-  # reverted because of it segfault X with modesetting/intel 
-  #patch -Np1 -i ../0001-i965-import-prime-buffers-in-the-current-context-not.patch
+  patch -Np1 -i ../0001-i965-import-prime-buffers-in-the-current-context-not.patch
 
   autoreconf -fiv
 }
