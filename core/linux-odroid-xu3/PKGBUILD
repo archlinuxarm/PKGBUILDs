@@ -4,12 +4,12 @@
 buildarch=4
 
 pkgbase=linux-odroid-xu3
-_commit=ae5b5f99f06f936382edda30522787bdde1248bd
+_commit=533ce5530343f4f8cb9c1fdf83b844b8be4e538f
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.96
-pkgrel=7
+pkgrel=8
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
@@ -18,8 +18,8 @@ options=('!strip')
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         'config'
         'exynos-gcc6.patch')
-md5sums=('3c02ec6f384ea70aaf000a6fd99f04ba'
-         'df97c8caa1791d330a38e22f04b7a9e0'
+md5sums=('66ecae847ce2a5f8b7a7821c522d2604'
+         'a8db4c2592b8a3db4a72431cc49fb37c'
          'd4c327797fb7124076541859ac3d4e90')
 
 prepare() {
