@@ -9,19 +9,24 @@ _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.96
-pkgrel=6
+pkgrel=7
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
-        'config')
+        'config'
+        'exynos-gcc6.patch')
 md5sums=('3c02ec6f384ea70aaf000a6fd99f04ba'
-         'df97c8caa1791d330a38e22f04b7a9e0')
+         'df97c8caa1791d330a38e22f04b7a9e0'
+         'd4c327797fb7124076541859ac3d4e90')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
+
+  # Patch for GCC 6 compatibility
+  patch -Np1 <../exynos-gcc6.patch
 
   cat "${srcdir}/config" > ./.config
 
