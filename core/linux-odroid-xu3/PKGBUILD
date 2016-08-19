@@ -8,8 +8,10 @@ _commit=533ce5530343f4f8cb9c1fdf83b844b8be4e538f
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
-pkgver=3.10.96
-pkgrel=8
+pkgver=3.10.102
+pkgrel=1
+bfqver=v7r8
+
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
@@ -17,16 +19,32 @@ makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         'config'
-        'exynos-gcc6.patch')
+        "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.8+-${bfqver}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver:0:4}.8.patch"
+        "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.8+-${bfqver}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver:0:4}.8.patch"
+        "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.8+-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.8+.patch"
+        'exynos-gcc6.patch'
+        '3.10.96_to_3.10.102.patch.xz')
 md5sums=('66ecae847ce2a5f8b7a7821c522d2604'
-         'a8db4c2592b8a3db4a72431cc49fb37c'
-         'd4c327797fb7124076541859ac3d4e90')
+         '939b77911f680a4e73812f8e078560a8'
+         '003f1554be6b672100d2f2401a574d92'
+         '12ffe57584b4f2adcc3e184dc6948772'
+         '9e78f9f5364f8ebb981aeb235dcb7415'
+         'd4c327797fb7124076541859ac3d4e90'
+         '76b028a53dc7547f3532b5ca73c5d326')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
   # Patch for GCC 6 compatibility
-  patch -Np1 <../exynos-gcc6.patch
+  patch -Np1 -i ${srcdir}/exynos-gcc6.patch
+
+  # Upstream commits
+  patch -Np1 -i ${srcdir}/3.10.96_to_3.10.102.patch
+
+  # Add BFQ patches
+  patch -Np1 -i "${srcdir}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver:0:4}.8.patch"
+  patch -Np1 -i "${srcdir}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver:0:4}.8.patch"
+  patch -Np1 -i "${srcdir}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.8+.patch"
 
   cat "${srcdir}/config" > ./.config
 
@@ -35,9 +53,6 @@ prepare() {
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
-
-  # GCC 6 compatibility hack
-  cp include/linux/compiler-gcc5.h include/linux/compiler-gcc6.h
 }
 
 build() {
