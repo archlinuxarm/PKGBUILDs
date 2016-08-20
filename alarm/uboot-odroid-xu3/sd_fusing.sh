@@ -44,13 +44,13 @@ if [ -n "$emmc" ]; then
     signed_bl1_position=0
     bl2_position=30
     uboot_position=62
-    tzsw_position=718
+    tzsw_position=2110
     device=$1boot0
 else
     signed_bl1_position=1
     bl2_position=31
     uboot_position=63
-    tzsw_position=719
+    tzsw_position=2111
     device=$1
 fi
 

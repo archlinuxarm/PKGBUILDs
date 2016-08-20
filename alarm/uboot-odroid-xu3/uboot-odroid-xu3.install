@@ -1,26 +1,28 @@
 sd_fuse() {
-  if [ ! -b /dev/mmcblk0 ]; then
+  device=$1
+
+  if [ ! -b /dev/${device} ]; then
     echo "No MMC device to flash, exiting."
     exit 0
   fi
 
-  if [ -d /sys/block/mmcblk0boot0 ]; then
-    echo "/dev/mmcblk0 is an eMMC card, disabling read-only.."
-    if ! echo 0 > /sys/block/mmcblk0boot0/force_ro; then
-      echo "Disabling read-only for /dev/mmcblk0boot0 failed."
+  if [ -d /sys/block/${device}boot0 ]; then
+    echo "/dev/${device} is an eMMC card, disabling read-only.."
+    if ! echo 0 > /sys/block/${device}boot0/force_ro; then
+      echo "Disabling read-only for /dev/${device}boot0 failed."
       exit 1
     fi
     signed_bl1_position=0
     bl2_position=30
     uboot_position=62
-    tzsw_position=718
-    device=/dev/mmcblk0boot0
+    tzsw_position=2110
+    device=/dev/${device}boot0
   else
     signed_bl1_position=1
     bl2_position=31
     uboot_position=63
-    tzsw_position=719
-    device=/dev/mmcblk0
+    tzsw_position=2111
+    device=/dev/${device}
   fi
 
   echo "BL1 fusing"
@@ -34,14 +36,18 @@ sd_fuse() {
 }
 
 flash_uboot() {
-  echo "A new U-Boot version needs to be flashed onto /dev/mmcblk0."
+  major=$(mountpoint -d / | cut -f 1 -d ':')
+  minor=$(expr $(mountpoint -d / | cut -f 2 -d ':') - 1)
+  device=$(cat /proc/partitions | awk {'if ($1 == "'${major}'" && $2 == "'${minor}'") print $4 '})
+
+  echo "A new U-Boot version needs to be flashed onto /dev/${device}."
   echo "Do you want to do this now? [y|N]"
   read -r shouldwe
   if [[ $shouldwe =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    sd_fuse
+    sd_fuse $device
   else
     echo "You can do this later by running:"
-    echo "# cd /boot; ./sd_fusing.sh /dev/mmcblk0"
+    echo "# cd /boot; ./sd_fusing.sh /dev/${device}"
   fi
 }
 
@@ -50,5 +56,9 @@ post_install() {
 }
 
 post_upgrade() {
+  if (( $(vercmp $2 2016.07-1) < 0 )); then
+    echo ' >>> Note: boot.ini is no longer used. Make any customizations within /boot/boot.txt'
+    echo '           and run ./mkscr within /boot to convert it to the boot.scr file.'
+  fi
   flash_uboot
 }
