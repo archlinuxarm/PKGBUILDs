@@ -5,7 +5,7 @@ buildarch=4
 
 pkgname=uboot-odroid-xu3
 pkgver=2016.07
-pkgrel=1
+pkgrel=2
 pkgdesc="U-Boot for ODROID-XU3"
 arch=('armv7h')
 url='http://www.denx.de/wiki/U-Boot/WebHome'
