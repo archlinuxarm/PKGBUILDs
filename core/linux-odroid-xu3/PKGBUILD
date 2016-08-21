@@ -9,7 +9,7 @@ _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.102
-pkgrel=2
+pkgrel=3
 bfqver=v7r8
 
 arch=('armv7h')
@@ -107,6 +107,7 @@ _package() {
   cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
   cp arch/$KARCH/boot/dts/*.dtb "${pkgdir}/boot/dtbs"
   cp "${pkgdir}/boot/dtbs/exynos5422-odroidxu3.dtb" "${pkgdir}/boot/dtbs/exynos5422-odroidxu3-lite.dtb"
+  cp "${pkgdir}/boot/dtbs/exynos5422-odroidxu3.dtb" "${pkgdir}/boot/dtbs/exynos5422-odroidxu4.dtb"
 
   # set correct depmod command for install
   sed \
