@@ -4,12 +4,12 @@
 buildarch=4
 
 pkgbase=linux-odroid-xu3
-_commit=533ce5530343f4f8cb9c1fdf83b844b8be4e538f
+_commit=6fd591a6c38ca6bdc1445cff3122b23a60409483
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.102
-pkgrel=3
+pkgrel=4
 bfqver=v7r8
 
 arch=('armv7h')
@@ -24,8 +24,8 @@ source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.8+-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.8+.patch"
         'exynos-gcc6.patch'
         '3.10.96_to_3.10.102.patch.xz')
-md5sums=('66ecae847ce2a5f8b7a7821c522d2604'
-         '939b77911f680a4e73812f8e078560a8'
+md5sums=('e264caec5537563c64b4762387a62c52'
+         'aae0e0545e2de944b10cbf8f12706ef9'
          '003f1554be6b672100d2f2401a574d92'
          '12ffe57584b4f2adcc3e184dc6948772'
          '9e78f9f5364f8ebb981aeb235dcb7415'
@@ -36,15 +36,15 @@ prepare() {
   cd "${srcdir}/${_srcname}"
 
   # Patch for GCC 6 compatibility
-  patch -Np1 -i ${srcdir}/exynos-gcc6.patch
+  patch -sNp1 -i ${srcdir}/exynos-gcc6.patch
 
   # Upstream commits
-  patch -Np1 -i ${srcdir}/3.10.96_to_3.10.102.patch
+  patch -sNp1 -i ${srcdir}/3.10.96_to_3.10.102.patch
 
   # Add BFQ patches
-  patch -Np1 -i "${srcdir}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver:0:4}.8.patch"
-  patch -Np1 -i "${srcdir}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver:0:4}.8.patch"
-  patch -Np1 -i "${srcdir}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.8+.patch"
+  patch -sNp1 -i "${srcdir}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver:0:4}.8.patch"
+  patch -sNp1 -i "${srcdir}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver:0:4}.8.patch"
+  patch -sNp1 -i "${srcdir}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.8+.patch"
 
   cat "${srcdir}/config" > ./.config
 
