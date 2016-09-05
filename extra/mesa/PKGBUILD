@@ -10,8 +10,8 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=12.0.1
-pkgrel=7
+pkgver=12.0.2
+pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
@@ -21,19 +21,11 @@ license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        remove-libpthread-stubs.patch
-        0001-st-mesa-fix-reference-counting-bug-in-st_vdpau.patch
-        0002-vl-dri3-fix-a-memory-leak-from-front-buffer.patch
-        0001-Mesa-dev-st_glsl_to_tgsi-overlord-fix.patch
-        0001-i965-import-prime-buffers-in-the-current-context-not.patch)
-sha256sums=('bab24fb79f78c876073527f515ed871fc9c81d816f66c8a0b051d8d653896389'
+        remove-libpthread-stubs.patch)
+sha256sums=('d957a5cc371dcd7ff2aa0d87492f263aece46f79352f4520039b58b1f32552cb'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
-            'd82c329e89754266eb1538df29b94d33692a66e3b6882b2cee78f4d5aab4a39c'
-            'ccc8ea7f4e38f2dc26fd29150929e943aac5bc9b56bd3eddec882c6ccd1d64a5'
-            'f6c17257e96182ce51b85ef75cef4f6c205b00dfbf8fc1089cd77c4a3eda6981'
-            'c1b650d2b3512d5f8f463f1974a28ed6b88e7e1936c5cfe1034ab97696d1de14'
-            '6d6159b9080d75f653dbd43284b5138264612a7f4b895c37859f984d1ea2246d')
+            'd82c329e89754266eb1538df29b94d33692a66e3b6882b2cee78f4d5aab4a39c')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 
 prepare() {
@@ -41,15 +33,6 @@ prepare() {
 
   # Now mesa checks for libpthread-stubs - so remove the check
   patch -Np1 -i ../remove-libpthread-stubs.patch
-
-  # fix memory leaks - merged upstream
-  patch -Np1 -i ../0001-st-mesa-fix-reference-counting-bug-in-st_vdpau.patch
-  patch -Np1 -i ../0002-vl-dri3-fix-a-memory-leak-from-front-buffer.patch
-  # fix rendering in overlord series games - merged upstream
-  patch -Np1 -i ../0001-Mesa-dev-st_glsl_to_tgsi-overlord-fix.patch
-  # fix https://bugs.freedesktop.org/show_bug.cgi?id=71759 / FS#50240
-  # reverted because of it segfault X with modesetting/intel 
-  #patch -Np1 -i ../0001-i965-import-prime-buffers-in-the-current-context-not.patch
 
   autoreconf -fiv
 }
