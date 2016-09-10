@@ -5,82 +5,87 @@
 #  - patch to remove neon detection in configure
 
 pkgname=ceph
-pkgver=0.94.5
-pkgrel=3
+pkgver=10.2.2
+pkgrel=2
 pkgdesc='Distributed, fault-tolerant storage platform delivering object, block, and file system'
 arch=('x86_64' 'i686')
 url='http://ceph.com/'
 license=('GPL')
-makedepends=('boost' 'systemd' 'xfsprogs')
-depends=('boost-libs'
-         'curl'
-         'expat'
-         'fcgi'
-         'fuse'
-         'gcc-libs'
-         'glibc'
-         'gperftools'
-         'keyutils'
-         'leveldb'
-         'libaio'
-         'libatomic_ops'
-         'libedit'
-         'libsystemd'
-         'libutil-linux'
-         'ncurses'
-         'nss'
-         'python2'
-         'snappy')
+makedepends=('boost' 'systemd' 'xfsprogs' 'python2-setuptools' 'python2-sphinx'
+             'python2-virtualenv' 'cython2')
+depends=('boost-libs' 'curl' 'expat' 'fcgi' 'fuse' 'gcc-libs' 'glibc'
+  'gperftools' 'keyutils' 'leveldb' 'libaio' 'libatomic_ops' 'libedit'
+  'libsystemd' 'libutil-linux' 'ncurses' 'nss' 'python2' 'snappy')
 optdepends=('xfsprogs: support xfs backend')
 options=('emptydirs')
-source=("http://ceph.com/download/$pkgname-$pkgver.tar.bz2"
-        'ceph-osd@.service'
-        'ceph-mon@.service'
-        'ceph-mds@.service'
+install=ceph.install
+source=("http://ceph.com/download/$pkgname-$pkgver.tar.gz"
+        'ceph.sysusers'
+        '01-virtualenv2.patch'
+        '02-setup-python2.patch'
         'no-neon.patch')
-md5sums=('e7c35581f8d36d34f7cde16a862e54fb'
-         '9104b5b90349d2aa7802eb89158456e8'
-         '63a584aa2a4e2b0efbee4e8fd32593f0'
-         'd2411c41208d95743baa6d899cc1e0b0'
-         '7bc1737bb952b08db8e9a0780aee21d8')
+md5sums=('5cba47af53b3b17002aad3c854e5405c'
+         'b3e24e3aa005a657ab475f84bfe3291a'
+         'a3f72dc8e97f9fd5708d52256bcd9e75'
+         'f11582acceeb6c1790518c3a5a29bb18'
+         '97d293b08d5d4b4a2db37030c28bc617')
 
 prepare() {
-#  patch -p1 -d $pkgname-$pkgver < 01-boost-158.patch
-  patch -p1 -d $pkgname-$pkgver -i ../no-neon.patch
+  cd $pkgname-$pkgver
+  # apply patch from the source array (should be a pacman feature)
+  local filename
+  for filename in "${source[@]}"; do
+    if [[ "$filename" =~ \.patch$ ]]; then
+      msg2 "Applying patch $filename"
+      patch -p1 -N -i "$srcdir/$filename"
+    fi
+  done
+  :
 }
 
 build() {
   cd $pkgname-$pkgver
-  export PYTHON=/usr/bin/python2
   ./configure \
     --prefix=/usr \
     --sbindir=/usr/bin \
     --libexecdir=/usr/lib \
     --sysconfdir=/etc \
     --localstatedir=/var \
-    --with-radosgw
+    --with-man-pages \
+    --with-radosgw \
+    --without-openldap \
+    PYTHON=/usr/bin/python2 \
+    CYTHON_CHECK=yes \
+    PYTHON_CONFIG_CHECK=yes \
+    SPHINX_BUILD=sphinx-build2
   make
 }
 
 package() {
-  make -C $pkgname-$pkgver DESTDIR="$pkgdir" install
+  cd $pkgname-$pkgver
+
+  make DESTDIR="$pkgdir" install
+
+  # install tmpfiles.d
+  install -Dm644 systemd/ceph.tmpfiles.d "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
+  install -Dm644 "$srcdir"/ceph.sysusers "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
 
   cd "$pkgdir"
 
-  # systemd
-  install -dm755 usr/lib/{systemd/system,udev/rules.d}
-  install -Dm644 "$srcdir"/ceph-{osd,mon,mds}@.service usr/lib/systemd/system
-  install -Dm644 "$srcdir"/$pkgname-$pkgver/udev/* usr/lib/udev/rules.d
+  # fix sbin path
+  msg2 'Fix sbin paths'
+  mv -v sbin/* usr/sbin/* usr/bin
+  rmdir -v sbin usr/sbin
 
-  # fix directories path
-  mv sbin/* usr/bin
-  rmdir sbin
+  # fix bash completions path
+  msg2 'Fix bash completion path'
   install -d -m 755 usr/share/bash-completion
   mv etc/bash_completion.d usr/share/bash-completion/completions
 
   # fix python2 shebang, did not do it in prepare() anymore because it
   # confuse automake
-  find . -type f -exec \
+  msg2 'Fix python2 shebang'
+  find . -type f -executable -exec \
     sed -i '1s,^#! \?/usr/bin/\(env \|\)python$,#!/usr/bin/python2,' {} \;
 }
 
