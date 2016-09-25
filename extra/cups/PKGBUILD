@@ -6,15 +6,15 @@
 
 pkgbase="cups"
 pkgname=('libcups' 'cups')
-pkgver=2.1.4
-pkgrel=2
+pkgver=2.2.0
+pkgrel=3
 arch=('i686' 'x86_64')
 license=('GPL')
 url="http://www.cups.org/"
-makedepends=('libtiff>=4.0.0' 'libpng>=1.5.7' 'acl' 'pam' 'xdg-utils' 'krb5' 'gnutls'
+makedepends=('libtiff' 'libpng' 'acl' 'pam' 'xdg-utils' 'krb5' 'gnutls'
              'cups-filters' 'bc' 'colord' 'xinetd' 'gzip' 'autoconf' 'libusb' 'dbus' 
              'avahi'  'hicolor-icon-theme' 'systemd' 'inetutils' 'libpaper')
-source=(https://github.com/apple/cups/releases/download/release-${pkgver}/cups-${pkgver}-source.tar.gz
+source=(https://github.com/apple/cups/releases/download/v${pkgver}/cups-${pkgver}-source.tar.gz
         cups.logrotate cups.pam
         # improve build and linking
         cups-no-export-ssllibs.patch
@@ -24,16 +24,20 @@ source=(https://github.com/apple/cups/releases/download/release-${pkgver}/cups-$
         cups-1.6.0-fix-install-perms.patch
         # bugfixes
         cups-systemd-socket.patch
+        start_cups_by_port631.diff
+        fix_endless_loops.diff
 )
-md5sums=('9f9bf6e3b9c20a3519b4dc409666d6e7'
+md5sums=('e22d943cff300411d3616dc2ee86272c'
          'fc8286f185e2cc5f7e1f6843bf193e2b'
          '96f82c38f3f540b53f3e5144900acf17'
          '3ba9e3410df1dc3015463d615ef91b3b'
          '1beb4896f217bc241bc08a422274ec0c'
-         '90c30380d4c8cd48a908cfdadae1ea24'
+         '39dd3141991c3052b73f59ece70e1ea6'
          '451609db34f95209d64c38474de27ce1'
          '5117f65342fcc69c6a506529e4daca9e'
-         '25a618201dd4bbc73ba800da425000f1')
+         '53bb3c80ee6823d36f9ab499373edfc5'
+         'f75c17b1b2d446a27b629f63622b9468'
+         '32f6e1f907247dab466c37403d87d4e4')
 validpgpkeys=('3737FD0D0E63B30172440D2DDBA3A7AB08D76223') # CUPS.org (CUPS.org PGP key) <security@cups.org>
 prepare() {
 
@@ -54,6 +58,10 @@ prepare() {
   # bug fixes
   # make sure network is up when starting and notify systemd - FC
   patch -Np1 -i ${srcdir}/cups-systemd-socket.patch
+  # make sure cupsd starts when requested via web interface
+  patch -Np1 -i ${srcdir}/start_cups_by_port631.diff
+  # fix endless loops; FS#50796; https://github.com/apple/cups/issues/4870
+  patch -Np1 -i ${srcdir}/fix_endless_loops.diff
 
   # set MaxLogSize to 0 to prevent using cups internal log rotation
   sed -i -e '5i\ ' conf/cupsd.conf.in
@@ -96,7 +104,6 @@ check() {
 package_libcups() {
 pkgdesc="The CUPS Printing System - client libraries and headers"
 depends=('gnutls' 'libtiff>=4.0.0' 'libpng>=1.5.7' 'krb5' 'avahi' 'libusb')
-backup=(etc/cups/client.conf)
 
   cd ${pkgbase}-${pkgver}
   make BUILDROOT=${pkgdir} install-headers install-libs
@@ -107,11 +114,6 @@ backup=(etc/cups/client.conf)
   # install client.conf man page and config file
   install -dm755 ${pkgdir}/usr/share/man/man5
   install -Dm644  ${srcdir}/${pkgbase}-${pkgver}/man/client.conf.5 ${pkgdir}/usr/share/man/man5/
-  install -dm755 -g lp ${pkgdir}/etc/cups
-  touch ${pkgdir}/etc/cups/client.conf
-  echo "# see 'man client.conf'" >> ${pkgdir}/etc/cups/client.conf
-  echo "ServerName /run/cups/cups.sock #  alternative: ServerName hostname-or-ip-address[:port] of a remote server" >> ${pkgdir}/etc/cups/client.conf
-  chgrp -R lp ${pkgdir}/etc/cups
 }
 
 package_cups() {
