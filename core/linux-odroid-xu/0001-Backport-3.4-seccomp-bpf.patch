@@ -1,0 +1,2498 @@
+diff --git a/Documentation/filesystems/proc.txt b/Documentation/filesystems/proc.txt
+index b7413cb..3f3ed20 100644
+--- a/Documentation/filesystems/proc.txt
++++ b/Documentation/filesystems/proc.txt
+@@ -180,6 +180,7 @@ read the file /proc/PID/status:
+   CapPrm: 0000000000000000
+   CapEff: 0000000000000000
+   CapBnd: ffffffffffffffff
++  Seccomp:        0
+   voluntary_ctxt_switches:        0
+   nonvoluntary_ctxt_switches:     1
+ 
+@@ -236,6 +237,7 @@ Table 1-2: Contents of the status files (as of 2.6.30-rc7)
+  CapPrm                      bitmap of permitted capabilities
+  CapEff                      bitmap of effective capabilities
+  CapBnd                      bitmap of capabilities bounding set
++ Seccomp                     seccomp mode, like prctl(PR_GET_SECCOMP, ...)
+  Cpus_allowed                mask of CPUs on which this process may run
+  Cpus_allowed_list           Same as previous, but in "list format"
+  Mems_allowed                mask of memory nodes allowed to this process
+diff --git a/arch/Kconfig b/arch/Kconfig
+index 684eb5a..ed5702d 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -216,4 +216,28 @@ config HAVE_CMPXCHG_DOUBLE
+ config ARCH_WANT_OLD_COMPAT_IPC
+ 	bool
+ 
++config HAVE_ARCH_SECCOMP_FILTER
++	bool
++	help
++	  An arch should select this symbol if it provides all of these things:
++	  - syscall_get_arch()
++	  - syscall_get_arguments()
++	  - syscall_rollback()
++	  - syscall_set_return_value()
++	  - SIGSYS siginfo_t support
++	  - uses __secure_computing_int() or secure_computing()
++	  - secure_computing is called from a ptrace_event()-safe context
++	  - secure_computing return value is checked and a return value of -1
++	    results in the system call being skipped immediately.
++
++config SECCOMP_FILTER
++	def_bool y
++	depends on HAVE_ARCH_SECCOMP_FILTER && SECCOMP && NET
++	help
++	  Enable tasks to build secure computing environments defined
++	  in terms of Berkeley Packet Filter programs which implement
++	  task-defined system call filtering polices.
++
++	  See Documentation/prctl/seccomp_filter.txt for details.
++
+ source "kernel/gcov/Kconfig"
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+index 3649a71..8dc10cd 100644
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -29,6 +29,8 @@ config ARM
+ 	select HAVE_HW_BREAKPOINT if (PERF_EVENTS && (CPU_V6 || CPU_V6K || CPU_V7))
+ 	select HAVE_C_RECORDMCOUNT
+ 	select HAVE_GENERIC_HARDIRQS
++	select HAVE_SPARSE_IRQ
++	select HAVE_ARCH_SECCOMP_FILTER
+ 	select GENERIC_IRQ_SHOW
+ 	select CPU_PM if (SUSPEND || CPU_IDLE)
+ 	select GENERIC_PCI_IOMAP
+diff --git a/arch/arm/include/asm/syscall.h b/arch/arm/include/asm/syscall.h
+new file mode 100644
+index 0000000..2834036
+--- /dev/null
++++ b/arch/arm/include/asm/syscall.h
+@@ -0,0 +1,80 @@
++/*
++ * Access to user system call parameters and results
++ *
++ * Copyright (C) 2012 The Chromium OS Authors <chromium-os-dev@chromium.org>
++ *
++ * This copyrighted material is made available to anyone wishing to use,
++ * modify, copy, or redistribute it subject to the terms and conditions
++ * of the GNU General Public License v.2.
++ *
++ * See asm-generic/syscall.h for descriptions of what we must do here.
++ */
++#ifndef _ASM_ARM_SYSCALL_H
++#define _ASM_ARM_SYSCALL_H
++
++#include <linux/audit.h> /* for AUDIT_ARCH_* */
++#include <linux/elf.h> /* for ELF_EM */
++#include <linux/sched.h>
++#include <linux/thread_info.h> /* for task_thread_info */
++#include <linux/err.h>
++
++static inline int syscall_get_nr(struct task_struct *task, struct pt_regs *regs)
++{
++	return task_thread_info(task)->syscall;
++}
++
++static inline void syscall_rollback(struct task_struct *task,
++				    struct pt_regs *regs)
++{
++	regs->ARM_r0 = regs->ARM_ORIG_r0;
++}
++
++static inline long syscall_get_error(struct task_struct *task,
++				     struct pt_regs *regs)
++{
++	unsigned long error = regs->ARM_r0;
++	return IS_ERR_VALUE(error) ? error : 0;
++}
++
++static inline long syscall_get_return_value(struct task_struct *task,
++					    struct pt_regs *regs)
++{
++	return regs->ARM_r0;
++}
++
++static inline void syscall_set_return_value(struct task_struct *task,
++					    struct pt_regs *regs,
++					    int error, long val)
++{
++	regs->ARM_r0 = (long) error ?: val;
++}
++
++static inline void syscall_get_arguments(struct task_struct *task,
++					 struct pt_regs *regs,
++					 unsigned int i, unsigned int n,
++					 unsigned long *args)
++{
++	BUG_ON(i + n > 6);
++	memcpy(args, &regs->ARM_r1 + i, n * sizeof(args[0]));
++}
++
++static inline void syscall_set_arguments(struct task_struct *task,
++					 struct pt_regs *regs,
++					 unsigned int i, unsigned int n,
++					 const unsigned long *args)
++{
++	BUG_ON(i + n > 6);
++	memcpy(&regs->ARM_r1 + i, args, n * sizeof(args[0]));
++}
++
++static inline int syscall_get_arch(struct task_struct *task,
++				    struct pt_regs *regs)
++{
++	/* ARM tasks don't change audit architectures on the fly. */
++#ifdef __ARMEB__
++	return AUDIT_ARCH_ARMEB;
++#else
++	return AUDIT_ARCH_ARM;
++#endif
++}
++#endif	/* _ASM_ARM_SYSCALL_H */
+diff --git a/arch/arm/kernel/entry-common.S b/arch/arm/kernel/entry-common.S
+index 54ee265..e463331 100644
+--- a/arch/arm/kernel/entry-common.S
++++ b/arch/arm/kernel/entry-common.S
+@@ -444,12 +444,7 @@ ENTRY(vector_swi)
+ 
+ #ifdef CONFIG_SECCOMP
+ 	tst	r10, #_TIF_SECCOMP
+-	beq	1f
+-	mov	r0, scno
+-	bl	__secure_computing	
+-	add	r0, sp, #S_R0 + S_OFF		@ pointer to regs
+-	ldmia	r0, {r0 - r3}			@ have to reload r0 - r3
+-1:
++	bne	__sys_trace
+ #endif
+ 
+ 	tst	r10, #_TIF_SYSCALL_WORK		@ are we tracing syscalls?
+diff --git a/arch/arm/kernel/ptrace.c b/arch/arm/kernel/ptrace.c
+index 9650c14..75902f8 100644
+--- a/arch/arm/kernel/ptrace.c
++++ b/arch/arm/kernel/ptrace.c
+@@ -909,19 +909,28 @@ long arch_ptrace(struct task_struct *child, long request,
+ asmlinkage int syscall_trace(int why, struct pt_regs *regs, int scno)
+ {
+ 	unsigned long ip;
++	current_thread_info()->syscall = scno;
+ 
+ 	if (why)
+ 		audit_syscall_exit(regs);
+-	else
++	else {
++		if (secure_computing(scno) == -1)
++			return -1;
+ 		audit_syscall_entry(AUDIT_ARCH_ARM, scno, regs->ARM_r0,
+ 				    regs->ARM_r1, regs->ARM_r2, regs->ARM_r3);
++	}
+ 
+ 	if (!test_thread_flag(TIF_SYSCALL_TRACE))
+ 		return scno;
+ 	if (!(current->ptrace & PT_PTRACED))
+ 		return scno;
+ 
+-	current_thread_info()->syscall = scno;
++	/*
++	 * IP is used to denote syscall entry/exit:
++	 * IP = 0 -> entry, =1 -> exit
++	 */
++	ip = regs->ARM_ip;
++	regs->ARM_ip = why;
+ 
+ 	/*
+ 	 * IP is used to denote syscall entry/exit:
+diff --git a/arch/arm/kernel/traps.c b/arch/arm/kernel/traps.c
+index f01ad29..a12e58a 100644
+--- a/arch/arm/kernel/traps.c
++++ b/arch/arm/kernel/traps.c
+@@ -514,6 +514,10 @@ asmlinkage int arm_syscall(int no, struct pt_regs *regs)
+ 	struct thread_info *thread = current_thread_info();
+ 	siginfo_t info;
+ 
++	/* Emulate/fallthrough. */
++	if (no == -1)
++		return regs->ARM_r0;
++
+ 	if ((no >> 16) != (__ARM_NR_BASE>> 16))
+ 		return bad_syscall(no, regs);
+ 
+diff --git a/arch/microblaze/kernel/ptrace.c b/arch/microblaze/kernel/ptrace.c
+index 6eb2aa9..ab1b9db 100644
+--- a/arch/microblaze/kernel/ptrace.c
++++ b/arch/microblaze/kernel/ptrace.c
+@@ -136,7 +136,7 @@ asmlinkage long do_syscall_trace_enter(struct pt_regs *regs)
+ {
+ 	long ret = 0;
+ 
+-	secure_computing(regs->r12);
++	secure_computing_strict(regs->r12);
+ 
+ 	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
+ 	    tracehook_report_syscall_entry(regs))
+diff --git a/arch/mips/kernel/ptrace.c b/arch/mips/kernel/ptrace.c
+index 7c24c29..4812c6d 100644
+--- a/arch/mips/kernel/ptrace.c
++++ b/arch/mips/kernel/ptrace.c
+@@ -535,7 +535,7 @@ static inline int audit_arch(void)
+ asmlinkage void syscall_trace_enter(struct pt_regs *regs)
+ {
+ 	/* do the secure computing check first */
+-	secure_computing(regs->regs[2]);
++	secure_computing_strict(regs->regs[2]);
+ 
+ 	if (!(current->ptrace & PT_PTRACED))
+ 		goto out;
+diff --git a/arch/powerpc/kernel/ptrace.c b/arch/powerpc/kernel/ptrace.c
+index 8d8e028..dd5e214 100644
+--- a/arch/powerpc/kernel/ptrace.c
++++ b/arch/powerpc/kernel/ptrace.c
+@@ -1710,7 +1710,7 @@ long do_syscall_trace_enter(struct pt_regs *regs)
+ {
+ 	long ret = 0;
+ 
+-	secure_computing(regs->gpr[0]);
++	secure_computing_strict(regs->gpr[0]);
+ 
+ 	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
+ 	    tracehook_report_syscall_entry(regs))
+diff --git a/arch/s390/kernel/ptrace.c b/arch/s390/kernel/ptrace.c
+index e0a8707..9e15f30 100644
+--- a/arch/s390/kernel/ptrace.c
++++ b/arch/s390/kernel/ptrace.c
+@@ -724,7 +724,7 @@ asmlinkage long do_syscall_trace_enter(struct pt_regs *regs)
+ 	long ret = 0;
+ 
+ 	/* Do the secure computing check first. */
+-	secure_computing(regs->gprs[2]);
++	secure_computing_strict(regs->gprs[2]);
+ 
+ 	/*
+ 	 * The sysc_tracesys code in entry.S stored the system
+diff --git a/arch/sh/kernel/ptrace_32.c b/arch/sh/kernel/ptrace_32.c
+index 9698671..81f999a 100644
+--- a/arch/sh/kernel/ptrace_32.c
++++ b/arch/sh/kernel/ptrace_32.c
+@@ -503,7 +503,7 @@ asmlinkage long do_syscall_trace_enter(struct pt_regs *regs)
+ {
+ 	long ret = 0;
+ 
+-	secure_computing(regs->regs[0]);
++	secure_computing_strict(regs->regs[0]);
+ 
+ 	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
+ 	    tracehook_report_syscall_entry(regs))
+diff --git a/arch/sh/kernel/ptrace_64.c b/arch/sh/kernel/ptrace_64.c
+index bc81e07..af90339 100644
+--- a/arch/sh/kernel/ptrace_64.c
++++ b/arch/sh/kernel/ptrace_64.c
+@@ -522,7 +522,7 @@ asmlinkage long long do_syscall_trace_enter(struct pt_regs *regs)
+ {
+ 	long long ret = 0;
+ 
+-	secure_computing(regs->regs[9]);
++	secure_computing_strict(regs->regs[9]);
+ 
+ 	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
+ 	    tracehook_report_syscall_entry(regs))
+diff --git a/arch/sparc/kernel/ptrace_64.c b/arch/sparc/kernel/ptrace_64.c
+index 6f97c07..484daba 100644
+--- a/arch/sparc/kernel/ptrace_64.c
++++ b/arch/sparc/kernel/ptrace_64.c
+@@ -1062,7 +1062,7 @@ asmlinkage int syscall_trace_enter(struct pt_regs *regs)
+ 	int ret = 0;
+ 
+ 	/* do the secure computing check first */
+-	secure_computing(regs->u_regs[UREG_G1]);
++	secure_computing_strict(regs->u_regs[UREG_G1]);
+ 
+ 	if (test_thread_flag(TIF_SYSCALL_TRACE))
+ 		ret = tracehook_report_syscall_entry(regs);
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+index 917c109..fff2c0a 100644
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -45,6 +45,7 @@ config X86
+ 	select HAVE_KVM
+ 	select HAVE_ARCH_KGDB
+ 	select HAVE_ARCH_TRACEHOOK
++	select HAVE_ARCH_SECCOMP_FILTER
+ 	select HAVE_GENERIC_DMA_COHERENT if X86_32
+ 	select HAVE_EFFICIENT_UNALIGNED_ACCESS
+ 	select USER_STACKTRACE_SUPPORT
+diff --git a/arch/x86/ia32/ia32_signal.c b/arch/x86/ia32/ia32_signal.c
+index 4f5bfac..b154661 100644
+--- a/arch/x86/ia32/ia32_signal.c
++++ b/arch/x86/ia32/ia32_signal.c
+@@ -67,6 +67,10 @@ int copy_siginfo_to_user32(compat_siginfo_t __user *to, siginfo_t *from)
+ 			switch (from->si_code >> 16) {
+ 			case __SI_FAULT >> 16:
+ 				break;
++			case __SI_SYS >> 16:
++				put_user_ex(from->si_syscall, &to->si_syscall);
++				put_user_ex(from->si_arch, &to->si_arch);
++				break;
+ 			case __SI_CHLD >> 16:
+ 				if (ia32) {
+ 					put_user_ex(from->si_utime, &to->si_utime);
+diff --git a/arch/x86/include/asm/ia32.h b/arch/x86/include/asm/ia32.h
+index ee52760..b04cbdb 100644
+--- a/arch/x86/include/asm/ia32.h
++++ b/arch/x86/include/asm/ia32.h
+@@ -144,6 +144,12 @@ typedef struct compat_siginfo {
+ 			int _band;	/* POLL_IN, POLL_OUT, POLL_MSG */
+ 			int _fd;
+ 		} _sigpoll;
++
++		struct {
++			unsigned int _call_addr; /* calling insn */
++			int _syscall;	/* triggering system call number */
++			unsigned int _arch;	/* AUDIT_ARCH_* of syscall */
++		} _sigsys;
+ 	} _sifields;
+ } compat_siginfo_t;
+ 
+diff --git a/arch/x86/include/asm/syscall.h b/arch/x86/include/asm/syscall.h
+index 1d82a11..57df087 100644
+--- a/arch/x86/include/asm/syscall.h
++++ b/arch/x86/include/asm/syscall.h
+@@ -13,10 +13,12 @@
+ #ifndef _ASM_X86_SYSCALL_H
+ #define _ASM_X86_SYSCALL_H
+ 
++#include <linux/audit.h>
+ #include <linux/sched.h>
+ #include <linux/err.h>
+ #include <asm/asm-offsets.h>	/* For NR_syscalls */
+ #include <asm/unistd.h>
++#include <asm/thread_info.h>	/* for TS_COMPAT */
+ 
+ extern const unsigned long sys_call_table[];
+ 
+@@ -88,6 +90,12 @@ static inline void syscall_set_arguments(struct task_struct *task,
+ 	memcpy(&regs->bx + i, args, n * sizeof(args[0]));
+ }
+ 
++static inline int syscall_get_arch(struct task_struct *task,
++				   struct pt_regs *regs)
++{
++	return AUDIT_ARCH_I386;
++}
++
+ #else	 /* CONFIG_X86_64 */
+ 
+ static inline void syscall_get_arguments(struct task_struct *task,
+@@ -212,6 +220,23 @@ static inline void syscall_set_arguments(struct task_struct *task,
+ 		}
+ }
+ 
++static inline int syscall_get_arch(struct task_struct *task,
++				   struct pt_regs *regs)
++{
++#ifdef CONFIG_IA32_EMULATION
++	/*
++	 * TS_COMPAT is set for 32-bit syscall entries and then
++	 * remains set until we return to user mode.
++	 *
++	 * TIF_IA32 tasks should always have TS_COMPAT set at
++	 * system call time.
++	 */
++	if (task_thread_info(task)->status & TS_COMPAT)
++		 return AUDIT_ARCH_I386;
++#endif
++	/* Both x32 and x86_64 are considered "64-bit". */
++	return AUDIT_ARCH_X86_64;
++}
+ #endif	/* CONFIG_X86_32 */
+ 
+ #endif	/* _ASM_X86_SYSCALL_H */
+diff --git a/arch/x86/kernel/ptrace.c b/arch/x86/kernel/ptrace.c
+index c4410fb..9ee1787 100644
+--- a/arch/x86/kernel/ptrace.c
++++ b/arch/x86/kernel/ptrace.c
+@@ -1504,7 +1504,11 @@ long syscall_trace_enter(struct pt_regs *regs)
+ 		regs->flags |= X86_EFLAGS_TF;
+ 
+ 	/* do the secure computing check first */
+-	secure_computing(regs->orig_ax);
++	if (secure_computing(regs->orig_ax)) {
++		/* seccomp failures shouldn't expose any additional code. */
++		ret = -1L;
++		goto out;
++	}
+ 
+ 	if (unlikely(test_thread_flag(TIF_SYSCALL_EMU)))
+ 		ret = -1L;
+@@ -1529,6 +1533,7 @@ long syscall_trace_enter(struct pt_regs *regs)
+ 				    regs->dx, regs->r10);
+ #endif
+ 
++out:
+ 	return ret ?: regs->orig_ax;
+ }
+ 
+diff --git a/arch/x86/kernel/vsyscall_64.c b/arch/x86/kernel/vsyscall_64.c
+index 7515cf0..280408c 100644
+--- a/arch/x86/kernel/vsyscall_64.c
++++ b/arch/x86/kernel/vsyscall_64.c
+@@ -54,7 +54,7 @@
+ DEFINE_VVAR(int, vgetcpu_mode);
+ DEFINE_VVAR(struct vsyscall_gtod_data, vsyscall_gtod_data);
+ 
+-static enum { EMULATE, NATIVE, NONE } vsyscall_mode = EMULATE;
++static enum { EMULATE, NATIVE, NONE } vsyscall_mode = NATIVE;
+ 
+ static int __init vsyscall_setup(char *str)
+ {
+diff --git a/fs/exec.c b/fs/exec.c
+index 5b9dfbe..4f319cb 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -1266,6 +1266,13 @@ static int check_unsafe_exec(struct linux_binprm *bprm)
+ 			bprm->unsafe |= LSM_UNSAFE_PTRACE;
+ 	}
+ 
++	/*
++	 * This isn't strictly necessary, but it makes it harder for LSMs to
++	 * mess up.
++	 */
++	if (current->no_new_privs)
++		bprm->unsafe |= LSM_UNSAFE_NO_NEW_PRIVS;
++
+ 	n_fs = 1;
+ 	spin_lock(&p->fs->lock);
+ 	rcu_read_lock();
+@@ -1309,7 +1316,8 @@ int prepare_binprm(struct linux_binprm *bprm)
+ 	bprm->cred->euid = current_euid();
+ 	bprm->cred->egid = current_egid();
+ 
+-	if (!(bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID)) {
++	if (!(bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID) &&
++	    !current->no_new_privs) {
+ 		/* Set-uid? */
+ 		if (mode & S_ISUID) {
+ 			bprm->per_clear |= PER_CLEAR_ON_SETID;
+diff --git a/fs/proc/array.c b/fs/proc/array.c
+index d0ae725..b6c877c 100644
+--- a/fs/proc/array.c
++++ b/fs/proc/array.c
+@@ -318,6 +318,13 @@ static inline void task_cap(struct seq_file *m, struct task_struct *p)
+ 	render_cap_t(m, "CapBnd:\t", &cap_bset);
+ }
+ 
++static inline void task_seccomp(struct seq_file *m, struct task_struct *p)
++{
++#ifdef CONFIG_SECCOMP
++	seq_printf(m, "Seccomp:\t%d\n", p->seccomp.mode);
++#endif
++}
++
+ static inline void task_context_switch_counts(struct seq_file *m,
+ 						struct task_struct *p)
+ {
+@@ -351,6 +358,7 @@ int proc_pid_status(struct seq_file *m, struct pid_namespace *ns,
+ 	}
+ 	task_sig(m, task);
+ 	task_cap(m, task);
++	task_seccomp(m, task);
+ 	task_cpus_allowed(m, task);
+ 	cpuset_task_status_allowed(m, task);
+ 	task_context_switch_counts(m, task);
+diff --git a/include/asm-generic/siginfo.h b/include/asm-generic/siginfo.h
+index 5e5e386..8ed6777 100644
+--- a/include/asm-generic/siginfo.h
++++ b/include/asm-generic/siginfo.h
+@@ -98,9 +98,18 @@ typedef struct siginfo {
+ 			__ARCH_SI_BAND_T _band;	/* POLL_IN, POLL_OUT, POLL_MSG */
+ 			int _fd;
+ 		} _sigpoll;
++
++		/* SIGSYS */
++		struct {
++			void __user *_call_addr; /* calling user insn */
++			int _syscall;	/* triggering system call number */
++			unsigned int _arch;	/* AUDIT_ARCH_* of syscall */
++		} _sigsys;
+ 	} _sifields;
+ } __ARCH_SI_ATTRIBUTES siginfo_t;
+ 
++/* If the arch shares siginfo, then it has SIGSYS. */
++#define __ARCH_SIGSYS
+ #endif
+ 
+ /*
+@@ -124,6 +133,11 @@ typedef struct siginfo {
+ #define si_addr_lsb	_sifields._sigfault._addr_lsb
+ #define si_band		_sifields._sigpoll._band
+ #define si_fd		_sifields._sigpoll._fd
++#ifdef __ARCH_SIGSYS
++#define si_call_addr	_sifields._sigsys._call_addr
++#define si_syscall	_sifields._sigsys._syscall
++#define si_arch		_sifields._sigsys._arch
++#endif
+ 
+ #ifdef __KERNEL__
+ #define __SI_MASK	0xffff0000u
+@@ -134,6 +148,7 @@ typedef struct siginfo {
+ #define __SI_CHLD	(4 << 16)
+ #define __SI_RT		(5 << 16)
+ #define __SI_MESGQ	(6 << 16)
++#define __SI_SYS	(7 << 16)
+ #define __SI_CODE(T,N)	((T) | ((N) & 0xffff))
+ #else
+ #define __SI_KILL	0
+@@ -143,6 +158,7 @@ typedef struct siginfo {
+ #define __SI_CHLD	0
+ #define __SI_RT		0
+ #define __SI_MESGQ	0
++#define __SI_SYS	0
+ #define __SI_CODE(T,N)	(N)
+ #endif
+ 
+@@ -240,6 +256,12 @@ typedef struct siginfo {
+ #define NSIGPOLL	6
+ 
+ /*
++ * SIGSYS si_codes
++ */
++#define SYS_SECCOMP		(__SI_SYS|1)	/* seccomp triggered */
++#define NSIGSYS	1
++
++/*
+  * sigevent definitions
+  * 
+  * It seems likely that SIGEV_THREAD will have to be handled from 
+diff --git a/include/asm-generic/syscall.h b/include/asm-generic/syscall.h
+index 5c122ae..5b09392 100644
+--- a/include/asm-generic/syscall.h
++++ b/include/asm-generic/syscall.h
+@@ -142,4 +142,18 @@ void syscall_set_arguments(struct task_struct *task, struct pt_regs *regs,
+ 			   unsigned int i, unsigned int n,
+ 			   const unsigned long *args);
+ 
++/**
++ * syscall_get_arch - return the AUDIT_ARCH for the current system call
++ * @task:	task of interest, must be in system call entry tracing
++ * @regs:	task_pt_regs() of @task
++ *
++ * Returns the AUDIT_ARCH_* based on the system call convention in use.
++ *
++ * It's only valid to call this when @task is stopped on entry to a system
++ * call, due to %TIF_SYSCALL_TRACE, %TIF_SYSCALL_AUDIT, or %TIF_SECCOMP.
++ *
++ * Architectures which permit CONFIG_HAVE_ARCH_SECCOMP_FILTER must
++ * provide an implementation of this.
++ */
++int syscall_get_arch(struct task_struct *task, struct pt_regs *regs);
+ #endif	/* _ASM_SYSCALL_H */
+diff --git a/include/linux/Kbuild b/include/linux/Kbuild
+index 4bf4100..d984dac 100644
+--- a/include/linux/Kbuild
++++ b/include/linux/Kbuild
+@@ -336,6 +336,7 @@ header-y += scc.h
+ header-y += sched.h
+ header-y += screen_info.h
+ header-y += sdla.h
++header-y += seccomp.h
+ header-y += securebits.h
+ header-y += selinux_netlink.h
+ header-y += sem.h
+diff --git a/include/linux/audit.h b/include/linux/audit.h
+index acc4ff37..b7e0cf8 100644
+--- a/include/linux/audit.h
++++ b/include/linux/audit.h
+@@ -463,7 +463,6 @@ extern void audit_putname(const char *name);
+ extern void __audit_inode(const char *name, const struct dentry *dentry);
+ extern void __audit_inode_child(const struct dentry *dentry,
+ 				const struct inode *parent);
+-extern void __audit_seccomp(unsigned long syscall);
+ extern void __audit_ptrace(struct task_struct *t);
+ 
+ static inline int audit_dummy_context(void)
+@@ -507,12 +506,8 @@ static inline void audit_inode_child(const struct dentry *dentry,
+ 		__audit_inode_child(dentry, parent);
+ }
+ void audit_core_dumps(long signr);
+-
+-static inline void audit_seccomp(unsigned long syscall)
+-{
+-	if (unlikely(!audit_dummy_context()))
+-		__audit_seccomp(syscall);
+-}
++/* XXX: implement! */
++#define audit_seccomp(i,s,c) do { ; } while (0)
+ 
+ static inline void audit_ptrace(struct task_struct *t)
+ {
+@@ -634,7 +629,6 @@ extern int audit_signals;
+ #define audit_inode(n,d) do { (void)(d); } while (0)
+ #define audit_inode_child(i,p) do { ; } while (0)
+ #define audit_core_dumps(i) do { ; } while (0)
+-#define audit_seccomp(i) do { ; } while (0)
+ #define auditsc_get_stamp(c,t,s) (0)
+ #define audit_get_loginuid(t) (-1)
+ #define audit_get_sessionid(t) (-1)
+@@ -717,6 +711,7 @@ extern int audit_enabled;
+ #define audit_log_d_path(b, p, d) do { ; } while (0)
+ #define audit_log_key(b, k) do { ; } while (0)
+ #define audit_log_secctx(b,s) do { ; } while (0)
++#define audit_seccomp(i,s,c) do { ; } while (0)
+ #define audit_enabled 0
+ #endif
+ #endif
+diff --git a/include/linux/filter.h b/include/linux/filter.h
+index 8eeb205..f2e5315 100644
+--- a/include/linux/filter.h
++++ b/include/linux/filter.h
+@@ -10,6 +10,7 @@
+ 
+ #ifdef __KERNEL__
+ #include <linux/atomic.h>
++#include <linux/compat.h>
+ #endif
+ 
+ /*
+@@ -132,6 +133,16 @@ struct sock_fprog {	/* Required for SO_ATTACH_FILTER. */
+ 
+ #ifdef __KERNEL__
+ 
++#ifdef CONFIG_COMPAT
++/*
++ * A struct sock_filter is architecture independent.
++ */
++struct compat_sock_fprog {
++	u16		len;
++	compat_uptr_t	filter;		/* struct sock_filter * */
++};
++#endif
++
+ struct sk_buff;
+ struct sock;
+ 
+@@ -228,6 +239,7 @@ enum {
+ 	BPF_S_ANC_HATYPE,
+ 	BPF_S_ANC_RXHASH,
+ 	BPF_S_ANC_CPU,
++	BPF_S_ANC_SECCOMP_LD_W,
+ };
+ 
+ #endif /* __KERNEL__ */
+diff --git a/include/linux/prctl.h b/include/linux/prctl.h
+index e0cfec2..78b76e2 100644
+--- a/include/linux/prctl.h
++++ b/include/linux/prctl.h
+@@ -124,4 +124,19 @@
+ #define PR_SET_CHILD_SUBREAPER 36
+ #define PR_GET_CHILD_SUBREAPER 37
+ 
++/*
++ * If no_new_privs is set, then operations that grant new privileges (i.e.
++ * execve) will either fail or not grant them.  This affects suid/sgid,
++ * file capabilities, and LSMs.
++ *
++ * Operations that merely manipulate or drop existing privileges (setresuid,
++ * capset, etc.) will still work.  Drop those privileges if you want them gone.
++ *
++ * Changing LSM security domain is considered a new privilege.  So, for example,
++ * asking selinux for a specific new context (e.g. with runcon) will result
++ * in execve returning -EPERM.
++ */
++#define PR_SET_NO_NEW_PRIVS 38
++#define PR_GET_NO_NEW_PRIVS 39
++
+ #endif /* _LINUX_PRCTL_H */
+diff --git a/include/linux/ptrace.h b/include/linux/ptrace.h
+index ed12724..c980dbe 100644
+--- a/include/linux/ptrace.h
++++ b/include/linux/ptrace.h
+@@ -51,6 +51,9 @@
+ #define PTRACE_INTERRUPT	0x4207
+ #define PTRACE_LISTEN		0x4208
+ 
++/* flags in @data for PTRACE_SEIZE */
++#define PTRACE_SEIZE_DEVEL	0x80000000 /* temp flag for development */
++
+ /* Wait extended result codes for the above trace options.  */
+ #define PTRACE_EVENT_FORK	1
+ #define PTRACE_EVENT_VFORK	2
+@@ -58,6 +61,8 @@
+ #define PTRACE_EVENT_EXEC	4
+ #define PTRACE_EVENT_VFORK_DONE	5
+ #define PTRACE_EVENT_EXIT	6
++#define PTRACE_EVENT_SECCOMP	7
++
+ /* Extended result codes which enabled by means other than options.  */
+ #define PTRACE_EVENT_STOP	128
+ 
+@@ -69,8 +74,9 @@
+ #define PTRACE_O_TRACEEXEC	(1 << PTRACE_EVENT_EXEC)
+ #define PTRACE_O_TRACEVFORKDONE	(1 << PTRACE_EVENT_VFORK_DONE)
+ #define PTRACE_O_TRACEEXIT	(1 << PTRACE_EVENT_EXIT)
++#define PTRACE_O_TRACESECCOMP	(1 << PTRACE_EVENT_SECCOMP)
+ 
+-#define PTRACE_O_MASK		0x0000007f
++#define PTRACE_O_MASK		0x000000ff
+ 
+ #include <asm/ptrace.h>
+ 
+@@ -98,6 +104,9 @@
+ #define PT_TRACE_EXEC		PT_EVENT_FLAG(PTRACE_EVENT_EXEC)
+ #define PT_TRACE_VFORK_DONE	PT_EVENT_FLAG(PTRACE_EVENT_VFORK_DONE)
+ #define PT_TRACE_EXIT		PT_EVENT_FLAG(PTRACE_EVENT_EXIT)
++#define PT_TRACE_SECCOMP	PT_EVENT_FLAG(PTRACE_EVENT_SECCOMP)
++
++#define PT_TRACE_MASK	0x000007f4
+ 
+ /* single stepping state bits (used on ARM and PA-RISC) */
+ #define PT_SINGLESTEP_BIT	31
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 9be9a0b..d75db19 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1350,6 +1350,8 @@ struct task_struct {
+ 				 * execve */
+ 	unsigned in_iowait:1;
+ 
++	/* task may not gain privileges */
++	unsigned no_new_privs:1;
+ 
+ 	/* Revert to default priority/policy when forking */
+ 	unsigned sched_reset_on_fork:1;
+@@ -1459,7 +1461,7 @@ struct task_struct {
+ 	uid_t loginuid;
+ 	unsigned int sessionid;
+ #endif
+-	seccomp_t seccomp;
++	struct seccomp seccomp;
+ 
+ /* Thread group tracking */
+    	u32 parent_exec_id;
+diff --git a/include/linux/seccomp.h b/include/linux/seccomp.h
+index cc7a4e9..f3b5f34 100644
+--- a/include/linux/seccomp.h
++++ b/include/linux/seccomp.h
+@@ -1,25 +1,95 @@
+ #ifndef _LINUX_SECCOMP_H
+ #define _LINUX_SECCOMP_H
+ 
+-
++#include <linux/compiler.h>
++#include <linux/types.h>
++
++
++/* Valid values for seccomp.mode and prctl(PR_SET_SECCOMP, <mode>) */
++#define SECCOMP_MODE_DISABLED	0 /* seccomp is not in use. */
++#define SECCOMP_MODE_STRICT	1 /* uses hard-coded filter. */
++#define SECCOMP_MODE_FILTER	2 /* uses user-supplied filter. */
++
++/*
++ * All BPF programs must return a 32-bit value.
++ * The bottom 16-bits are for optional return data.
++ * The upper 16-bits are ordered from least permissive values to most.
++ *
++ * The ordering ensures that a min_t() over composed return values always
++ * selects the least permissive choice.
++ */
++#define SECCOMP_RET_KILL	0x00000000U /* kill the task immediately */
++#define SECCOMP_RET_TRAP	0x00030000U /* disallow and force a SIGSYS */
++#define SECCOMP_RET_ERRNO	0x00050000U /* returns an errno */
++#define SECCOMP_RET_TRACE	0x7ff00000U /* pass to a tracer or disallow */
++#define SECCOMP_RET_ALLOW	0x7fff0000U /* allow */
++
++/* Masks for the return value sections. */
++#define SECCOMP_RET_ACTION	0x7fff0000U
++#define SECCOMP_RET_DATA	0x0000ffffU
++
++/**
++ * struct seccomp_data - the format the BPF program executes over.
++ * @nr: the system call number
++ * @arch: indicates system call convention as an AUDIT_ARCH_* value
++ *        as defined in <linux/audit.h>.
++ * @instruction_pointer: at the time of the system call.
++ * @args: up to 6 system call arguments always stored as 64-bit values
++ *        regardless of the architecture.
++ */
++struct seccomp_data {
++	int nr;
++	__u32 arch;
++	__u64 instruction_pointer;
++	__u64 args[6];
++};
++
++#ifdef __KERNEL__
+ #ifdef CONFIG_SECCOMP
+ 
+ #include <linux/thread_info.h>
+ #include <asm/seccomp.h>
+ 
+-typedef struct { int mode; } seccomp_t;
+-
+-extern void __secure_computing(int);
+-static inline void secure_computing(int this_syscall)
++struct seccomp_filter;
++/**
++ * struct seccomp - the state of a seccomp'ed process
++ *
++ * @mode:  indicates one of the valid values above for controlled
++ *         system calls available to a process.
++ * @filter: The metadata and ruleset for determining what system calls
++ *          are allowed for a task.
++ *
++ *          @filter must only be accessed from the context of current as there
++ *          is no locking.
++ */
++struct seccomp {
++	int mode;
++	struct seccomp_filter *filter;
++};
++
++/*
++ * Direct callers to __secure_computing should be updated as
++ * CONFIG_HAVE_ARCH_SECCOMP_FILTER propagates.
++ */
++extern void __secure_computing(int) __deprecated;
++extern int __secure_computing_int(int);
++static inline int secure_computing(int this_syscall)
+ {
+ 	if (unlikely(test_thread_flag(TIF_SECCOMP)))
+-		__secure_computing(this_syscall);
++		return  __secure_computing_int(this_syscall);
++	return 0;
++}
++
++/* A wrapper for architectures supporting only SECCOMP_MODE_STRICT. */
++static inline void secure_computing_strict(int this_syscall)
++{
++	BUG_ON(secure_computing(this_syscall) != 0);
+ }
+ 
+ extern long prctl_get_seccomp(void);
+-extern long prctl_set_seccomp(unsigned long);
++extern long prctl_set_seccomp(unsigned long, char __user *);
+ 
+-static inline int seccomp_mode(seccomp_t *s)
++static inline int seccomp_mode(struct seccomp *s)
+ {
+ 	return s->mode;
+ }
+@@ -28,25 +98,41 @@ static inline int seccomp_mode(seccomp_t *s)
+ 
+ #include <linux/errno.h>
+ 
+-typedef struct { } seccomp_t;
++struct seccomp { };
++struct seccomp_filter { };
+ 
+-#define secure_computing(x) do { } while (0)
++static inline int secure_computing(int this_syscall) { return 0; }
++static inline void secure_computing_strict(int this_syscall) { return; }
+ 
+ static inline long prctl_get_seccomp(void)
+ {
+ 	return -EINVAL;
+ }
+ 
+-static inline long prctl_set_seccomp(unsigned long arg2)
++static inline long prctl_set_seccomp(unsigned long arg2, char __user *arg3)
+ {
+ 	return -EINVAL;
+ }
+ 
+-static inline int seccomp_mode(seccomp_t *s)
++static inline int seccomp_mode(struct seccomp *s)
+ {
+ 	return 0;
+ }
+-
+ #endif /* CONFIG_SECCOMP */
+ 
++#ifdef CONFIG_SECCOMP_FILTER
++extern void put_seccomp_filter(struct task_struct *tsk);
++extern void get_seccomp_filter(struct task_struct *tsk);
++extern u32 seccomp_bpf_load(int off);
++#else  /* CONFIG_SECCOMP_FILTER */
++static inline void put_seccomp_filter(struct task_struct *tsk)
++{
++	return;
++}
++static inline void get_seccomp_filter(struct task_struct *tsk)
++{
++	return;
++}
++#endif /* CONFIG_SECCOMP_FILTER */
++#endif /* __KERNEL__ */
+ #endif /* _LINUX_SECCOMP_H */
+diff --git a/include/linux/security.h b/include/linux/security.h
+index 673afbb..6e1dea9 100644
+--- a/include/linux/security.h
++++ b/include/linux/security.h
+@@ -144,6 +144,7 @@ struct request_sock;
+ #define LSM_UNSAFE_SHARE	1
+ #define LSM_UNSAFE_PTRACE	2
+ #define LSM_UNSAFE_PTRACE_CAP	4
++#define LSM_UNSAFE_NO_NEW_PRIVS	8
+ 
+ #ifdef CONFIG_MMU
+ extern int mmap_min_addr_handler(struct ctl_table *table, int write,
+diff --git a/kernel/auditsc.c b/kernel/auditsc.c
+index 5490712..fa73caf 100644
+--- a/kernel/auditsc.c
++++ b/kernel/auditsc.c
+@@ -67,6 +67,7 @@
+ #include <linux/syscalls.h>
+ #include <linux/capability.h>
+ #include <linux/fs_struct.h>
++#include <linux/compat.h>
+ 
+ #include "audit.h"
+ 
+diff --git a/kernel/fork.c b/kernel/fork.c
+index a708f64..23ed658 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -34,6 +34,7 @@
+ #include <linux/cgroup.h>
+ #include <linux/security.h>
+ #include <linux/hugetlb.h>
++#include <linux/seccomp.h>
+ #include <linux/swap.h>
+ #include <linux/syscalls.h>
+ #include <linux/jiffies.h>
+@@ -174,6 +175,7 @@ void free_task(struct task_struct *tsk)
+ 	free_thread_info(tsk->stack);
+ 	rt_mutex_debug_task_free(tsk);
+ 	ftrace_graph_exit_task(tsk);
++	put_seccomp_filter(tsk);
+ 	free_task_struct(tsk);
+ }
+ EXPORT_SYMBOL(free_task);
+@@ -1180,6 +1182,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
+ 		goto fork_out;
+ 
+ 	ftrace_graph_init_task(p);
++	get_seccomp_filter(p);
+ 
+ 	rt_mutex_init_task(p);
+ 
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index a143236..154e0ea 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -575,6 +575,9 @@ static int ptrace_setoptions(struct task_struct *child, unsigned long data)
+ 	flags |= (data << PT_OPT_FLAG_SHIFT);
+ 	child->ptrace = flags;
+ 
++	if (data & PTRACE_O_TRACESECCOMP)
++		child->ptrace |= PT_TRACE_SECCOMP;
++
+ 	return 0;
+ }
+ 
+diff --git a/kernel/seccomp.c b/kernel/seccomp.c
+index e8d76c5..3a018fa 100644
+--- a/kernel/seccomp.c
++++ b/kernel/seccomp.c
+@@ -3,16 +3,357 @@
+  *
+  * Copyright 2004-2005  Andrea Arcangeli <andrea@cpushare.com>
+  *
+- * This defines a simple but solid secure-computing mode.
++ * Copyright (C) 2012 Google, Inc.
++ * Will Drewry <wad@chromium.org>
++ *
++ * This defines a simple but solid secure-computing facility.
++ *
++ * Mode 1 uses a fixed list of allowed system calls.
++ * Mode 2 allows user-defined system call filters in the form
++ *        of Berkeley Packet Filters/Linux Socket Filters.
+  */
+ 
++#include <linux/atomic.h>
+ #include <linux/audit.h>
+ #include <linux/seccomp.h>
+ #include <linux/sched.h>
+ #include <linux/compat.h>
+ 
+ /* #define SECCOMP_DEBUG 1 */
+-#define NR_SECCOMP_MODES 1
++
++#ifdef CONFIG_SECCOMP_FILTER
++#include <asm/syscall.h>
++#include <linux/filter.h>
++#include <linux/ptrace.h>
++#include <linux/security.h>
++#include <linux/slab.h>
++#include <linux/tracehook.h>
++#include <linux/uaccess.h>
++
++/**
++ * struct seccomp_filter - container for seccomp BPF programs
++ *
++ * @usage: reference count to manage the object lifetime.
++ *         get/put helpers should be used when accessing an instance
++ *         outside of a lifetime-guarded section.  In general, this
++ *         is only needed for handling filters shared across tasks.
++ * @prev: points to a previously installed, or inherited, filter
++ * @len: the number of instructions in the program
++ * @insns: the BPF program instructions to evaluate
++ *
++ * seccomp_filter objects are organized in a tree linked via the @prev
++ * pointer.  For any task, it appears to be a singly-linked list starting
++ * with current->seccomp.filter, the most recently attached or inherited filter.
++ * However, multiple filters may share a @prev node, by way of fork(), which
++ * results in a unidirectional tree existing in memory.  This is similar to
++ * how namespaces work.
++ *
++ * seccomp_filter objects should never be modified after being attached
++ * to a task_struct (other than @usage).
++ */
++struct seccomp_filter {
++	atomic_t usage;
++	struct seccomp_filter *prev;
++	unsigned short len;  /* Instruction count */
++	struct sock_filter insns[];
++};
++
++/* Limit any path through the tree to 256KB worth of instructions. */
++#define MAX_INSNS_PER_PATH ((1 << 18) / sizeof(struct sock_filter))
++
++/**
++ * get_u32 - returns a u32 offset into data
++ * @data: a unsigned 64 bit value
++ * @index: 0 or 1 to return the first or second 32-bits
++ *
++ * This inline exists to hide the length of unsigned long.  If a 32-bit
++ * unsigned long is passed in, it will be extended and the top 32-bits will be
++ * 0. If it is a 64-bit unsigned long, then whatever data is resident will be
++ * properly returned.
++ *
++ * Endianness is explicitly ignored and left for BPF program authors to manage
++ * as per the specific architecture.
++ */
++static inline u32 get_u32(u64 data, int index)
++{
++	return ((u32 *)&data)[index];
++}
++
++/* Helper for bpf_load below. */
++#define BPF_DATA(_name) offsetof(struct seccomp_data, _name)
++/**
++ * bpf_load: checks and returns a pointer to the requested offset
++ * @off: offset into struct seccomp_data to load from
++ *
++ * Returns the requested 32-bits of data.
++ * seccomp_check_filter() should assure that @off is 32-bit aligned
++ * and not out of bounds.  Failure to do so is a BUG.
++ */
++u32 seccomp_bpf_load(int off)
++{
++	struct pt_regs *regs = task_pt_regs(current);
++	if (off == BPF_DATA(nr))
++		return syscall_get_nr(current, regs);
++	if (off == BPF_DATA(arch))
++		return syscall_get_arch(current, regs);
++	if (off >= BPF_DATA(args[0]) && off < BPF_DATA(args[6])) {
++		unsigned long value;
++		int arg = (off - BPF_DATA(args[0])) / sizeof(u64);
++		int index = !!(off % sizeof(u64));
++		syscall_get_arguments(current, regs, arg, 1, &value);
++		return get_u32(value, index);
++	}
++	if (off == BPF_DATA(instruction_pointer))
++		return get_u32(KSTK_EIP(current), 0);
++	if (off == BPF_DATA(instruction_pointer) + sizeof(u32))
++		return get_u32(KSTK_EIP(current), 1);
++	/* seccomp_check_filter should make this impossible. */
++	BUG();
++}
++
++/**
++ *	seccomp_check_filter - verify seccomp filter code
++ *	@filter: filter to verify
++ *	@flen: length of filter
++ *
++ * Takes a previously checked filter (by sk_chk_filter) and
++ * redirects all filter code that loads struct sk_buff data
++ * and related data through seccomp_bpf_load.  It also
++ * enforces length and alignment checking of those loads.
++ *
++ * Returns 0 if the rule set is legal or -EINVAL if not.
++ */
++static int seccomp_check_filter(struct sock_filter *filter, unsigned int flen)
++{
++	int pc;
++	for (pc = 0; pc < flen; pc++) {
++		struct sock_filter *ftest = &filter[pc];
++		u16 code = ftest->code;
++		u32 k = ftest->k;
++
++		switch (code) {
++		case BPF_S_LD_W_ABS:
++			ftest->code = BPF_S_ANC_SECCOMP_LD_W;
++			/* 32-bit aligned and not out of bounds. */
++			if (k >= sizeof(struct seccomp_data) || k & 3)
++				return -EINVAL;
++			continue;
++		case BPF_S_LD_W_LEN:
++			ftest->code = BPF_S_LD_IMM;
++			ftest->k = sizeof(struct seccomp_data);
++			continue;
++		case BPF_S_LDX_W_LEN:
++			ftest->code = BPF_S_LDX_IMM;
++			ftest->k = sizeof(struct seccomp_data);
++			continue;
++		/* Explicitly include allowed calls. */
++		case BPF_S_RET_K:
++		case BPF_S_RET_A:
++		case BPF_S_ALU_ADD_K:
++		case BPF_S_ALU_ADD_X:
++		case BPF_S_ALU_SUB_K:
++		case BPF_S_ALU_SUB_X:
++		case BPF_S_ALU_MUL_K:
++		case BPF_S_ALU_MUL_X:
++		case BPF_S_ALU_DIV_X:
++		case BPF_S_ALU_AND_K:
++		case BPF_S_ALU_AND_X:
++		case BPF_S_ALU_OR_K:
++		case BPF_S_ALU_OR_X:
++		case BPF_S_ALU_LSH_K:
++		case BPF_S_ALU_LSH_X:
++		case BPF_S_ALU_RSH_K:
++		case BPF_S_ALU_RSH_X:
++		case BPF_S_ALU_NEG:
++		case BPF_S_LD_IMM:
++		case BPF_S_LDX_IMM:
++		case BPF_S_MISC_TAX:
++		case BPF_S_MISC_TXA:
++		case BPF_S_ALU_DIV_K:
++		case BPF_S_LD_MEM:
++		case BPF_S_LDX_MEM:
++		case BPF_S_ST:
++		case BPF_S_STX:
++		case BPF_S_JMP_JA:
++		case BPF_S_JMP_JEQ_K:
++		case BPF_S_JMP_JEQ_X:
++		case BPF_S_JMP_JGE_K:
++		case BPF_S_JMP_JGE_X:
++		case BPF_S_JMP_JGT_K:
++		case BPF_S_JMP_JGT_X:
++		case BPF_S_JMP_JSET_K:
++		case BPF_S_JMP_JSET_X:
++			continue;
++		default:
++			return -EINVAL;
++		}
++	}
++	return 0;
++}
++
++/**
++ * seccomp_run_filters - evaluates all seccomp filters against @syscall
++ * @syscall: number of the current system call
++ *
++ * Returns valid seccomp BPF response codes.
++ */
++static u32 seccomp_run_filters(int syscall)
++{
++	struct seccomp_filter *f;
++	u32 ret = SECCOMP_RET_ALLOW;
++
++	/* Ensure unexpected behavior doesn't result in failing open. */
++	if (WARN_ON(current->seccomp.filter == NULL))
++		return SECCOMP_RET_KILL;
++
++	/*
++	 * All filters in the list are evaluated and the lowest BPF return
++	 * value always takes priority (ignoring the DATA).
++	 */
++	for (f = current->seccomp.filter; f; f = f->prev) {
++		u32 cur_ret = sk_run_filter(NULL, f->insns);
++		if ((cur_ret & SECCOMP_RET_ACTION) < (ret & SECCOMP_RET_ACTION))
++			ret = cur_ret;
++	}
++	return ret;
++}
++
++/**
++ * seccomp_attach_filter: Attaches a seccomp filter to current.
++ * @fprog: BPF program to install
++ *
++ * Returns 0 on success or an errno on failure.
++ */
++static long seccomp_attach_filter(struct sock_fprog *fprog)
++{
++	struct seccomp_filter *filter;
++	unsigned long fp_size = fprog->len * sizeof(struct sock_filter);
++	unsigned long total_insns = fprog->len;
++	long ret;
++
++	if (fprog->len == 0 || fprog->len > BPF_MAXINSNS)
++		return -EINVAL;
++
++	for (filter = current->seccomp.filter; filter; filter = filter->prev)
++		total_insns += filter->len + 4;  /* include a 4 instr penalty */
++	if (total_insns > MAX_INSNS_PER_PATH)
++		return -ENOMEM;
++
++	/*
++	 * Installing a seccomp filter requires that the task have
++	 * CAP_SYS_ADMIN in its namespace or be running with no_new_privs.
++	 * This avoids scenarios where unprivileged tasks can affect the
++	 * behavior of privileged children.
++	 */
++	if (!current->no_new_privs &&
++			security_capable_noaudit(current_cred(),
++				current_user_ns(), CAP_SYS_ADMIN) != 0)
++		return -EACCES;
++
++	/* Allocate a new seccomp_filter */
++	filter = kzalloc(sizeof(struct seccomp_filter) + fp_size,
++			 GFP_KERNEL|__GFP_NOWARN);
++	if (!filter)
++		return -ENOMEM;
++	atomic_set(&filter->usage, 1);
++	filter->len = fprog->len;
++
++	/* Copy the instructions from fprog. */
++	ret = -EFAULT;
++	if (copy_from_user(filter->insns, fprog->filter, fp_size))
++		goto fail;
++
++	/* Check and rewrite the fprog via the skb checker */
++	ret = sk_chk_filter(filter->insns, filter->len);
++	if (ret)
++		goto fail;
++
++	/* Check and rewrite the fprog for seccomp use */
++	ret = seccomp_check_filter(filter->insns, filter->len);
++	if (ret)
++		goto fail;
++
++	/*
++	 * If there is an existing filter, make it the prev and don't drop its
++	 * task reference.
++	 */
++	filter->prev = current->seccomp.filter;
++	current->seccomp.filter = filter;
++	return 0;
++fail:
++	kfree(filter);
++	return ret;
++}
++
++/**
++ * seccomp_attach_user_filter - attaches a user-supplied sock_fprog
++ * @user_filter: pointer to the user data containing a sock_fprog.
++ *
++ * Returns 0 on success and non-zero otherwise.
++ */
++long seccomp_attach_user_filter(char __user *user_filter)
++{
++	struct sock_fprog fprog;
++	long ret = -EFAULT;
++
++#ifdef CONFIG_COMPAT
++	if (is_compat_task()) {
++		struct compat_sock_fprog fprog32;
++		if (copy_from_user(&fprog32, user_filter, sizeof(fprog32)))
++			goto out;
++		fprog.len = fprog32.len;
++		fprog.filter = compat_ptr(fprog32.filter);
++	} else /* falls through to the if below. */
++#endif
++	if (copy_from_user(&fprog, user_filter, sizeof(fprog)))
++		goto out;
++	ret = seccomp_attach_filter(&fprog);
++out:
++	return ret;
++}
++
++/* get_seccomp_filter - increments the reference count of the filter on @tsk */
++void get_seccomp_filter(struct task_struct *tsk)
++{
++	struct seccomp_filter *orig = tsk->seccomp.filter;
++	if (!orig)
++		return;
++	/* Reference count is bounded by the number of total processes. */
++	atomic_inc(&orig->usage);
++}
++
++/* put_seccomp_filter - decrements the ref count of tsk->seccomp.filter */
++void put_seccomp_filter(struct task_struct *tsk)
++{
++	struct seccomp_filter *orig = tsk->seccomp.filter;
++	/* Clean up single-reference branches iteratively. */
++	while (orig && atomic_dec_and_test(&orig->usage)) {
++		struct seccomp_filter *freeme = orig;
++		orig = orig->prev;
++		kfree(freeme);
++	}
++}
++
++/**
++ * seccomp_send_sigsys - signals the task to allow in-process syscall emulation
++ * @syscall: syscall number to send to userland
++ * @reason: filter-supplied reason code to send to userland (via si_errno)
++ *
++ * Forces a SIGSYS with a code of SYS_SECCOMP and related sigsys info.
++ */
++static void seccomp_send_sigsys(int syscall, int reason)
++{
++	struct siginfo info;
++	memset(&info, 0, sizeof(info));
++	info.si_signo = SIGSYS;
++	info.si_code = SYS_SECCOMP;
++	info.si_call_addr = (void __user *)KSTK_EIP(current);
++	info.si_errno = reason;
++	info.si_arch = syscall_get_arch(current, task_pt_regs(current));
++	info.si_syscall = syscall;
++	force_sig_info(SIGSYS, &info, current);
++}
++#endif	/* CONFIG_SECCOMP_FILTER */
+ 
+ /*
+  * Secure computing mode 1 allows only read/write/exit/sigreturn.
+@@ -33,11 +374,20 @@ static int mode1_syscalls_32[] = {
+ 
+ void __secure_computing(int this_syscall)
+ {
++	/* Filter calls should never use this function. */
++	BUG_ON(current->seccomp.mode == SECCOMP_MODE_FILTER);
++	__secure_computing_int(this_syscall);
++}
++
++int __secure_computing_int(int this_syscall)
++{
+ 	int mode = current->seccomp.mode;
+-	int * syscall;
++	int exit_sig = 0;
++	int *syscall;
++	u32 ret;
+ 
+ 	switch (mode) {
+-	case 1:
++	case SECCOMP_MODE_STRICT:
+ 		syscall = mode1_syscalls;
+ #ifdef CONFIG_COMPAT
+ 		if (is_compat_task())
+@@ -45,9 +395,58 @@ void __secure_computing(int this_syscall)
+ #endif
+ 		do {
+ 			if (*syscall == this_syscall)
+-				return;
++				return 0;
+ 		} while (*++syscall);
++		exit_sig = SIGKILL;
++		ret = SECCOMP_RET_KILL;
++		break;
++#ifdef CONFIG_SECCOMP_FILTER
++	case SECCOMP_MODE_FILTER: {
++		int data;
++		ret = seccomp_run_filters(this_syscall);
++		data = ret & SECCOMP_RET_DATA;
++		ret &= SECCOMP_RET_ACTION;
++		switch (ret) {
++		case SECCOMP_RET_ERRNO:
++			/* Set the low-order 16-bits as a errno. */
++			syscall_set_return_value(current, task_pt_regs(current),
++						 -data, 0);
++			goto skip;
++		case SECCOMP_RET_TRAP:
++			/* Show the handler the original registers. */
++			syscall_rollback(current, task_pt_regs(current));
++			/* Let the filter pass back 16 bits of data. */
++			seccomp_send_sigsys(this_syscall, data);
++			goto skip;
++		case SECCOMP_RET_TRACE:
++			/* Skip these calls if there is no tracer. */
++			if (!ptrace_event_enabled(current, PTRACE_EVENT_SECCOMP)) {
++				/* Make sure userspace sees an ENOSYS. */
++				syscall_set_return_value(current,
++					task_pt_regs(current), -ENOSYS, 0);
++				goto skip;
++			}
++			/* Allow the BPF to provide the event message */
++			ptrace_event(PTRACE_EVENT_SECCOMP, data);
++			/*
++			 * The delivery of a fatal signal during event
++			 * notification may silently skip tracer notification.
++			 * Terminating the task now avoids executing a system
++			 * call that may not be intended.
++			 */
++			if (fatal_signal_pending(current))
++				break;
++			return 0;
++		case SECCOMP_RET_ALLOW:
++			return 0;
++		case SECCOMP_RET_KILL:
++		default:
++			break;
++		}
++		exit_sig = SIGSYS;
+ 		break;
++	}
++#endif
+ 	default:
+ 		BUG();
+ 	}
+@@ -55,8 +454,13 @@ void __secure_computing(int this_syscall)
+ #ifdef SECCOMP_DEBUG
+ 	dump_stack();
+ #endif
+-	audit_seccomp(this_syscall);
+-	do_exit(SIGKILL);
++	audit_seccomp(this_syscall, exit_sig, ret);
++	do_exit(exit_sig);
++#ifdef CONFIG_SECCOMP_FILTER
++skip:
++	audit_seccomp(this_syscall, exit_sig, ret);
++#endif
++	return -1;
+ }
+ 
+ long prctl_get_seccomp(void)
+@@ -64,25 +468,48 @@ long prctl_get_seccomp(void)
+ 	return current->seccomp.mode;
+ }
+ 
+-long prctl_set_seccomp(unsigned long seccomp_mode)
++/**
++ * prctl_set_seccomp: configures current->seccomp.mode
++ * @seccomp_mode: requested mode to use
++ * @filter: optional struct sock_fprog for use with SECCOMP_MODE_FILTER
++ *
++ * This function may be called repeatedly with a @seccomp_mode of
++ * SECCOMP_MODE_FILTER to install additional filters.  Every filter
++ * successfully installed will be evaluated (in reverse order) for each system
++ * call the task makes.
++ *
++ * Once current->seccomp.mode is non-zero, it may not be changed.
++ *
++ * Returns 0 on success or -EINVAL on failure.
++ */
++long prctl_set_seccomp(unsigned long seccomp_mode, char __user *filter)
+ {
+-	long ret;
++	long ret = -EINVAL;
+ 
+-	/* can set it only once to be even more secure */
+-	ret = -EPERM;
+-	if (unlikely(current->seccomp.mode))
++	if (current->seccomp.mode &&
++	    current->seccomp.mode != seccomp_mode)
+ 		goto out;
+ 
+-	ret = -EINVAL;
+-	if (seccomp_mode && seccomp_mode <= NR_SECCOMP_MODES) {
+-		current->seccomp.mode = seccomp_mode;
+-		set_thread_flag(TIF_SECCOMP);
++	switch (seccomp_mode) {
++	case SECCOMP_MODE_STRICT:
++		ret = 0;
+ #ifdef TIF_NOTSC
+ 		disable_TSC();
+ #endif
+-		ret = 0;
++		break;
++#ifdef CONFIG_SECCOMP_FILTER
++	case SECCOMP_MODE_FILTER:
++		ret = seccomp_attach_user_filter(filter);
++		if (ret)
++			goto out;
++		break;
++#endif
++	default:
++		goto out;
+ 	}
+ 
+- out:
++	current->seccomp.mode = seccomp_mode;
++	set_thread_flag(TIF_SECCOMP);
++out:
+ 	return ret;
+ }
+diff --git a/kernel/signal.c b/kernel/signal.c
+index ee44fc7..bee7057 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -160,7 +160,7 @@ void recalc_sigpending(void)
+ 
+ #define SYNCHRONOUS_MASK \
+ 	(sigmask(SIGSEGV) | sigmask(SIGBUS) | sigmask(SIGILL) | \
+-	 sigmask(SIGTRAP) | sigmask(SIGFPE))
++	 sigmask(SIGTRAP) | sigmask(SIGFPE) | sigmask(SIGSYS))
+ 
+ int next_signal(struct sigpending *pending, sigset_t *mask)
+ {
+@@ -2708,6 +2708,13 @@ int copy_siginfo_to_user(siginfo_t __user *to, siginfo_t *from)
+ 		err |= __put_user(from->si_uid, &to->si_uid);
+ 		err |= __put_user(from->si_ptr, &to->si_ptr);
+ 		break;
++#ifdef __ARCH_SIGSYS
++	case __SI_SYS:
++		err |= __put_user(from->si_call_addr, &to->si_call_addr);
++		err |= __put_user(from->si_syscall, &to->si_syscall);
++		err |= __put_user(from->si_arch, &to->si_arch);
++		break;
++#endif
+ 	default: /* this is just in case for now ... */
+ 		err |= __put_user(from->si_pid, &to->si_pid);
+ 		err |= __put_user(from->si_uid, &to->si_uid);
+diff --git a/kernel/sys.c b/kernel/sys.c
+index 3449d26..671e937 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -1935,7 +1935,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
+ 			error = prctl_get_seccomp();
+ 			break;
+ 		case PR_SET_SECCOMP:
+-			error = prctl_set_seccomp(arg2);
++			error = prctl_set_seccomp(arg2, (char __user *)arg3);
+ 			break;
+ 		case PR_GET_TSC:
+ 			error = GET_TSC_CTL(arg2);
+@@ -2006,6 +2006,16 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
+ 			error = put_user(me->signal->is_child_subreaper,
+ 					 (int __user *) arg2);
+ 			break;
++		case PR_SET_NO_NEW_PRIVS:
++			if (arg2 != 1 || arg3 || arg4 || arg5)
++				return -EINVAL;
++
++			current->no_new_privs = 1;
++			break;
++		case PR_GET_NO_NEW_PRIVS:
++			if (arg2 || arg3 || arg4 || arg5)
++				return -EINVAL;
++			return current->no_new_privs ? 1 : 0;
+ 		default:
+ 			error = -EINVAL;
+ 			break;
+diff --git a/net/compat.c b/net/compat.c
+index 2c774d8..f7f82ba 100644
+--- a/net/compat.c
++++ b/net/compat.c
+@@ -332,14 +332,6 @@ void scm_detach_fds_compat(struct msghdr *kmsg, struct scm_cookie *scm)
+ 	__scm_destroy(scm);
+ }
+ 
+-/*
+- * A struct sock_filter is architecture independent.
+- */
+-struct compat_sock_fprog {
+-	u16		len;
+-	compat_uptr_t	filter;		/* struct sock_filter * */
+-};
+-
+ static int do_set_attach_filter(struct socket *sock, int level, int optname,
+ 				char __user *optval, unsigned int optlen)
+ {
+diff --git a/net/core/filter.c b/net/core/filter.c
+index 3b7398a..21237ce 100644
+--- a/net/core/filter.c
++++ b/net/core/filter.c
+@@ -38,6 +38,7 @@
+ #include <linux/filter.h>
+ #include <linux/reciprocal_div.h>
+ #include <linux/ratelimit.h>
++#include <linux/seccomp.h>
+ 
+ /* No hurry in this branch
+  *
+@@ -356,6 +357,11 @@ load_b:
+ 				A = 0;
+ 			continue;
+ 		}
++#ifdef CONFIG_SECCOMP_FILTER
++		case BPF_S_ANC_SECCOMP_LD_W:
++			A = seccomp_bpf_load(fentry->k);
++			continue;
++#endif
+ 		default:
+ 			WARN_RATELIMIT(1, "Unknown code:%u jt:%u tf:%u k:%u\n",
+ 				       fentry->code, fentry->jt,
+diff --git a/samples/Makefile b/samples/Makefile
+index 2f75851..5ef08bb 100644
+--- a/samples/Makefile
++++ b/samples/Makefile
+@@ -1,4 +1,4 @@
+ # Makefile for Linux samples code
+ 
+ obj-$(CONFIG_SAMPLES)	+= kobject/ kprobes/ tracepoints/ trace_events/ \
+-			   hw_breakpoint/ kfifo/ kdb/ hidraw/ rpmsg/
++			   hw_breakpoint/ kfifo/ kdb/ hidraw/ rpmsg/ seccomp/
+diff --git a/samples/seccomp/Makefile b/samples/seccomp/Makefile
+new file mode 100644
+index 0000000..16aa2d4
+--- /dev/null
++++ b/samples/seccomp/Makefile
+@@ -0,0 +1,32 @@
++# kbuild trick to avoid linker error. Can be omitted if a module is built.
++obj- := dummy.o
++
++hostprogs-$(CONFIG_SECCOMP_FILTER) := bpf-fancy dropper bpf-direct
++
++HOSTCFLAGS_bpf-fancy.o += -I$(objtree)/usr/include
++HOSTCFLAGS_bpf-fancy.o += -idirafter $(objtree)/include
++HOSTCFLAGS_bpf-helper.o += -I$(objtree)/usr/include
++HOSTCFLAGS_bpf-helper.o += -idirafter $(objtree)/include
++bpf-fancy-objs := bpf-fancy.o bpf-helper.o
++
++HOSTCFLAGS_dropper.o += -I$(objtree)/usr/include
++HOSTCFLAGS_dropper.o += -idirafter $(objtree)/include
++dropper-objs := dropper.o
++
++HOSTCFLAGS_bpf-direct.o += -I$(objtree)/usr/include
++HOSTCFLAGS_bpf-direct.o += -idirafter $(objtree)/include
++bpf-direct-objs := bpf-direct.o
++
++# Try to match the kernel target.
++ifeq ($(CONFIG_64BIT),)
++HOSTCFLAGS_bpf-direct.o += -m32
++HOSTCFLAGS_dropper.o += -m32
++HOSTCFLAGS_bpf-helper.o += -m32
++HOSTCFLAGS_bpf-fancy.o += -m32
++HOSTLOADLIBES_bpf-direct += -m32
++HOSTLOADLIBES_bpf-fancy += -m32
++HOSTLOADLIBES_dropper += -m32
++endif
++
++# Tell kbuild to always build the programs
++always := $(hostprogs-y)
+diff --git a/samples/seccomp/bpf-direct.c b/samples/seccomp/bpf-direct.c
+new file mode 100644
+index 0000000..4d64344
+--- /dev/null
++++ b/samples/seccomp/bpf-direct.c
+@@ -0,0 +1,190 @@
++/*
++ * Seccomp filter example for x86 (32-bit and 64-bit) with BPF macros
++ *
++ * Copyright (c) 2012 The Chromium OS Authors <chromium-os-dev@chromium.org>
++ * Author: Will Drewry <wad@chromium.org>
++ *
++ * The code may be used by anyone for any purpose,
++ * and can serve as a starting point for developing
++ * applications using prctl(PR_SET_SECCOMP, 2, ...).
++ */
++#if defined(__i386__) || defined(__x86_64__)
++#define SUPPORTED_ARCH 1
++#endif
++
++#if defined(SUPPORTED_ARCH)
++#define __USE_GNU 1
++#define _GNU_SOURCE 1
++
++#include <linux/types.h>
++#include <linux/filter.h>
++#include <linux/seccomp.h>
++#include <linux/unistd.h>
++#include <signal.h>
++#include <stdio.h>
++#include <stddef.h>
++#include <string.h>
++#include <sys/prctl.h>
++#include <unistd.h>
++
++#define syscall_arg(_n) (offsetof(struct seccomp_data, args[_n]))
++#define syscall_nr (offsetof(struct seccomp_data, nr))
++
++#if defined(__i386__)
++#define REG_RESULT	REG_EAX
++#define REG_SYSCALL	REG_EAX
++#define REG_ARG0	REG_EBX
++#define REG_ARG1	REG_ECX
++#define REG_ARG2	REG_EDX
++#define REG_ARG3	REG_ESI
++#define REG_ARG4	REG_EDI
++#define REG_ARG5	REG_EBP
++#elif defined(__x86_64__)
++#define REG_RESULT	REG_RAX
++#define REG_SYSCALL	REG_RAX
++#define REG_ARG0	REG_RDI
++#define REG_ARG1	REG_RSI
++#define REG_ARG2	REG_RDX
++#define REG_ARG3	REG_R10
++#define REG_ARG4	REG_R8
++#define REG_ARG5	REG_R9
++#endif
++
++#ifndef PR_SET_NO_NEW_PRIVS
++#define PR_SET_NO_NEW_PRIVS 36
++#endif
++
++#ifndef SYS_SECCOMP
++#define SYS_SECCOMP 1
++#endif
++
++static void emulator(int nr, siginfo_t *info, void *void_context)
++{
++	ucontext_t *ctx = (ucontext_t *)(void_context);
++	int syscall;
++	char *buf;
++	ssize_t bytes;
++	size_t len;
++	if (info->si_code != SYS_SECCOMP)
++		return;
++	if (!ctx)
++		return;
++	syscall = ctx->uc_mcontext.gregs[REG_SYSCALL];
++	buf = (char *) ctx->uc_mcontext.gregs[REG_ARG1];
++	len = (size_t) ctx->uc_mcontext.gregs[REG_ARG2];
++
++	if (syscall != __NR_write)
++		return;
++	if (ctx->uc_mcontext.gregs[REG_ARG0] != STDERR_FILENO)
++		return;
++	/* Redirect stderr messages to stdout. Doesn't handle EINTR, etc */
++	ctx->uc_mcontext.gregs[REG_RESULT] = -1;
++	if (write(STDOUT_FILENO, "[ERR] ", 6) > 0) {
++		bytes = write(STDOUT_FILENO, buf, len);
++		ctx->uc_mcontext.gregs[REG_RESULT] = bytes;
++	}
++	return;
++}
++
++static int install_emulator(void)
++{
++	struct sigaction act;
++	sigset_t mask;
++	memset(&act, 0, sizeof(act));
++	sigemptyset(&mask);
++	sigaddset(&mask, SIGSYS);
++
++	act.sa_sigaction = &emulator;
++	act.sa_flags = SA_SIGINFO;
++	if (sigaction(SIGSYS, &act, NULL) < 0) {
++		perror("sigaction");
++		return -1;
++	}
++	if (sigprocmask(SIG_UNBLOCK, &mask, NULL)) {
++		perror("sigprocmask");
++		return -1;
++	}
++	return 0;
++}
++
++static int install_filter(void)
++{
++	struct sock_filter filter[] = {
++		/* Grab the system call number */
++		BPF_STMT(BPF_LD+BPF_W+BPF_ABS, syscall_nr),
++		/* Jump table for the allowed syscalls */
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, __NR_rt_sigreturn, 0, 1),
++		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW),
++#ifdef __NR_sigreturn
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, __NR_sigreturn, 0, 1),
++		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW),
++#endif
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, __NR_exit_group, 0, 1),
++		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW),
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, __NR_exit, 0, 1),
++		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW),
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, __NR_read, 1, 0),
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, __NR_write, 3, 2),
++
++		/* Check that read is only using stdin. */
++		BPF_STMT(BPF_LD+BPF_W+BPF_ABS, syscall_arg(0)),
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, STDIN_FILENO, 4, 0),
++		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_KILL),
++
++		/* Check that write is only using stdout */
++		BPF_STMT(BPF_LD+BPF_W+BPF_ABS, syscall_arg(0)),
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, STDOUT_FILENO, 1, 0),
++		/* Trap attempts to write to stderr */
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, STDERR_FILENO, 1, 2),
++
++		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW),
++		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_TRAP),
++		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_KILL),
++	};
++	struct sock_fprog prog = {
++		.len = (unsigned short)(sizeof(filter)/sizeof(filter[0])),
++		.filter = filter,
++	};
++
++	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
++		perror("prctl(NO_NEW_PRIVS)");
++		return 1;
++	}
++
++
++	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog)) {
++		perror("prctl");
++		return 1;
++	}
++	return 0;
++}
++
++#define payload(_c) (_c), sizeof((_c))
++int main(int argc, char **argv)
++{
++	char buf[4096];
++	ssize_t bytes = 0;
++	if (install_emulator())
++		return 1;
++	if (install_filter())
++		return 1;
++	syscall(__NR_write, STDOUT_FILENO,
++		payload("OHAI! WHAT IS YOUR NAME? "));
++	bytes = syscall(__NR_read, STDIN_FILENO, buf, sizeof(buf));
++	syscall(__NR_write, STDOUT_FILENO, payload("HELLO, "));
++	syscall(__NR_write, STDOUT_FILENO, buf, bytes);
++	syscall(__NR_write, STDERR_FILENO,
++		payload("Error message going to STDERR\n"));
++	return 0;
++}
++#else	/* SUPPORTED_ARCH */
++/*
++ * This sample is x86-only.  Since kernel samples are compiled with the
++ * host toolchain, a non-x86 host will result in using only the main()
++ * below.
++ */
++int main(void)
++{
++	return 1;
++}
++#endif	/* SUPPORTED_ARCH */
+diff --git a/samples/seccomp/bpf-fancy.c b/samples/seccomp/bpf-fancy.c
+new file mode 100644
+index 0000000..bf1f6b5
+--- /dev/null
++++ b/samples/seccomp/bpf-fancy.c
+@@ -0,0 +1,102 @@
++/*
++ * Seccomp BPF example using a macro-based generator.
++ *
++ * Copyright (c) 2012 The Chromium OS Authors <chromium-os-dev@chromium.org>
++ * Author: Will Drewry <wad@chromium.org>
++ *
++ * The code may be used by anyone for any purpose,
++ * and can serve as a starting point for developing
++ * applications using prctl(PR_ATTACH_SECCOMP_FILTER).
++ */
++
++#include <linux/filter.h>
++#include <linux/seccomp.h>
++#include <linux/unistd.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/prctl.h>
++#include <unistd.h>
++
++#include "bpf-helper.h"
++
++#ifndef PR_SET_NO_NEW_PRIVS
++#define PR_SET_NO_NEW_PRIVS 36
++#endif
++
++int main(int argc, char **argv)
++{
++	struct bpf_labels l;
++	static const char msg1[] = "Please type something: ";
++	static const char msg2[] = "You typed: ";
++	char buf[256];
++	struct sock_filter filter[] = {
++		/* TODO: LOAD_SYSCALL_NR(arch) and enforce an arch */
++		LOAD_SYSCALL_NR,
++		SYSCALL(__NR_exit, ALLOW),
++		SYSCALL(__NR_exit_group, ALLOW),
++		SYSCALL(__NR_write, JUMP(&l, write_fd)),
++		SYSCALL(__NR_read, JUMP(&l, read)),
++		DENY,  /* Don't passthrough into a label */
++
++		LABEL(&l, read),
++		ARG(0),
++		JNE(STDIN_FILENO, DENY),
++		ARG(1),
++		JNE((unsigned long)buf, DENY),
++		ARG(2),
++		JGE(sizeof(buf), DENY),
++		ALLOW,
++
++		LABEL(&l, write_fd),
++		ARG(0),
++		JEQ(STDOUT_FILENO, JUMP(&l, write_buf)),
++		JEQ(STDERR_FILENO, JUMP(&l, write_buf)),
++		DENY,
++
++		LABEL(&l, write_buf),
++		ARG(1),
++		JEQ((unsigned long)msg1, JUMP(&l, msg1_len)),
++		JEQ((unsigned long)msg2, JUMP(&l, msg2_len)),
++		JEQ((unsigned long)buf, JUMP(&l, buf_len)),
++		DENY,
++
++		LABEL(&l, msg1_len),
++		ARG(2),
++		JLT(sizeof(msg1), ALLOW),
++		DENY,
++
++		LABEL(&l, msg2_len),
++		ARG(2),
++		JLT(sizeof(msg2), ALLOW),
++		DENY,
++
++		LABEL(&l, buf_len),
++		ARG(2),
++		JLT(sizeof(buf), ALLOW),
++		DENY,
++	};
++	struct sock_fprog prog = {
++		.filter = filter,
++		.len = (unsigned short)(sizeof(filter)/sizeof(filter[0])),
++	};
++	ssize_t bytes;
++	bpf_resolve_jumps(&l, filter, sizeof(filter)/sizeof(*filter));
++
++	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
++		perror("prctl(NO_NEW_PRIVS)");
++		return 1;
++	}
++
++	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog)) {
++		perror("prctl(SECCOMP)");
++		return 1;
++	}
++	syscall(__NR_write, STDOUT_FILENO, msg1, strlen(msg1));
++	bytes = syscall(__NR_read, STDIN_FILENO, buf, sizeof(buf)-1);
++	bytes = (bytes > 0 ? bytes : 0);
++	syscall(__NR_write, STDERR_FILENO, msg2, strlen(msg2));
++	syscall(__NR_write, STDERR_FILENO, buf, bytes);
++	/* Now get killed */
++	syscall(__NR_write, STDERR_FILENO, msg2, strlen(msg2)+2);
++	return 0;
++}
+diff --git a/samples/seccomp/bpf-helper.c b/samples/seccomp/bpf-helper.c
+new file mode 100644
+index 0000000..579cfe3
+--- /dev/null
++++ b/samples/seccomp/bpf-helper.c
+@@ -0,0 +1,89 @@
++/*
++ * Seccomp BPF helper functions
++ *
++ * Copyright (c) 2012 The Chromium OS Authors <chromium-os-dev@chromium.org>
++ * Author: Will Drewry <wad@chromium.org>
++ *
++ * The code may be used by anyone for any purpose,
++ * and can serve as a starting point for developing
++ * applications using prctl(PR_ATTACH_SECCOMP_FILTER).
++ */
++
++#include <stdio.h>
++#include <string.h>
++
++#include "bpf-helper.h"
++
++int bpf_resolve_jumps(struct bpf_labels *labels,
++		      struct sock_filter *filter, size_t count)
++{
++	struct sock_filter *begin = filter;
++	__u8 insn = count - 1;
++
++	if (count < 1)
++		return -1;
++	/*
++	* Walk it once, backwards, to build the label table and do fixups.
++	* Since backward jumps are disallowed by BPF, this is easy.
++	*/
++	filter += insn;
++	for (; filter >= begin; --insn, --filter) {
++		if (filter->code != (BPF_JMP+BPF_JA))
++			continue;
++		switch ((filter->jt<<8)|filter->jf) {
++		case (JUMP_JT<<8)|JUMP_JF:
++			if (labels->labels[filter->k].location == 0xffffffff) {
++				fprintf(stderr, "Unresolved label: '%s'\n",
++					labels->labels[filter->k].label);
++				return 1;
++			}
++			filter->k = labels->labels[filter->k].location -
++				    (insn + 1);
++			filter->jt = 0;
++			filter->jf = 0;
++			continue;
++		case (LABEL_JT<<8)|LABEL_JF:
++			if (labels->labels[filter->k].location != 0xffffffff) {
++				fprintf(stderr, "Duplicate label use: '%s'\n",
++					labels->labels[filter->k].label);
++				return 1;
++			}
++			labels->labels[filter->k].location = insn;
++			filter->k = 0; /* fall through */
++			filter->jt = 0;
++			filter->jf = 0;
++			continue;
++		}
++	}
++	return 0;
++}
++
++/* Simple lookup table for labels. */
++__u32 seccomp_bpf_label(struct bpf_labels *labels, const char *label)
++{
++	struct __bpf_label *begin = labels->labels, *end;
++	int id;
++	if (labels->count == 0) {
++		begin->label = label;
++		begin->location = 0xffffffff;
++		labels->count++;
++		return 0;
++	}
++	end = begin + labels->count;
++	for (id = 0; begin < end; ++begin, ++id) {
++		if (!strcmp(label, begin->label))
++			return id;
++	}
++	begin->label = label;
++	begin->location = 0xffffffff;
++	labels->count++;
++	return id;
++}
++
++void seccomp_bpf_print(struct sock_filter *filter, size_t count)
++{
++	struct sock_filter *end = filter + count;
++	for ( ; filter < end; ++filter)
++		printf("{ code=%u,jt=%u,jf=%u,k=%u },\n",
++			filter->code, filter->jt, filter->jf, filter->k);
++}
+diff --git a/samples/seccomp/bpf-helper.h b/samples/seccomp/bpf-helper.h
+new file mode 100644
+index 0000000..643279d
+--- /dev/null
++++ b/samples/seccomp/bpf-helper.h
+@@ -0,0 +1,238 @@
++/*
++ * Example wrapper around BPF macros.
++ *
++ * Copyright (c) 2012 The Chromium OS Authors <chromium-os-dev@chromium.org>
++ * Author: Will Drewry <wad@chromium.org>
++ *
++ * The code may be used by anyone for any purpose,
++ * and can serve as a starting point for developing
++ * applications using prctl(PR_SET_SECCOMP, 2, ...).
++ *
++ * No guarantees are provided with respect to the correctness
++ * or functionality of this code.
++ */
++#ifndef __BPF_HELPER_H__
++#define __BPF_HELPER_H__
++
++#include <asm/bitsperlong.h>	/* for __BITS_PER_LONG */
++#include <endian.h>
++#include <linux/filter.h>
++#include <linux/seccomp.h>	/* for seccomp_data */
++#include <linux/types.h>
++#include <linux/unistd.h>
++#include <stddef.h>
++
++#define BPF_LABELS_MAX 256
++struct bpf_labels {
++	int count;
++	struct __bpf_label {
++		const char *label;
++		__u32 location;
++	} labels[BPF_LABELS_MAX];
++};
++
++int bpf_resolve_jumps(struct bpf_labels *labels,
++		      struct sock_filter *filter, size_t count);
++__u32 seccomp_bpf_label(struct bpf_labels *labels, const char *label);
++void seccomp_bpf_print(struct sock_filter *filter, size_t count);
++
++#define JUMP_JT 0xff
++#define JUMP_JF 0xff
++#define LABEL_JT 0xfe
++#define LABEL_JF 0xfe
++
++#define ALLOW \
++	BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW)
++#define DENY \
++	BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_KILL)
++#define JUMP(labels, label) \
++	BPF_JUMP(BPF_JMP+BPF_JA, FIND_LABEL((labels), (label)), \
++		 JUMP_JT, JUMP_JF)
++#define LABEL(labels, label) \
++	BPF_JUMP(BPF_JMP+BPF_JA, FIND_LABEL((labels), (label)), \
++		 LABEL_JT, LABEL_JF)
++#define SYSCALL(nr, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (nr), 0, 1), \
++	jt
++
++/* Lame, but just an example */
++#define FIND_LABEL(labels, label) seccomp_bpf_label((labels), #label)
++
++#define EXPAND(...) __VA_ARGS__
++/* Map all width-sensitive operations */
++#if __BITS_PER_LONG == 32
++
++#define JEQ(x, jt) JEQ32(x, EXPAND(jt))
++#define JNE(x, jt) JNE32(x, EXPAND(jt))
++#define JGT(x, jt) JGT32(x, EXPAND(jt))
++#define JLT(x, jt) JLT32(x, EXPAND(jt))
++#define JGE(x, jt) JGE32(x, EXPAND(jt))
++#define JLE(x, jt) JLE32(x, EXPAND(jt))
++#define JA(x, jt) JA32(x, EXPAND(jt))
++#define ARG(i) ARG_32(i)
++#define LO_ARG(idx) offsetof(struct seccomp_data, args[(idx)])
++
++#elif __BITS_PER_LONG == 64
++
++/* Ensure that we load the logically correct offset. */
++#if __BYTE_ORDER == __LITTLE_ENDIAN
++#define ENDIAN(_lo, _hi) _lo, _hi
++#define LO_ARG(idx) offsetof(struct seccomp_data, args[(idx)])
++#define HI_ARG(idx) offsetof(struct seccomp_data, args[(idx)]) + sizeof(__u32)
++#elif __BYTE_ORDER == __BIG_ENDIAN
++#define ENDIAN(_lo, _hi) _hi, _lo
++#define LO_ARG(idx) offsetof(struct seccomp_data, args[(idx)]) + sizeof(__u32)
++#define HI_ARG(idx) offsetof(struct seccomp_data, args[(idx)])
++#else
++#error "Unknown endianness"
++#endif
++
++union arg64 {
++	struct {
++		__u32 ENDIAN(lo32, hi32);
++	};
++	__u64 u64;
++};
++
++#define JEQ(x, jt) \
++	JEQ64(((union arg64){.u64 = (x)}).lo32, \
++	      ((union arg64){.u64 = (x)}).hi32, \
++	      EXPAND(jt))
++#define JGT(x, jt) \
++	JGT64(((union arg64){.u64 = (x)}).lo32, \
++	      ((union arg64){.u64 = (x)}).hi32, \
++	      EXPAND(jt))
++#define JGE(x, jt) \
++	JGE64(((union arg64){.u64 = (x)}).lo32, \
++	      ((union arg64){.u64 = (x)}).hi32, \
++	      EXPAND(jt))
++#define JNE(x, jt) \
++	JNE64(((union arg64){.u64 = (x)}).lo32, \
++	      ((union arg64){.u64 = (x)}).hi32, \
++	      EXPAND(jt))
++#define JLT(x, jt) \
++	JLT64(((union arg64){.u64 = (x)}).lo32, \
++	      ((union arg64){.u64 = (x)}).hi32, \
++	      EXPAND(jt))
++#define JLE(x, jt) \
++	JLE64(((union arg64){.u64 = (x)}).lo32, \
++	      ((union arg64){.u64 = (x)}).hi32, \
++	      EXPAND(jt))
++
++#define JA(x, jt) \
++	JA64(((union arg64){.u64 = (x)}).lo32, \
++	       ((union arg64){.u64 = (x)}).hi32, \
++	       EXPAND(jt))
++#define ARG(i) ARG_64(i)
++
++#else
++#error __BITS_PER_LONG value unusable.
++#endif
++
++/* Loads the arg into A */
++#define ARG_32(idx) \
++	BPF_STMT(BPF_LD+BPF_W+BPF_ABS, LO_ARG(idx))
++
++/* Loads hi into A and lo in X */
++#define ARG_64(idx) \
++	BPF_STMT(BPF_LD+BPF_W+BPF_ABS, LO_ARG(idx)), \
++	BPF_STMT(BPF_ST, 0), /* lo -> M[0] */ \
++	BPF_STMT(BPF_LD+BPF_W+BPF_ABS, HI_ARG(idx)), \
++	BPF_STMT(BPF_ST, 1) /* hi -> M[1] */
++
++#define JEQ32(value, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (value), 0, 1), \
++	jt
++
++#define JNE32(value, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (value), 1, 0), \
++	jt
++
++/* Checks the lo, then swaps to check the hi. A=lo,X=hi */
++#define JEQ64(lo, hi, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (hi), 0, 5), \
++	BPF_STMT(BPF_LD+BPF_MEM, 0), /* swap in lo */ \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (lo), 0, 2), \
++	BPF_STMT(BPF_LD+BPF_MEM, 1), /* passed: swap hi back in */ \
++	jt, \
++	BPF_STMT(BPF_LD+BPF_MEM, 1) /* failed: swap hi back in */
++
++#define JNE64(lo, hi, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (hi), 5, 0), \
++	BPF_STMT(BPF_LD+BPF_MEM, 0), /* swap in lo */ \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (lo), 2, 0), \
++	BPF_STMT(BPF_LD+BPF_MEM, 1), /* passed: swap hi back in */ \
++	jt, \
++	BPF_STMT(BPF_LD+BPF_MEM, 1) /* failed: swap hi back in */
++
++#define JA32(value, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JSET+BPF_K, (value), 0, 1), \
++	jt
++
++#define JA64(lo, hi, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JSET+BPF_K, (hi), 3, 0), \
++	BPF_STMT(BPF_LD+BPF_MEM, 0), /* swap in lo */ \
++	BPF_JUMP(BPF_JMP+BPF_JSET+BPF_K, (lo), 0, 2), \
++	BPF_STMT(BPF_LD+BPF_MEM, 1), /* passed: swap hi back in */ \
++	jt, \
++	BPF_STMT(BPF_LD+BPF_MEM, 1) /* failed: swap hi back in */
++
++#define JGE32(value, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JGE+BPF_K, (value), 0, 1), \
++	jt
++
++#define JLT32(value, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JGE+BPF_K, (value), 1, 0), \
++	jt
++
++/* Shortcut checking if hi > arg.hi. */
++#define JGE64(lo, hi, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JGT+BPF_K, (hi), 4, 0), \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (hi), 0, 5), \
++	BPF_STMT(BPF_LD+BPF_MEM, 0), /* swap in lo */ \
++	BPF_JUMP(BPF_JMP+BPF_JGE+BPF_K, (lo), 0, 2), \
++	BPF_STMT(BPF_LD+BPF_MEM, 1), /* passed: swap hi back in */ \
++	jt, \
++	BPF_STMT(BPF_LD+BPF_MEM, 1) /* failed: swap hi back in */
++
++#define JLT64(lo, hi, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JGE+BPF_K, (hi), 0, 4), \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (hi), 0, 5), \
++	BPF_STMT(BPF_LD+BPF_MEM, 0), /* swap in lo */ \
++	BPF_JUMP(BPF_JMP+BPF_JGT+BPF_K, (lo), 2, 0), \
++	BPF_STMT(BPF_LD+BPF_MEM, 1), /* passed: swap hi back in */ \
++	jt, \
++	BPF_STMT(BPF_LD+BPF_MEM, 1) /* failed: swap hi back in */
++
++#define JGT32(value, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JGT+BPF_K, (value), 0, 1), \
++	jt
++
++#define JLE32(value, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JGT+BPF_K, (value), 1, 0), \
++	jt
++
++/* Check hi > args.hi first, then do the GE checking */
++#define JGT64(lo, hi, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JGT+BPF_K, (hi), 4, 0), \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (hi), 0, 5), \
++	BPF_STMT(BPF_LD+BPF_MEM, 0), /* swap in lo */ \
++	BPF_JUMP(BPF_JMP+BPF_JGT+BPF_K, (lo), 0, 2), \
++	BPF_STMT(BPF_LD+BPF_MEM, 1), /* passed: swap hi back in */ \
++	jt, \
++	BPF_STMT(BPF_LD+BPF_MEM, 1) /* failed: swap hi back in */
++
++#define JLE64(lo, hi, jt) \
++	BPF_JUMP(BPF_JMP+BPF_JGT+BPF_K, (hi), 6, 0), \
++	BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, (hi), 0, 3), \
++	BPF_STMT(BPF_LD+BPF_MEM, 0), /* swap in lo */ \
++	BPF_JUMP(BPF_JMP+BPF_JGT+BPF_K, (lo), 2, 0), \
++	BPF_STMT(BPF_LD+BPF_MEM, 1), /* passed: swap hi back in */ \
++	jt, \
++	BPF_STMT(BPF_LD+BPF_MEM, 1) /* failed: swap hi back in */
++
++#define LOAD_SYSCALL_NR \
++	BPF_STMT(BPF_LD+BPF_W+BPF_ABS, \
++		 offsetof(struct seccomp_data, nr))
++
++#endif  /* __BPF_HELPER_H__ */
+diff --git a/samples/seccomp/dropper.c b/samples/seccomp/dropper.c
+new file mode 100644
+index 0000000..c69c347
+--- /dev/null
++++ b/samples/seccomp/dropper.c
+@@ -0,0 +1,68 @@
++/*
++ * Naive system call dropper built on seccomp_filter.
++ *
++ * Copyright (c) 2012 The Chromium OS Authors <chromium-os-dev@chromium.org>
++ * Author: Will Drewry <wad@chromium.org>
++ *
++ * The code may be used by anyone for any purpose,
++ * and can serve as a starting point for developing
++ * applications using prctl(PR_SET_SECCOMP, 2, ...).
++ *
++ * When run, returns the specified errno for the specified
++ * system call number against the given architecture.
++ *
++ * Run this one as root as PR_SET_NO_NEW_PRIVS is not called.
++ */
++
++#include <errno.h>
++#include <linux/audit.h>
++#include <linux/filter.h>
++#include <linux/seccomp.h>
++#include <linux/unistd.h>
++#include <stdio.h>
++#include <stddef.h>
++#include <stdlib.h>
++#include <sys/prctl.h>
++#include <unistd.h>
++
++static int install_filter(int nr, int arch, int error)
++{
++	struct sock_filter filter[] = {
++		BPF_STMT(BPF_LD+BPF_W+BPF_ABS,
++			 (offsetof(struct seccomp_data, arch))),
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, arch, 0, 3),
++		BPF_STMT(BPF_LD+BPF_W+BPF_ABS,
++			 (offsetof(struct seccomp_data, nr))),
++		BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, nr, 0, 1),
++		BPF_STMT(BPF_RET+BPF_K,
++			 SECCOMP_RET_ERRNO|(error & SECCOMP_RET_DATA)),
++		BPF_STMT(BPF_RET+BPF_K, SECCOMP_RET_ALLOW),
++	};
++	struct sock_fprog prog = {
++		.len = (unsigned short)(sizeof(filter)/sizeof(filter[0])),
++		.filter = filter,
++	};
++	if (prctl(PR_SET_SECCOMP, 2, &prog)) {
++		perror("prctl");
++		return 1;
++	}
++	return 0;
++}
++
++int main(int argc, char **argv)
++{
++	if (argc < 5) {
++		fprintf(stderr, "Usage:\n"
++			"dropper <syscall_nr> <arch> <errno> <prog> [<args>]\n"
++			"Hint:	AUDIT_ARCH_I386: 0x%X\n"
++			"	AUDIT_ARCH_X86_64: 0x%X\n"
++			"\n", AUDIT_ARCH_I386, AUDIT_ARCH_X86_64);
++		return 1;
++	}
++	if (install_filter(strtol(argv[1], NULL, 0), strtol(argv[2], NULL, 0),
++			   strtol(argv[3], NULL, 0)))
++		return 1;
++	execv(argv[4], &argv[4]);
++	printf("Failed to execv\n");
++	return 255;
++}
+diff --git a/security/apparmor/domain.c b/security/apparmor/domain.c
+index 6327685..b81ea10 100644
+--- a/security/apparmor/domain.c
++++ b/security/apparmor/domain.c
+@@ -394,6 +394,11 @@ int apparmor_bprm_set_creds(struct linux_binprm *bprm)
+ 			new_profile = find_attach(ns, &ns->base.profiles, name);
+ 		if (!new_profile)
+ 			goto cleanup;
++		/*
++		 * NOTE: Domain transitions from unconfined are allowed
++		 * even when no_new_privs is set because this aways results
++		 * in a further reduction of permissions.
++		 */
+ 		goto apply;
+ 	}
+ 
+@@ -455,6 +460,16 @@ int apparmor_bprm_set_creds(struct linux_binprm *bprm)
+ 		/* fail exec */
+ 		error = -EACCES;
+ 
++	/*
++	 * Policy has specified a domain transition, if no_new_privs then
++	 * fail the exec.
++	 */
++	if (bprm->unsafe & LSM_UNSAFE_NO_NEW_PRIVS) {
++		aa_put_profile(new_profile);
++		error = -EPERM;
++		goto cleanup;
++	}
++
+ 	if (!new_profile)
+ 		goto audit;
+ 
+@@ -609,6 +624,14 @@ int aa_change_hat(const char *hats[], int count, u64 token, bool permtest)
+ 	const char *target = NULL, *info = NULL;
+ 	int error = 0;
+ 
++	/*
++	 * Fail explicitly requested domain transitions if no_new_privs.
++	 * There is no exception for unconfined as change_hat is not
++	 * available.
++	 */
++	if (current->no_new_privs)
++		return -EPERM;
++
+ 	/* released below */
+ 	cred = get_current_cred();
+ 	cxt = cred->security;
+@@ -750,6 +773,18 @@ int aa_change_profile(const char *ns_name, const char *hname, bool onexec,
+ 	cxt = cred->security;
+ 	profile = aa_cred_profile(cred);
+ 
++	/*
++	 * Fail explicitly requested domain transitions if no_new_privs
++	 * and not unconfined.
++	 * Domain transitions from unconfined are allowed even when
++	 * no_new_privs is set because this aways results in a reduction
++	 * of permissions.
++	 */
++	if (current->no_new_privs && !unconfined(profile)) {
++		put_cred(cred);
++		return -EPERM;
++	}
++
+ 	if (ns_name) {
+ 		/* released below */
+ 		ns = aa_find_namespace(profile->ns, ns_name);
+diff --git a/security/commoncap.c b/security/commoncap.c
+index 0051ac2..98ff463 100644
+--- a/security/commoncap.c
++++ b/security/commoncap.c
+@@ -523,14 +523,17 @@ skip:
+ 
+ 
+ 	/* Don't let someone trace a set[ug]id/setpcap binary with the revised
+-	 * credentials unless they have the appropriate permit
++	 * credentials unless they have the appropriate permit.
++	 *
++	 * In addition, if NO_NEW_PRIVS, then ensure we get no new privs.
+ 	 */
+ 	if ((new->euid != old->uid ||
+ 	     new->egid != old->gid ||
+ 	     !cap_issubset(new->cap_permitted, old->cap_permitted)) &&
+ 	    bprm->unsafe & ~LSM_UNSAFE_PTRACE_CAP) {
+ 		/* downgrade; they get no more than they had, and maybe less */
+-		if (!capable(CAP_SETUID)) {
++		if (!capable(CAP_SETUID) ||
++		    (bprm->unsafe & LSM_UNSAFE_NO_NEW_PRIVS)) {
+ 			new->euid = new->uid;
+ 			new->egid = new->gid;
+ 		}
+diff --git a/security/selinux/hooks.c b/security/selinux/hooks.c
+index 639e5c4..6bc3e3a 100644
+--- a/security/selinux/hooks.c
++++ b/security/selinux/hooks.c
+@@ -2051,6 +2051,13 @@ static int selinux_bprm_set_creds(struct linux_binprm *bprm)
+ 		new_tsec->sid = old_tsec->exec_sid;
+ 		/* Reset exec SID on execve. */
+ 		new_tsec->exec_sid = 0;
++
++		/*
++		 * Minimize confusion: if no_new_privs and a transition is
++		 * explicitly requested, then fail the exec.
++		 */
++		if (bprm->unsafe & LSM_UNSAFE_NO_NEW_PRIVS)
++			return -EPERM;
+ 	} else {
+ 		/* Check for a default transition on this program. */
+ 		rc = security_transition_sid(old_tsec->sid, isec->sid,
+@@ -2064,7 +2071,8 @@ static int selinux_bprm_set_creds(struct linux_binprm *bprm)
+ 	ad.selinux_audit_data = &sad;
+ 	ad.u.path = bprm->file->f_path;
+ 
+-	if (bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID)
++	if ((bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID) ||
++	    (bprm->unsafe & LSM_UNSAFE_NO_NEW_PRIVS))
+ 		new_tsec->sid = old_tsec->sid;
+ 
+ 	if (new_tsec->sid == old_tsec->sid) {
