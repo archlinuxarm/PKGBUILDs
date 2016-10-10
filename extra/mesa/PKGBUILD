@@ -11,7 +11,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
 pkgver=12.0.3
-pkgrel=2
+pkgrel=3
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
@@ -21,11 +21,15 @@ license=('custom')
 options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        remove-libpthread-stubs.patch)
+        remove-libpthread-stubs.patch
+        0001-loader-dri3-add-get_dri_screen-to-the-vtable.patch
+        0002-loader-dri3-import-prime-buffers-in-the-currently-bo.patch)
 sha256sums=('1dc86dd9b51272eee1fad3df65e18cda2e556ef1bc0b6e07cd750b9757f493b1'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
-            'd82c329e89754266eb1538df29b94d33692a66e3b6882b2cee78f4d5aab4a39c')
+            'd82c329e89754266eb1538df29b94d33692a66e3b6882b2cee78f4d5aab4a39c'
+            '52eb98eb6c9c644383d9743692aea302d84c4f89cfaa7a276b9276befc2d9780'
+            '96ad07e241d16802b14b14ca3d6965fa7f4f4b8c678d62ba375291910dce3b4a')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 
 prepare() {
@@ -33,6 +37,11 @@ prepare() {
 
   # Now mesa checks for libpthread-stubs - so remove the check
   patch -Np1 -i ../remove-libpthread-stubs.patch
+  
+  # fix FS#50240 - https://bugs.freedesktop.org/show_bug.cgi?id=71759
+  # merged upstream
+  patch -Np1 -i ../0001-loader-dri3-add-get_dri_screen-to-the-vtable.patch
+  patch -Np1 -i ../0002-loader-dri3-import-prime-buffers-in-the-currently-bo.patch
 
   autoreconf -fiv
 }
