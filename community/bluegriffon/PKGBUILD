@@ -11,35 +11,45 @@ highmem=1
 pkgname=bluegriffon
 pkgver=2.1.1
 _mozilla_ver=f14898695ee0
-pkgrel=2
+pkgrel=3
 pkgdesc="The next-generation Web Editor based on the rendering engine of Firefox"
 arch=('i686' 'x86_64')
 url="http://bluegriffon.org/"
 license=('MPL' 'GPL' 'LGPL')
-depends=('alsa-lib' 'desktop-file-utils' 'dbus-glib' 'gtk2' 'hunspell' 'mozilla-common'
-         'nss' 'libevent' 'libvpx' 'libxt' 'python2' 'startup-notification' 'gconf')
+depends=('alsa-lib' 'desktop-file-utils' 'dbus-glib' 'gtk2' 'gtk3' 'hunspell' 'mozilla-common'
+         'nss' 'libevent' 'libvpx' 'libxt' 'python2' 'startup-notification')
 makedepends=('autoconf2.13' 'libpulse' 'unzip' 'zip' 'yasm')
 options=('!emptydirs')
 source=("${pkgname}-${pkgver}.tar.gz"::"https://github.com/therealglazou/${pkgname}/archive/${pkgver}.tar.gz"
         "mozilla-central-${_mozilla_ver}.tar.bz2"::"http://hg.mozilla.org/mozilla-central/archive/${_mozilla_ver}.tar.bz2"
+        "${pkgname}_gtk3.patch"
+        "bug_1234158_firefox-gtk3-20.patch"
         "mozconfig"
         "${pkgname}.desktop"
         "bug_1257019.patch"::"https://hg.mozilla.org/mozilla-central/raw-rev/d5e77c8d64c9")
 sha256sums=('50810c4b287c1cd14aedbfff48dd93df4ff3c590e0dcca52f7ef28841b49e5ee'
             '0b13213b5f9b3819b56872f7fb4fa7a1170ade06f8797dc11114e5f7c8eabca2'
-            'b548bd055dbddc0cae7ad9d9e98b9f540b2838003bacf69e10928842baa77c03'
+            '3868f39181a258823c45e7ad62bba8e7b6e8b07c41535dd584c2dc71431f5deb'
+            'd5e1b9a702dc693184494899fc4cd57ac206e1fd5415a8e5520b8ff3b822e734'
+            '3c162de2bae884a573b2c1260500352e6b9c7803758cc73975109482503b9eb0'
             '882133b77840356985a81e496b4ddc443f8f33c068cfb7ef0858497820adcfff'
             'cae36525cffd2869b5c76c1f48eac4d77e4b8b1c0767a0ddb967596f9dc6d717')
 
 prepare() {
-  cd "${srcdir}/mozilla-central-${_mozilla_ver}"
+  # Fix build with GTK+3
+  cd "${pkgname}-${pkgver}"
+  patch -Np1 -i "../${pkgname}_gtk3.patch"
 
   # Move files to their correct location
+  cd "${srcdir}/mozilla-central-${_mozilla_ver}"
   cp -r "${srcdir}/${pkgname}-${pkgver}" bluegriffon
   cp "${srcdir}/mozconfig" .mozconfig
 
+  # https://bugzilla.mozilla.org/show_bug.cgi?id=1234158
+  patch -Np1 -i "../bug_1234158_firefox-gtk3-20.patch"
+
   # Apply BlueGriffon's upstream customizations
-  patch -Np1 -i bluegriffon/config/content.patch
+  patch -Np1 -i "bluegriffon/config/content.patch"
 
   # ALARM
   patch -p1 -i ../bug_1257019.patch
@@ -55,6 +65,9 @@ build() {
   # https://bugs.archlinux.org/task/34644
   export CPPFLAGS+=' -O2'
   export PYTHON=python2
+
+  # Fix linking with gtk3
+  export LDFLAGS+=" $(pkg-config --libs gtk+-3.0)"
 
   # Build the package
   ./mach build
@@ -72,9 +85,9 @@ package() {
   ln -sf /usr/lib/${pkgname}/${pkgname} "${pkgdir}/usr/bin/${pkgname}"
 
   # Install icons
-  cp bg/dist/branding/mozicon128.png bg/dist/branding/default128.png
-  for _icon in 16 32 48 128; do
-      install -Dm644 bg/dist/branding/default${_icon}.png \
+  cp bluegriffon/branding/mozicon128.png bluegriffon/branding/default128.png
+  for _icon in 16 32 48 128 256; do
+      install -Dm644 bluegriffon/branding/default${_icon}.png \
         "${pkgdir}/usr/share/icons/hicolor/${_icon}x${_icon}/apps/${pkgname}.png"
   done
 
