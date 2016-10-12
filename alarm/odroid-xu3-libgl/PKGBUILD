@@ -5,7 +5,7 @@ buildarch=4
 
 pkgbase=odroid-xu3-libgl
 pkgname=("${pkgbase}-x11" "${pkgbase}-fb" "${pkgbase}-headers")
-pkgver=r9p0
+pkgver=r14p0
 pkgrel=1
 _commit=543eb787af5719224c2231490d5ebda71c1ec7a8
 arch=('armv7h')
