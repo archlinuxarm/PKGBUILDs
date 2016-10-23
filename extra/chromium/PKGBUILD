@@ -5,21 +5,21 @@
 # Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - removed NaCl, not for ARM
-#  - adjusted gyp flags for v7/aarch64
+#  - add ffmpeg to _system_libs
 #  - makeflags to -j4 on v7, RAM constraints
 #  - Gentoo patch to remove lingering built-in ffmpeg code
+#  - patches to fix GN for AArch64 and ARM toolchain definitions
 
 buildarch=12
 highmem=1
-noautobuild=1
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
 declare -rgA _system_libs=(
+  [ffmpeg]=ffmpeg
   [flac]=flac
   [harfbuzz-ng]=harfbuzz-icu
-  #[libjpeg]=libjpeg   # Error during build
+  [libjpeg]=libjpeg
   [libpng]=libpng
   [libvpx]=libvpx
   [libwebp]=libwebp
@@ -36,8 +36,8 @@ pkgver=54.0.2840.71
 pkgrel=1
 _launcher_ver=3
 pkgdesc="The open-source project behind Google Chrome, an attempt at creating a safer, faster, and more stable browser"
-arch=('armv6h' 'armv7h')
-url="http://www.chromium.org/"
+arch=('i686' 'x86_64' 'armv7h' 'aarch64')
+url="https://www.chromium.org/Home"
 license=('BSD')
 depends=('gtk2' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libexif' 'libgcrypt'
          'ttf-font' 'systemd' 'dbus' 'libpulse' 'perl' 'perl-file-basedir'
@@ -47,8 +47,6 @@ makedepends=('python2' 'gperf' 'yasm' 'mesa' 'ninja')
 optdepends=('kdebase-kdialog: needed for file dialogs in KDE'
             'gnome-keyring: for storing passwords in GNOME keyring'
             'kwallet: for storing passwords in KWallet')
-provides=('chromium-browser')
-conflicts=('chromium-browser')
 install=chromium.install
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
         chromium-launcher-$_launcher_ver.tar.gz::https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver.tar.gz
@@ -56,14 +54,18 @@ source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgn
         chromium-52.0.2743.116-unset-madv_free.patch
         chromium-53.0.2785.92-last-commit-position.patch
         chromium-widevine.patch
-        0001-system-ffmpeg-fixes.patch)
+        0001-system-ffmpeg-fixes.patch
+        0002-Add-aarch64-GN-support.patch
+        0003-ARM-toolchain-fixes.patch)
 sha256sums=('d202d3eb0b3a979ad0e6d0d0c4faa93222c5e5b664d88b9f3a0343899fe7dd7d'
             '8b01fb4efe58146279858a754d90b49e5a38c9a0b36a1f84cbb7d12f92b84c28'
             '028a748a5c275de9b8f776f97909f999a8583a4b77fd1cd600b4fc5c0c3e91e9'
-            'd6fdcb922e5a7fbe15759d39ccc8ea4225821c44d98054ce0f23f9d1f00c9808'
             '3b3aa9e28f29e6f539ed1c7832e79463b13128863a02e9c6fecd16c30d61c227'
             'd3dc397956a26ec045e76c25c57a1fac5fc0acff94306b2a670daee7ba15709e'
-            '4a8907651ea25dd7753566799bea28b74b8cd512d3cbc40c34b6d9a43cb36e22')
+            'd6fdcb922e5a7fbe15759d39ccc8ea4225821c44d98054ce0f23f9d1f00c9808'
+            '0bb0d916a2bc332de61dc72e0726cae0cd677761d025bffc77052648ebfa3bd6'
+            '001c913c608482d49080c520b53a669ce7d1941ed484f5dee713bb44ca195fdc'
+            'ab2c1864df8f2aa36a4d8beef9d9a25fa52ed5dbb1993e11d9e5da62422f9014')
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -77,14 +79,18 @@ _google_default_client_secret=0ZChLK6AxeA3Isu96MkwqDR4
 prepare() {
   cd "$srcdir/$pkgname-$pkgver"
 
+  # Arch Linux ARM fixes
+  patch -Np1 -i ../0001-system-ffmpeg-fixes.patch
+  patch -Np1 -i ../0002-Add-aarch64-GN-support.patch
+  patch -Np1 -i ../0003-ARM-toolchain-fixes.patch
+
+  [[ $CARCH == "armv7h" ]] && MAKEFLAGS="-j4" && CFLAGS=`echo $CFLAGS | sed -e 's/vfpv3-d16/neon/'` && CXXFLAGS="$CFLAGS"
+
   # Enable support for the Widevine CDM plugin
   # libwidevinecdm.so is not included, but can be copied over from Chrome
   # (Version string doesn't seem to matter so let's go with "Pinkie Pie")
   sed "s/@WIDEVINE_VERSION@/Pinkie Pie/" ../chromium-widevine.patch |
     patch -Np1
-
-  # Fix building with system ffmpeg
-  patch -Np1 -i ../0001-system-ffmpeg-fixes.patch
 
   # Disable MADV_FREE (if set by glibc)
   # https://bugzilla.redhat.com/show_bug.cgi?id=1361157
@@ -99,8 +105,6 @@ prepare() {
   sed -i '/config("compiler")/ a cflags_cc = [ "-fno-delete-null-pointer-checks" ]' \
     build/config/linux/BUILD.gn
 
-  [[ $CARCH == "armv7h" ]] && MAKEFLAGS=-j4
-
   # Use Python 2
   find . -name '*.py' -exec sed -i -r 's|/usr/bin/python$|&2|g' {} +
 
@@ -112,7 +116,7 @@ prepare() {
   # *should* do what the remove_bundled_libraries.py script does, with the
   # added benefit of not having to list all the remaining libraries
   local _lib
-  for _lib in ${!_system_libs[@]}; do
+  for _lib in ${!_system_libs[@]} ${_system_libs[libjpeg]+libjpeg_turbo}; do
     find -type f -path "*third_party/$_lib/*" \
       \! -path "*third_party/$_lib/chromium/*" \
       \! -path "*third_party/$_lib/google/*" \
@@ -130,8 +134,6 @@ build() {
   make -C "$srcdir/chromium-launcher-$_launcher_ver" PREFIX=/usr
 
   cd "$srcdir/$pkgname-$pkgver"
-
-  CFLAGS=`echo $CFLAGS | sed -e 's/vfpv3-d16/neon/'` && CXXFLAGS="$CFLAGS"
 
   export PATH="$srcdir/python2-path:$PATH"
   export TMPDIR="$srcdir/temp"
@@ -161,31 +163,18 @@ build() {
     'use_sysroot=false'
     'enable_hangout_services_extension=true'
     'enable_widevine=true'
-    "enable_nacl=$_build_nacl"
-    "enable_nacl_nonsfi=$_build_nacl"
+    'enable_nacl=false'
+    'enable_nacl_nonsfi=false'
     "google_api_key=\"${_google_api_key}\""
     "google_default_client_id=\"${_google_default_client_id}\""
     "google_default_client_secret=\"${_google_default_client_secret}\""
   )
 
-  [[ $CARCH == "armv7h" ]] && _chromium_conf+=(
-    -Dtarget_arch=arm
-    -Darm_neon=1
-    -Dv8_use_arm_eabi_hardfloat=true
-    -Darm_float_abi=hard
-    -Darmv7=1
-    -Darm_fpu=neon)
-
-  [[ $CARCH == "aarch64" ]] && _chromium_conf+=(
-    -Dtarget_arch=arm64
-    -Darm_neon=0
-    -Duse_allocator=none)
-
   python2 tools/gn/bootstrap/bootstrap.py --gn-gen-args "${_flags[*]}"
   out/Release/gn gen out/Release --args="${_flags[*]}" \
     --script-executable=/usr/bin/python2
 
-  ninja -C out/Release chrome chrome_sandbox widevinecdmadapter
+  ninja -C out/Release chrome chrome_sandbox chromedriver widevinecdmadapter
 }
 
 package() {
@@ -205,14 +194,12 @@ package() {
   install -Dm4755 out/Release/chrome_sandbox \
     "$pkgdir/usr/lib/chromium/chrome-sandbox"
 
-  cp -a out/Release/{*.pak,*.bin,libwidevinecdmadapter.so,icudtl.dat} \
+  cp -a out/Release/{*.pak,*.bin,chromedriver,libwidevinecdmadapter.so,icudtl.dat} \
     out/Release/locales \
     out/Release/gen/content/content_resources.pak \
     "$pkgdir/usr/lib/chromium/"
 
-  # Manually strip binaries so that 'nacl_irt_*.nexe' is left intact
-  strip $STRIP_BINARIES "$pkgdir/usr/lib/chromium/"{chromium,chrome-sandbox}
-  strip $STRIP_SHARED "$pkgdir/usr/lib/chromium/libwidevinecdmadapter.so"
+  ln -s /usr/lib/chromium/chromedriver "$pkgdir/usr/bin/chromedriver"
 
   for size in 22 24 48 64 128 256; do
     install -Dm644 "chrome/app/theme/chromium/product_logo_$size.png" \
