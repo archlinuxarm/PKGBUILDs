@@ -16,9 +16,9 @@
 #  - v8: disable lldb, unsupported architecture
 
 pkgname=('llvm' 'llvm-libs' 'llvm-ocaml' 'lldb' 'clang' 'clang-tools-extra')
-pkgver=3.8.1
+pkgver=3.9.0
 pkgrel=1
-_ocaml_ver=4.02.3
+_ocaml_ver=4.03.0
 arch=('i686' 'x86_64')
 url="http://llvm.org/"
 license=('custom:University of Illinois/NCSA Open Source License')
@@ -32,26 +32,23 @@ source=(http://llvm.org/releases/$pkgver/llvm-$pkgver.src.tar.xz{,.sig}
         http://llvm.org/releases/$pkgver/clang-tools-extra-$pkgver.src.tar.xz{,.sig}
         http://llvm.org/releases/$pkgver/compiler-rt-$pkgver.src.tar.xz{,.sig}
         http://llvm.org/releases/$pkgver/lldb-$pkgver.src.tar.xz{,.sig}
-        D17567-PR23529-Sema-part-of-attrbute-abi_tag-support.patch
-        D18035-PR23529-Mangler-part-of-attrbute-abi_tag-support.patch
+        msan-prevent-initialization-failure-with-newer-glibc.patch
         llvm-Config-llvm-config.h
         remove-threadpool.patch)
-sha256sums=('6e82ce4adb54ff3afc18053d6981b6aed1406751b8742582ed50f04b5ab475f9'
+sha256sums=('66c73179da42cee1386371641241f79ded250e117a79f571bbd69e56daa48948'
             'SKIP'
-            '4cd3836dfb4b88b597e075341cae86d61c63ce3963e45c7fe6a8bf59bb382cdf'
+            '7596a7c7d9376d0c89e60028fe1ceb4d3e535e8ea8b89e0eb094e0dcb3183d28'
             'SKIP'
-            '664a5c60220de9c290bf2a5b03d902ab731a4f95fe73a00856175ead494ec396'
+            '5b7aec46ec8e999ec683c87ad744082e1133781ee4b01905b4bdae5d20785f14'
             'SKIP'
-            '0df011dae14d8700499dfc961602ee0a9572fef926202ade5dcdfe7858411e5c'
+            'e0e5224fcd5740b61e416c549dd3dcda92f10c524216c1edb5e979e42078a59a'
             'SKIP'
-            '349148116a47e39dcb5d5042f10d8a6357d2c865034563283ca512f81cdce8a3'
+            '61280e07411e3f2b4cca0067412b39c16b0a9edd19d304d3fc90249899d12384'
             'SKIP'
-            '406754764e83d58bc3b859ab4b7893abd48c760278c4619cf4341ef9b9b75c85'
-            'd71f8677882c86accddb8a5b720f298a4d7a2ad3bce6091951a46396b8f14da1'
+            '8e4f194c2283b91644a7fff43bc4e58c36b5507f2a4d90b72f275c0bd7511c20'
             '597dc5968c695bbdbb0eac9e8eb5117fcd2773bc91edf5ec103ecffffab8bc48'
             'ea686a21076aeefdb81af22ab7e5d786e4f6d490507320275f443d8bcf663040')
-validpgpkeys=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D'
-              '11E521D646982372EB577A1F8F0871F202119294')
+validpgpkeys=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D')
 
 prepare() {
   cd "$srcdir/llvm-$pkgver.src"
@@ -66,9 +63,8 @@ prepare() {
 
   [[ $CARCH != 'aarch64' && $CARCH != 'arm' ]] && mv "$srcdir/lldb-$pkgver.src" tools/lldb
 
-  # https://llvm.org/bugs/show_bug.cgi?id=23529
-  patch -d tools/clang -Np2 <../D17567-PR23529-Sema-part-of-attrbute-abi_tag-support.patch
-  patch -d tools/clang -Np0 <../D18035-PR23529-Mangler-part-of-attrbute-abi_tag-support.patch
+  # https://reviews.llvm.org/D24736
+  patch -Np0 -d projects/compiler-rt <../msan-prevent-initialization-failure-with-newer-glibc.patch
 
   if [[ $CARCH == "arm" ]]; then
     patch -p1 -i ../remove-threadpool.patch
@@ -89,7 +85,6 @@ build() {
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DLLVM_BUILD_LLVM_DYLIB=ON \
-    -DLLVM_DYLIB_EXPORT_ALL=ON \
     -DLLVM_LINK_LLVM_DYLIB=ON \
     -DLLVM_ENABLE_RTTI=ON \
     -DLLVM_ENABLE_FFI=ON \
@@ -97,6 +92,7 @@ build() {
     -DLLVM_BUILD_DOCS=ON \
     -DLLVM_ENABLE_SPHINX=ON \
     -DLLVM_ENABLE_DOXYGEN=OFF \
+    -DLLDB_DISABLE_LIBEDIT=1 \
     -DSPHINX_WARNINGS_AS_ERRORS=OFF \
     -DFFI_INCLUDE_DIR=$(pkg-config --variable=includedir libffi) \
     -DLLVM_BINUTILS_INCDIR=/usr/include \
@@ -184,13 +180,17 @@ package_llvm-ocaml() {
 package_lldb() {
   pkgdesc="Next generation, high-performance debugger"
   url="http://lldb.llvm.org/"
-  depends=('libedit' 'libxml2' 'python2' 'python2-six')
+  depends=('libxml2' 'python2' 'python2-six')
 
   [[ $CARCH == "aarch64" || $CARCH == "arm" ]] && return
 
   cd "$srcdir/llvm-$pkgver.src"
 
   make -C build/tools/lldb DESTDIR="$pkgdir" install
+
+  # https://bugs.archlinux.org/task/50759
+  sed -i "/import_module('_lldb')/s/_lldb/lldb.&/" \
+  "$pkgdir/usr/lib/python2.7/site-packages/lldb/__init__.py"
 
   # Remove bundled six library
   rm "$pkgdir/usr/lib/python2.7/site-packages/six.py"
@@ -253,10 +253,8 @@ package_clang-tools-extra() {
   make -C build/tools/clang/tools/extra DESTDIR="$pkgdir" install
 
   # Use Python 2
-  sed -i \
-    -e 's|env python$|&2|' \
-    -e 's|/usr/bin/python$|&2|' \
-    "$pkgdir"/usr/share/clang/{clang-tidy-diff,run-clang-tidy}.py
+  sed -i 's|/usr/bin/env python|&2|' \
+    "$pkgdir"/usr/share/clang/{clang-tidy-diff,run-clang-tidy,run-find-all-symbols}.py
 
   install -Dm644 tools/clang/tools/extra/LICENSE.TXT \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
