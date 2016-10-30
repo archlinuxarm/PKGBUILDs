@@ -14,7 +14,7 @@
 
 pkgbase=boost
 pkgname=('boost-libs' 'boost')
-pkgver=1.61.0
+pkgver=1.62.0
 _boostver=${pkgver//./_}
 pkgrel=2
 url='http://www.boost.org/'
@@ -22,7 +22,7 @@ arch=('i686' 'x86_64')
 license=('custom')
 makedepends=('icu>=55.1' 'python>=3.5' 'python<3.6' 'python2' 'bzip2' 'zlib' 'openmpi')
 source=(https://downloads.sourceforge.net/project/${pkgbase}/${pkgbase}/${pkgver}/${pkgbase}_${_boostver}.tar.bz2)
-sha1sums=('f84b1a1ce764108ec3c2b7bd7704cf8dfd3c9d01')
+sha1sums=('5fd97433c3f859d8cbab1eaed4156d3068ae3648')
 
 build() {
    CFLAGS=`echo $CFLAGS | sed -e 's/armv6/armv6k/'` && CXXFLAGS="$CFLAGS"
@@ -35,11 +35,6 @@ build() {
 
    _bindir="bin.linuxarm"
    install -Dm755 tools/build/src/engine/$_bindir/b2 "${_stagedir}"/bin/b2
-
-   # Add an extra python version. This does not replace anything and python 2.x
-   # need to be the default.
-   echo "using python : 3.5 : /usr/bin/python3 : /usr/include/python3.5m : /usr/lib ;" \
-      >> project-config.jam
 
    # Support for OpenMPI
    echo "using mpi ;" >> project-config.jam
@@ -67,8 +62,36 @@ build() {
       cxxflags="${CPPFLAGS} ${CXXFLAGS} -std=c++14 -fPIC -O3" \
       linkflags="${LDFLAGS}" \
       --layout=system \
-      --prefix="${_stagedir}" \
       ${JOBS} \
+      \
+      --prefix="${_stagedir}" \
+      install
+
+   # because b2 in boost 1.62.0 doesn't seem to respect python parameter, we
+   # need another run for liboost_python3.so
+   sed -e '/using python/ s@;@: /usr/include/python${PYTHON_VERSION/3*/${PYTHON_VERSION}m} ;@' \
+      -i bootstrap.sh
+
+   ./bootstrap.sh --with-toolset=gcc --with-icu --with-python=/usr/bin/python3 \
+      --with-libraries=python
+
+   "${_stagedir}"/bin/b2 clean
+   "${_stagedir}"/bin/b2 \
+      variant=release \
+      debug-symbols=off \
+      threading=multi \
+      runtime-link=shared \
+      link=shared,static \
+      toolset=gcc \
+      python=3.5 \
+      cflags="${CPPFLAGS} ${CFLAGS} -fPIC -O3" \
+      cxxflags="${CPPFLAGS} ${CXXFLAGS} -std=c++14 -fPIC -O3" \
+      linkflags="${LDFLAGS}" \
+      --layout=system \
+      ${JOBS} \
+      \
+      --prefix="${_stagedir}/python3" \
+      --with-python \
       install
 }
 
@@ -88,6 +111,9 @@ package_boost() {
    install -Dm644 "${srcdir}/"${pkgbase}_${_boostver}/LICENSE_1_0.txt \
       "${pkgdir}"/usr/share/licenses/boost/LICENSE_1_0.txt
 
+   install -Dm644 "${_stagedir}"/python3/lib/libboost_python3.a \
+      "${pkgdir}"/usr/lib/libboost_python3.a
+
    ln -s /usr/bin/b2 "$pkgdir"/usr/bin/bjam
 }
 
@@ -98,6 +124,7 @@ package_boost-libs() {
 
    install -dm755 "${pkgdir}"/usr
    cp -a "${_stagedir}"/lib "${pkgdir}"/usr
+   cp -a "${_stagedir}"/python3/lib/libboost_python3* "${pkgdir}"/usr/lib
    rm "${pkgdir}"/usr/lib/*.a
 
    install -Dm644 "${srcdir}/"${pkgbase}_${_boostver}/LICENSE_1_0.txt \
