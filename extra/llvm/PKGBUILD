@@ -10,14 +10,14 @@
 # Contributor: Gerardo Exequiel Pozzi <vmlinuz386@yahoo.com.ar>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - v5: disable compiler-rt, don't install in clang package
-#  - v5: patch to remove ThreadPool: unsupported c++ usage
-#  - v5: disable lldb, unsupported c++ usage
-#  - v8: disable lldb, unsupported architecture
+#  - disable v5
+
+buildarch=28
+highmem=1
 
 pkgname=('llvm' 'llvm-libs' 'llvm-ocaml' 'lldb' 'clang' 'clang-tools-extra')
 pkgver=3.9.0
-pkgrel=1
+pkgrel=1.1
 _ocaml_ver=4.03.0
 arch=('i686' 'x86_64')
 url="http://llvm.org/"
@@ -33,8 +33,7 @@ source=(http://llvm.org/releases/$pkgver/llvm-$pkgver.src.tar.xz{,.sig}
         http://llvm.org/releases/$pkgver/compiler-rt-$pkgver.src.tar.xz{,.sig}
         http://llvm.org/releases/$pkgver/lldb-$pkgver.src.tar.xz{,.sig}
         msan-prevent-initialization-failure-with-newer-glibc.patch
-        llvm-Config-llvm-config.h
-        remove-threadpool.patch)
+        llvm-Config-llvm-config.h)
 sha256sums=('66c73179da42cee1386371641241f79ded250e117a79f571bbd69e56daa48948'
             'SKIP'
             '7596a7c7d9376d0c89e60028fe1ceb4d3e535e8ea8b89e0eb094e0dcb3183d28'
@@ -46,8 +45,7 @@ sha256sums=('66c73179da42cee1386371641241f79ded250e117a79f571bbd69e56daa48948'
             '61280e07411e3f2b4cca0067412b39c16b0a9edd19d304d3fc90249899d12384'
             'SKIP'
             '8e4f194c2283b91644a7fff43bc4e58c36b5507f2a4d90b72f275c0bd7511c20'
-            '597dc5968c695bbdbb0eac9e8eb5117fcd2773bc91edf5ec103ecffffab8bc48'
-            'ea686a21076aeefdb81af22ab7e5d786e4f6d490507320275f443d8bcf663040')
+            '597dc5968c695bbdbb0eac9e8eb5117fcd2773bc91edf5ec103ecffffab8bc48')
 validpgpkeys=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D')
 
 prepare() {
@@ -61,25 +59,16 @@ prepare() {
 
   mv "$srcdir/compiler-rt-$pkgver.src" projects/compiler-rt
 
-  [[ $CARCH != 'aarch64' && $CARCH != 'arm' ]] && mv "$srcdir/lldb-$pkgver.src" tools/lldb
+  mv "$srcdir/lldb-$pkgver.src" tools/lldb
 
   # https://reviews.llvm.org/D24736
   patch -Np0 -d projects/compiler-rt <../msan-prevent-initialization-failure-with-newer-glibc.patch
-
-  if [[ $CARCH == "arm" ]]; then
-    patch -p1 -i ../remove-threadpool.patch
-    rm lib/Support/ThreadPool.cpp
-    rm include/llvm/Support/ThreadPool.h
-    rm unittests/Support/ThreadPool.cpp
-  fi
 
   mkdir build
 }
 
 build() {
   cd "$srcdir/llvm-$pkgver.src/build"
-
-  [[ $CARCH == "arm" ]] && CONFIG="-DLLVM_BUILD_EXTERNAL_COMPILER_RT=ON"
 
   cmake \
     -DCMAKE_BUILD_TYPE=Release \
@@ -96,7 +85,7 @@ build() {
     -DSPHINX_WARNINGS_AS_ERRORS=OFF \
     -DFFI_INCLUDE_DIR=$(pkg-config --variable=includedir libffi) \
     -DLLVM_BINUTILS_INCDIR=/usr/include \
-    $CONFIG ..
+    ..
 
   make
   make ocaml_doc
@@ -182,8 +171,6 @@ package_lldb() {
   url="http://lldb.llvm.org/"
   depends=('libxml2' 'python2' 'python2-six')
 
-  [[ $CARCH == "aarch64" || $CARCH == "arm" ]] && return
-
   cd "$srcdir/llvm-$pkgver.src"
 
   make -C build/tools/lldb DESTDIR="$pkgdir" install
@@ -215,7 +202,7 @@ package_clang() {
   cd "$srcdir/llvm-$pkgver.src"
 
   make -C build/tools/clang DESTDIR="$pkgdir" install
-  [[ $CARCH != "arm" ]] && make -C build/projects/compiler-rt DESTDIR="$pkgdir" install
+  make -C build/projects/compiler-rt DESTDIR="$pkgdir" install
 
   # Remove documentation sources
   rm -r "$pkgdir"/usr/share/doc/$pkgname/html/{_sources,.buildinfo}
