@@ -8,28 +8,25 @@
 #  - Moved .pc files to mesa-libgl that reference libraries in mesa-libgl
 #  - Build vc4 gallium driver for v6/v7
 
+noautobuild=1
+
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=12.0.3
-pkgrel=3.1
+pkgver=13.0.0
+pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
              'systemd' 'libomxil-bellagio' 'libgcrypt' 'clang')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
-options=('!libtool')
 source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        remove-libpthread-stubs.patch
-        0001-loader-dri3-add-get_dri_screen-to-the-vtable.patch
-        0002-loader-dri3-import-prime-buffers-in-the-currently-bo.patch)
-sha256sums=('1dc86dd9b51272eee1fad3df65e18cda2e556ef1bc0b6e07cd750b9757f493b1'
+        remove-libpthread-stubs.patch)
+sha256sums=('94edb4ebff82066a68be79d9c2627f15995e1fe10f67ab3fc63deb842027d727'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
-            'd82c329e89754266eb1538df29b94d33692a66e3b6882b2cee78f4d5aab4a39c'
-            '52eb98eb6c9c644383d9743692aea302d84c4f89cfaa7a276b9276befc2d9780'
-            '96ad07e241d16802b14b14ca3d6965fa7f4f4b8c678d62ba375291910dce3b4a')
+            '75ab53ad44b95204c788a2988e97a5cb963bdbf6072a5466949a2afb79821c8f')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 
 prepare() {
@@ -38,11 +35,6 @@ prepare() {
   # Now mesa checks for libpthread-stubs - so remove the check
   patch -Np1 -i ../remove-libpthread-stubs.patch
   
-  # fix FS#50240 - https://bugs.freedesktop.org/show_bug.cgi?id=71759
-  # merged upstream
-  patch -Np1 -i ../0001-loader-dri3-add-get_dri_screen-to-the-vtable.patch
-  patch -Np1 -i ../0002-loader-dri3-import-prime-buffers-in-the-currently-bo.patch
-
   autoreconf -fiv
 }
 
@@ -84,7 +76,7 @@ build() {
 
 package_libva-mesa-driver() {
   pkgdesc="VA-API implementation for gallium"
-  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'elfutils')
+  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libgcrypt' 'libxshmfence')
 
   install -m755 -d ${pkgdir}/usr/lib
   cp -rv ${srcdir}/fakeinstall/usr/lib/dri ${pkgdir}/usr/lib
@@ -95,8 +87,8 @@ package_libva-mesa-driver() {
                
 package_mesa() {
   pkgdesc="an open-source implementation of the OpenGL specification"
-  depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'systemd' 'elfutils' 
-           'libomxil-bellagio' 'expat' 'libgcrypt' 'libtxc_dxtn' 'llvm-libs')
+  depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'libelf' 
+           'libomxil-bellagio' 'libgcrypt' 'libtxc_dxtn' 'llvm-libs')
   optdepends=('opengl-man-pages: for the OpenGL API man pages'
               'mesa-vdpau: for accelerated video playback'
               'libva-mesa-driver: for accelerated video playback')
