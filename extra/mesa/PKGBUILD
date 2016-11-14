@@ -6,9 +6,6 @@
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
 #  - Removed libgles, libegl and khrplatform-devel from conflicts for marvell-libgfx compatibility.
 #  - Moved .pc files to mesa-libgl that reference libraries in mesa-libgl
-#  - Build vc4 gallium driver for v6/v7
-
-noautobuild=1
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
@@ -41,12 +38,10 @@ prepare() {
 build() {
   cd ${srcdir}/?esa-*
 
-  [[ $CARCH == "armv7h" || $CARCH == "armv6h" ]] && VC4=',vc4'
-
   ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-gallium-drivers=freedreno,nouveau,swrast,virgl${VC4} \
+    --with-gallium-drivers=freedreno,nouveau,swrast,virgl,vc4 \
     --with-dri-drivers=nouveau,swrast \
     --with-egl-platforms=x11,drm,wayland \
     --with-sha1=libgcrypt \
