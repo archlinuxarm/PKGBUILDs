@@ -1,161 +1,32 @@
-From 901b53bdb99f888eb2a21cf8a50d9d49bdf2fb5e Mon Sep 17 00:00:00 2001
+From 2119a1cd7b9bf7a762619e15ebb2a8a701055c63 Mon Sep 17 00:00:00 2001
 From: Kevin Mihelich <kevin@archlinuxarm.org>
-Date: Sat, 31 Oct 2015 12:27:08 -0600
+Date: Mon, 18 Jul 2016 19:20:59 -0600
 Subject: [PATCH] arch linux arm modifications
 
-Signed-off-by: Kevin Mihelich <kevin@archlinuxarm.org>
 ---
- include/configs/mx6_common.h |  4 ++-
- include/configs/wandboard.h  | 80 ++++++++++++++++++++++++++------------------
- 2 files changed, 51 insertions(+), 33 deletions(-)
+ configs/wandboard_defconfig | 5 +++++
+ 1 file changed, 5 insertions(+)
 
-diff --git a/include/configs/mx6_common.h b/include/configs/mx6_common.h
-index ef4cb68..254458d 100644
---- a/include/configs/mx6_common.h
-+++ b/include/configs/mx6_common.h
-@@ -68,7 +68,7 @@
- #define CONFIG_SYS_LOAD_ADDR	CONFIG_LOADADDR
- 
- #ifndef CONFIG_BOOTDELAY
--#define CONFIG_BOOTDELAY	3
-+#define CONFIG_BOOTDELAY	1
- #endif
- 
- /* allow to overwrite serial and ethaddr */
-@@ -82,6 +82,8 @@
- #define CONFIG_SUPPORT_RAW_INITRD
- #define CONFIG_CMD_FS_GENERIC
- #define CONFIG_DOS_PARTITION
-+#define CONFIG_CMD_PART
-+#define CONFIG_PARTITION_UUIDS
- #define CONFIG_CMD_EXT2
- #define CONFIG_CMD_EXT4
- #define CONFIG_CMD_EXT4_WRITE
-diff --git a/include/configs/wandboard.h b/include/configs/wandboard.h
-index 6e8aec2..f8eb0ca 100644
---- a/include/configs/wandboard.h
-+++ b/include/configs/wandboard.h
-@@ -86,19 +86,26 @@
- #define CONFIG_IMX_HDMI
- #define CONFIG_IMX_VIDEO_SKIP
- 
-+#define CONFIG_IDENT_STRING " Arch Linux ARM"
-+
- #define CONFIG_ENV_VARS_UBOOT_RUNTIME_CONFIG
- #define CONFIG_EXTRA_ENV_SETTINGS \
- 	"script=boot.scr\0" \
- 	"image=zImage\0" \
-+	"bootdir=/boot\0" \
- 	"console=ttymxc0\0" \
- 	"splashpos=m,m\0" \
- 	"fdtfile=undefined\0" \
-+	"fdtdir=/boot/dtbs\0" \
- 	"fdt_high=0xffffffff\0" \
- 	"initrd_high=0xffffffff\0" \
- 	"fdt_addr=0x18000000\0" \
-+	"rdaddr=0x12A00000\0" \
-+	"rdfile=initramfs-linux.img\0" \
- 	"boot_fdt=try\0" \
-+	"optargs=\0" \
- 	"ip_dyn=yes\0" \
--	"mmcdev=" __stringify(CONFIG_SYS_MMC_ENV_DEV) "\0" \
-+	"mmcdev=0\0" \
- 	"mmcpart=1\0" \
- 	"mmcroot=/dev/mmcblk0p2 rootwait rw\0" \
- 	"update_sd_firmware_filename=u-boot.imx\0" \
-@@ -116,7 +123,9 @@
- 			"fi; "	\
- 		"fi\0" \
- 	"mmcargs=setenv bootargs console=${console},${baudrate} " \
--		"root=${mmcroot}; run videoargs\0" \
-+		"${optargs} " \
-+		"root=${root} " \
-+		"video=${video}\0" \
- 	"videoargs=" \
- 		"setenv nextcon 0; " \
- 		"if hdmidet; then " \
-@@ -143,27 +152,43 @@
- 			"echo '- no FWBADAPT-7WVGA-LCD-F07A-0102 display';" \
- 		"fi; " \
- 		"setenv bootargs ${bootargs} ${fbmem}\0" \
--	"loadbootscript=" \
--		"fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${script};\0" \
--	"bootscript=echo Running bootscript from mmc ...; " \
--		"source\0" \
--	"loadimage=fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${image}\0" \
--	"loadfdt=fatload mmc ${mmcdev}:${mmcpart} ${fdt_addr} ${fdtfile}\0" \
--	"mmcboot=echo Booting from mmc ...; " \
--		"run mmcargs; " \
--		"if test ${boot_fdt} = yes || test ${boot_fdt} = try; then " \
--			"if run loadfdt; then " \
--				"bootz ${loadaddr} - ${fdt_addr}; " \
--			"else " \
--				"if test ${boot_fdt} = try; then " \
--					"bootz; " \
-+	"loadimage=load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/${image}\0" \
-+	"loadrd=load ${devtype} ${bootpart} ${rdaddr} ${bootdir}/${rdfile}\0" \
-+	"loadfdt=echo loading ${fdtdir}/${fdtfile} ...; load ${devtype} ${bootpart} ${fdt_addr} ${fdtdir}/${fdtfile}\0" \
-+	"mmcboot=usb start;" \
-+		"for devtype in mmc usb; do " \
-+			"setenv devnum 0;" \
-+			"while ${devtype} dev ${devnum}; do " \
-+				"echo ${devtype} found on device ${devnum};" \
-+				"setenv bootpart ${devnum}:1;" \
-+				"part uuid ${devtype} ${bootpart} uuid;" \
-+				"setenv root PARTUUID=${uuid} rw rootwait;" \
-+				"echo Checking for: ${bootdir}/uEnv.txt ...;" \
-+				"if test -e ${devtype} ${bootpart} ${bootdir}/uEnv.txt; then " \
-+					"load ${devtype} ${bootpart} ${loadaddr} ${bootdir}/uEnv.txt;" \
-+					"env import -t ${loadaddr} ${filesize};" \
-+					"echo Loaded environment from ${bootdir}/uEnv.txt;" \
-+					"echo Checking if uenvcmd is set ...;" \
-+					"if test -n ${uenvcmd}; then " \
-+						"echo Running uenvcmd ...;" \
-+						"run uenvcmd;" \
-+					"fi;" \
-+				"fi;" \
-+				"if run loadimage; then " \
-+					"run mmcargs;" \
-+					"if run loadfdt; then " \
-+						"if run loadrd; then " \
-+							"bootz ${loadaddr} ${rdaddr}:${filesize} ${fdt_addr};" \
-+						"else " \
-+							"bootz ${loadaddr} - ${fdt_addr};" \
-+						"fi;" \
-+					"fi;" \
- 				"else " \
--					"echo WARN: Cannot load the DT; " \
--				"fi; " \
--			"fi; " \
--		"else " \
--			"bootz; " \
--		"fi;\0" \
-+					"echo No kernel found;" \
-+				"fi;" \
-+				"setexpr devnum ${devnum} + 1;" \
-+			"done;" \
-+		"done;\0" \
- 	"netargs=setenv bootargs console=${console},${baudrate} " \
- 		"root=/dev/nfs " \
- 	"ip=dhcp nfsroot=${serverip}:${nfsroot},v3,tcp\0" \
-@@ -202,16 +227,7 @@
- 
- #define CONFIG_BOOTCOMMAND \
- 	   "run findfdt; " \
--	   "mmc dev ${mmcdev}; if mmc rescan; then " \
--		   "if run loadbootscript; then " \
--			   "run bootscript; " \
--		   "else " \
--			   "if run loadimage; then " \
--				   "run mmcboot; " \
--			   "else run netboot; " \
--			   "fi; " \
--		   "fi; " \
--	   "else run netboot; fi"
-+	   "run mmcboot;"
- 
- /* Physical Memory Map */
- #define CONFIG_NR_DRAM_BANKS		1
+diff --git a/configs/wandboard_defconfig b/configs/wandboard_defconfig
+index d338ffc..0fefe3a 100644
+--- a/configs/wandboard_defconfig
++++ b/configs/wandboard_defconfig
+@@ -3,6 +3,10 @@ CONFIG_ARCH_MX6=y
+ CONFIG_SPL_GPIO_SUPPORT=y
+ CONFIG_SPL_LIBCOMMON_SUPPORT=y
+ CONFIG_SPL_LIBGENERIC_SUPPORT=y
++CONFIG_AUTOBOOT_KEYED=y
++CONFIG_AUTOBOOT_PROMPT="Press SPACE to abort autoboot in %d seconds\n"
++CONFIG_AUTOBOOT_DELAY_STR="d"
++CONFIG_AUTOBOOT_STOP_STR=" "
+ CONFIG_TARGET_WANDBOARD=y
+ CONFIG_SPL_EXT_SUPPORT=y
+ CONFIG_SPL_I2C_SUPPORT=y
+@@ -39,3 +43,4 @@ CONFIG_USB=y
+ CONFIG_USB_STORAGE=y
+ # CONFIG_VIDEO_SW_CURSOR is not set
+ CONFIG_OF_LIBFDT=y
++CONFIG_IDENT_STRING=" Arch Linux ARM"
 -- 
-2.6.1
+2.10.2
 
