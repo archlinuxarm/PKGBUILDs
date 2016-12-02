@@ -4,8 +4,8 @@
 buildarch=4
 
 pkgname=uboot-odroid-xu3
-pkgver=2016.07
-pkgrel=2
+pkgver=2016.11
+pkgrel=1
 pkgdesc="U-Boot for ODROID-XU3"
 arch=('armv7h')
 url='http://www.denx.de/wiki/U-Boot/WebHome'
@@ -22,11 +22,11 @@ source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver}.tar.bz2"
         'sd_fusing.sh'
         'boot.txt'
         'mkscr')
-md5sums=('425a3fa610a7d972e5092a0e92276c70'
+md5sums=('ca1f6e019d08aff8d0ca1beb2e66737d'
          '38fb058aa3bcc568f9547c85517949b9'
          '09c42bed980921cfc914e97e067ba9a3'
          'fd01dda20b999e0b731c7063431a42b3'
-         'a24247db919d89e2fadf48b6760cb7f2'
+         '683f66010666783d086af222c052d57e'
          '8a31acf5da5722698f54d1fe15c482bb'
          '52306aa4cf2c3499ecfcea026fb2741c'
          '021623a04afd29ac3f368977140cfbfd')
