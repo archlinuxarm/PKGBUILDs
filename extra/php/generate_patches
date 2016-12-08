@@ -1,0 +1,48 @@
+#!/bin/bash
+
+. PKGBUILD
+
+makepkg -o --nodeps --noprepare --skipinteg
+
+pushd src/${pkgbase}-${pkgver}
+
+sed '/APACHE_THREADED_MPM=/d' -i.orig sapi/apache2handler/config.m4 -i.orig configure
+
+sed 's/.conf.default/.conf/g' -i.orig sapi/fpm/Makefile.frag
+
+sed \
+	-e 's#run/php-fpm.pid#/run/php-fpm/php-fpm.pid#' \
+	-e 's#^;error_log =.*#error_log = syslog#' \
+	-i.orig sapi/fpm/php-fpm.conf.in
+
+sed \
+	-e 's#^listen =.*#listen = /run/php-fpm/php-fpm.sock#' \
+	-e 's#^;listen.owner =#listen.owner =#' \
+	-e 's#^;listen.group =#listen.group =#' \
+	-e 's#^;chdir =.*#;chdir = /srv/http#' \
+	-i.orig sapi/fpm/www.conf.in
+
+sed \
+	-e 's#^PIDFile=.*#PIDFile=/run/php-fpm/php-fpm.pid#' \
+	-i.orig sapi/fpm/php-fpm.service.in
+
+extensions=";extension=bcmath.so\n;extension=bz2.so\n;extension=calendar.so\nextension=curl.so\n;extension=dba.so\n;extension=enchant.so\n;extension=exif.so\n;extension=ftp.so\n;extension=gd.so\n;extension=gettext.so\n;extension=gmp.so\n;extension=iconv.so\n;extension=imap.so\n;extension=intl.so\n;extension=ldap.so\n;extension=mcrypt.so\n;extension=mysqli.so\n;extension=odbc.so\n;zend_extension=opcache.so\n;extension=pdo_dblib.so\n;extension=pdo_mysql.so\n;extension=pdo_odbc.so\n;extension=pdo_pgsql.so\n;extension=pdo_sqlite.so\n;extension=pgsql.so\n;extension=pspell.so\n;extension=shmop.so\n;extension=snmp.so\n;extension=soap.so\n;extension=sockets.so\n;extension=sqlite3.so\n;extension=sysvmsg.so\n;extension=sysvsem.so\n;extension=sysvshm.so\n;extension=tidy.so\n;extension=xmlrpc.so\n;extension=xsl.so\nextension=zip.so\n"
+
+sed \
+	-r ":a;N;\$!ba;s/; Windows Extensions\n.+;?extension=php_[a-z]+\.dll\n/${extensions}/g" \
+	-i.orig php.ini-production
+sed \
+	-e 's#^; extension_dir = "\./"$#extension_dir = "/usr/lib/php/modules/"#g' \
+	-i php.ini-production
+
+diff -u sapi/apache2handler/config.m4.orig sapi/apache2handler/config.m4 | filterdiff --clean --remove-timestamps > ../../apache.patch
+diff -u configure.orig configure | filterdiff --clean --remove-timestamps >> ../../apache.patch
+
+diff -u sapi/fpm/Makefile.frag.orig sapi/fpm/Makefile.frag | filterdiff --clean --remove-timestamps > ../../php-fpm.patch
+diff -u sapi/fpm/php-fpm.conf.in.orig sapi/fpm/php-fpm.conf.in | filterdiff --clean --remove-timestamps >> ../../php-fpm.patch
+diff -u sapi/fpm/www.conf.in.orig sapi/fpm/www.conf.in | filterdiff --clean --remove-timestamps >> ../../php-fpm.patch
+diff -u sapi/fpm/php-fpm.service.in.orig sapi/fpm/php-fpm.service.in | filterdiff --clean --remove-timestamps >> ../../php-fpm.patch
+
+diff -u php.ini-production.orig php.ini-production | filterdiff --clean --remove-timestamps > ../../php.ini.patch
+
+popd
