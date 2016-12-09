@@ -9,7 +9,7 @@ _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.104
-pkgrel=2
+pkgrel=3
 bfqver=v7r8
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
@@ -17,23 +17,26 @@ license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
-        'config'
+        '0001-exynos-ss-GCC6-compatibility.patch'
+        '0002-packet-fix-race-condition-in-packet_set_ring.patch'
         "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.8+-${bfqver}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver:0:4}.8.patch"
         "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.8+-${bfqver}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver:0:4}.8.patch"
         "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.8+-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.8+.patch"
-        'exynos-gcc6.patch')
+        'config')
 md5sums=('a3ba8ae98922ed7768e1d80db0085f8a'
-         '3fadb4550c405046b7f695152681b1d4'
+         '29bc7bd1a4cb2fbfb25a63c6dd993ffb'
+         'bda0fddf55f95c0e9a54b2522d8399eb'
          '003f1554be6b672100d2f2401a574d92'
          '12ffe57584b4f2adcc3e184dc6948772'
          '9e78f9f5364f8ebb981aeb235dcb7415'
-         'd4c327797fb7124076541859ac3d4e90')
+         '3fadb4550c405046b7f695152681b1d4')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
-  # Patch for GCC 6 compatibility
-  patch -sNp1 -i ${srcdir}/exynos-gcc6.patch
+  # ALARM patches
+  git apply ../0001-exynos-ss-GCC6-compatibility.patch
+  git apply ../0002-packet-fix-race-condition-in-packet_set_ring.patch
 
   # Add BFQ patches
   patch -sNp1 -i "${srcdir}/0001-block-cgroups-kconfig-build-bits-for-BFQ-${bfqver}-${pkgver:0:4}.8.patch"
