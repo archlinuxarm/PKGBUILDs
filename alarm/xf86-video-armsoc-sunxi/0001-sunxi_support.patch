@@ -1,0 +1,685 @@
+From: Simon Eisenmann <simon@longsleep.org>
+Date: Sun, 31 Jul 2016 18:25:44 +0200
+Subject: sunxi_support
+
+Import changes from sunxi_arm_video.tar.bz2 as found on the Pine64 wiki.
+---
+ README                            |  16 ++--
+ src/Makefile.am                   |   4 +-
+ src/armsoc_dri2.c                 |  11 ++-
+ src/armsoc_driver.c               |   5 +-
+ src/armsoc_dumb.c                 |   8 +-
+ src/armsoc_exa_null.c             |  37 +++++++-
+ src/drmmode_display.c             |  25 +++++-
+ src/drmmode_driver.h              |   2 +
+ src/drmmode_kirin/drmmode_kirin.c |  95 ++++++++++++++++++++
+ src/drmmode_sunxi/drmmode_sunxi.c | 177 ++++++++++++++++++++++++++++++++++++++
+ src/drmmode_sunxi/sunxi_drm.h     |  94 ++++++++++++++++++++
+ 11 files changed, 453 insertions(+), 21 deletions(-)
+ create mode 100644 src/drmmode_kirin/drmmode_kirin.c
+ create mode 100755 src/drmmode_sunxi/drmmode_sunxi.c
+ create mode 100755 src/drmmode_sunxi/sunxi_drm.h
+
+diff --git a/README b/README
+index 4329914..36b9782 100644
+--- a/README
++++ b/README
+@@ -5,25 +5,21 @@ DRM driver selection
+ --------------------
+ While most operations use only the standard DRM modesetting interfaces, certain operations
+ unavoidably rely on specific driver behaviour (including dumb buffer allocation flags and cursor
+-plane z-ordering). As such, the armsoc driver must be configured for a particular DRM driver.
++plane z-ordering). As such, the armsoc driver should choose a particular DRM driver dynamically
++according to the current environment.
+ 
+ The currently supported DRM drivers are:
+ - pl111
+ - exynos
+-
+-To configure armsoc for one of these, pass the --with-drmmode option to ./configure. For example:
+-
+-$ ./configure --with-drmmode=pl111
++- kirin
+ 
+ For other drivers, you will need to implement this support yourself. A template implementation is
+-provided in src/drmmode_template which can be built by passing --with-drmmode=template to ./configure.
++provided in src/drmmode_template.
+ The interface is defined and documented in src/drmmode_driver.h, and you should refer to this while
+ modifying the template to set up your DRM driver's abstraction appropriately.
+ 
+-You can also copy src/drmmode_template into src/drmmode_<yourdrivername> and build with:
+-
+-$ ./configure --with-drmmode=<yourdrivername>
+-
++You can also copy src/drmmode_template into src/drmmode_<yourdrivername>,
++modify the driver_name to match with the name used in the kernel drm driver.
+ 
+ Summary of bo reference counting
+ --------------------------------
+diff --git a/src/Makefile.am b/src/Makefile.am
+index e5bfe8b..d4a1417 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -41,7 +41,9 @@ armsoc_drv_la_LDFLAGS = -module -avoid-version -no-undefined
+ armsoc_drv_la_LIBADD = @XORG_LIBS@
+ armsoc_drv_ladir = @moduledir@/drivers
+ DRMMODE_SRCS = drmmode_exynos/drmmode_exynos.c \
+-	drmmode_pl111/drmmode_pl111.c
++	drmmode_pl111/drmmode_pl111.c \
++	drmmode_kirin/drmmode_kirin.c \
++	drmmode_sunxi/drmmode_sunxi.c 
+ 
+ 
+ armsoc_drv_la_SOURCES = \
+diff --git a/src/armsoc_dri2.c b/src/armsoc_dri2.c
+index dc502e4..e89d494 100755
+--- a/src/armsoc_dri2.c
++++ b/src/armsoc_dri2.c
+@@ -375,6 +375,8 @@ ARMSOCDRI2ReferenceBuffer(DRI2BufferPtr buffer)
+ /**
+  *
+  */
++static struct armsoc_bo *boFromBuffer(DRI2BufferPtr buf);
++int sunxi_rotate_copy(struct armsoc_bo *src_bo, struct armsoc_bo *dst_bo);
+ static void
+ ARMSOCDRI2CopyRegion(DrawablePtr pDraw, RegionPtr pRegion,
+ 		DRI2BufferPtr pDstBuffer, DRI2BufferPtr pSrcBuffer)
+@@ -385,10 +387,17 @@ ARMSOCDRI2CopyRegion(DrawablePtr pDraw, RegionPtr pRegion,
+ 	DrawablePtr pDstDraw = dri2draw(pDraw, pDstBuffer);
+ 	RegionPtr pCopyClip;
+ 	GCPtr pGC;
+-
++    struct armsoc_bo *src_bo, *dst_bo;
++    src_bo = boFromBuffer(pSrcBuffer);
++	dst_bo = boFromBuffer(pDstBuffer);
+ 	DEBUG_MSG("pDraw=%p, pDstBuffer=%p (%p), pSrcBuffer=%p (%p)",
+ 			pDraw, pDstBuffer, pSrcDraw, pSrcBuffer, pDstDraw);
++    xf86Msg(X_INFO," haredware rotate  bbbbbbb\n");
+ 
++    if(!sunxi_rotate_copy(src_bo, dst_bo)) {
++        xf86Msg(X_ERROR," haredware rotate  err\n");
++        return;
++    }
+ 	pGC = GetScratchGC(pDstDraw->depth, pScreen);
+ 	if (!pGC)
+ 		return;
+diff --git a/src/armsoc_driver.c b/src/armsoc_driver.c
+index f21d8ef..3556fd8 100644
+--- a/src/armsoc_driver.c
++++ b/src/armsoc_driver.c
+@@ -735,6 +735,8 @@ static struct drmmode_interface *get_drmmode_implementation(int drm_fd)
+ 	struct drmmode_interface *ifaces[] = {
+ 		&exynos_interface,
+ 		&pl111_interface,
++		&kirin_interface,
++		&sunxi_interface,
+ 	};
+ 	int i;
+ 
+@@ -746,6 +748,8 @@ static struct drmmode_interface *get_drmmode_implementation(int drm_fd)
+ 		struct drmmode_interface *iface = ifaces[i];
+ 		if (strcmp(version->name, iface->driver_name) == 0) {
+ 			ret = iface;
++	            xf86Msg(X_INFO, "######%s\n",iface->driver_name);
++
+ 			break;
+ 		}
+ 	}
+@@ -1170,7 +1174,6 @@ ARMSOCScreenInit(SCREEN_INIT_ARGS_DECL)
+ 	} else {
+ 		pARMSOC->lockFD = -1;
+ 	}
+-
+ 	TRACE_EXIT();
+ 	return TRUE;
+ 
+diff --git a/src/armsoc_dumb.c b/src/armsoc_dumb.c
+index 7e6dbd9..11d3978 100644
+--- a/src/armsoc_dumb.c
++++ b/src/armsoc_dumb.c
+@@ -67,6 +67,7 @@ struct armsoc_bo {
+ 	 */
+ 	uint32_t original_size;
+ 	uint32_t name;
++enum armsoc_buf_type buf_type;
+ };
+ 
+ /* device related functions:
+@@ -170,7 +171,7 @@ struct armsoc_bo *armsoc_bo_new_with_dim(struct armsoc_device *dev,
+ 	new_buf->refcnt = 1;
+ 	new_buf->dmabuf = -1;
+ 	new_buf->name = 0;
+-
++new_buf->buf_type = buf_type;
+ 	return new_buf;
+ }
+ 
+@@ -186,7 +187,6 @@ static void armsoc_bo_del(struct armsoc_bo *bo)
+ 
+ 	assert(bo->refcnt == 0);
+ 	assert(bo->dmabuf < 0);
+-
+ 	if (bo->map_addr) {
+ 		/* always map/unmap the full buffer for consistency */
+ 		munmap(bo->map_addr, bo->original_size);
+@@ -342,10 +342,12 @@ int armsoc_bo_cpu_prep(struct armsoc_bo *bo, enum armsoc_gem_op op)
+ 	}
+ 	return ret;
+ }
+-
++void sunxi_sync_gem(struct armsoc_bo *src_bo);
+ int armsoc_bo_cpu_fini(struct armsoc_bo *bo, enum armsoc_gem_op op)
+ {
+ 	assert(bo->refcnt > 0);
++//if(bo->buf_type == ARMSOC_BO_SCANOUT)
++  //  sunxi_sync_gem(bo);
+ 	return msync(bo->map_addr, bo->size, MS_SYNC | MS_INVALIDATE);
+ }
+ 
+diff --git a/src/armsoc_exa_null.c b/src/armsoc_exa_null.c
+index 17f5dd0..12f78e6 100644
+--- a/src/armsoc_exa_null.c
++++ b/src/armsoc_exa_null.c
+@@ -53,13 +53,42 @@ PrepareSolidFail(PixmapPtr pPixmap, int alu, Pixel planemask, Pixel fill_colour)
+ {
+ 	return FALSE;
+ }
+-
++int sunxi_rotate_copy(struct armsoc_bo *src_bo, struct armsoc_bo *dst_bo);
+ static Bool
+-PrepareCopyFail(PixmapPtr pSrc, PixmapPtr pDst, int xdir, int ydir,
++sunxiPrepareCopy(PixmapPtr pSrc, PixmapPtr pDst, int xdir, int ydir,
+ 		int alu, Pixel planemask)
+ {
++    struct ARMSOCPixmapPrivRec *priv_src = exaGetPixmapDriverPrivate(pSrc);
++    struct ARMSOCPixmapPrivRec *priv_dst = exaGetPixmapDriverPrivate(pDst);
++    ScreenPtr pScreen = pSrc->drawable.pScreen;
++	ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
++    struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
++    struct armsoc_bo *src_bo = priv_src->bo;
++    struct armsoc_bo *dst_bo = priv_dst->bo;
++    if(pARMSOC->scanout == dst_bo)
++    {
++        //xf86Msg(X_INFO,"########copy dispay#######\n");
++        if (armsoc_bo_width(src_bo) == armsoc_bo_width(dst_bo) &&
++	    armsoc_bo_height(src_bo) == armsoc_bo_height(dst_bo) &&
++	    armsoc_bo_bpp(src_bo) == armsoc_bo_bpp(dst_bo) &&
++        armsoc_bo_depth(src_bo) == armsoc_bo_depth(dst_bo)) {
++            //if(sunxi_rotate_copy(src_bo, dst_bo))// we not support crop,so del it
++                return FALSE;
++            return TRUE;
++        }
++    }
+ 	return FALSE;
+ }
++static void sunxiCopy (PixmapPtr pDstPixmap,
++                  int srcX,
++                  int srcY, int dstX, int dstY, int width, int height)
++{
++    return;
++}
++static void sunxiDoneCopy (PixmapPtr pDstPixmap)
++{
++    return ;
++}
+ 
+ static Bool
+ CheckCompositeFail(int op, PicturePtr pSrcPicture, PicturePtr pMaskPicture,
+@@ -146,7 +175,9 @@ InitNullEXA(ScreenPtr pScreen, ScrnInfoPtr pScrn, int fd)
+ 	exa->PixmapIsOffscreen = ARMSOCPixmapIsOffscreen;
+ 
+ 	/* Always fallback for software operations */
+-	exa->PrepareCopy = PrepareCopyFail;
++	exa->PrepareCopy = sunxiPrepareCopy;
++    exa->Copy = sunxiCopy;
++    exa->DoneCopy = sunxiDoneCopy;
+ 	exa->PrepareSolid = PrepareSolidFail;
+ 	exa->CheckComposite = CheckCompositeFail;
+ 	exa->PrepareComposite = PrepareCompositeFail;
+diff --git a/src/drmmode_display.c b/src/drmmode_display.c
+index 8e45b5f..eaa33f3 100644
+--- a/src/drmmode_display.c
++++ b/src/drmmode_display.c
+@@ -931,6 +931,7 @@ drmmode_output_mode_valid(xf86OutputPtr output, DisplayModePtr mode)
+ 		/* Default modes are harmful here. */
+ 		return MODE_BAD;
+ 
++
+ 	return MODE_OK;
+ }
+ 
+@@ -1011,7 +1012,25 @@ drmmode_output_destroy(xf86OutputPtr output)
+ 	free(drmmode_output);
+ 	output->driver_private = NULL;
+ }
+-
++/*
++static void stack_dump(void)
++{
++    const int BT_SIZE = 6;
++    void *array[BT_SIZE];
++    const char **mod;
++    int size, i;
++    Dl_info info;
++
++    ErrorFSigSafe("\n");
++    ErrorFSigSafe("Backtrace:\n");
++    size = backtrace(array, BT_SIZE);
++    mod = backtrace_symbols(array[i], size);
++
++    for (i = 0; i < size; i++) {
++            xf86Msg(X_ERROR,"%s\n",mod[i]);
++    }
++}
++*/
+ static void
+ drmmode_output_dpms(xf86OutputPtr output, int mode)
+ {
+@@ -1020,7 +1039,9 @@ drmmode_output_dpms(xf86OutputPtr output, int mode)
+ 	drmModePropertyPtr prop;
+ 	struct drmmode_rec *drmmode = drmmode_output->drmmode;
+ 	int mode_id = -1, i;
+-
++    xf86Msg(X_ERROR,"MODE :%d  \n",mode);
++//    xorg_backtrace();
++//    stack_dump();
+ 	for (i = 0; i < connector->count_props; i++) {
+ 		prop = drmModeGetProperty(drmmode->fd, connector->props[i]);
+ 		if (!prop)
+diff --git a/src/drmmode_driver.h b/src/drmmode_driver.h
+index 55c8b8a..1fab848 100644
+--- a/src/drmmode_driver.h
++++ b/src/drmmode_driver.h
+@@ -104,6 +104,8 @@ struct drmmode_interface {
+ 
+ extern struct drmmode_interface exynos_interface;
+ extern struct drmmode_interface pl111_interface;
++extern struct drmmode_interface kirin_interface;
++extern struct drmmode_interface sunxi_interface;
+ 
+ 
+ #endif
+diff --git a/src/drmmode_kirin/drmmode_kirin.c b/src/drmmode_kirin/drmmode_kirin.c
+new file mode 100644
+index 0000000..f956a9b
+--- /dev/null
++++ b/src/drmmode_kirin/drmmode_kirin.c
+@@ -0,0 +1,95 @@
++/*
++ * Copyright © 2016 Linaro Limited.
++ * Copyright © 2016 Hisilicon Limited.
++ *
++ * Permission is hereby granted, free of charge, to any person
++obtaining a
++ * copy of this software and associated documentation files (the
++"Software"),
++ * to deal in the Software without restriction, including without
++limitation
++ * the rights to use, copy, modify, merge, publish, distribute,
++sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom
++the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the
++next
++ * paragraph) shall be included in all copies or substantial portions
++of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT
++SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
++OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++DEALINGS IN THE
++ * SOFTWARE.
++ *
++ */
++
++#include <xf86drm.h>
++#include "../drmmode_driver.h"
++
++/* Cursor dimensions
++ * Technically we probably don't have any size limit.. since we
++ * are just using an overlay... but xserver will always create
++ * cursor images in the max size, so don't use width/height values
++ * that are too big
++ */
++/* width */
++#define CURSORW   (64)
++/* height */
++#define CURSORH   (64)
++/* Padding added down each side of cursor image */
++#define CURSORPAD (0)
++
++#define ALIGN(val, align)      (((val) + (align) - 1) & ~((align) - 1))
++
++static int create_custom_gem(int fd, struct armsoc_create_gem *create_gem)
++{
++	struct drm_mode_create_dumb arg;
++	unsigned int pitch;
++	int ret;
++
++	/* For 32bpp mali 450GPU needs pitch 8 bytes alignment */
++	pitch = ALIGN(create_gem->width * ((create_gem->bpp + 7) / 8), 8);
++	memset(&arg, 0, sizeof(arg));
++	arg.width = create_gem->width;
++	arg.height = create_gem->height;
++	arg.bpp = create_gem->bpp;
++	arg.pitch = pitch;
++	arg.size = pitch * create_gem->height;
++
++	ret = drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &arg);
++	if (ret)
++		return ret;
++
++	create_gem->handle = arg.handle;
++	create_gem->pitch = arg.pitch;
++	create_gem->size = arg.size;
++
++	return 0;
++}
++
++struct drmmode_interface kirin_interface = {
++	"kirin"               /* name of drm driver */,
++	1                     /* use_page_flip_events */,
++	1                     /* use_early_display */,
++	CURSORW               /* cursor width */,
++	CURSORH               /* cursor_height */,
++	CURSORPAD             /* cursor padding */,
++	HWCURSOR_API_NONE     /* software cursor */,
++	NULL                  /* no plane for cursor */,
++	0                     /* vblank_query_supported */,
++	create_custom_gem     /* create_custom_gem */,
++};
++
+diff --git a/src/drmmode_sunxi/drmmode_sunxi.c b/src/drmmode_sunxi/drmmode_sunxi.c
+new file mode 100755
+index 0000000..420c73a
+--- /dev/null
++++ b/src/drmmode_sunxi/drmmode_sunxi.c
+@@ -0,0 +1,177 @@
++/*
++ * Copyright Â© 2013 ARM Limited.
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++ * SOFTWARE.
++ *
++ */
++
++#include "../drmmode_driver.h"
++#include "sunxi_drm.h"
++#include <stddef.h>
++#include <xf86drmMode.h>
++#include <xf86drm.h>
++#include <sys/ioctl.h>
++
++#include "armsoc_driver.h"
++#include "../armsoc_dumb.h"
++
++/* Cursor dimensions
++ * Technically we probably don't have any size limit.. since we
++ * are just using an overlay... but xserver will always create
++ * cursor images in the max size, so don't use width/height values
++ * that are too big
++ */
++ struct armsoc_device {
++	int fd;
++	int (*create_custom_gem)(int fd, struct armsoc_create_gem *create_gem);
++	Bool alpha_supported;
++};
++struct armsoc_bo {
++	struct armsoc_device *dev;
++	uint32_t handle;
++	uint32_t size;
++	void *map_addr;
++	uint32_t fb_id;
++	uint32_t width;
++	uint32_t height;
++	uint8_t depth;
++	uint8_t bpp;
++	uint32_t pitch;
++	int refcnt;
++	int dmabuf;
++	uint32_t original_size;
++	uint32_t name;
++enum armsoc_buf_type buf_type;
++};
++/* width */
++#define CURSORW   (64)
++/* height */
++#define CURSORH   (64)
++/* Padding added down each side of cursor image */
++#define CURSORPAD (0)
++
++/* Optional function only for HWCURSOR_API_PLANE interface */
++
++int sunxi_rotate_copy(struct armsoc_bo *src_bo, struct armsoc_bo *dst_bo)
++{
++    static int rotate_handle;
++    static int rotate_init;
++    struct sunxi_rotate_info rotate_in;
++    struct sunxi_rotate_cmd rotate_cmd;
++    int ret;
++    if(rotate_init == 0) {
++        rotate_cmd.cmd = TR_CMD_AQUIRE;
++        rotate_cmd.private = &rotate_handle;
++        ret = ioctl(src_bo->dev->fd, DRM_IOCTL_SUNXI_ROTATE, &rotate_cmd);
++        if(ret) {
++            xf86Msg(X_ERROR,"rotate aquire err.  :%d\n",ret);
++            return -1;
++        }
++        rotate_init = 1;
++    }
++    if (src_bo->bpp != dst_bo->bpp ||
++       src_bo->depth != dst_bo->depth ||
++       src_bo->width != dst_bo->width ||
++       src_bo->pitch != dst_bo->pitch ||
++       src_bo->height!= dst_bo->height||
++       src_bo->handle == dst_bo->handle) {
++            xf86Msg(X_ERROR,"rotate not the same condition[%d,%d][%d,%d][%u,%u][%u,%u][%u,%u][%u,%u]\n"
++                ,src_bo->bpp, dst_bo->bpp, src_bo->depth,dst_bo->depth,src_bo->width,dst_bo->width,
++src_bo->pitch,dst_bo->pitch,       src_bo->height,dst_bo->height,src_bo->handle,dst_bo->handle);
++            return -1;
++    }
++    rotate_in.bpp = src_bo->bpp;
++    rotate_in.depth = src_bo->depth;
++    rotate_in.src_gem_handle = src_bo->handle;
++    rotate_in.width = src_bo->width;
++    rotate_in.height = src_bo->height;
++    rotate_in.dst_gem_handle = dst_bo->handle;
++    rotate_in.pitch = dst_bo->pitch;
++    rotate_in.mode = TR_ROT_0;
++    rotate_in.set_time = 50;
++    rotate_in.sleep_mode = 1;
++
++rotate_cmd.handle = rotate_handle;
++    rotate_cmd.cmd = TR_CMD_COMMIT;
++    rotate_cmd.private = &rotate_in;
++    ret = ioctl(src_bo->dev->fd, DRM_IOCTL_SUNXI_ROTATE, &rotate_cmd);
++	if(ret) {
++        xf86Msg(X_ERROR,"rotate commit err %d.\n", ret);
++		return ret;
++	}
++    return rotate_in.status;
++}
++void sunxi_sync_gem(struct armsoc_bo *src_bo)
++{
++    int ret;
++    struct sunxi_sync_gem_cmd sync_cmd;
++    sync_cmd.gem_handle = src_bo->handle;
++    ret = ioctl(src_bo->dev->fd, DRM_IOCTL_SUNXI_SYNC_GEM, &sync_cmd);
++	if(ret) {
++        xf86Msg(X_ERROR,"sync gem err  %d.\n", ret);
++
++	} 
++}
++static int create_custom_gem(int fd, struct armsoc_create_gem *create_gem)
++{
++	struct drm_mode_create_dumb create_sunxi;
++	int ret;
++
++	/* make pitch a multiple of 64 bytes for best performance */
++	memset(&create_sunxi, 0, sizeof(create_sunxi));
++	create_sunxi.width = create_gem->width;
++    create_sunxi.height = create_gem->height;
++    create_sunxi.bpp = create_gem->bpp;
++	create_sunxi.flags = SUNXI_BO_CONTIG|SUNXI_BO_CACHABLE;
++    //xf86Msg(X_INFO, "######flags:%x\n",create_sunxi.flags);
++
++	assert((create_gem->buf_type == ARMSOC_BO_SCANOUT) ||
++			(create_gem->buf_type == ARMSOC_BO_NON_SCANOUT));
++    if (create_gem->buf_type == ARMSOC_BO_SCANOUT)
++	 create_sunxi.flags = SUNXI_BO_CONTIG|SUNXI_BO_WC;
++	/* Contiguous allocations are not supported in some sunxi drm versions.
++	 * When they are supported all allocations are effectively contiguous
++	 * anyway, so for simplicity we always request non contiguous buffers.
++	 */
++
++	ret = drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &create_sunxi);
++	if (ret)
++		return ret;
++
++	/* Convert custom create_sunxi to generic create_gem */
++	create_gem->handle = create_sunxi.handle;
++	create_gem->pitch = create_sunxi.pitch;
++	create_gem->size = create_sunxi.size;
++
++	return 0;
++}
++
++struct drmmode_interface sunxi_interface = {
++    	"sunxi",
++	1                     /* use_page_flip_events */,
++	1                     /* use_early_display */,
++	CURSORW               /* cursor width */,
++	CURSORH               /* cursor_height */,
++	CURSORPAD             /* cursor padding */,
++	HWCURSOR_API_NONE   /* cursor_api */,
++	NULL                /* init_plane_for_cursor */,
++	0                     /* vblank_query_supported */,
++	create_custom_gem     /* create_custom_gem */,
++};
+diff --git a/src/drmmode_sunxi/sunxi_drm.h b/src/drmmode_sunxi/sunxi_drm.h
+new file mode 100755
+index 0000000..b6fc524
+--- /dev/null
++++ b/src/drmmode_sunxi/sunxi_drm.h
+@@ -0,0 +1,94 @@
++/*
++ * Copyright (C) 2016 Allwinnertech Co.Ltd
++ * Authors: Jet Cui
++ *
++ * This program is free software; you can redistribute  it and/or modify it
++ * under  the terms of  the GNU General  Public License as published by the
++ * Free Software Foundation;  either version 2 of the  License, or (at your
++ * option) any later version.
++ *
++ */
++ /* this is the user layer ioctl and struct */
++#ifndef _SUNXI_DRM_UAPI_H_
++#define _SUNXI_DRM_UAPI_H_
++#include <stdbool.h>
++enum tr_mode {
++	TR_ROT_0        = 0x0,//rotate clockwise 0 ROTgree
++	TR_ROT_90       = 0x1,//rotate clockwise 90 ROTgree
++	TR_ROT_180      = 0x2,//rotate clockwise 180 ROTgree
++	TR_ROT_270      = 0x3,//rotate clockwise 270 ROTgree
++	TR_HFLIP        = 0x4,//horizontal flip
++	TR_HFLIP_ROT_90 = 0x5,//first rotate clockwise 90 ROTgree then horizontal flip
++	TR_VFLIP        = 0x6,//vertical flip
++	TR_VFLIP_ROT_90 = 0x7,//first rotate clockwise 90 ROTgree then vertical flip
++};
++enum tr_cmd {
++    TR_CMD_AQUIRE = 1,
++	TR_CMD_COMMIT,
++	TR_CMD_QUERY,
++	TR_CMD_RELEASE,
++};
++
++enum sunxi_drm_gem_buf_type {
++	/* Physically Continuous memory and used as default. */
++	SUNXI_BO_CONTIG	= 1 << 0,
++	/* Physically Non-Continuous memory. */
++	SUNXI_BO_NONCONTIG	= 0 << 0,
++	/* non-cachable mapping. */
++	SUNXI_BO_NONCACHABLE	= 0 << 1,
++	/* cachable mapping. */
++	SUNXI_BO_CACHABLE	= 1 << 1,
++	/* write-combine mapping. */
++	SUNXI_BO_WC		= 1 << 2,
++	SUNXI_BO_MASK		= SUNXI_BO_CONTIG | SUNXI_BO_CACHABLE |
++					SUNXI_BO_WC
++};
++
++struct sunxi_flip_user_date {
++    __u32   plane_id;
++    int     zpos;//cancel
++    unsigned int sync_id;
++    unsigned int crtc_id;
++};
++
++struct sunxi_rotate_info {
++    union{
++        uint32_t src_gem_handle;
++        int     status;  
++    };
++    uint32_t dst_gem_handle;
++    int width;
++    int pitch;
++    int height;
++    int depth;
++    int bpp;
++    unsigned int set_time;
++    enum  tr_mode mode;
++    bool sleep_mode;
++};
++struct sunxi_rotate_cmd {
++    int handle;
++    enum tr_cmd cmd;
++    void  *private;
++};
++struct sunxi_sync_gem_cmd {
++    uint32_t gem_handle;
++};
++int sunxi_rotate_copy(struct armsoc_bo *src_bo, struct armsoc_bo *dst_bo);
++void sunxi_sync_gem(struct armsoc_bo *src_bo);
++#define DRM_SUNXI_FLIP_SYNC		0x00
++#define DRM_SUNXI_FENCE_SYNC	0x01
++#define DRM_SUNXI_ROTATE	0x02
++#define DRM_SUNXI_SYNC_GEM	0x03
++
++#define DRM_IOCTL_SUNXI_FLIP_SYNC		DRM_IOW(DRM_COMMAND_BASE + \
++		DRM_SUNXI_FLIP_SYNC, struct sunxi_flip_user_date)
++#define DRM_IOCTL_SUNXI_FENCE_SYNC		DRM_IO(DRM_COMMAND_BASE + \
++		DRM_SUNXI_FENCE_SYNC)
++
++#define DRM_IOCTL_SUNXI_ROTATE		DRM_IOWR(DRM_COMMAND_BASE + \
++		DRM_SUNXI_ROTATE, struct sunxi_rotate_cmd)
++#define DRM_IOCTL_SUNXI_SYNC_GEM		DRM_IOW(DRM_COMMAND_BASE + \
++		DRM_SUNXI_SYNC_GEM, struct sunxi_sync_gem_cmd)	
++#endif
++
