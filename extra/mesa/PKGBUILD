@@ -9,18 +9,18 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=13.0.2
-pkgrel=2
+pkgver=13.0.3
+pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
              'libomxil-bellagio' 'libgcrypt' 'clang')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
-source=(ftp://ftp.freedesktop.org/pub/mesa/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
+source=(https://mesa.freedesktop.org/archive/${pkgver}/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
         remove-libpthread-stubs.patch)
-sha256sums=('a6ed622645f4ed61da418bf65adde5bcc4bb79023c36ba7d6b45b389da4416d5'
+sha256sums=('d9aa8be5c176d00d0cd503cb2f64a5a403ea471ec819c022581414860d7ba40e'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
             '75ab53ad44b95204c788a2988e97a5cb963bdbf6072a5466949a2afb79821c8f')
