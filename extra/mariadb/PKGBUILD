@@ -9,7 +9,7 @@ pkgbase=mariadb
 pkgname=('libmariadbclient' 'mariadb-clients' 'mytop' 'mariadb')
 pkgver=10.1.20
 _pkgver=${pkgver/.a/a}
-pkgrel=1
+pkgrel=3
 arch=('i686' 'x86_64')
 license=('GPL')
 url='http://mariadb.org/'
@@ -42,21 +42,21 @@ build() {
     -DCMAKE_RANLIB=/usr/bin/gcc-ranlib \
     -DBUILD_CONFIG=mysql_release \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DSYSCONFDIR=/etc/mysql \
     -DMYSQL_DATADIR=/var/lib/mysql \
     -DMYSQL_UNIX_ADDR=/run/mysqld/mysqld.sock \
     -DDEFAULT_CHARSET=utf8 \
     -DDEFAULT_COLLATION=utf8_general_ci \
     -DENABLED_LOCAL_INFILE=ON \
-    -DINSTALL_INFODIR=share/mysql/docs \
+    -DINSTALL_DOCDIR=share/doc/mariadb \
+    -DINSTALL_DOCREADMEDIR=share/doc/mariadb \
     -DINSTALL_MANDIR=share/man \
     -DINSTALL_PLUGINDIR=lib/mysql/plugin \
     -DINSTALL_SCRIPTDIR=bin \
+    -DINSTALL_SYSCONFDIR=/etc/mysql \
+    -DINSTALL_SYSCONF2DIR=/etc/mysql \
     -DINSTALL_INCLUDEDIR=include/mysql \
-    -DINSTALL_DOCREADMEDIR=share/mysql \
     -DINSTALL_SUPPORTFILESDIR=share/mysql \
     -DINSTALL_MYSQLSHAREDIR=share/mysql \
-    -DINSTALL_DOCDIR=share/mysql/docs \
     -DINSTALL_SHAREDIR=share/mysql \
     -DINSTALL_SYSTEMD_UNITDIR=/usr/lib/systemd/system/ \
     -DWITH_SYSTEMD=yes \
@@ -66,7 +66,6 @@ build() {
     -DWITH_PCRE=system \
     -DWITH_LIBWRAP=OFF \
     -DWITH_JEMALLOC=ON \
-    -DCMAKE_EXE_LINKER_FLAGS='-ljemalloc' \
     -DWITH_EXTRA_CHARSETS=complex \
     -DWITH_EMBEDDED_SERVER=ON \
     -DWITH_ARCHIVE_STORAGE_ENGINE=1 \
@@ -77,6 +76,7 @@ build() {
     -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 \
     -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 \
     -DWITHOUT_PBXT_STORAGE_ENGINE=1 \
+    -DCMAKE_EXE_LINKER_FLAGS='-ljemalloc' \
     -DWITHOUT_MROONGA_STORAGE_ENGINE=1 \
     -DCMAKE_C_FLAGS="-fPIC $CFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -fomit-frame-pointer -fno-delete-null-pointer-checks" \
     -DCMAKE_CXX_FLAGS="-fPIC $CXXFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -felide-constructors -fno-rtti -fno-delete-null-pointer-checks" \
@@ -97,10 +97,10 @@ package_libmariadbclient() {
     make -C $dir DESTDIR="$pkgdir" install
   done
 
-  install -Dm755 scripts/mysql_config "$pkgdir"/usr/bin/mysql_config
+  install -Dm0755 scripts/mysql_config "$pkgdir"/usr/bin/mysql_config
   install -d "$pkgdir"/usr/share/man/man1
   for man in mysql_config mysql_client_test_embedded mysqltest_embedded; do
-    install -m644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
+    install -m0644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
   done
 
   rm "$pkgdir"/usr/lib/libmysql{client,client_r,d}.a
@@ -118,7 +118,7 @@ package_mariadb-clients() {
   # install man pages
   install -d "$pkgdir"/usr/share/man/man1
   for man in mysql mysqladmin mysqlcheck mysqldump mysqlimport mysqlshow mysqlslap; do
-    install -m644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
+    install -m0644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
   done
 
   # provided by mariadb
@@ -131,7 +131,7 @@ package_mytop() {
   depends=('perl' 'perl-dbd-mysql' 'perl-term-readkey')
 
   cd build
-  install -Dm755 scripts/mytop "$pkgdir"/usr/bin/mytop
+  install -Dm0755 scripts/mytop "$pkgdir"/usr/bin/mytop
 }
 
 package_mariadb() {
@@ -148,17 +148,35 @@ package_mariadb() {
   cd build
   make DESTDIR="$pkgdir" install
 
-  install -Dm644 "$pkgdir"/usr/share/mysql/my-medium.cnf "$pkgdir"/etc/mysql/my.cnf
-  install -Dm644 ../mariadb-tmpfile.conf "$pkgdir"/usr/lib/tmpfiles.d/mariadb.conf
-  install -Dm644 ../mariadb-sysusers.conf "$pkgdir"/usr/lib/sysusers.d/mariadb.conf
-  ln -s mariadb.service "$pkgdir"/usr/lib/systemd/system/mysqld.service
-  ln -s mariadb@.service "$pkgdir"/usr/lib/systemd/system/mysqld@.service
+  cd "$pkgdir"
 
-  install -dm700 "$pkgdir"/var/lib/mysql
-  chown -R 89:89 "$pkgdir"/var/lib/mysql &>/dev/null
+  # We specified INSTALL_SYSCONFDIR and INSTALL_SYSCONF2DIR to have proper paths
+  # in binaries and support file. But we want our own files...
+  # TOOD: Change to upstream file layout with version 10.2.x?
+  rm -r etc/
+  install -Dm0644 usr/share/mysql/my-medium.cnf etc/mysql/my.cnf
+
+  install -Dm0644 "${srcdir}"/mariadb-tmpfile.conf usr/lib/tmpfiles.d/mariadb.conf
+  install -Dm0644 "${srcdir}"/mariadb-sysusers.conf usr/lib/sysusers.d/mariadb.conf
+  ln -s mariadb.service usr/lib/systemd/system/mysqld.service
+  ln -s mariadb@.service usr/lib/systemd/system/mysqld@.service
+
+  install -dm0700 var/lib/mysql
+  chown -R 89:89 var/lib/mysql &>/dev/null
+
+  # move aclocal and pkgconfig files
+  install -D -m0644 usr/share/mysql/aclocal/mysql.m4 usr/share/aclocal/mysql.m4
+  install -D -m0644 usr/share/mysql/pkgconfig/mariadb.pc usr/share/pkgconfig/mariadb.pc
+  rm -r usr/share/mysql/{aclocal,pkgconfig}
+ 
+  # move to proper licenses directories
+  install -d usr/share/licenses/mariadb
+  mv usr/share/doc/mariadb/COPYING* usr/share/licenses/mariadb/
+
+  # already installed to real systemd unit directory
+  rm -r usr/share/mysql/systemd/
 
   # provided by libmariadbclient
-  cd "$pkgdir"
   rm usr/bin/{mysql_config,mysql_client_test_embedded,mysqltest_embedded}
   rm usr/lib/libmysql*
   rm -r usr/include/
