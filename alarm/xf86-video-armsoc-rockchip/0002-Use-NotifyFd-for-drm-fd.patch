@@ -1,0 +1,113 @@
+From d724dc5671b4b47f4913105ffa158318b7731440 Mon Sep 17 00:00:00 2001
+From: Keith Packard <keithp@keithp.com>
+Date: Tue, 19 Jul 2016 08:51:12 -0700
+Subject: [PATCH 2/2] Use NotifyFd for drm fd
+
+NotifyFd is available after API 22, and must be used after API 23.
+
+Signed-off-by: Keith Packard <keithp@keithp.com>
+---
+ src/compat-api.h      |  5 +++++
+ src/drmmode_display.c | 29 ++++++++++++++++++++++++++++-
+ 2 files changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/src/compat-api.h b/src/compat-api.h
+index 78d3c91..54f9f64 100644
+--- a/src/compat-api.h
++++ b/src/compat-api.h
+@@ -77,7 +77,12 @@
+ 
+ #define SCREEN_INIT_ARGS_DECL ScreenPtr pScreen, int argc, char **argv
+ 
++#if ABI_VIDEODRV_VERSION >= SET_ABI_VERSION(22,0)
++#define HAVE_NOTIFY_FD	1
++#endif
++
+ #if ABI_VIDEODRV_VERSION >= SET_ABI_VERSION(23, 0)
++#define RELOAD_CURSORS_DEPRECATED 1
+ #define BLOCKHANDLER_ARGS_DECL \
+ 	ScreenPtr arg, pointer pTimeout
+ #define BLOCKHANDLER_ARGS arg, pTimeout
+diff --git a/src/drmmode_display.c b/src/drmmode_display.c
+index 8e45b5f..70fbc7c 100644
+--- a/src/drmmode_display.c
++++ b/src/drmmode_display.c
+@@ -410,9 +410,11 @@ done_setting:
+ 		drmmode_output_dpms(output, DPMSModeOn);
+ 	}
+ 
++#if !RELOAD_CURSORS_DEPRECATED
+ 	/* if hw cursor is initialized, reload it */
+ 	if (drmmode->cursor)
+ 		xf86_reload_cursors(pScrn->pScreen);
++#endif
+ 
+ cleanup:
+ 	if (newcrtc)
+@@ -1889,6 +1891,13 @@ drmmode_uevent_fini(ScrnInfoPtr pScrn)
+ 	TRACE_EXIT();
+ }
+ 
++#if HAVE_NOTIFY_FD
++static void
++drmmode_notify_fd(int fd, int notify, void *data)
++{
++	drmHandleEvent(fd, &event_context);
++}
++#else
+ static void
+ drmmode_wakeup_handler(pointer data, int err, pointer p)
+ {
+@@ -1902,7 +1911,9 @@ drmmode_wakeup_handler(pointer data, int err, pointer p)
+ 	if (FD_ISSET(fd, read_mask))
+ 		drmHandleEvent(fd, &event_context);
+ }
++#endif
+ 
++#ifndef HAVE_NOTIFY_FD
+ void drmmode_init_wakeup_handler(struct ARMSOCRec *pARMSOC)
+ {
+ 	AddGeneralSocket(pARMSOC->drmFD);
+@@ -1916,6 +1927,7 @@ void drmmode_fini_wakeup_handler(struct ARMSOCRec *pARMSOC)
+ 			drmmode_wakeup_handler, pARMSOC);
+ 	RemoveGeneralSocket(pARMSOC->drmFD);
+ }
++#endif
+ 
+ void
+ drmmode_wait_for_event(ScrnInfoPtr pScrn)
+@@ -1927,15 +1939,30 @@ drmmode_wait_for_event(ScrnInfoPtr pScrn)
+ void
+ drmmode_screen_init(ScrnInfoPtr pScrn)
+ {
++#if HAVE_NOTIFY_FD
++	struct drmmode_rec *drmmode = drmmode_from_scrn(pScrn);
++#else
+ 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
++#endif
++
+ 	drmmode_uevent_init(pScrn);
++
++#if HAVE_NOTIFY_FD
++	SetNotifyFd(drmmode->fd, drmmode_notify_fd, X_NOTIFY_READ, NULL);
++#else
+ 	drmmode_init_wakeup_handler(pARMSOC);
++#endif
+ }
+ 
+ void
+ drmmode_screen_fini(ScrnInfoPtr pScrn)
+ {
++#if HAVE_NOTIFY_FD
++	struct drmmode_rec *drmmode = drmmode_from_scrn(pScrn);
++	RemoveNotifyFd(drmmode->fd);
++#else
+ 	struct ARMSOCRec *pARMSOC = ARMSOCPTR(pScrn);
+-	drmmode_uevent_fini(pScrn);
+ 	drmmode_fini_wakeup_handler(pARMSOC);
++#endif
++	drmmode_uevent_fini(pScrn);
+ }
+-- 
+2.11.0
+
