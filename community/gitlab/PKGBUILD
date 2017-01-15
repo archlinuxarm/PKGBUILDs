@@ -10,13 +10,13 @@
 #  - build unf_ext with -fsigned-char
 
 pkgname=gitlab
-pkgver=8.15.3
+pkgver=8.15.4
 pkgrel=1
 pkgdesc="Project management and code hosting application"
 arch=('i686' 'x86_64')
 url="https://gitlab.com/gitlab-org/gitlab-ce/tree/master#README"
 license=('MIT')
-depends=('ruby' 'git' 'ruby-bundler' 'gitlab-workhorse' 'openssh' 'redis' 'libxslt' 'icu' 'nodejs')
+depends=('ruby2.3' 'git' 'ruby2.3-bundler' 'gitlab-workhorse' 'openssh' 'redis' 'libxslt' 'icu' 'nodejs')
 makedepends=('cmake' 'postgresql' 'mariadb')
 optdepends=('postgresql: database backend'
             'mysql: database backend'
@@ -44,7 +44,7 @@ source=("$pkgname-$pkgver.tar.gz::https://gitlab.com/gitlab-org/gitlab-ce/reposi
         nginx-ssl.conf.example
         lighttpd.conf.example)
 install='gitlab.install'
-sha512sums=('065b207a5a05874c12901634fece5a6e670a9218a82bbe330d18056dd34d8cd1ff2103bd6ca7426fa93cb9efb6358825a69d24470b78c50282ba54c0b6a512ae'
+sha512sums=('485907942cc84603886985c2fddbccf11d0b01ba8491af225387fb6e58629766177b59cd923df76c91e4d5dd4cc345deb5ce87f7012789f2f6c5fbef7fe5dfe5'
             '1464ca9399b627bb8bd286608b4ad93feca6bc54c7e63c98180744e710295508a89a1a34c412b82e3eaad9308a82b2ea2483ae0f0b1e1149c24b17ab0d126f69'
             '9844b8e42e8d50e6eac54711fb8c9745d506560676e0b8d5f1c42fb5177b9b4bac5c0d3c6a673d9e54f4b5e21056627db1d434c5c76d4f3ede8cc15a109f3cb6'
             'e74f54224e7fd5f24c3459f34649ce5fddc70886faf7eb8520513d8715b3c17452aab62676b779c136ba576193a09ae3a5471abe51013d7ecd8b37d6e0acd393'
@@ -115,16 +115,16 @@ build() {
   msg "Fetching bundled gems..."
   # Gems will be installed into vendor/bundle
 
-  bundle config build.nokogiri --use-system-libraries
-  bundle config build.unf_ext "--with-cxxflags='$CFLAGS -fsigned-char'" "--with-cflags='$CXXFLAGS -fsigned-char'"
-  bundle install -j$(nproc) --no-cache --deployment --without development test aws kerberos
+  bundle-2.3 config build.nokogiri --use-system-libraries
+  bundle-2.3 config build.unf_ext "--with-cxxflags='$CFLAGS -fsigned-char'" "--with-cflags='$CXXFLAGS -fsigned-char'"
+  bundle-2.3 install -j$(nproc) --no-cache --deployment --without development test aws kerberos
 
   # We'll temporarily stick this in here so we can build the assets
   cp config/database.yml.postgresql.orig config/database.yml
   cp config/resque.yml.example config/resque.yml
   sed -i 's/url.*/nope.sock/g' config/resque.yml
 
-  bundle exec rake assets:precompile RAILS_ENV=production --trace
+  bundle-2.3 exec rake assets:precompile RAILS_ENV=production --trace
 
   # After building assets, clean this up again
   rm config/database.yml config/database.yml.postgresql.orig
@@ -167,6 +167,10 @@ package() {
   ln -fs /etc/webapps/gitlab-shell/secret "${pkgdir}${_datadir}/.gitlab_shell_secret"
 
   sed -i "s|require_relative '../lib|require '${_datadir}/lib|" config/application.rb
+
+  # Fix for ruby-2.3 and bundle-2.3
+  sed -i "s|bundle|bundle-2.3|g" "${pkgdir}${_datadir}/lib/tasks/gitlab/check.rake"
+  grep -rl "bin/env ruby" "${pkgdir}${_datadir}" | xargs sed -i "s|bin/env ruby$|bin/env ruby-2.3|g"
 
   # Install config files
   for config_file in application.rb gitlab.yml unicorn.rb resque.yml; do
