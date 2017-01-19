@@ -6,32 +6,40 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - added --disable-neon-opt to configure
-#  - removed xen pieces
 
 pkgbase=pulseaudio
 pkgname=(pulseaudio libpulse pulseaudio-{gconf,zeroconf,lirc,jack,bluetooth,equalizer})
 pkgdesc="A featureful, general-purpose sound server"
-pkgver=9.0
+pkgver=10.0
 pkgrel=1
 arch=(i686 x86_64)
 url="http://www.freedesktop.org/wiki/Software/PulseAudio"
-license=(LGPL)
+license=(GPL)
 makedepends=(libasyncns libcap attr libxtst libsm libsndfile libtool rtkit libsoxr
              speexdsp tdb systemd dbus avahi bluez bluez-libs gconf intltool jack2-dbus sbc
-             lirc openssl fftw orc json-c gtk3 webrtc-audio-processing
-             check)
+             lirc openssl fftw orc gtk3 webrtc-audio-processing
+             check autoconf-archive git)
 options=(!emptydirs)
-source=(http://freedesktop.org/software/$pkgbase/releases/$pkgbase-$pkgver.tar.xz
+_commit=84952e6a092b6a0c5b153bd7a4f6e490810681c8  # tags/v10.0^0
+source=("git+https://anongit.freedesktop.org/git/pulseaudio/pulseaudio#commit=$_commit"
         padsp-lib32.patch)
-sha256sums=('c3d3d66b827f18fbe903fe3df647013f09fc1e2191c035be1ee2d82a9e404686'
+sha256sums=('SKIP'
             '7832fc59df76538ff10aedd297c03cb7ff117235da8bfad26082994bb5b84332')
 
+pkgver() {
+  cd pulseaudio
+  git describe --tags | sed 's/^v//;s/-/+/g'
+}
+
 prepare() {
-  cd $pkgbase-$pkgver
+  cd pulseaudio
+  NOCONFIGURE=1 ./bootstrap.sh
 }
 
 build() {
-  cd $pkgbase-$pkgver
+  cd pulseaudio
+
+  [[ $CARCH != "aarch64" ]] && CONFIG="--disable-neon-opt"
 
   ./configure --prefix=/usr \
     --sysconfdir=/etc \
@@ -44,7 +52,7 @@ build() {
     --disable-samplerate \
     --disable-rpath \
     --disable-default-build-tests \
-    --disable-neon-opt \
+    $CONFIG \
     DATADIRNAME=share
 
   # fight unused direct deps
@@ -54,13 +62,14 @@ build() {
 }
 
 package_pulseaudio() {
-  depends=("libpulse=$pkgver-$pkgrel" rtkit libltdl speexdsp tdb orc
-           webrtc-audio-processing sbc libsoxr)
+  depends=("libpulse=$pkgver-$pkgrel" rtkit libltdl speexdsp tdb orc libsoxr
+           webrtc-audio-processing)
   optdepends=('pulseaudio-alsa: ALSA configuration (recommended)')
   backup=(etc/pulse/{daemon.conf,default.pa,system.pa})
   install=pulseaudio.install
+  replaces=('pulseaudio-xen<=9.0')
 
-  cd $pkgbase-$pkgver
+  cd pulseaudio
 
   _pulsever=$(./git-version-gen .tarball-version)
   while [[ $_pulsever = *.*.* ]]; do
@@ -152,7 +161,8 @@ package_pulseaudio() {
 
 package_libpulse() {
   pkgdesc="$pkgdesc (client library)"
-  depends=(dbus libasyncns libcap libxtst libsm libsndfile json-c systemd)
+  depends=(dbus libasyncns libcap libxtst libsm libsndfile systemd)
+  license=(LGPL)
   backup=(etc/pulse/client.conf)
 
   mv "$srcdir"/libpulse/* "$pkgdir"
@@ -188,7 +198,7 @@ package_pulseaudio-jack(){
 
 package_pulseaudio-bluetooth(){
   pkgdesc="Bluetooth support for PulseAudio"
-  depends=("pulseaudio=$pkgver-$pkgrel" bluez bluez-libs)
+  depends=("pulseaudio=$pkgver-$pkgrel" bluez bluez-libs sbc)
 
   mv "$srcdir"/bluetooth/* "$pkgdir"
 }
