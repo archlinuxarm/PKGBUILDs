@@ -10,7 +10,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
 pkgver=17.0.0
-pkgrel=1
+pkgrel=1.1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
@@ -38,10 +38,12 @@ prepare() {
 build() {
   cd ${srcdir}/mesa-${pkgver}
 
+  [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,imx"
+
   ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-gallium-drivers=freedreno,nouveau,swrast,virgl,vc4 \
+    --with-gallium-drivers=freedreno,nouveau,swrast,virgl,vc4${GALLIUM} \
     --with-dri-drivers=nouveau,swrast \
     --with-egl-platforms=x11,drm,wayland \
     --disable-xvmc \
