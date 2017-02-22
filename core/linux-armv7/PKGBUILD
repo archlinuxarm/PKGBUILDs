@@ -4,19 +4,19 @@
 buildarch=4
 
 pkgbase=linux-armv7
-_srcname=linux-4.9
+_srcname=linux-4.10
 _kernelname=${pkgbase#linux}
 _desc="ARMv7 multi-platform"
-pkgver=4.9.11
+pkgver=4.10.0
 pkgrel=1
-rcnrel=armv7-x4
+rcnrel=armv7-x1
 arch=('armv7h')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' 'vboot-utils' 'dtc')
 options=('!strip')
 source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
-        "http://www.kernel.org/pub/linux/kernel/v4.x/patch-${pkgver}.xz"
+        #"http://www.kernel.org/pub/linux/kernel/v4.x/patch-${pkgver}.xz"
         "http://rcn-ee.com/deb/sid-armhf/v${pkgver}-${rcnrel}/patch-${pkgver%.0}-${rcnrel}.diff.gz"
         '0001-ARM-atags-add-support-for-Marvell-s-u-boot.patch'
         '0002-ARM-atags-fdt-retrieve-MAC-addresses-from-Marvell-bo.patch'
@@ -26,33 +26,36 @@ source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
         '0006-ARM-TLV320AIC23-SoC-Audio-Codec-Fix-errors-reported-.patch'
         '0007-set-default-cubietruck-led-triggers.patch'
         '0008-exynos4412-odroid-set-higher-minimum-buck2-regulator.patch'
+        '0009-drm-armada-tracing-fix.patch'
         'config'
-        'cmdline'
         'kernel.its'
         'kernel.keyblock'
-        'kernel_data_key.vbprivk')
-md5sums=('0a68ef3615c64bd5ee54a3320e46667d'
-         '738953d9d33739f3a333c7ef6ce33e3d'
-         '49c7f6725c400994e12675d3fa4690bf'
-         '7bad9743fd2f1690f479cbbec5a556ab'
-         '57998a8dbf42d2237f2f3a650b93ef26'
-         '75e392a161842813d0ff3d0beaf68038'
-         '5840b71b7b2600388aa9a1195a5af528'
-         '25c3f00750a1aa951b857bf06ec79a8e'
-         'dd1c99be98c43f06a07aa14fc47d6e3e'
-         'ef825f8c3563a87bab10f4782e7a0efc'
-         'ef5fd8e682fed9dce4bc3d1c821acbd1'
-         '8f06a784da37647e0421d97cbed22a56'
-         '1813b39074d01af6548951764a0f6444'
+        'kernel_data_key.vbprivk'
+        'linux.preset'
+        '99-linux.hook')
+md5sums=('b5e7f6b9b2fe1b6cc7bc56a3a0bfc090'
+         '4d5a9908ea800a6aa704a9cb31e4c86b'
+         '214847b73b9001db1362e8bb3f9aed87'
+         '82ffb2a8297f35e56f8827bd6cc89a32'
+         '70bc3d3d13f4e77728bbc324dc81a9d3'
+         '47eae7e2c1d8e41137c4214b3091aa99'
+         'cfa66bcafa51215e71be60c63e978e35'
+         '5f76b742e3d04056a6bb49c1bde4a190'
+         'a93178aff351099bdc1932b15c09e506'
+         'd9986312d2a15c29cf816a967d3447e1'
+         '62e75ec9b302e39ac51227ebb4243b76'
+         'b31f5c531af2b831e82977bee36d9420'
          '4f2379ed84258050edb858ee8d281678'
          '61c5ff73c136ed07a7aadbf58db3d96a'
-         '584777ae88bce2c5659960151b64c7d8')
+         '584777ae88bce2c5659960151b64c7d8'
+         'fb034fe5f2e28a4cce30ae2d8cf6be3c'
+         '79fa396e3f9a09a85156d6d7c2d34b58')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
   # add upstream patch
-  git apply --whitespace=nowarn ../patch-${pkgver}
+  #git apply --whitespace=nowarn ../patch-${pkgver}
 
   # RCN patch
   git apply ../patch-${pkgver%.0}-${rcnrel}.diff
@@ -66,6 +69,7 @@ prepare() {
   git apply ../0006-ARM-TLV320AIC23-SoC-Audio-Codec-Fix-errors-reported-.patch
   git apply ../0007-set-default-cubietruck-led-triggers.patch
   git apply ../0008-exynos4412-odroid-set-higher-minimum-buck2-regulator.patch
+  git apply ../0009-drm-armada-tracing-fix.patch
 
   cat "${srcdir}/config" > ./.config
 
@@ -110,6 +114,7 @@ _package() {
   pkgdesc="The Linux Kernel and modules - ${_desc}"
   depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
+  backup=("etc/mkinitcpio.d/${pkgbase}.preset")
   provides=('kernel26' "linux=${pkgver}")
   conflicts=('linux')
   replaces=('linux-mvebu' 'linux-udoo' 'linux-sun4i' 'linux-sun5i' 'linux-sun7i' 'linux-usbarmory' 'linux-wandboard')
@@ -134,6 +139,17 @@ _package() {
     -e  "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
     -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
     -i "${startdir}/${pkgname}.install"
+
+  # install mkinitcpio preset file for kernel
+  install -D -m644 "${srcdir}/linux.preset" "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
+  sed \
+    -e "1s|'linux.*'|'${pkgbase}'|" \
+    -e "s|ALL_kver=.*|ALL_kver=\"${_kernver}\"|" \
+    -i "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
+
+  # install pacman hook for initramfs regeneration
+  sed "s|%PKGBASE%|${pkgbase}|g" "${srcdir}/99-linux.hook" |
+    install -D -m644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/99-${pkgbase}.hook"
 
   # remove build and source links
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
@@ -355,6 +371,7 @@ _package-chromebook() {
   cp ../kernel.its .
   mkimage -D "-I dts -O dtb -p 2048" -f kernel.its vmlinux.uimg
   dd if=/dev/zero of=bootloader.bin bs=512 count=1
+  echo 'console=tty0 init=/sbin/init root=PARTUUID=%U/PARTNROFF=1 rootwait rw noinitrd' > cmdline
   vbutil_kernel \
     --pack vmlinux.kpart \
     --version 1 \
@@ -362,7 +379,7 @@ _package-chromebook() {
     --arch arm \
     --keyblock ../kernel.keyblock \
     --signprivate ../kernel_data_key.vbprivk \
-    --config ../cmdline \
+    --config cmdline \
     --bootloader bootloader.bin
 
   mkdir -p "${pkgdir}/boot"
