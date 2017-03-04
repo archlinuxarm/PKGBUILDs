@@ -9,8 +9,8 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
-pkgver=17.0.0
-pkgrel=2
+pkgver=17.0.1
+pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
@@ -20,7 +20,7 @@ license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
         remove-libpthread-stubs.patch)
-sha256sums=('39db3d59700159add7f977307d12a7dfe016363e760ad82280ac4168ea668481'
+sha256sums=('96fd70ef5f31d276a17e424e7e1bb79447ccbbe822b56844213ef932e7ad1b0c'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
             '75ab53ad44b95204c788a2988e97a5cb963bdbf6072a5466949a2afb79821c8f')
