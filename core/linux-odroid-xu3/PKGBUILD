@@ -4,12 +4,12 @@
 buildarch=4
 
 pkgbase=linux-odroid-xu3
-_commit=02603ddf8851b9296033bee8243d04d274eaefa0
+_commit=4e555dd7a15cc7ce3d8131655d8cc20f7abac661
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3"
 pkgver=3.10.105
-pkgrel=1
+pkgrel=2
 bfqver=v7r8
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
@@ -23,13 +23,13 @@ source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.8+-${bfqver}/0002-block-introduce-the-BFQ-${bfqver}-I-O-sched-for-${pkgver:0:4}.8.patch"
         "ftp://teambelgium.net/bfq/patches/${pkgver:0:4}.8+-${bfqver}/0003-block-bfq-add-Early-Queue-Merge-EQM-to-BFQ-${bfqver}-for-${pkgver:0:4}.8+.patch"
         'config')
-md5sums=('cf5c3460cf4dec38e1b821bd324b7227'
+md5sums=('326ef327f8da09e0a3194814ff9575e2'
          'b38a203d9083d66e31196494513fd5a3'
          'd366eb182dc5ba9fa033f0c36af921a0'
          '003f1554be6b672100d2f2401a574d92'
          '12ffe57584b4f2adcc3e184dc6948772'
          '9e78f9f5364f8ebb981aeb235dcb7415'
-         '94adf5c7c7debd42850f545ac29121d1')
+         'bea5e3a60a7303c76156f506f46e2d3f')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
