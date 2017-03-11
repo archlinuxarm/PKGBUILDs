@@ -1,4 +1,4 @@
-# $Id: PKGBUILD 163008 2012-07-05 13:48:19Z allan $
+# $Id$
 # Maintainer: Allan McRae <allan@archlinux.org>
 
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
@@ -13,15 +13,15 @@
 noautobuild=1
 
 pkgname=glibc
-pkgver=2.24
-pkgrel=2
-_commit=fdfc9260
+pkgver=2.25
+pkgrel=1
+_commit=69e0a87cc4c570e3b7218392fc3e743b5bddcce2
 pkgdesc="GNU C Library"
 arch=('i686' 'x86_64')
 url="http://www.gnu.org/software/libc"
 license=('GPL' 'LGPL')
 groups=('base')
-depends=('linux-api-headers>=4.7' 'tzdata' 'filesystem')
+depends=('linux-api-headers>=4.10' 'tzdata' 'filesystem')
 makedepends=('gcc>=6' 'git')
 backup=(etc/gai.conf
         etc/locale.gen
@@ -37,10 +37,22 @@ md5sums=('SKIP'
 
 prepare() {
   mkdir glibc-build
+  
+  cd glibc
+  # avoid crashes on i686 memchr-sse2.S
+  # https://sourceware.org/bugzilla/show_bug.cgi?id=21182
+  _revert_commit="23d27709a423aec32821e9a5198a10267107bae2"
+  _revert_file="sysdeps/i386/i686/multiarch/memchr-sse2.S"
+  git show ${_revert_commit} -- ${_revert_file} | git apply -R
 }
 
 build() {
   cd glibc-build
+
+  if [[ ${CARCH} = "i686" ]]; then
+    # Hack to fix NPTL issues with Xen, only required on 32bit platforms
+    export CFLAGS="${CFLAGS} -mno-tls-direct-seg-refs"
+  fi
 
   # ALARM: Specify build host types
   [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=armv5tel-unknown-linux-gnueabi --build=armv5tel-unknown-linux-gnueabi"
@@ -53,43 +65,44 @@ build() {
   echo "sbindir=/usr/bin" >> configparms
   echo "rootsbindir=/usr/bin" >> configparms
 
-  # remove hardening options for building libraries
-  CFLAGS=${CFLAGS/-fstack-protector/}
+  # remove fortify for building libraries
   CPPFLAGS=${CPPFLAGS/-D_FORTIFY_SOURCE=2/}
 
-  # enable unwinding tables so that gdb can unwind the standard functions
-  CFLAGS+=" -funwind-tables"
-
-  ../${pkgname}/configure --prefix=/usr \
-      --libdir=/usr/lib --libexecdir=/usr/lib \
+  ../${pkgname}/configure \
+      --prefix=/usr \
+      --libdir=/usr/lib \
+      --libexecdir=/usr/lib \
       --with-headers=/usr/include \
       --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
       --enable-add-ons \
       --enable-obsolete-rpc \
       --enable-kernel=2.6.32 \
-      --enable-bind-now --disable-profile \
+      --enable-bind-now \
+      --disable-profile \
       --enable-stackguard-randomization \
+      --enable-stack-protector=strong \
       --enable-lock-elision \
       --disable-multi-arch \
       --disable-werror \
       $CONFIGFLAG
 
-  # build libraries with hardening disabled
+  # build libraries with fortify disabled
   echo "build-programs=no" >> configparms
   make
 
-  # re-enable hardening for programs
+  # re-enable fortify for programs
   sed -i "/build-programs=/s#no#yes#" configparms
-  echo "CC += -fstack-protector -D_FORTIFY_SOURCE=2" >> configparms
-  echo "CXX += -fstack-protector -D_FORTIFY_SOURCE=2" >> configparms
-  make
 
-  # remove harding in preparation to run test-suite
-  sed -i '/FORTIFY/d' configparms
+  echo "CC += -D_FORTIFY_SOURCE=2" >> configparms
+  echo "CXX += -D_FORTIFY_SOURCE=2" >> configparms
+  make
 }
 
 check() {
   cd glibc-build
+
+  # remove fortify in preparation to run test-suite
+  sed -i '/FORTIFY/d' configparms
 
   # some failures are "expected"
   make check || true
@@ -139,14 +152,22 @@ package() {
     strip $STRIP_BINARIES usr/bin/lddlibc4
   fi
 
-  strip $STRIP_STATIC usr/lib/*.a
+  strip $STRIP_STATIC usr/lib/lib{anl,BrokenLocale,c{,_nonshared},crypt}.a \
+                      usr/lib/lib{dl,g,ieee,mcheck,nsl,pthread{,_nonshared}}.a \
+                      usr/lib/lib{resolv,rpcsvc,rt,util}.a
 
-  strip $STRIP_SHARED usr/lib/lib{anl,BrokenLocale,cidn,crypt}-*.so \
+  strip $STRIP_SHARED usr/lib/lib{anl,BrokenLocale,cidn,crypt}-${pkgver}.so \
                       usr/lib/libnss_{compat,db,dns,files,hesiod,nis,nisplus}-*.so \
-                      usr/lib/lib{dl,m,nsl,resolv,rt,util}-*.so \
+                      usr/lib/lib{dl,m,nsl,resolv,rt,util}-${pkgver}.so \
                       usr/lib/lib{memusage,pcprofile,SegFault}.so \
                       usr/lib/{audit,gconv}/*.so || true
+
   if [[ $CARCH = "x86_64" ]]; then
+    strip $STRIP_STATIC usr/lib/lib{m-${pkgver},mvec{,_nonshared}}.a
     strip $STRIP_SHARED usr/lib/libmvec-*.so
+  fi
+  
+  if [[ $CARCH = "i686" ]]; then
+    strip $STRIP_STATIC usr/lib/libm.a
   fi
 }
