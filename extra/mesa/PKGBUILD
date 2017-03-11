@@ -4,26 +4,34 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
-#  - Removed libgles, libegl and khrplatform-devel from conflicts for marvell-libgfx compatibility.
-#  - Moved .pc files to mesa-libgl that reference libraries in mesa-libgl
 
 pkgbase=mesa
-pkgname=('mesa' 'mesa-libgl' 'libva-mesa-driver')
+pkgname=('mesa' 'libva-mesa-driver')
 pkgver=17.0.1
 pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
-             'libomxil-bellagio' 'clang')
+             'libomxil-bellagio' 'clang' 'libglvnd')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        remove-libpthread-stubs.patch)
+        remove-libpthread-stubs.patch
+        0001-EGL-Implement-the-libglvnd-interface-for-EGL-v2.patch
+        0001-Fix-linkage-against-shared-glapi.patch
+        0001-glapi-Link-with-glapi-when-built-shared.patch
+        0002-fixup-EGL-Implement-the-libglvnd-interface-for-EGL-v.patch
+        glvnd-fix-gl-dot-pc.patch)
 sha256sums=('96fd70ef5f31d276a17e424e7e1bb79447ccbbe822b56844213ef932e7ad1b0c'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
-            '75ab53ad44b95204c788a2988e97a5cb963bdbf6072a5466949a2afb79821c8f')
+            '75ab53ad44b95204c788a2988e97a5cb963bdbf6072a5466949a2afb79821c8f'
+            '1d3475dc2f4f3e450cf313130d3ce965f933f396058828fa843c0df8115feeb9'
+            'c68d1522f9bce4ce31c92aa7a688da49f13043f5bb2254795b76dea8f47130b7'
+            '064dcd5a3ab1b7c23383e2cafbd37859e4c353f8839671d9695c6f7c2ef3260b'
+            '81d0ced62f61677ea0cf5f69a491093409fa1370f2ef045c41106ca8bf9c46f6'
+            '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 
 prepare() {
@@ -32,6 +40,15 @@ prepare() {
   # Now mesa checks for libpthread-stubs - so remove the check
   patch -Np1 -i ../remove-libpthread-stubs.patch
   
+  # glvnd support patches - from Fedora
+  # https://patchwork.freedesktop.org/series/12354/, v3 & v4
+  patch -Np1 -i ../0001-EGL-Implement-the-libglvnd-interface-for-EGL-v2.patch
+  patch -Np1 -i ../0002-fixup-EGL-Implement-the-libglvnd-interface-for-EGL-v.patch
+  # non-upstreamed ones
+  patch -Np1 -i ../glvnd-fix-gl-dot-pc.patch
+  patch -Np1 -i ../0001-Fix-linkage-against-shared-glapi.patch
+  patch -Np1 -i ../0001-glapi-Link-with-glapi-when-built-shared.patch
+
   autoreconf -fiv
 }
 
@@ -50,6 +67,7 @@ build() {
     --enable-gallium-llvm \
     --enable-llvm-shared-libs \
     --enable-shared-glapi \
+    --enable-libglvnd \
     --enable-egl \
     --enable-glx \
     --enable-glx-tls \
@@ -57,7 +75,7 @@ build() {
     --enable-gles2 \
     --enable-gbm \
     --enable-dri \
-    --enable-osmesa \
+    --enable-gallium-osmesa \
     --enable-texture-float \
     --enable-omx \
     --enable-nine \
@@ -85,16 +103,19 @@ package_libva-mesa-driver() {
 package_mesa() {
   pkgdesc="an open-source implementation of the OpenGL specification"
   depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'libelf' 
-           'libomxil-bellagio' 'libtxc_dxtn' 'llvm-libs')
+           'libomxil-bellagio' 'libtxc_dxtn' 'llvm-libs' 'libglvnd')
   optdepends=('opengl-man-pages: for the OpenGL API man pages'
               'mesa-vdpau: for accelerated video playback'
               'libva-mesa-driver: for accelerated video playback')
-  provides=('ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri')
-  conflicts=('ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri')
-  replaces=('ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri')
+  provides=('ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri' 'mesa-libgl' 'opengl-driver')
+  conflicts=('ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri' 'mesa-libgl')
+  replaces=('ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri' 'mesa-libgl')
 
   install -m755 -d ${pkgdir}/etc
   cp -rv ${srcdir}/fakeinstall/etc/drirc ${pkgdir}/etc
+  
+  install -m755 -d ${pkgdir}/usr/share/glvnd/egl_vendor.d
+  cp -rv ${srcdir}/fakeinstall/usr/share/glvnd/egl_vendor.d/50_mesa.json ${pkgdir}/usr/share/glvnd/egl_vendor.d/
 
   install -m755 -d ${pkgdir}/usr/lib/xorg/modules/dri
   # ati-dri, nouveau-dri, intel-dri, svga-dri, swrast
@@ -108,48 +129,14 @@ package_mesa() {
 
   cp -rv ${srcdir}/fakeinstall/usr/include ${pkgdir}/usr
   cp -rv ${srcdir}/fakeinstall/usr/lib/pkgconfig ${pkgdir}/usr/lib/
-  rm ${pkgdir}/usr/lib/pkgconfig/{egl,gl,glesv1_cm,glesv2}.pc
-
+  
   # remove vulkan headers
   rm -rf ${pkgdir}/usr/include/vulkan
 
-  install -m755 -d ${pkgdir}/usr/lib/mesa
-  # move libgl/EGL/glesv*.so to not conflict with blobs - may break .pc files ?
-  cp -rv ${srcdir}/fakeinstall/usr/lib/libGL.so* 	${pkgdir}/usr/lib/mesa/
-  cp -rv ${srcdir}/fakeinstall/usr/lib/libEGL.so* 	${pkgdir}/usr/lib/mesa/
-  cp -rv ${srcdir}/fakeinstall/usr/lib/libGLES*.so*	${pkgdir}/usr/lib/mesa/
+  # libglvnd support
+  cp -rv ${srcdir}/fakeinstall/usr/lib/libGLX_mesa.so* ${pkgdir}/usr/lib/
+  cp -rv ${srcdir}/fakeinstall/usr/lib/libEGL_mesa.so* ${pkgdir}/usr/lib/
 
   install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa/"
-}
-
-package_mesa-libgl() {
-  pkgdesc="Mesa 3-D graphics library"
-  depends=('mesa')
-  provides=('libgl' 'libgles' 'libegl')
-  conflicts=('libgl' 'libgles' 'libegl')
-
-  install -m755 -d ${pkgdir}/usr/lib/pkgconfig
-  cp ${srcdir}/fakeinstall/usr/lib/pkgconfig/{egl,gl,glesv1_cm,glesv2}.pc ${pkgdir}/usr/lib/pkgconfig
- 
-  install -m755 -d "${pkgdir}/usr/lib/"
-
-  ln -s /usr/lib/mesa/libGL.so.1.2.0 ${pkgdir}/usr/lib/libGL.so.1.2.0
-  ln -s libGL.so.1.2.0	             ${pkgdir}/usr/lib/libGL.so.1
-  ln -s libGL.so.1.2.0               ${pkgdir}/usr/lib/libGL.so
-
-  ln -s /usr/lib/mesa/libEGL.so.1.0.0 ${pkgdir}/usr/lib/libEGL.so.1.0.0
-  ln -s libEGL.so.1.0.0	              ${pkgdir}/usr/lib/libEGL.so.1
-  ln -s libEGL.so.1.0.0               ${pkgdir}/usr/lib/libEGL.so
-
-  ln -s /usr/lib/mesa/libGLESv1_CM.so.1.1.0 ${pkgdir}/usr/lib/libGLESv1_CM.so.1.1.0
-  ln -s libGLESv1_CM.so.1.1.0	            ${pkgdir}/usr/lib/libGLESv1_CM.so.1
-  ln -s libGLESv1_CM.so.1.1.0               ${pkgdir}/usr/lib/libGLESv1_CM.so
-
-  ln -s /usr/lib/mesa/libGLESv2.so.2.0.0 ${pkgdir}/usr/lib/libGLESv2.so.2.0.0
-  ln -s libGLESv2.so.2.0.0               ${pkgdir}/usr/lib/libGLESv2.so.2
-  ln -s libGLESv2.so.2.0.0               ${pkgdir}/usr/lib/libGLESv2.so
-
-  install -m755 -d "${pkgdir}/usr/share/licenses/mesa-libgl"
-  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa-libgl/"
 }
