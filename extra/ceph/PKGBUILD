@@ -3,37 +3,32 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - patch to remove neon detection in configure
-#  - patch to remove incompatible gcc flag
+#  - add 32bit ARM to the xfs.h fix
 #  - make -j3, RAM constraints
 
+highmem=1
+
 pkgname=ceph
-pkgver=10.2.3
-pkgrel=2
+pkgver=10.2.5
+pkgrel=1
 pkgdesc='Distributed, fault-tolerant storage platform delivering object, block, and file system'
 arch=('x86_64' 'i686')
-url='http://ceph.com/'
+url='https://ceph.com/'
 license=('GPL')
-makedepends=('boost' 'systemd' 'xfsprogs' 'python2-setuptools' 'python2-sphinx'
-             'python2-virtualenv' 'cython2')
-depends=('boost-libs' 'curl' 'expat' 'fcgi' 'fuse' 'gcc-libs' 'glibc'
+makedepends=('boost' 'systemd' 'xfsprogs' 'python2-sphinx' 'cython2' 'sed')
+depends=('boost-libs' 'curl' 'expat' 'fcgi' 'fuse2' 'gcc-libs' 'glibc'
   'gperftools' 'keyutils' 'leveldb' 'libaio' 'libatomic_ops' 'libedit'
-  'libsystemd' 'libutil-linux' 'ncurses' 'nss' 'python2' 'snappy')
-optdepends=('xfsprogs: support xfs backend')
+  'libsystemd' 'libutil-linux' 'ncurses' 'nss' 'python2' 'snappy'
+  'python2-setuptools' 'xfsprogs')
 options=('emptydirs')
-install=ceph.install
-source=("http://ceph.com/download/$pkgname-$pkgver.tar.gz"
+source=("https://download.ceph.com/tarballs/$pkgname-$pkgver.tar.gz"
         'ceph.sysusers'
-        '01-virtualenv2.patch'
-        '02-setup-python2.patch'
-        '03-Revert-rgw-ldap-fix-ldap-bindpw-parsing.patch'
-        '04-fix-686-build.patch'
-        'no-neon.patch')
-md5sums=('5cba47af53b3b17002aad3c854e5405c'
+        '01-ceph-detec-init.patch'
+        'no-neon.diff')
+md5sums=('772bf99f4360774f5948191a7b012c88'
          'b3e24e3aa005a657ab475f84bfe3291a'
-         'a3f72dc8e97f9fd5708d52256bcd9e75'
-         'f11582acceeb6c1790518c3a5a29bb18'
-         '97d293b08d5d4b4a2db37030c28bc617'
-         '8c4af30de8c2dab89a8afa3ff8c03a5d')
+         'da25c78ae413dc134cc99fe9818f6ff1'
+         'd75fe7ff3125dd2df43fee6410700dda')
 
 prepare() {
   cd $pkgname-$pkgver
@@ -41,8 +36,8 @@ prepare() {
   local filename
   for filename in "${source[@]}"; do
     if [[ "$filename" =~ \.patch$ ]]; then
-      msg2 "Applying patch $filename"
-      patch -p1 -N -i "$srcdir/$filename"
+      msg2 "Applying patch ${filename##*/}"
+      patch -p1 -N -i "$srcdir/${filename##*/}"
     fi
   done
   :
@@ -50,6 +45,16 @@ prepare() {
 
 build() {
   cd $pkgname-$pkgver
+  # fix xfs.h failure in configure on i686
+  [[ $CARCH == i686 || $CARCH == arm || $CARCH == armv6h || $CARCH == armv7h ]] && export CXXFLAGS="$CFLAGS -D_FILE_OFFSET_BITS=64"
+  # don't use autotools for ceph-disk, ceph-detect and tests
+  sed -ri 's,include (ceph-disk|ceph-detect-init|test)/Makefile.am,,' src/Makefile.am
+  # regen configure
+  ./autogen.sh
+  # fix python-config binary name
+  sed -i 's,python-config,python2-config,g' configure
+  # drop neon checks
+  patch -p1 -i ../no-neon.diff
   ./configure \
     --prefix=/usr \
     --sbindir=/usr/bin \
@@ -57,7 +62,7 @@ build() {
     --sysconfdir=/etc \
     --localstatedir=/var \
     --with-man-pages \
-    --with-radosgw \
+    --without-radosgw \
     --without-openldap \
     PYTHON=/usr/bin/python2 \
     CYTHON_CHECK=yes \
@@ -69,28 +74,32 @@ build() {
 package() {
   cd $pkgname-$pkgver
 
+  # main install
   make DESTDIR="$pkgdir" install
 
-  # install tmpfiles.d
+  # ceph-disk
+  pushd src/ceph-disk
+  python2 setup.py install --root "$pkgdir" --prefix=/usr
+  popd
+
+  # ceph-detect-init
+  pushd src/ceph-detect-init
+  python2 setup.py install --root "$pkgdir" --prefix=/usr
+  popd
+
+  # systemd stuff
   install -Dm644 systemd/ceph.tmpfiles.d "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
   install -Dm644 "$srcdir"/ceph.sysusers "$pkgdir/usr/lib/sysusers.d/$pkgname.conf"
 
-  cd "$pkgdir"
-
-  # fix sbin path
-  msg2 'Fix sbin paths'
-  mv -v usr/sbin/* usr/bin
-  rmdir -v usr/sbin
-
   # fix bash completions path
   msg2 'Fix bash completion path'
-  install -d -m 755 usr/share/bash-completion
-  mv etc/bash_completion.d usr/share/bash-completion/completions
+  install -d -m 755 "$pkgdir"/usr/share/bash-completion
+  mv "$pkgdir"/{etc/bash_completion.d,usr/share/bash-completion/completions}
 
   # fix python2 shebang, did not do it in prepare() anymore because it
   # confuse automake
   msg2 'Fix python2 shebang'
-  find . -type f -executable -exec \
+  find "$pkgdir" -type f -executable -exec \
     sed -i '1s,^#! \?/usr/bin/\(env \|\)python$,#!/usr/bin/python2,' {} \;
 }
 
