@@ -1,145 +1,89 @@
 # $Id$
-# Maintainer: Alexander F Rødseth <xyproto@archlinux.org>
-# Maintainer: Pierre Neidhardt <ambrevar@gmail.com>
-# Contributor: Vesa Kaihlavirta <vegai@iki.fi>
-# Contributor: Rémy Oudompheng <remy@archlinux.org>
-# Contributor: Andres Perera <andres87p gmail>
-# Contributor: Matthew Bauer <mjbauer95@gmail.com>
-# Contributor: Christian Himpel <chressie@gmail.com>
-# Contributor: Mike Rosset <mike.rosset@gmail.com>
-# Contributor: Daniel YC Lin <dlin.tw@gmail.com>
-# Contributor: John Luebs <jkluebs@gmail.com>
+# Maintainer: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - added switches for our architectures
 #  - upstream patch for AArch64
 
-pkgname=('go' 'go-tools')
+pkgname=go
 epoch=2
 pkgver=1.8
-pkgrel=1.2
-arch=('arm' 'armv6h' 'armv7h' 'aarch64')
+pkgrel=3
+pkgdesc='Core compiler tools for the Go programming language'
+arch=(i686 x86_64)
 url='http://golang.org/'
-license=('BSD')
-makedepends=('inetutils' 'git' 'go')
-options=('!strip' 'staticlibs')
-source=("$pkgname-$pkgver::git+https://go.googlesource.com/go#tag=$pkgname$pkgver")
-md5sums=('SKIP')
-_gourl=golang.org/x/tools/cmd
+license=(BSD)
+makedepends=(git go)
+options=(!strip staticlibs)
+_commit=cd6b6202dd1559b3ac63179b45f1833fcfbe7eca # go1.8
+source=(git+https://go.googlesource.com/go#commit=$_commit
+        0001-time-make-the-ParseInLocation-test-more-robust.patch)
+md5sums=('SKIP'
+         'a9031d2fdd5d0951980db7ffe20afe41')
+
+export GOOS=linux
+case "$CARCH" in
+  x86_64) export GOARCH=amd64 ;;
+  i686) export GOARCH=386 GO386=387 ;;
+  arm) export GOARCH=arm GOARM=5 ;;
+  armv6h) export GOARCH=arm GOARM=6 ;;
+  armv7h) export GOARCH=arm GOARM=7 ;;
+  aarch64) export GOARCH=arm64 ;;
+esac
+export GOROOT_FINAL=/usr/lib/go
+export GOROOT_BOOTSTRAP=/usr/lib/go
 
 prepare() {
-  cd "$pkgname-$pkgver"
+  cd $pkgname
+
+  # fixes time/format test with tzdata >=2017a
+  patch -p1 -i "$srcdir/0001-time-make-the-ParseInLocation-test-more-robust.patch"
+
+  # upstream patch for AArch64
   git cherry-pick -n 3557d546090c7fedd69562c88d20767397de835d
 }
 
 build() {
-  cd "$pkgname-$pkgver/src"
-
-  export GOARCH=arm
-  [ "$CARCH" == 'arm' ] && export GOARM=5
-  [ "$CARCH" == 'armv6h' ] && export GOARM=6
-  [ "$CARCH" == 'armv7h' ] && export GOARM=7
-  [ "$CARCH" == 'aarch64' ] && export GOARCH=arm64
-
-  export GOROOT_FINAL=/usr/lib/go
-  export GOROOT_BOOTSTRAP=/usr/lib/go
-  export GOOS=linux
-  export GOPATH="$srcdir/"
-  export GOROOT="$srcdir/$pkgname-$pkgver"
+  export GOROOT="$srcdir/$pkgname"
   export GOBIN="$GOROOT/bin"
+  export GOPATH="$srcdir/"
 
-  bash make.bash --no-clean
-
-  # System-wide tools
-  for tool in godex godoc goimports gomvpkg gorename gotype; do
-    $GOROOT/bin/go get -d golang.org/x/tools/cmd/$tool
-    $GOROOT/bin/go build -v -x -o $GOPATH/bin/$tool $_gourl/$tool
-  done
-
-  # Distribution tools
-  for tool in benchcmp bundle callgraph digraph eg fiximports guru html2article present ssadump stress stringer ; do
-    $GOROOT/bin/go get -d golang.org/x/tools/cmd/$tool
-    $GOROOT/bin/go build -v -x -o $GOPATH/pkg/tool/${GOOS}_$GOARCH/$tool golang.org/x/tools/cmd/$tool
-  done
+  cd $pkgname/src
+  ./make.bash --no-clean
 }
 
 check() {
-  cd "$pkgname-$pkgver"
-
-  export GOARCH=arm
-  [ "$CARCH" == 'arm' ] && export GOARM=5
-  [ "$CARCH" == 'armv6h' ] && export GOARM=6
-  [ "$CARCH" == 'armv7h' ] && export GOARM=7
-  [ "$CARCH" == 'aarch64' ] && export GOARCH=arm64
-
-  export GOROOT="$srcdir/$pkgname-$pkgver"
+  export GOROOT="$srcdir/$pkgname"
   export GOBIN="$GOROOT/bin"
   export PATH="$srcdir/$pkgname-$pkgver/bin:$PATH"
-  export GOROOT_BOOTSTRAP=/usr/lib/go
+  export GO_TEST_TIMEOUT_SCALE=2
 
-  for tool in goimports gomvpkg gorename gotype \
-    benchcmp bundle callgraph digraph eg fiximports guru html2article present ssadump stress stringer; do
-    GOPATH="$srcdir" $GOROOT/bin/go test -v -x $_gourl/$tool
-  done
+  # The cgo_test and race tests fail via run.bash but not if run manually.
+  # Assume that five "failed" messages are okay and just re-run failed tests.
+  cd $pkgname/src
+  ./run.bash --no-rebuild -v -v -v -k |& tee run.log
+  if (( $(grep -c Failed: run.log) > 5 )) && grep -q FAILED run.log; then
+    return 1
+  fi
 
-  # TestSimpleMulticastListener will fail in standard chroot
-  cd src && bash run.bash --no-rebuild || true
+  go tool dist test -v -v -v -run=^cgo_test$
+  go tool dist test -v -v -v -run=^race$
 }
 
-package_go() {
-  pkgdesc='Compiler and tools for the Go programming language from Google'
-  optdepends=('mercurial: for fetching sources from mercurial repositories'
-              'git: for fetching sources from git repositories'
-              'bzr: for fetching sources from bazaar repositories'
-              'subversion: for fetching sources from subversion repositories'
-              'go-tools: doc, goimports, gorename, and other tools.')
-  cd "$pkgname-$pkgver"
+package() {
+  cd $pkgbase
 
-  export GOROOT="$srcdir/$pkgname-$pkgver"
-  export GOBIN="$GOROOT/bin"
-  export GOROOT_BOOTSTRAP=/usr/lib/go
+  install -d "$pkgdir/usr/bin" "$pkgdir/usr/lib/go" "$pkgdir/usr/share/doc/go"
+  cp -a bin pkg src lib "$pkgdir/usr/lib/go"
+  cp -r doc/* "$pkgdir/usr/share/doc/go"
+
+  ln -sf /usr/lib/go/bin/go "$pkgdir/usr/bin/go"
+  ln -sf /usr/lib/go/bin/gofmt "$pkgdir/usr/bin/gofmt"
+  ln -sf /usr/share/doc/go "$pkgdir/usr/lib/go/doc"
 
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/go/LICENSE"
-
-  mkdir -p "$pkgdir/usr/"{share/go,lib/go,lib/go/pkg,lib/go/src,lib/go/site/src}
-
-  cp -r doc misc -t "$pkgdir/usr/share/go"
-  ln -s /usr/share/go/doc "$pkgdir/usr/lib/go/doc"
-  cp -a bin "$pkgdir/usr"
-  cp -a pkg/{include,linux_$GOARCH,tool} "$pkgdir/usr/lib/go/pkg"
-  # The 'race' folder is not always generated for all architectures.
-  [ -d "pkg/linux_${GOARCH}_race" ] && cp -a pkg/linux_${GOARCH}_race "$pkgdir/usr/lib/go/pkg"
-  cp -a "$GOROOT/src" "$pkgdir/usr/lib/go/"
-  cp -a "$GOROOT/lib" "$pkgdir/usr/lib/go/"
-
-  # This is to make `# go get golang.org/x/tour/gotour` and then running the
-  # gotour executable work out of the box.
-  ln -sf /usr/bin "$pkgdir/usr/lib/go/bin"
-
   install -Dm644 VERSION "$pkgdir/usr/lib/go/VERSION"
 
-  # For godoc command
-  install -Dm644 favicon.ico "$pkgdir/usr/lib/go/favicon.ico"
-
-  # Clean Windows specific files.
-  rm -fv "$pkgdir"/usr/lib/go/src/*.bat
+  rm -rf "$pkgdir/usr/lib/go/pkg/bootstrap"
+  rm -rf "$pkgdir/usr/lib/go/pkg/tool/*/api"
 }
-
-package_go-tools() {
-  pkgdesc='Developer tools for the Go programming language (includes godoc)'
-  depends=('go')
-
-  GOOS=linux
-
-  install -Dm644 "$srcdir/src/$_gourl/../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-
-  # System-wide tools
-  install -dm755 "$pkgdir/usr/bin"
-  install -p -m755 "$srcdir/bin"/* "$pkgdir/usr/bin"
-
-  # Distribution tools
-  install -dm755 "$pkgdir/usr/lib/go/pkg/tool/${GOOS}_$GOARCH"
-  install -p -m755 "$srcdir/pkg/tool/${GOOS}_$GOARCH"/* "$pkgdir/usr/lib/go/pkg/tool/${GOOS}_$GOARCH"
-}
-
-# vim:set ts=2 sw=2 et:
