@@ -1,0 +1,551 @@
+diff --git a/mythtv/libs/libmythui/cecadapter.cpp b/mythtv/libs/libmythui/cecadapter.cpp
+index 00a8c73..06a8f3d 100644
+--- a/mythtv/libs/libmythui/cecadapter.cpp
++++ b/mythtv/libs/libmythui/cecadapter.cpp
+@@ -33,17 +33,31 @@ QWaitCondition* CECAdapter::gActionsReady = new QWaitCondition();
+ // libcec1's callback parameters are pass-by-ref
+ #define CEC_CALLBACK_PARAM_TYPE &
+ #else
+-// libcec2's callback parameters are pass-by-value
++#if CEC_LIB_VERSION_MAJOR <= 3
++// libcec2 and 3 callback parameters are pass-by-value
+ #define CEC_CALLBACK_PARAM_TYPE
+ #endif
++#endif
+ 
+ // The libCEC callback functions
++#if CEC_LIB_VERSION_MAJOR <= 3
+ static int CECLogMessageCallback(void *adapter, const cec_log_message CEC_CALLBACK_PARAM_TYPE message);
+ static int CECKeyPressCallback(void *adapter, const cec_keypress CEC_CALLBACK_PARAM_TYPE keypress);
+ static int CECCommandCallback(void *adapter, const cec_command CEC_CALLBACK_PARAM_TYPE command);
++#endif
++#if CEC_LIB_VERSION_MAJOR >= 4
++static void CECLogMessageCallback(void *adapter, const cec_log_message* message);
++static void CECKeyPressCallback(void *adapter, const cec_keypress* keypress);
++static void CECCommandCallback(void *adapter, const cec_command* command);
++#endif
+ 
+ #if CEC_LIB_VERSION_MAJOR >= 2
++#if CEC_LIB_VERSION_MAJOR <= 3
+ static int CECAlertCallback(void *adapter, const libcec_alert alert, const libcec_parameter CEC_CALLBACK_PARAM_TYPE data);
++#endif
++#if CEC_LIB_VERSION_MAJOR >= 4
++static void CECAlertCallback(void *adapter, const libcec_alert alert, const libcec_parameter data);
++#endif
+ static void CECSourceActivatedCallback(void *adapter, const cec_logical_address address, const uint8_t activated);
+ #endif
+ 
+@@ -107,13 +121,24 @@ class CECAdapterPriv
+         }
+ 
+         // Set up the callbacks
++#if CEC_LIB_VERSION_MAJOR <= 3
+         callbacks.CBCecLogMessage = &CECLogMessageCallback;
+         callbacks.CBCecKeyPress   = &CECKeyPressCallback;
+         callbacks.CBCecCommand    = &CECCommandCallback;
+-#if CEC_LIB_VERSION_MAJOR >= 2
++#endif
++#if CEC_LIB_VERSION_MAJOR >= 4
++        callbacks.logMessage      = &CECLogMessageCallback;
++        callbacks.keyPress        = &CECKeyPressCallback;
++        callbacks.commandReceived = &CECCommandCallback;
++#endif
++#if CEC_LIB_VERSION_MAJOR >= 2 && CEC_LIB_VERSION_MAJOR <= 3
+         callbacks.CBCecAlert      = &CECAlertCallback;
+         callbacks.CBCecSourceActivated = &CECSourceActivatedCallback;
+ #endif
++#if CEC_LIB_VERSION_MAJOR >= 4
++        callbacks.alert           = &CECAlertCallback;
++        callbacks.sourceActivated = &CECSourceActivatedCallback;
++#endif
+         configuration.callbackParam = this;
+         configuration.callbacks = &callbacks;
+ 
+@@ -127,8 +152,13 @@ class CECAdapterPriv
+         }
+ 
+         // find adapters
++#if CEC_LIB_VERSION_MAJOR >= 4
++        cec_adapter_descriptor *devices = new cec_adapter_descriptor[MAX_CEC_DEVICES];
++        uint8_t num_devices = adapter->DetectAdapters(devices, MAX_CEC_DEVICES, NULL, true);
++#else
+         cec_adapter *devices = new cec_adapter[MAX_CEC_DEVICES];
+         uint8_t num_devices = adapter->FindAdapters(devices, MAX_CEC_DEVICES, NULL);
++#endif
+         if (num_devices < 1)
+         {
+             LOG(VB_GENERAL, LOG_ERR, LOC + "Failed to find any CEC devices.");
+@@ -143,22 +173,37 @@ class CECAdapterPriv
+             .arg(num_devices));
+         for (uint8_t i = 0; i < num_devices; i++)
+         {
++#if CEC_LIB_VERSION_MAJOR >= 4
++            QString comm = QString::fromLatin1(devices[i].strComName);
++            QString path = QString::fromLatin1(devices[i].strComPath);
++#else
+             QString comm = QString::fromLatin1(devices[i].comm);
++            QString path = QString::fromLatin1(devices[i].path);
++#endif
+             bool match = find ? (comm == defaultDevice) : (i == 0);
+             devicenum = match ? i : devicenum;
+             LOG(VB_GENERAL, LOG_INFO, LOC +
+                 QString("Device %1: path '%2' com port '%3' %4").arg(i + 1)
+-                .arg(QString::fromLatin1(devices[i].path)).arg(comm)
++                .arg(path).arg(comm)
+                 .arg(match ? "SELECTED" : ""));
+         }
+ 
+         // open adapter
+-        QString path = QString::fromLatin1(devices[devicenum].path);
++#if CEC_LIB_VERSION_MAJOR >= 4
++        QString comm = QString::fromLatin1(devices[devicenum].strComName);
++        QString path = QString::fromLatin1(devices[devicenum].strComPath);
++#else
+         QString comm = QString::fromLatin1(devices[devicenum].comm);
++        QString path = QString::fromLatin1(devices[devicenum].path);
++#endif
+         LOG(VB_GENERAL, LOG_INFO, LOC + QString("Trying to open device %1 (%2).")
+             .arg(path).arg(comm));
+ 
++#if CEC_LIB_VERSION_MAJOR >= 4
++        if (!adapter->Open(devices[devicenum].strComName))
++#else
+         if (!adapter->Open(devices[devicenum].comm))
++#endif
+         {
+             LOG(VB_GENERAL, LOG_ERR, LOC + "Failed to open device.");
+             return false;
+@@ -213,6 +258,20 @@ class CECAdapterPriv
+         return 1;
+     }
+ 
++    void LogMessage(const cec_log_message* message)
++    {
++        QString msg(message->message);
++        int lvl = LOG_UNKNOWN;
++        switch (message->level)
++        {
++            case CEC_LOG_ERROR:   lvl = LOG_ERR;     break;
++            case CEC_LOG_WARNING: lvl = LOG_WARNING; break;
++            case CEC_LOG_NOTICE:  lvl = LOG_INFO;    break;
++            case CEC_LOG_DEBUG:   lvl = LOG_DEBUG;   break;
++        }
++        LOG(VB_GENERAL, lvl, LOC + QString("%1").arg(msg));
++    }
++
+     // NOTE - libcec2 changes the callbacks
+     // to be pass-by-value.
+     // For simplicity, this function remains as pass-by-ref
+@@ -241,6 +300,29 @@ class CECAdapterPriv
+         return 1;
+     }
+ 
++    void HandleCommand(const cec_command* command)
++    {
++        if (!adapter || !valid)
++            return;
++
++        LOG(VB_GENERAL, LOG_DEBUG, LOC +
++            QString("Command %1 from '%2' (%3) - destination '%4' (%5)")
++            .arg(command->opcode)
++            .arg(adapter->ToString(command->initiator))
++            .arg(command->initiator)
++            .arg(adapter->ToString(command->destination))
++            .arg(command->destination));
++
++        switch (command->opcode)
++        {
++            // TODO
++            default:
++                break;
++        }
++        gCoreContext->SendSystemEvent(QString("CEC_COMMAND_RECEIVED COMMAND %1")
++                                      .arg(command->opcode));
++    }
++
+     int HandleKeyPress(const cec_keypress &key)
+     {
+         if (!adapter || !valid)
+@@ -572,6 +654,335 @@ class CECAdapterPriv
+         return 1;
+     }
+ 
++    void HandleKeyPress(const cec_keypress* key)
++    {
++        if (!adapter || !valid)
++            return;
++
++        // Ignore key down events and wait for the key 'up'
++        if (key->duration < 1)
++            return;
++
++        QString code;
++        int action = 0;
++        switch (key->keycode)
++        {
++            case CEC_USER_CONTROL_CODE_NUMBER0:
++                action = Qt::Key_0;
++                code   = "0";
++                break;
++            case CEC_USER_CONTROL_CODE_NUMBER1:
++                action = Qt::Key_1;
++                code   = "1";
++                break;
++            case CEC_USER_CONTROL_CODE_NUMBER2:
++                action = Qt::Key_2;
++                code   = "2";
++                break;
++            case CEC_USER_CONTROL_CODE_NUMBER3:
++                action = Qt::Key_3;
++                code   = "3";
++                break;
++            case CEC_USER_CONTROL_CODE_NUMBER4:
++                action = Qt::Key_4;
++                code   = "4";
++                break;
++            case CEC_USER_CONTROL_CODE_NUMBER5:
++                action = Qt::Key_5;
++                code   = "5";
++                break;
++            case CEC_USER_CONTROL_CODE_NUMBER6:
++                action = Qt::Key_6;
++                code   = "6";
++                break;
++            case CEC_USER_CONTROL_CODE_NUMBER7:
++                action = Qt::Key_7;
++                code   = "7";
++                break;
++            case CEC_USER_CONTROL_CODE_NUMBER8:
++                action = Qt::Key_8;
++                code   = "8";
++                break;
++            case CEC_USER_CONTROL_CODE_NUMBER9:
++                action = Qt::Key_9;
++                code   = "9";
++                break;
++            case CEC_USER_CONTROL_CODE_SELECT:
++                action = Qt::Key_Select;
++                code   = "SELECT";
++                break;
++            case CEC_USER_CONTROL_CODE_ENTER:
++                action = Qt::Key_Enter;
++                code   = "ENTER";
++                break;
++            case CEC_USER_CONTROL_CODE_UP:
++                action = Qt::Key_Up;
++                code   = "UP";
++                break;
++            case CEC_USER_CONTROL_CODE_DOWN:
++                action = Qt::Key_Down;
++                code   = "DOWN";
++                break;
++            case CEC_USER_CONTROL_CODE_LEFT:
++                action = Qt::Key_Left;
++                code   = "LEFT";
++                break;
++            case CEC_USER_CONTROL_CODE_LEFT_UP:
++                action = Qt::Key_Left;
++                code   = "LEFT_UP";
++                break;
++            case CEC_USER_CONTROL_CODE_LEFT_DOWN:
++                action = Qt::Key_Left;
++                code   = "LEFT_DOWN";
++                break;
++            case CEC_USER_CONTROL_CODE_RIGHT:
++                action = Qt::Key_Right;
++                code   = "RIGHT";
++                break;
++            case CEC_USER_CONTROL_CODE_RIGHT_UP:
++                action = Qt::Key_Right;
++                code   = "RIGHT_UP";
++                break;
++            case CEC_USER_CONTROL_CODE_RIGHT_DOWN:
++                action = Qt::Key_Right;
++                code   = "RIGHT_DOWN";
++                break;
++            case CEC_USER_CONTROL_CODE_ROOT_MENU:
++                action = Qt::Key_M;
++                code   = "ROOT_MENU";
++                break;
++            case CEC_USER_CONTROL_CODE_EXIT:
++                action = Qt::Key_Escape;
++                code   = "EXIT";
++                break;
++            case CEC_USER_CONTROL_CODE_PREVIOUS_CHANNEL:
++                action = Qt::Key_H;
++                code   = "PREVIOUS_CHANNEL";
++                break;
++            case CEC_USER_CONTROL_CODE_SOUND_SELECT:
++                action = Qt::Key_Plus;
++                code   = "SOUND_SELECT";
++                break;
++            case CEC_USER_CONTROL_CODE_VOLUME_UP:
++                action = Qt::Key_VolumeUp;
++                code   = "VOLUME_UP";
++                break;
++            case CEC_USER_CONTROL_CODE_VOLUME_DOWN:
++                action = Qt::Key_VolumeDown;
++                code   = "VOLUME_DOWN";
++                break;
++            case CEC_USER_CONTROL_CODE_MUTE:
++                action = Qt::Key_VolumeMute;
++                code   = "MUTE";
++                break;
++            case CEC_USER_CONTROL_CODE_PLAY:
++                action = Qt::Key_P;
++                code   = "PLAY";
++                break;
++            case CEC_USER_CONTROL_CODE_PAUSE:
++                action = Qt::Key_P; // same as play
++                code   = "PAUSE";
++                break;
++            case CEC_USER_CONTROL_CODE_STOP:
++                action = Qt::Key_Stop;
++                code   = "STOP";
++                break;
++            case CEC_USER_CONTROL_CODE_RECORD:
++                action = Qt::Key_R;
++                code   = "RECORD";
++                break;
++            case CEC_USER_CONTROL_CODE_CLEAR:
++                action = Qt::Key_Clear;
++                code   = "CLEAR";
++                break;
++            case CEC_USER_CONTROL_CODE_DISPLAY_INFORMATION:
++                action = Qt::Key_I;
++                code   = "DISPLAY_INFORMATION";
++                break;
++            case CEC_USER_CONTROL_CODE_PAGE_UP:
++                action = Qt::Key_PageUp;
++                code   = "PAGE_UP";
++                break;
++            case CEC_USER_CONTROL_CODE_PAGE_DOWN:
++                action = Qt::Key_PageDown;
++                code   = "PAGE_DOWN";
++                break;
++            case CEC_USER_CONTROL_CODE_EJECT:
++                action = Qt::Key_Eject;
++                code   = "EJECT";
++                break;
++            case CEC_USER_CONTROL_CODE_FORWARD:
++                action = Qt::Key_Forward;
++                code   = "FORWARD";
++                break;
++            case CEC_USER_CONTROL_CODE_BACKWARD:
++                action = Qt::Key_Back;
++                code   = "BACKWARD";
++                break;
++            case CEC_USER_CONTROL_CODE_F1_BLUE:
++                action = Qt::Key_F5; // NB F1 is help and we normally map blue to F5
++                code   = "F1_BLUE";
++                break;
++            case CEC_USER_CONTROL_CODE_F2_RED:
++                action = Qt::Key_F2;
++                code   = "F2_RED";
++                break;
++            case CEC_USER_CONTROL_CODE_F3_GREEN:
++                action = Qt::Key_F3;
++                code   = "F3_GREEN";
++                break;
++            case CEC_USER_CONTROL_CODE_F4_YELLOW:
++                action = Qt::Key_F4;
++                code   = "F4_YELLOW";
++                break;
++            case CEC_USER_CONTROL_CODE_SETUP_MENU:
++                action = Qt::Key_M; // Duplicate of Root Menu
++                code   = "SETUP_MENU";
++                break;
++            case CEC_USER_CONTROL_CODE_CONTENTS_MENU:
++                action = Qt::Key_M; // Duplicate of Root Menu
++                code   = "CONTENTS_MENU";
++                break;
++            case CEC_USER_CONTROL_CODE_FAVORITE_MENU:
++                action = Qt::Key_M; // Duplicate of Root Menu
++                code   = "FAVORITE_MENU";
++                break;
++            case CEC_USER_CONTROL_CODE_DOT:
++                action = Qt::Key_Period;
++                code  = "DOT";
++                break;
++            case CEC_USER_CONTROL_CODE_NEXT_FAVORITE:
++                action = Qt::Key_Slash;
++                code   = "NEXT_FAVORITE";
++                break;
++            case CEC_USER_CONTROL_CODE_INPUT_SELECT:
++                action = Qt::Key_C;
++                code = "INPUT_SELECT";
++                break;
++            case CEC_USER_CONTROL_CODE_HELP:
++                action = Qt::Key_F1;
++                code   = "HELP";
++                break;
++            case CEC_USER_CONTROL_CODE_STOP_RECORD:
++                action = Qt::Key_R; // Duplicate of Record
++                code = "STOP_RECORD";
++                break;
++            case CEC_USER_CONTROL_CODE_SUB_PICTURE:
++                action = Qt::Key_V;
++                code   = "SUB_PICTURE";
++                break;
++            case CEC_USER_CONTROL_CODE_ELECTRONIC_PROGRAM_GUIDE:
++                action = Qt::Key_S;
++                code   = "ELECTRONIC_PROGRAM_GUIDE";
++                break;
++            case CEC_USER_CONTROL_CODE_POWER:
++                action = Qt::Key_PowerOff;
++                code = "POWER";
++                break;
++
++             // these codes have 'non-standard' Qt key mappings to ensure
++             // each code has a unique key mapping
++            case CEC_USER_CONTROL_CODE_CHANNEL_DOWN:
++                action = Qt::Key_F20; // to differentiate from Up
++                code   = "CHANNEL_DOWN";
++                break;
++            case CEC_USER_CONTROL_CODE_CHANNEL_UP:
++                action = Qt::Key_F21; // to differentiate from Down
++                code   = "CHANNEL_UP";
++                break;
++            case CEC_USER_CONTROL_CODE_REWIND:
++                action = Qt::Key_F22; // to differentiate from Left
++                code   = "REWIND";
++                break;
++            case CEC_USER_CONTROL_CODE_FAST_FORWARD:
++                action = Qt::Key_F23; // to differentiate from Right
++                code   = "FAST_FORWARD";
++                break;
++            case CEC_USER_CONTROL_CODE_ANGLE:
++                action = Qt::Key_F24;
++                code = "ANGLE";
++                break;
++            case CEC_USER_CONTROL_CODE_F5:
++                action = Qt::Key_F6; // NB!
++                code = "F5";
++                break;
++
++            // codes with no obvious MythTV action
++            case CEC_USER_CONTROL_CODE_INITIAL_CONFIGURATION:
++                code = "INITIAL_CONFIGURATION";
++                break;
++            case CEC_USER_CONTROL_CODE_PAUSE_RECORD:
++                code = "PAUSE_RECORD";
++                break;
++            case CEC_USER_CONTROL_CODE_VIDEO_ON_DEMAND:
++                code = "VIDEO_ON_DEMAND";
++                break;
++            case CEC_USER_CONTROL_CODE_TIMER_PROGRAMMING:
++                code = "TIMER_PROGRAMMING";
++                break;
++            case CEC_USER_CONTROL_CODE_UNKNOWN:
++                code = "UNKNOWN";
++                break;
++            case CEC_USER_CONTROL_CODE_DATA:
++                code = "DATA";
++                break;
++
++            // Functions aren't implemented (similar to macros?)
++            case CEC_USER_CONTROL_CODE_POWER_ON_FUNCTION:
++                code = "POWER_ON_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_PLAY_FUNCTION:
++                code = "PLAY_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_PAUSE_PLAY_FUNCTION:
++                code = "PAUSE_PLAY_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_RECORD_FUNCTION:
++                code = "RECORD_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_PAUSE_RECORD_FUNCTION:
++                code = "PAUSE_RECORD_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_STOP_FUNCTION:
++                code = "STOP_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_MUTE_FUNCTION:
++                code = "MUTE_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_RESTORE_VOLUME_FUNCTION:
++                code = "RESTORE_VOLUME_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_TUNE_FUNCTION:
++                code = "TUNE_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_SELECT_MEDIA_FUNCTION:
++                code = "SELECT_MEDIA_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_SELECT_AV_INPUT_FUNCTION:
++                code = "SELECT_AV_INPUT_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_SELECT_AUDIO_INPUT_FUNCTION:
++                code = "SELECT_AUDIO_INPUT_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_POWER_TOGGLE_FUNCTION:
++                code = "POWER_TOGGLE_FUNCTION";
++                break;
++            case CEC_USER_CONTROL_CODE_POWER_OFF_FUNCTION:
++                code = "POWER_OFF_FUNCTION";
++                break;
++        }
++
++        LOG(VB_GENERAL, LOG_DEBUG, LOC + QString("Keypress %1 %2")
++            .arg(code).arg(0 == action ? "(Not actioned)" : ""));
++
++        if (0 == action)
++            return;
++
++        GetMythUI()->ResetScreensaver();
++        QKeyEvent* ke = new QKeyEvent(QEvent::KeyPress, action, Qt::NoModifier);
++        qApp->postEvent(GetMythMainWindow(), (QEvent*)ke);
++    }
++
+ #if CEC_LIB_VERSION_MAJOR >= 2
+     int HandleAlert(const libcec_alert alert, const libcec_parameter &data)
+     {
+@@ -764,6 +1175,7 @@ void CECAdapter::Action(const QString &action)
+         gActionsReady->wakeAll();
+ }
+ 
++#if CEC_LIB_VERSION_MAJOR <= 3
+ static int CECLogMessageCallback(void *adapter, const cec_log_message CEC_CALLBACK_PARAM_TYPE message)
+ {
+     return ((CECAdapterPriv*)adapter)->LogMessage(message);
+@@ -778,13 +1190,37 @@ static int CECCommandCallback(void *adapter, const cec_command CEC_CALLBACK_PARA
+ {
+     return ((CECAdapterPriv*)adapter)->HandleCommand(command);
+ }
++#endif
++#if CEC_LIB_VERSION_MAJOR >= 4
++static void CECLogMessageCallback(void *adapter, const cec_log_message* message)
++{
++    ((CECAdapterPriv*)adapter)->LogMessage(message);
++}
++
++static void CECKeyPressCallback(void *adapter, const cec_keypress* keypress)
++{
++    ((CECAdapterPriv*)adapter)->HandleKeyPress(keypress);
++}
++
++static void CECCommandCallback(void *adapter, const cec_command* command)
++{
++    ((CECAdapterPriv*)adapter)->HandleCommand(command);
++}
++#endif
+ 
+ #if CEC_LIB_VERSION_MAJOR >= 2
++#if CEC_LIB_VERSION_MAJOR <= 3
+ static int CECAlertCallback(void *adapter, const libcec_alert alert, const libcec_parameter CEC_CALLBACK_PARAM_TYPE data)
+ {
+     return ((CECAdapterPriv*)adapter)->HandleAlert(alert, data);
+ }
+-
++#endif
++#if CEC_LIB_VERSION_MAJOR >= 4
++static void CECAlertCallback(void *adapter, const libcec_alert alert, const libcec_parameter data)
++{
++    ((CECAdapterPriv*)adapter)->HandleAlert(alert, data);
++}
++#endif
+ static void CECSourceActivatedCallback(void *adapter, const cec_logical_address address, const uint8_t activated)
+ {
+     ((CECAdapterPriv*)adapter)->HandleSourceActivated(address, activated);

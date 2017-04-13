@@ -1,4 +1,4 @@
-# $Id: PKGBUILD 141367 2011-10-30 06:46:41Z allan $
+# $Id$
 # Maintainer: Allan McRae <allan@archlinux.org>
 
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
@@ -16,26 +16,24 @@
 noautobuild=1
 
 pkgname=('gcc' 'gcc-libs' 'gcc-fortran' 'gcc-objc' 'gcc-go')
-pkgver=6.1.1
+pkgver=6.3.1
 _pkgver=6
 _islver=0.16.1
-pkgrel=1.1
-_commit=80f78834
+pkgrel=2
+_commit=4fc407888a30c5d953816b05c8a8e98ec2ab3101
 pkgdesc="The GNU Compiler Collection"
 arch=('i686' 'x86_64')
 license=('GPL' 'LGPL' 'FDL' 'custom')
 url="http://gcc.gnu.org"
-makedepends=('binutils>=2.26' 'libmpc' 'doxygen')
+makedepends=('binutils>=2.28' 'libmpc' 'doxygen' 'git')
 checkdepends=('dejagnu' 'inetutils')
 options=('!emptydirs' '!distcc')
 source=(https://github.com/gcc-mirror/gcc/archive/${_commit}.tar.gz
         http://isl.gforge.inria.fr/isl-${_islver}.tar.bz2
-        0001-ARMv5-disable-LDRD-STRD.patch
-        0002-PR-target-71056-Don-t-use-vectorized-builtins-when-N.patch)
-md5sums=('405eea1379f597d9876e33636c9cb6c7'
+        0001-ARMv5-disable-LDRD-STRD.patch)
+md5sums=('caa9e0f74678087d447d1dd87f358d97'
          'ac1f25a0677912952718a51f5bc20f32'
-         'ca6e64ae2d104e1c2bece200ed015843'
-         'fad1bba965c4fd341eb027950d35111d')
+         'a5165d78c473b487637d293a49e01740')
 
 _libdir="usr/lib/gcc/$CHOST/$pkgver"
 
@@ -49,7 +47,10 @@ prepare() {
   # Do not run fixincludes
   sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
 
-  # Arch Linux installs 64bit libraries /lib
+  # Arch Linux installs x86_64 libraries /lib
+  [[ $CARCH == "x86_64" ]] && sed -i '/m64=/s/lib64/lib/' gcc/config/i386/t-linux64
+
+  # Arch Linux ARM installs aarch64 libraries /lib
   [[ $CARCH == "aarch64" ]] && sed -i '/lp64=/s/lib64/lib/' gcc/config/aarch64/t-aarch64-linux
 
   # hack! - some configure tests for header files using "$CPP $CPPFLAGS"
@@ -65,9 +66,6 @@ prepare() {
 
   # Disable LDRD/STRD on ARMv5 (64-bit alignment issues)
   patch -p1 -i ../0001-ARMv5-disable-LDRD-STRD.patch
-
-  # Fix for NEON assembly being emitted when NEON is not used
-  patch -p1 -i ../0002-PR-target-71056-Don-t-use-vectorized-builtins-when-N.patch
 }
 
 build() {
@@ -79,23 +77,35 @@ build() {
   CXXFLAGS=${CXXFLAGS/-pipe/}
 
   ${srcdir}/gcc/configure --prefix=/usr \
-      --libdir=/usr/lib --libexecdir=/usr/lib \
-      --mandir=/usr/share/man --infodir=/usr/share/info \
+      --libdir=/usr/lib \
+      --libexecdir=/usr/lib \
+      --mandir=/usr/share/man \
+      --infodir=/usr/share/info \
       --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
       --enable-languages=c,c++,fortran,go,lto,objc,obj-c++ \
-      --enable-shared --enable-threads=posix \
-      --with-system-zlib --with-isl --enable-__cxa_atexit \
-      --disable-libunwind-exceptions --enable-clocale=gnu \
-      --disable-libstdcxx-pch --disable-libssp \
-      --enable-gnu-unique-object --enable-linker-build-id \
-      --enable-lto --enable-plugin --enable-install-libiberty \
-      --with-linker-hash-style=gnu --enable-gnu-indirect-function \
-      --disable-multilib --disable-werror \
+      --enable-shared \
+      --enable-threads=posix \
+      --with-system-zlib \
+      --with-isl \
+      --enable-__cxa_atexit \
+      --disable-libunwind-exceptions \
+      --enable-clocale=gnu \
+      --disable-libstdcxx-pch \
+      --disable-libssp \
+      --enable-gnu-unique-object \
+      --enable-linker-build-id \
+      --enable-lto \
+      --enable-plugin \
+      --enable-install-libiberty \
+      --with-linker-hash-style=gnu \
+      --enable-gnu-indirect-function \
+      --disable-multilib \
+      --disable-werror \
       --enable-checking=release \
       $CONFIGFLAG
 
   make
-
+  
   # make documentation
   make -C $CHOST/libstdc++-v3/doc doc-man-doxygen
 }
@@ -117,11 +127,11 @@ package_gcc-libs()
 {
   pkgdesc="Runtime libraries shipped by GCC"
   groups=('base')
-  depends=('glibc>=2.23')
+  depends=('glibc>=2.25')
   options=('!emptydirs' '!strip')
 
   cd ${srcdir}/gcc-build
-
+  
   make -C $CHOST/libgcc DESTDIR=${pkgdir} install-shared
   rm ${pkgdir}/${_libdir}/libgcc_eh.a
   
@@ -131,9 +141,14 @@ package_gcc-libs()
              libgomp \
              libitm \
              libquadmath \
-             libstdc++-v3/src; do
+             libsanitizer/{a,l,ub}san \
+             libstdc++-v3/src \
+             libvtv; do
     make -C $CHOST/$lib DESTDIR=${pkgdir} install-toolexeclibLTLIBRARIES
   done
+
+  [[ $CARCH == "x86_64" || $CARCH == "aarch64" ]] && \
+    make -C $CHOST/libsanitizer/tsan DESTDIR=${pkgdir} install-toolexeclibLTLIBRARIES
 
   make -C $CHOST/libobjc DESTDIR=${pkgdir} install-libs
 
@@ -144,7 +159,7 @@ package_gcc-libs()
              libquadmath; do
     make -C $CHOST/$lib DESTDIR=${pkgdir} install-info
   done
-  
+
   # Install Runtime Library Exception
   install -Dm644 ${srcdir}/gcc/COPYING.RUNTIME \
     ${pkgdir}/usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION
@@ -153,12 +168,12 @@ package_gcc-libs()
 package_gcc()
 {
   pkgdesc="The GNU Compiler Collection - C and C++ frontends"
-  depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.26' 'libmpc')
+  depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.28' 'libmpc')
   groups=('base-devel')
   options=('staticlibs')
 
   cd ${srcdir}/gcc-build
-  
+
   make -C gcc DESTDIR=${pkgdir} install-driver install-cpp install-gcc-ar \
     c++.install-common install-headers install-plugin install-lto-wrapper
 
@@ -167,7 +182,7 @@ package_gcc()
 
   make -C $CHOST/libgcc DESTDIR=${pkgdir} install
   rm ${pkgdir}/usr/lib/libgcc_s.so*
-
+  
   make -C $CHOST/libstdc++-v3/src DESTDIR=${pkgdir} install
   make -C $CHOST/libstdc++-v3/include DESTDIR=${pkgdir} install
   make -C $CHOST/libstdc++-v3/libsupc++ DESTDIR=${pkgdir} install
@@ -181,7 +196,7 @@ package_gcc()
 
   make DESTDIR=${pkgdir} install-fixincludes
   make -C gcc DESTDIR=${pkgdir} install-mkheaders
-
+  
   make -C lto-plugin DESTDIR=${pkgdir} install
   install -dm755 ${pkgdir}/usr/lib/bfd-plugins/
   ln -s /usr/lib/gcc/$CHOST/${pkgver}/liblto_plugin.so \
@@ -191,6 +206,8 @@ package_gcc()
     install-nodist_libsubincludeHEADERS
   make -C $CHOST/libitm DESTDIR=${pkgdir} install-nodist_toolexeclibHEADERS
   make -C $CHOST/libquadmath DESTDIR=${pkgdir} install-nodist_libsubincludeHEADERS
+  make -C $CHOST/libsanitizer DESTDIR=${pkgdir} install-nodist_{saninclude,toolexeclib}HEADERS
+  make -C $CHOST/libsanitizer/asan DESTDIR=${pkgdir} install-nodist_toolexeclibHEADERS
 
   make -C libiberty DESTDIR=${pkgdir} install
   # install PIC version of libiberty
@@ -255,9 +272,9 @@ package_gcc-fortran()
   make -C $CHOST/libgomp DESTDIR=$pkgdir install-nodist_fincludeHEADERS
   make -C gcc DESTDIR=$pkgdir fortran.install-{common,man,info}
   install -Dm755 gcc/f951 $pkgdir/${_libdir}/f951
-  
+
   ln -s gfortran ${pkgdir}/usr/bin/f95
-  
+
   # Install Runtime Library Exception
   install -d ${pkgdir}/usr/share/licenses/gcc-fortran/
   ln -s ../gcc-libs/RUNTIME.LIBRARY.EXCEPTION ${pkgdir}/usr/share/licenses/gcc-fortran/

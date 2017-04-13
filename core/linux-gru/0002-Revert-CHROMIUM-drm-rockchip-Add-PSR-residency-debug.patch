@@ -1,0 +1,89 @@
+From e070341ce4eed1ccaab532704f42a1026aaecd1a Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Wed, 5 Apr 2017 22:55:05 -0600
+Subject: [PATCH 2/4] Revert "CHROMIUM: drm: rockchip: Add PSR residency debug
+ entry"
+
+This reverts commit 9f416401b95d3f1dee2ffb12e0e27339fce3ce1b.
+---
+ drivers/gpu/drm/rockchip/analogix_dp-rockchip.c | 21 +--------------------
+ 1 file changed, 1 insertion(+), 20 deletions(-)
+
+diff --git a/drivers/gpu/drm/rockchip/analogix_dp-rockchip.c b/drivers/gpu/drm/rockchip/analogix_dp-rockchip.c
+index f2766cafd0b4..acd31ea3825d 100644
+--- a/drivers/gpu/drm/rockchip/analogix_dp-rockchip.c
++++ b/drivers/gpu/drm/rockchip/analogix_dp-rockchip.c
+@@ -13,7 +13,6 @@
+  */
+ 
+ #include <linux/component.h>
+-#include <linux/debugfs.h>
+ #include <linux/mfd/syscon.h>
+ #include <linux/of_device.h>
+ #include <linux/of_graph.h>
+@@ -68,17 +67,12 @@ struct rockchip_dp_device {
+ 
+ 	struct analogix_dp_device *adp;
+ 	struct analogix_dp_plat_data plat_data;
+-
+-	struct dentry            *debugfs_psr;
+-	u64                      psr_active_ms;
+-	ktime_t                  psr_start_time;
+ };
+ 
+ static int analogix_dp_psr_set(struct drm_encoder *encoder, bool enabled)
+ {
+ 	struct rockchip_dp_device *dp = to_dp(encoder);
+ 	struct drm_crtc *crtc = dp->encoder.crtc;
+-	s64 delta_ms;
+ 	int vact_end;
+ 	int ret;
+ 
+@@ -103,7 +97,6 @@ static int analogix_dp_psr_set(struct drm_encoder *encoder, bool enabled)
+ 			return ret;
+ 		}
+ 		rockchip_drm_set_win_enabled(crtc, false);
+-		dp->psr_start_time = ktime_get();
+ 	} else {
+ 		rockchip_drm_set_win_enabled(crtc, true);
+ 		ret = analogix_dp_disable_psr(dp->adp);
+@@ -111,9 +104,6 @@ static int analogix_dp_psr_set(struct drm_encoder *encoder, bool enabled)
+ 			dev_err(dp->dev, "failed to disable psr %d\n", ret);
+ 			return ret;
+ 		}
+-		delta_ms = ktime_ms_delta(ktime_get(), dp->psr_start_time);
+-		if (!WARN_ON(delta_ms < 0))
+-			dp->psr_active_ms += delta_ms;
+ 	}
+ 	return 0;
+ }
+@@ -397,17 +387,9 @@ static int rockchip_dp_bind(struct device *dev, struct device *master,
+ 	dp->plat_data.power_off = rockchip_dp_powerdown;
+ 	dp->plat_data.get_modes = rockchip_dp_get_modes;
+ 
+-	dp->debugfs_psr = debugfs_create_u64("psr_active_ms", S_IRUGO,
+-					     drm_dev->primary->debugfs_root,
+-					     &dp->psr_active_ms);
+-	if (IS_ERR(dp->debugfs_psr))
+-		return PTR_ERR(dp->debugfs_psr);
+-
+ 	dp->adp = analogix_dp_bind(dev, dp->drm_dev, &dp->plat_data);
+-	if (IS_ERR(dp->adp)) {
+-		debugfs_remove(dp->debugfs_psr);
++	if (IS_ERR(dp->adp))
+ 		return PTR_ERR(dp->adp);
+-	}
+ 
+ 	rockchip_drm_psr_register(&dp->encoder, analogix_dp_psr_set);
+ 
+@@ -422,7 +404,6 @@ static void rockchip_dp_unbind(struct device *dev, struct device *master,
+ 	rockchip_drm_psr_unregister(&dp->encoder);
+ 
+ 	analogix_dp_unbind(dp->adp);
+-	debugfs_remove(dp->debugfs_psr);
+ 
+ 	dp->adp = ERR_PTR(-ENODEV);
+ }
+-- 
+2.12.1
+

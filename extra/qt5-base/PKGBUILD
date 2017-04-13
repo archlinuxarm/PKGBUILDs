@@ -8,43 +8,38 @@
 #  - use OpenGLES 2.0
 
 pkgname=qt5-base
-_qtver=5.6.0
+_qtver=5.8.0
 pkgver=${_qtver/-/}
 pkgrel=7
 arch=('i686' 'x86_64')
 url='http://qt-project.org/'
-license=('GPL3' 'LGPL' 'FDL' 'custom')
+license=('GPL3' 'LGPL3' 'FDL' 'custom')
 pkgdesc='A cross-platform application and UI framework'
-depends=('libjpeg-turbo' 'xcb-util-keysyms' 'libgl' 'fontconfig'
+depends=('libjpeg-turbo' 'xcb-util-keysyms' 'xcb-util-renderutil' 'libgl' 'fontconfig'
          'xcb-util-wm' 'libxrender' 'libxi' 'sqlite' 'xcb-util-image' 'icu'
-         'qtchooser' 'tslib' 'libinput' 'libsm' 'libxkbcommon-x11')
-makedepends=('mtdev' 'libfbclient' 'libmariadbclient' 'sqlite' 'unixodbc' 'postgresql-libs' 'alsa-lib' 'gst-plugins-base-libs'
-             'gtk2' 'libpulse' 'cups' 'freetds')
+         'tslib' 'libinput' 'libsm' 'libxkbcommon-x11' 'libproxy' 'libcups') # 'openssl-1.0'
+makedepends=('libfbclient' 'libmariadbclient' 'sqlite' 'unixodbc' 'postgresql-libs' 'alsa-lib' 'gst-plugins-base-libs'
+             'gtk3' 'libpulse' 'cups' 'freetds')
 optdepends=('qt5-svg: to use SVG icon themes'
             'postgresql-libs: PostgreSQL driver'
             'libmariadbclient: MariaDB driver'
             'unixodbc: ODBC driver'
             'libfbclient: Firebird/iBase driver'
             'freetds: MS SQL driver'
-            'mtdev: evdev plugin'
-            'gtk2: GTK2 plugin')
-conflicts=('qt')
+            'gtk3: GTK platform plugin')
+conflicts=('qtchooser')
 groups=('qt' 'qt5')
 _pkgfqn="${pkgname/5-/}-opensource-src-${_qtver}"
-source=("http://download.qt.io/official_releases/qt/${pkgver%.*}/${_qtver}/submodules/${_pkgfqn}.tar.xz" qt5-alsa1.11.patch
-        qtbug-51648.patch qtbug-51649.patch qtbug-51676.patch qtbug-45812.patch qtbug-44964.patch
-        qtbug-53071.patch::"https://github.com/qtproject/qtbase/commit/e9041c7fc.patch"
-        qtbug-53071b.patch::"https://github.com/qtproject/qtbase/commit/cd25866f.patch")
-md5sums=('d6b6cfd333c22829c6c85fc52ceed019'
-         '5e96b5cfa248b8b071919adb27abc715'
-         'b09aa4f5763f013b06153fbdbc844404'
-         'ef981ff6892337cdab424ebb113b3c39'
-         'f59a1ea0f10a055ba930a53832933482'
-         '7f152c40947027acba56023e9d693260'
-         '28cddedf6c15751d08c1382bf1074fa7'
-         '974ef9e9110a1606e293aef3d37c841f'
-         '462f079cd46f869def6858903a718bf5'
-         'da4fd787ea877516397a027412e975e1')
+source=("http://download.qt.io/official_releases/qt/${pkgver%.*}/${_qtver}/submodules/${_pkgfqn}.tar.xz"
+        qt5-base-journald.patch::"https://github.com/qt/qtbase/commit/0c8f3229.patch"
+        plasma-crash-1.patch::https://github.com/qt/qtbase/commit/3bd0fd8f.patch
+        plasma-crash-2.patch::https://github.com/qt/qtbase/commit/0874861b.patch
+        plasma-crash-3.patch::https://github.com/qt/qtbase/commit/baad82d2.patch)
+md5sums=('6e1f7f6fb6333eb66e563b175c4e87e9'
+         '160fde81fe882c4241f04634f53691ad'
+         '078d8a051c06abf28451fd2cdb7f19ce'
+         '92daaa3ebd7cf10ee725b963e44c95a7'
+         '76ab122615f1ba2d68c83477f82e389e')
 
 prepare() {
   cd ${_pkgfqn}
@@ -60,34 +55,23 @@ prepare() {
   find . -name '*.py' -exec sed -i \
     's|#![ ]*/usr/bin/python$|&2|;s|#![ ]*/usr/bin/env python$|&2|' {} +
 
-  # Fix libsystemd-journal detection
-  sed -e 's|libsystemd-journal|libsystemd|' -i config.tests/unix/journald/journald.pro -i src/corelib/global/global.pri
+  # Fix logging to systemd journal
+  patch -p1 -i ../qt5-base-journald.patch
 
-  # Fix ALSA 1.11 detection
-  patch -p1 -i ../qt5-alsa1.11.patch
-
-  # Backport fixes for QtDBus deadlocks
-  patch -p1 -i ../qtbug-51648.patch
-  patch -p1 -i ../qtbug-51649.patch
-  patch -p1 -i ../qtbug-51676.patch
-
-  # Fix drag and drop from some applications
-  patch -p1 -i ../qtbug-45812.patch
-
-  # Fix parsing of tzfile(5) POSIX rule zone names with bracket quotes
-  patch -p1 -i ../qtbug-53071.patch
-  patch -p1 -i ../qtbug-53071b.patch
-
-  # Don't compress tablet motion events
-  patch -p1 -i ../qtbug-44964.patch
+  # Fix some Plasma taskbar crashes https://bugs.kde.org/show_bug.cgi?id=342763
+  patch -p1 -i ../plasma-crash-1.patch
+  patch -p1 -i ../plasma-crash-2.patch
+  patch -p1 -i ../plasma-crash-3.patch
 }
 
 build() {
   cd ${_pkgfqn}
 
+#  echo "QMAKE_CXXFLAGS += -I/usr/include/openssl-1.0" >> mkspecs/linux-g++/qmake.conf
+#  export OPENSSL_LIBS='-L/usr/lib/openssl-1.0 -lssl -lcrypto'
+
   PYTHON=/usr/bin/python2 ./configure -confirm-license -opensource -v \
     -prefix /usr \
-    -bindir /usr/lib/qt/bin \
     -docdir /usr/share/doc/qt \
     -headerdir /usr/include/qt \
     -archdatadir /usr/lib/qt \
@@ -132,9 +116,8 @@ package() {
   sed -i "s|${srcdir}/${_pkgfqn}|/usr|" \
     "${pkgdir}"/usr/lib/qt/mkspecs/modules/qt_lib_bootstrap_private.pri
 
-  # Useful symlinks
-  install -d "${pkgdir}"/usr/bin
-  for b in "${pkgdir}"/usr/lib/qt/bin/*; do
-    ln -s /usr/lib/qt/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
+  # Symlinks for backwards compatibility
+  for b in "${pkgdir}"/usr/bin/*; do
+    ln -s /usr/bin/$(basename $b) "${pkgdir}"/usr/bin/$(basename $b)-qt5
   done
 }

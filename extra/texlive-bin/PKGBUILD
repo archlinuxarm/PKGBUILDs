@@ -6,36 +6,36 @@
 #  -fPIC for v6 and v7
 #  --disable-xindy, remove xindy stuff, segfaults with clisp
 #  --disable-cxx-runtime-hack
+#  drop clisp and ffcall makedepends
 
 pkgname=('texlive-bin' 'libsynctex')
-pkgver=2015.37497
-pkgrel=12
+pkgver=2016.41290
+pkgrel=10
 license=('GPL')
 arch=('i686' 'x86_64')
 makedepends=('cairo' 'pixman' 'graphite' 't1lib' 'gd' 'poppler'
          'libsigsegv' 'zziplib' 'libpng' 'libjpeg' 'freetype2'
          'icu' 'harfbuzz' 'harfbuzz-icu' 'gmp' 'mpfr' 'potrace' 'libpaper'
-         'perl' 'clisp' 'ffcall')
+         'perl')
 url='http://tug.org/texlive/'
-source=('fix-fontforge-encoding.patch'
-        "http://mirrors.kernel.org/archlinux/other/texlive/texlive-bin-source-${pkgver}.tar.xz")
-md5sums=('bfb9716aa00c86c08cd31e5b32edeb98'
-         '0a8ffd5c0002a080a4202057b1f106c6')
-
-prepare() {
-   cd source
-}
+source=("https://sources.archlinux.org/other/texlive/texlive-bin-source-${pkgver}.tar.xz"
+        "mktexlsr.hook"
+        "mktexlsr.script"
+        "texlive-updmap.hook"
+        "texlive-updmap.script"
+        "texlive-fmtutil.hook"
+        "texlive-fmtutil.script")
+md5sums=('7303361f2d441eb5c962a996fd77e8fa'
+         'a4e54f0cb05f401728b2b230fd63b300'
+         '2bbbef810687f4b2804a4b8cb91ce02f'
+         '0ecdbd88cae12dbeb5d0d63127c5fc38'
+         'c64d77b5111a26b9995263b49df4937c'
+         '582af708588fd09eeaa0f08111e60091'
+         '3f05fa08f84b94fcb3a76be271116a95')
 
 build() {
    cd "$srcdir"
 
-   if [ "${CARCH}" = "x86_64" -o "${CARCH}" = "armv6h" -o "${CARCH}" = "armv7h" ]; then
-     export CFLAGS="${CFLAGS} -fPIC"
-     export CXXFLAGS="${CXXFLAGS} -fPIC"
-   fi
-
-   # this patch removes spurious error message with locale "xx_YY.utf8"
-   #patch -Np0 -i fix-fontforge-encoding.patch
    # t4ht expects to be un /usr/share/texmf/bin/t4ht (FS#27251)
    sed -i s/SELFAUTOPARENT/TEXMFROOT/ source/texk/tex4htk/t4ht.c
    #############################################################
@@ -48,7 +48,6 @@ build() {
    echo "--> Initial configuration..."
    # we use temporary prefix to avoid messing the existing
    # $pkgdir/usr/share/texmf tree
-   # system zlib is disabled due to issues with zlib 1.2.6 (FS#28221)
    ../configure --prefix=/usr -C \
      --sysconfdir=/etc \
      --datarootdir=/usr/share \
@@ -100,14 +99,12 @@ build() {
 }
 
 package_libsynctex() {
-   pkgdesc='Library for synchronization between TeX files and resulting file'
-   depends=('glibc' 'zlib')
+    pkgdesc='Library for synchronization between TeX files and resulting file'
+    depends=('glibc' 'zlib')
 
-   install -d "$pkgdir"/usr/lib
-
-   for lib in "$srcdir"/source/Work/texk/web2c/.libs/libsynctex.so*; do
-      cp -P $lib "$pkgdir"/usr/lib/
-   done
+    cd "${srcdir}/source/Work"
+    make -C texk/web2c DESTDIR="${pkgdir}" \
+        install-data-am install-libLTLIBRARIES
 }
 
 package_texlive-bin() {
@@ -116,10 +113,9 @@ package_texlive-bin() {
             'libsigsegv' 'zziplib' 'libpng' 'libjpeg' 'freetype2'
             'icu' 'harfbuzz' 'harfbuzz-icu' 'gmp' 'mpfr' 'potrace' 'libpaper'
             'libsynctex')
-   provides=('lcdf-typetools' 'kpathsea' 'xindy' 'pdfjam')
-   conflicts=('pdfjam')
-   optdepends=('ed: for texconfig')
-   install="texlive.install"
+   provides=('lcdf-typetools' 'kpathsea' 'xindy')
+   optdepends=('ed: for texconfig'
+               'biber: for bibliography processing')
    options=('!strip')
 
    cd "$srcdir"
@@ -144,7 +140,6 @@ package_texlive-bin() {
    ln -s luatex ${pkgdir}/usr/bin/dvilualatex
    ln -s luatex ${pkgdir}/usr/bin/dviluatex
    ln -s luatex ${pkgdir}/usr/bin/lualatex
-   ln -s luatex ${pkgdir}/usr/bin/lualollipop
    ln -s pdftex ${pkgdir}/usr/bin/amstex
    ln -s pdftex ${pkgdir}/usr/bin/cslatex
    ln -s pdftex ${pkgdir}/usr/bin/csplain
@@ -152,7 +147,7 @@ package_texlive-bin() {
    ln -s pdftex ${pkgdir}/usr/bin/etex
    ln -s pdftex ${pkgdir}/usr/bin/jadetex
    ln -s pdftex ${pkgdir}/usr/bin/latex
-   ln -s pdftex ${pkgdir}/usr/bin/lollipop
+   ln -s tex ${pkgdir}/usr/bin/lollipop
    ln -s pdftex ${pkgdir}/usr/bin/mex
    ln -s pdftex ${pkgdir}/usr/bin/mllatex
    ln -s pdftex ${pkgdir}/usr/bin/mltex
@@ -167,7 +162,14 @@ package_texlive-bin() {
    ln -s pdftex ${pkgdir}/usr/bin/utf8mex
    ln -s pdftex ${pkgdir}/usr/bin/xmltex
    ln -s xetex ${pkgdir}/usr/bin/xelatex
-   ln -s xetex ${pkgdir}/usr/bin/xelollipop
+
+   ## install pacman hooks
+   install -D -m644 ${srcdir}/mktexlsr.hook "$pkgdir/usr/share/libalpm/hooks/mktexlsr.hook"
+   install -D -m644 ${srcdir}/texlive-updmap.hook "$pkgdir/usr/share/libalpm/hooks/texlive-updmap.hook"
+   install -D -m644 ${srcdir}/texlive-fmtutil.hook "$pkgdir/usr/share/libalpm/hooks/texlive-fmtutil.hook"
+   install -D -m755 ${srcdir}/mktexlsr.script "$pkgdir/usr/share/libalpm/scripts/mktexlsr"
+   install -D -m755 ${srcdir}/texlive-updmap.script "$pkgdir/usr/share/libalpm/scripts/texlive-updmap"
+   install -D -m755 ${srcdir}/texlive-fmtutil.script "$pkgdir/usr/share/libalpm/scripts/texlive-fmtutil"
 
    #############################################################
    # remove dangling symlinks
@@ -193,6 +195,7 @@ arlatex
 autoinst
 bundledoc
 checkcites
+checklistings
 chkweb
 cjk-gs-integrate
 context
@@ -234,6 +237,7 @@ ltximg
 lua2dox_filter
 luaotfload-tool
 luatools
+make4ht
 match_parens
 mf2pt1
 mkjobtexmf
@@ -248,6 +252,7 @@ pdf270
 pdf90
 pdfatfi
 pdfbook
+pdfbook2
 pdfcrop
 pdfflip
 pdfjam
@@ -257,6 +262,7 @@ pdfjam-slides6up
 pdfjoin
 pdfnup
 pdfpun
+pdfxup
 pfarrei
 pkfix
 pkfix-helper
@@ -269,7 +275,9 @@ repstopdf
 rpdfcrop
 rungs
 simpdftex
+srcredact
 sty2dtx
+tex4ebook
 texconfig
 texconfig-dialog
 texconfig-sys
@@ -294,6 +302,7 @@ vpl2vpl
 "
    _games_scripts="rubikrotation"
    _htmlxml_scripts="ht htcontext htlatex htmex httex httexi htxelatex htxetex mk4ht"
+   _humanities_scripts="diadia"
    _langcyrillic_scripts="rubibtex rumakeindex"
    _langextra_scripts="ebong"
    _langgreek_scripts="mkgrkindex"
@@ -306,7 +315,9 @@ kanji-config-updmap-sys
    _latexextra_scripts="
 authorindex
 exceltex
+makedtx
 makeglossaries
+makeglossaries-lite
 pdfannotextractor
 perltex
 ps4pdf
@@ -316,14 +327,23 @@ vpe
 yplan"
    _music_scripts="lily-glyph-commands lily-image-commands lily-rebuild-pdfs
 m-tx musixtex musixflx pmx2pdf pmxchords"
-   _pictures_scripts="cachepic epspdf epspdftk fig4latex getmapdl mathspic mkpic"
+   _pictures_scripts="
+cachepic
+epspdf
+epspdftk
+fig4latex
+getmapdl
+mathspic
+mkpic
+pn2pdf"
    _pstricks_scripts="pedigree pst2pdf"
    _science_scripts="pygmentex ulqda"
    for s in \
         ${_bibtexextra_scripts} \
-        ${_core_scripts}       \
+        ${_core_scripts}        \
         ${_games_scripts}       \
-        ${_htmlxml_scripts}    \
+        ${_htmlxml_scripts}     \
+        ${_humanities_scripts}   \
         ${_langcyrillic_scripts} \
         ${_langextra_scripts}    \
         ${_langgreek_scripts}    \
@@ -340,5 +360,9 @@ m-tx musixtex musixflx pmx2pdf pmxchords"
    ###################################################################
 
    # remove libsynctex
+   rm -f "$pkgdir"/usr/include/synctex/*
    rm -f "$pkgdir"/usr/lib/libsynctex.*
+   rm -f "$pkgdir"/usr/lib/pkgconfig/synctex.pc
+   rm -f "$pkgdir"/usr/share/man/man*/synctex.*
 }
+

@@ -8,27 +8,33 @@
 
 pkgbase=percona-server
 pkgname=('libperconaserverclient' 'percona-server-clients' 'percona-server')
-pkgver=5.7.12_5
+pkgver=5.7.17_13
 _boost_ver=1.59.0
 _pkgver=${pkgver/_/-}
 _myver=${pkgver/_rel*}
-pkgrel=4
+pkgrel=1
 arch=('i686' 'x86_64')
-# valgrind necessary for bug https://bugs.launchpad.net/percona-server/+bug/1494283
-makedepends=('cmake' 'openssl' 'zlib' 'libaio' 'systemd-tools' 'pam' 'jemalloc')
+makedepends=('cmake' 'zlib' 'libaio' 'systemd-tools' 'pam' 'jemalloc')
 license=('GPL' 'AGPL')
-url="http://www.percona.com/software/percona-server/"
-source=("http://www.percona.com/downloads/Percona-Server-${pkgver%.*_*}/Percona-Server-$_pkgver/source/tarball/percona-server-$_pkgver.tar.gz"
-        "http://sourceforge.net/projects/boost/files/boost/${_boost_ver}/boost_${_boost_ver//./_}.tar.gz"
-        'make_pair.patch'
+url="https://www.percona.com/software/mysql-database/percona-server"
+source=("https://www.percona.com/downloads/Percona-Server-${pkgver%.*_*}/Percona-Server-$_pkgver/source/tarball/percona-server-$_pkgver.tar.gz"
+        "https://sourceforge.net/projects/boost/files/boost/${_boost_ver}/boost_${_boost_ver//./_}.tar.gz"
         'my.cnf'
         'mysql-user.conf')
+sha256sums=('31abe11f5aa7a85be4a2834e68abdd1fcb42016e73136b5da2b47070d7497a93'
+            '47f11c8844e579d02691a607fbd32540104a9ac7a2534a8ddaef50daf502baac'
+            'ae451839c368f0db25a63bb0a6a890194897a8e74818bd4245140933c29e5f83'
+            'e638a2657085f15b6728f43c1fd6aa551b27608fbf6b435e33afd3606a0cfb0e')
+
+# This ships with bundled SSL library until proper support for openssl 1.1.0
+# is available.
+# TODO: Switch back to system openssl
+#   -> add 'openssl' to dependencies
+#   -> switch to '-DWITH_SSL=system' in cmake command
 
 prepare() {
 	cd $pkgbase-$_pkgver
 	rm -v sql/sql_yacc.{cc,h}
-
-	patch -p1 -i "$srcdir"/make_pair.patch
 
 	sed 's|${fullhostname}|"archbuild"|' \
 		-i storage/tokudb/PerconaFT/cmake_modules/TokuSetupCTest.cmake
@@ -39,7 +45,7 @@ build() {
 	mkdir build
 	cd build
 
-    [[ $CARCH == "aarch64" ]] && CONFIG="-DHAVE_SYS_EPOLL_H=0"
+	[[ $CARCH == "aarch64" ]] && CONFIG="-DHAVE_SYS_EPOLL_H=0"
 
 	cmake ../$pkgbase-$_pkgver \
 		-DCMAKE_BUILD_TYPE=Release \
@@ -62,14 +68,14 @@ build() {
 		-DINSTALL_DOCDIR=share/mysql/docs \
 		-DINSTALL_SHAREDIR=share/mysql \
 		-DWITH_ZLIB=system \
-		-DWITH_SSL=system \
+		-DWITH_SSL=bundled \
 		-DWITH_LIBWRAP=OFF \
-    -DCMAKE_EXE_LINKER_FLAGS='-ljemalloc' \
+		-DCMAKE_EXE_LINKER_FLAGS='-ljemalloc' \
 		-DWITH_UNIT_TESTS=OFF \
 		-DWITH_PAM=ON \
 		-DWITH_EXTRA_CHARSETS=complex \
 		-DWITH_EMBEDDED_SERVER=ON \
-	  -DWITH_EMBEDDED_SHARED_LIBRARY=ON \
+		-DWITH_EMBEDDED_SHARED_LIBRARY=ON \
 		-DWITH_INNODB_MEMCACHED=ON \
 		-DWITH_INNOBASE_STORAGE_ENGINE=ON \
 		-DWITH_PARTITION_STORAGE_ENGINE=ON \
@@ -78,10 +84,9 @@ build() {
 		-DWITH_BLACKHOLE_STORAGE_ENGINE=ON \
 		-DWITH_FEDERATED_STORAGE_ENGINE=OFF \
 		-DWITH_EXAMPLE_STORAGE_ENGINE=OFF \
-	  -DWITH_SYSTEMD=1 \
+		-DWITH_SYSTEMD=1 \
 		-DCMAKE_C_FLAGS="-fPIC $CFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -fomit-frame-pointer -fno-delete-null-pointer-checks" \
 		-DCMAKE_CXX_FLAGS="-fPIC $CXXFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -felide-constructors -fno-delete-null-pointer-checks -Wno-error=nonnull-compare -Wno-deprecated-declarations -Wno-misleading-indentation -Wno-maybe-uninitialized" \
-		-DCMAKE_CXX_FLAGS="-fPIC $CXXFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -felide-constructors -fno-delete-null-pointer-checks" \
 		-DWITH_MYSQLD_LDFLAGS="-pie ${LDFLAGS},-z,now" \
 		-DWITH_BOOST="../boost_${_boost_ver//./_}" \
 		${CONFIG}
@@ -91,7 +96,7 @@ build() {
 
 package_libperconaserverclient() {
 	pkgdesc='Percona Server client libraries'
-	depends=('openssl' 'zlib')
+	depends=('zlib')
 
 	cd build
 	for dir in include libmysql libmysqld libservices; do
@@ -108,7 +113,7 @@ package_libperconaserverclient() {
 
 package_percona-server-clients() {
 	pkgdesc='Percona Server client tools'
-	depends=('libperconaserverclient' 'zlib' 'openssl' 'jemalloc')
+	depends=('libperconaserverclient' 'zlib' 'jemalloc' 'readline')
 	conflicts=('mysql-clients')
 	provides=("mysql-clients=$_myver" "mariadb-clients=$_myver")
 
@@ -128,7 +133,6 @@ package_percona-server-clients() {
 package_percona-server() {
 	pkgdesc='Drop-in replacement for MySQL that provides improved performance, diagnostics, instrumentation and TokuDB storage engine'
 	backup=('etc/mysql/my.cnf')
-	install=percona.install
 	depends=('libaio' 'systemd-tools' 'pam' 'jemalloc')
 	optdepends=('perl-dbd-mysql')
 	conflicts=('mysql')
@@ -173,9 +177,3 @@ package_percona-server() {
 	rm -r usr/mysql-test
 	rm usr/share/man/man1/mysql-test-run.pl.1
 }
-
-sha256sums=('1840b60878c2a11538c1a8793d8679c538c796ec840fedf191716149f381fada'
-            '47f11c8844e579d02691a607fbd32540104a9ac7a2534a8ddaef50daf502baac'
-            '1db0f48f06545307898bfed9305e5b4c2997ee97375cd8d0b2a36ee93370d00f'
-            'ae451839c368f0db25a63bb0a6a890194897a8e74818bd4245140933c29e5f83'
-            'e638a2657085f15b6728f43c1fd6aa551b27608fbf6b435e33afd3606a0cfb0e')

@@ -12,18 +12,16 @@
 
 pkgname=qt4
 pkgver=4.8.7
-pkgrel=9
+pkgrel=16
 arch=('i686' 'x86_64')
 url='http://qt-project.org/'
 license=('GPL3' 'LGPL' 'FDL' 'custom')
 pkgdesc='A cross-platform application and UI framework'
-depends=('libtiff' 'libpng' 'sqlite' 'ca-certificates' 'dbus'
-        'fontconfig' 'libgl' 'libxrandr' 'libxv' 'libxi' 'alsa-lib'
-        'xdg-utils' 'hicolor-icon-theme' 'desktop-file-utils' 'libmng')
+depends=('sqlite' 'ca-certificates' 'fontconfig' 'libgl' 'libxrandr' 'libxv' 'libxi' 'alsa-lib'
+        'xdg-utils' 'hicolor-icon-theme' 'desktop-file-utils' 'libmng' 'dbus') # 'openssl-1.0'
 makedepends=('postgresql-libs' 'mariadb' 'unixodbc' 'cups' 'gtk2'
              'mesa')
-optdepends=('qtchooser: set the default Qt toolkit'
-            'postgresql-libs: PostgreSQL driver'
+optdepends=('postgresql-libs: PostgreSQL driver'
             'libmariadbclient: MariaDB driver'
             'unixodbc: ODBC driver'
             'libxinerama: Xinerama support'
@@ -46,6 +44,7 @@ source=("http://download.qt.io/official_releases/qt/4.8/${pkgver}/${_pkgfqn}.tar
         'disable-sslv3.patch'
         'l-qclipboard_fix_recursive.patch'
         'l-qclipboard_delay.patch'
+        'qt4-gcc6.patch' 'qt4-glibc-2.25.patch'
         'qt-aarch64.patch')
 md5sums=('d990ee66bf7ab0c785589776f35ba6ad'
          'a16638f4781e56e7887ff8212a322ecc'
@@ -61,7 +60,9 @@ md5sums=('d990ee66bf7ab0c785589776f35ba6ad'
          '1803ab6313df762d807678e58fc85f53'
          '009de09b4e589a7770fba74405656c99'
          'addc5e88d538ee55e17bd49ba337ca67'
-         '2a9572f3b758fc3ca9ff5fc40012a2a4')
+         '98e00c5c7e5fee12e11ecbedd03f01ff'
+         'a6e217c159d9c0f588d4b5611493f0ea'
+         '296a06554222ff5839cccc41c5d3987e')
 
 prepare() {
   cd ${_pkgfqn}
@@ -101,18 +102,27 @@ prepare() {
   cp mkspecs/common/linux{,32}.conf
   sed -i "/^QMAKE_LIBDIR\s/s|=|= /usr/lib32|g" mkspecs/common/linux32.conf
   sed -i "s|common/linux.conf|common/linux32.conf|" mkspecs/linux-g++-32/qmake.conf
+
+  # Fix build with GCC6 (Fedora)
+  patch -p1 -i "$srcdir"/qt4-gcc6.patch
+
+  # Fix build of Qt4 applications with glibc 2.25 (Fedora)
+  patch -p1 -i "$srcdir"/qt4-glibc-2.25.patch
 }
 
 build() {
   export QT4DIR="${srcdir}"/${_pkgfqn}
   export LD_LIBRARY_PATH=${QT4DIR}/lib:${LD_LIBRARY_PATH}
+  export CXXFLAGS+=" -std=gnu++98" # Fix build with GCC 6
+#  export OPENSSL_LIBS='-L/usr/lib/openssl-1.0 -lssl -lcrypto'
+#  export CXXFLAGS+=" -I/usr/include/openssl-1.0"
   
+  cd ${_pkgfqn}
+
   if [[ $CARCH == "aarch64" ]]; then
     MAKEFLAGS="-j3"
     CONFIG="-platform linux-g++"
   fi
-
-  cd ${_pkgfqn}
 
   ./configure -confirm-license -opensource \
     -prefix /usr \

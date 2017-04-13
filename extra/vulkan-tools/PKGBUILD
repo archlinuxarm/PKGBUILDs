@@ -1,0 +1,83 @@
+# $Id$
+# Maintainer: Laurent Carlier <lordheavym@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - use suffix=32 in packaging for 32-bit ARM architectures
+
+pkgbase=vulkan-tools
+pkgname=(vulkan-trace vulkan-extra-layers)
+pkgver=1.0.39.1
+pkgrel=1
+arch=(i686 x86_64)
+url="http://lunarg.com/"
+license=('custom')
+depends=()
+makedepends=(git cmake wget python-lxml libxcb imagemagick qt5-svg)
+source=("vulkanTools-sdk-${pkgver}::https://github.com/LunarG/VulkanTools/archive/sdk-${pkgver}.tar.gz")
+sha256sums=('8977094ea2c67af998a0430032ab2b3e37bd44dc5051585b8482814226606df0')
+
+build() {
+  cd "${srcdir}/VulkanTools-sdk-${pkgver}"
+
+  ./update_external_sources.sh --glslang --spirv-tools
+
+  rm -rf build ; mkdir build ; cd build
+  cmake \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+    -DINCLUDE_INSTALL_DIR=/usr/include \
+    -DLIB_INSTALL_DIR=/usr/lib \
+    -DCMAKE_INSTALL_DATADIR=/usr/share \
+    -DCMAKE_SKIP_RPATH=True \
+    -DBUILD_WSI_XCB_SUPPORT=On \
+    -DBUILD_WSI_XLIB_SUPPORT=On \
+    -DBUILD_WSI_WAYLAND_SUPPORT=On \
+    -DBUILD_WSI_MIR_SUPPORT=Off \
+    -DBUILD_ICD=OFF \
+    -DBUILD_TESTS=OFF \
+    -DBUILD_DEMOS=OFF \
+    -DBUILD_VIA=OFF \
+    -DCMAKE_BUILD_TYPE=Release \
+    ..
+  make
+}
+
+package_vulkan-trace() {
+  pkgdesc="Vulkan tracing and replaying tools"
+  depends=(vulkan-icd-loader qt5-svg)
+  groups=('vulkan-devel')
+  
+  cd "${srcdir}/VulkanTools-sdk-${pkgver}"
+  
+  [[ $CARCH == i686 || $CARCH == arm || $CARCH == armv6h || $CARCH == armv7h ]] && suffix=32
+
+  install -dm755 ${pkgdir}/usr/{bin,lib}
+  install -dm755 ${pkgdir}/usr/share/licenses/${pkgname}
+  
+  install -m755 build/vktrace/{vkreplay,vktrace}${suffix} ${pkgdir}/usr/bin/
+  install -m755 build/vktrace/vktraceviewer${suffix} ${pkgdir}/usr/bin/
+  install -m755 build/vktrace/libVkLayer_vktrace_layer${suffix}.so ${pkgdir}/usr/lib/
+ 
+  install -m644 LICENSE.txt "${pkgdir}"/usr/share/licenses/${pkgname}/
+}
+
+package_vulkan-extra-layers() {
+  pkgdesc="Extra layers for Vulkan development"
+  depends=(vulkan-validation-layers)
+  groups=('vulkan-devel')
+  
+  cd "${srcdir}/VulkanTools-sdk-${pkgver}"
+
+  install -dm755 ${pkgdir}/usr/lib
+  install -dm755 ${pkgdir}/usr/share/licenses/${pkgname}
+  install -dm755 ${pkgdir}/usr/share/vulkan/explicit_layer.d
+ 
+  install -m644 build/layersvt/*.so ${pkgdir}/usr/lib
+
+  # fix library paths  
+  for i in layersvt/linux/*.json ; do 
+    sed 's@./@@' $i > ${pkgdir}/usr/share/vulkan/explicit_layer.d/$(basename $i)
+  done
+
+  install -m644 LICENSE.txt "${pkgdir}"/usr/share/licenses/${pkgname}/
+}

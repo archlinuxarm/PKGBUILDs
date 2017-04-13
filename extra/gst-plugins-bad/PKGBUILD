@@ -7,37 +7,51 @@
 #  - disable GL and GLX on v5/6/7
 
 pkgname=gst-plugins-bad
-pkgver=1.8.1
+pkgver=1.10.4
 pkgrel=1
 pkgdesc="GStreamer Multimedia Framework Bad Plugins"
-arch=('i686' 'x86_64')
-license=('LGPL')
-url="http://gstreamer.freedesktop.org/"
-depends=(mjpegtools gst-plugins-base-libs curl chromaprint libmms faad2 faac celt libdca
-         soundtouch spandsp libdvdnav libmodplug libgme wayland neon libofa fluidsynth
-         openjpeg libwebp libsrtp gnutls wildmidi glu sbc rtmpdump libgudev graphene)
+url="https://gstreamer.freedesktop.org/"
+arch=(i686 x86_64)
+license=(LGPL)
+depends=(mjpegtools gst-plugins-base-libs curl chromaprint libmms faad2 celt libdca libdvdnav
+         libmodplug libgme wayland libofa openjpeg2 libwebp libsrtp gnutls glu sbc rtmpdump
+         libgudev graphene)
 makedepends=(schroedinger libexif libdvdread libvdpau libmpeg2 python wildmidi librsvg
              gobject-introspection gtk-doc gtk3 clutter libtiger ladspa openal libusb
-             qt5-declarative qt5-x11extras qt5-wayland vulkan-headers vulkan-icd-loader)
+             qt5-declarative qt5-x11extras qt5-wayland vulkan-headers vulkan-icd-loader zbar
+             autoconf-archive git libfdk-aac faac soundtouch spandsp fluidsynth neon)
 options=(!emptydirs)
-source=(${url}/src/$pkgname/$pkgname-$pkgver.tar.xz)
-sha256sums=('0bbd58f363734fc0c4a620b2d6fb01d427fdafdbda7b90b4e15d03b751ca40f5')
+_commit=2e40502e73d744a26abaa9fd22453e625ca6a146  # tags/1.10.4^0
+source=("git+https://anongit.freedesktop.org/git/gstreamer/gst-plugins-bad#commit=$_commit"
+        "gst-common::git+https://anongit.freedesktop.org/git/gstreamer/common")
+sha256sums=('SKIP'
+            'SKIP')
+
+pkgver() {
+  cd $pkgname
+  git describe --tags | sed 's/-/+/g'
+}
 
 prepare() {
-  cd $pkgname-$pkgver
-  autoreconf -vi
+  cd $pkgname
+
+  git submodule init
+  git config --local submodule.common.url "$srcdir/gst-common"
+  git submodule update
+
+  NOCONFIGURE=1 ./autogen.sh
 }
 
 build() {
-  cd $pkgname-$pkgver
+  cd $pkgname
 
   [[ $CARCH != "aarch64" ]] && CONFIG="--disable-gl --disable-glx --enable-gles2"
 
-  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
-    --disable-static --enable-experimental --enable-gtk-doc \
+  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --libexecdir=/usr/lib \
     --with-package-name="GStreamer Bad Plugins (Arch Linux)" \
     --with-package-origin="http://www.archlinux.org/" \
-    --with-gtk=3.0 $CONFIG
+    --with-gtk=3.0 \
+    --enable-experimental --enable-gtk-doc --disable-static $CONFIG
 
   # https://bugzilla.gnome.org/show_bug.cgi?id=655517
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
@@ -46,12 +60,12 @@ build() {
 }
 
 check() {
-  cd $pkgname-$pkgver
+  cd $pkgname
   # don't have a camera for the camerabin test
   make -k check || :
 }
 
 package() {
-  cd $pkgname-$pkgver
-  make DESTDIR="${pkgdir}" install
+  cd $pkgname
+  make DESTDIR="$pkgdir" install
 }

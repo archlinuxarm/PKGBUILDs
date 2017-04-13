@@ -1,0 +1,136 @@
+# Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
+# Maintainer: Oleg Rakhmanov <oleg@archlinuxarm.org>
+# Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: BlackIkeEagle < ike DOT devolder AT gmail DOT com >
+# Contributor: Brad Fanella <bradfanella@archlinux.us>
+# Contributor: [vEX] <niechift.dot.vex.at.gmail.dot.com>
+# Contributor: Zeqadious <zeqadious.at.gmail.dot.com>
+# Contributor: BlackIkeEagle < ike DOT devolder AT gmail DOT com >
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Maxime Gauduin <alucryd@gmail.com>
+# Contributor: Vlad Frolov <frolvlad@gmail.com>
+
+buildarch=4
+
+_prefix=/usr
+
+pkgbase=kodi-odroid
+pkgname=('kodi-odroid' 'kodi-odroid-eventclients')
+_commit=45ff92040f47000a1373444c47c026cc25cae348
+pkgver=17.0
+pkgrel=1
+arch=('armv7h')
+url="http://kodi.tv"
+license=('GPL2')
+makedepends=(
+  'afpfs-ng' 'bluez-libs' 'boost' 'cmake' 'curl' 'cwiid' 'doxygen' 'git' 'glew'
+  'gperf' 'hicolor-icon-theme' 'jasper' 'java-runtime' 'libaacs' 'libass'
+  'libbluray' 'libcdio' 'odroid-libgl' 'libmariadbclient' 'libmicrohttpd'
+  'libmodplug' 'libmpeg2' 'libnfs' 'libplist' 'libpulse' 'libssh' 'libva'
+  'libxrandr' 'libxslt' 'lzo' 'nasm' 'nss-mdns' 'python2-pillow'
+  'python2-pybluez' 'python2-simplejson' 'rtmpdump' 'sdl2' 'sdl_image'
+  'shairplay' 'smbclient' 'swig' 'taglib' 'tinyxml' 'unzip' 'upower' 'yajl' 'zip'
+  'mesa' 'libdcadec.so' 'libcrossguid' 'libcec'
+)
+
+source=("https://github.com/Owersun/xbmc/archive/${_commit}.tar.gz")
+sha256sums=('8fc9b14d71141f8b27bce393949803c5c739c97f79c4e527246fe11fc62f4ae9')
+prepare() {
+  cd xbmc-${_commit}
+
+  find -type f -name *.py -exec sed 's|^#!.*python$|#!/usr/bin/python2|' -i "{}" +
+  sed 's|^#!.*python$|#!/usr/bin/python2|' -i tools/depends/native/rpl-native/rpl
+}
+
+build() {
+  cd xbmc-${_commit}
+
+  LDFLAGS+=" -L/usr/lib/mali-egl"
+
+  # Bootstrapping
+  MAKEFLAGS=-j1 ./bootstrap
+
+  # Configuring XBMC
+  export PYTHON_VERSION=2  # external python v2
+  ./configure --prefix=$_prefix \
+    gl_cv_func_gettimeofday_clobber=no ac_cv_lib_bluetooth_hci_devid=no \
+    --disable-debug \
+    --enable-optimizations \
+    --enable-libbluray \
+    --disable-texturepacker \
+    --enable-external-libraries \
+    --with-lirc-device=/run/lirc/lircd \
+    --disable-vaapi \
+    --disable-vdpau \
+    --disable-gl \
+    --disable-openmax \
+    --disable-static --enable-shared \
+    --disable-rsxs \
+    --enable-gles \
+    --enable-codec=mfc
+
+  # Now (finally) build
+  make
+}
+
+package_kodi-odroid() {
+  pkgdesc="A software media player and entertainment hub for digital media (ODROID-X/X2/U2/U3)"
+
+  # depends expected for kodi plugins:
+  # 'python2-pillow' 'python2-pybluez' 'python2-simplejson'
+  # depends expeced in FEH.py
+  # 'mesa-demos' 'xorg-xdpyinfo'
+  depends=(
+    'python2-pillow' 'python2-pybluez' 'python2-simplejson'
+    'mesa-demos' 'xorg-xdpyinfo'
+    'bluez-libs' 'fribidi' 'glew' 'hicolor-icon-theme' 'libcdio'
+    'libjpeg-turbo' 'libmariadbclient' 'libmicrohttpd' 'libpulse' 'libssh'
+    'libva' 'libxrandr' 'libxslt' 'lzo' 'sdl2' 'smbclient' 'taglib' 'tinyxml'
+    'yajl' 'odroid-libgl' 'mesa' 'libdcadec.so'
+  )
+  optdepends=(
+    'afpfs-ng: Apple shares support'
+    'bluez: Blutooth support'
+    'libnfs: NFS shares support'
+    'libplist: AirPlay support'
+    'lirc: Remote controller support'
+    'libcec: CEC (Consumer Electronics Control) allows to control devices over HDMI port'
+    'pulseaudio: PulseAudio support'
+    'shairplay: AirPlay support'
+    'udisks: Automount external drives'
+    'unrar: Archives support'
+    'unzip: Archives support'
+    'upower: Display battery level'
+    'lsb-release: log distro information in crashlog'
+  )
+  install="kodi.install"
+  provides=('xbmc' 'kodi')
+  conflicts=('xbmc' 'kodi' 'shairplay-git')
+  replaces=('xbmc')
+
+  cd xbmc-${_commit}
+  # Running make install
+  make DESTDIR="$pkgdir" install
+
+  # Licenses
+  install -dm755 ${pkgdir}${_prefix}/share/licenses/${pkgname}
+  for licensef in LICENSE.GPL copying.txt; do
+    mv ${pkgdir}${_prefix}/share/doc/kodi/${licensef} \
+       ${pkgdir}${_prefix}/share/licenses/${pkgname}
+  done
+}
+
+package_kodi-odroid-eventclients() {
+  pkgdesc="Kodi Event Clients (ODROID-X/X2/U2/U3)"
+  provides=('kodi-eventclients')
+  conflicts=('kodi-eventclients')
+  depends=('cwiid')
+
+  cd ${srcdir}/xbmc-${_commit}
+
+  make DESTDIR="$pkgdir" eventclients WII_EXTRA_OPTS=-DCWIID_OLD
+
+  install -dm755 "$pkgdir/usr/lib/python2.7/$pkgbase"
+  mv "$pkgdir/kodi"/* "$pkgdir/usr/lib/python2.7/$pkgbase"
+  rmdir "$pkgdir/kodi"
+}

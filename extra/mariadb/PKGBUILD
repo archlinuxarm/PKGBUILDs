@@ -1,26 +1,43 @@
 # $Id$
 # Maintainer: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Maintainer: Christian Hesse <mail@eworm.de>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - disable mroonga storage engine (doesn't build on ARM)
 
 pkgbase=mariadb
 pkgname=('libmariadbclient' 'mariadb-clients' 'mytop' 'mariadb')
-pkgver=10.1.14
+pkgver=10.1.22
 _pkgver=${pkgver/.a/a}
 pkgrel=1
 arch=('i686' 'x86_64')
 license=('GPL')
 url='http://mariadb.org/'
-makedepends=('cmake' 'zlib' 'libaio' 'libxml2' 'openssl' 'pcre' 'jemalloc'
-             'lz4' 'boost' 'libevent')
-source=(http://ftp.heanet.ie/mirrors/mariadb/mariadb-$pkgver/source/mariadb-$pkgver.tar.gz mariadb.service
-        mariadb-post.sh
+makedepends=('cmake' 'zlib' 'libaio' 'libxml2' 'pcre' 'jemalloc'
+             'lz4' 'boost' 'libevent' 'systemd')
+validpgpkeys=('199369E5404BD5FC7D2FE43BCBCB082A1BB943DB') # MariaDB Package Signing Key <package-signing-key@mariadb.org>
+source=(https://ftp.heanet.ie/mirrors/mariadb/mariadb-$pkgver/source/mariadb-$pkgver.tar.gz{,.asc}
+        mariadb-sysusers.conf
         mariadb-tmpfile.conf)
-md5sums=('294925531e0fd2f0461e3894496a5adc'
-         'd488fffa9f62f9949c4aa1bb6e6db692'
-         'b79e65a5aa536e6b5bc60988eb0b78a2'
-         '2fa6e456964d4ff5e6d4f9ff0126aed6')
+sha256sums=('bcb0572e7ad32cea9740a21e9255f733bdf60a5561ffbda317c22dd12b3966ce'
+            'SKIP'
+            'e1a22777c65854041f16fc0a2db3218d17b4d7e7ec7ab7a77cf49c71277c1515'
+            '2af318c52ae0fe5428e8a9245d1b0fc3bc5ce153842d1563329ceb1edfa83ddd')
+
+# This ships with bundled SSL library until proper support for openssl 1.1.0
+# is available.
+# TODO: Switch back to system openssl
+#   -> add 'openssl' to dependencies
+#   -> switch to '-DWITH_SSL=system' in cmake command
+
+prepare() {
+  # Changes to the upstream unit files:
+  #  * remove the alias from unit files, we install symlinks in package function
+  #  * enable PrivateTmp for a little bit more security
+  sed -i -e '/^Alias/d' \
+    -e '/^PrivateTmp/c PrivateTmp=true' \
+    $pkgbase-$_pkgver/support-files/mariadb{,@}.service.in
+}
 
 build() {
   mkdir build
@@ -31,29 +48,30 @@ build() {
     -DCMAKE_RANLIB=/usr/bin/gcc-ranlib \
     -DBUILD_CONFIG=mysql_release \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DSYSCONFDIR=/etc/mysql \
     -DMYSQL_DATADIR=/var/lib/mysql \
     -DMYSQL_UNIX_ADDR=/run/mysqld/mysqld.sock \
-    -DDEFAULT_CHARSET=utf8 \
-    -DDEFAULT_COLLATION=utf8_general_ci \
+    -DDEFAULT_CHARSET=utf8mb4 \
+    -DDEFAULT_COLLATION=utf8mb4_unicode_ci \
     -DENABLED_LOCAL_INFILE=ON \
-    -DINSTALL_INFODIR=share/mysql/docs \
+    -DINSTALL_DOCDIR=share/doc/mariadb \
+    -DINSTALL_DOCREADMEDIR=share/doc/mariadb \
     -DINSTALL_MANDIR=share/man \
     -DINSTALL_PLUGINDIR=lib/mysql/plugin \
     -DINSTALL_SCRIPTDIR=bin \
+    -DINSTALL_SYSCONFDIR=/etc/mysql \
+    -DINSTALL_SYSCONF2DIR=/etc/mysql \
     -DINSTALL_INCLUDEDIR=include/mysql \
-    -DINSTALL_DOCREADMEDIR=share/mysql \
     -DINSTALL_SUPPORTFILESDIR=share/mysql \
     -DINSTALL_MYSQLSHAREDIR=share/mysql \
-    -DINSTALL_DOCDIR=share/mysql/docs \
     -DINSTALL_SHAREDIR=share/mysql \
+    -DINSTALL_SYSTEMD_UNITDIR=/usr/lib/systemd/system/ \
+    -DWITH_SYSTEMD=yes \
     -DWITH_READLINE=ON \
     -DWITH_ZLIB=system \
-    -DWITH_SSL=system \
+    -DWITH_SSL=bundled \
     -DWITH_PCRE=system \
     -DWITH_LIBWRAP=OFF \
     -DWITH_JEMALLOC=ON \
-    -DCMAKE_EXE_LINKER_FLAGS='-ljemalloc' \
     -DWITH_EXTRA_CHARSETS=complex \
     -DWITH_EMBEDDED_SERVER=ON \
     -DWITH_ARCHIVE_STORAGE_ENGINE=1 \
@@ -64,6 +82,7 @@ build() {
     -DWITHOUT_EXAMPLE_STORAGE_ENGINE=1 \
     -DWITHOUT_FEDERATED_STORAGE_ENGINE=1 \
     -DWITHOUT_PBXT_STORAGE_ENGINE=1 \
+    -DCMAKE_EXE_LINKER_FLAGS='-ljemalloc' \
     -DWITHOUT_MROONGA_STORAGE_ENGINE=1 \
     -DCMAKE_C_FLAGS="-fPIC $CFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -fomit-frame-pointer -fno-delete-null-pointer-checks" \
     -DCMAKE_CXX_FLAGS="-fPIC $CXXFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -felide-constructors -fno-rtti -fno-delete-null-pointer-checks" \
@@ -84,10 +103,10 @@ package_libmariadbclient() {
     make -C $dir DESTDIR="$pkgdir" install
   done
 
-  install -Dm755 scripts/mysql_config "$pkgdir"/usr/bin/mysql_config
+  install -Dm0755 scripts/mysql_config "$pkgdir"/usr/bin/mysql_config
   install -d "$pkgdir"/usr/share/man/man1
   for man in mysql_config mysql_client_test_embedded mysqltest_embedded; do
-    install -m644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
+    install -m0644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
   done
 
   rm "$pkgdir"/usr/lib/libmysql{client,client_r,d}.a
@@ -95,7 +114,7 @@ package_libmariadbclient() {
 
 package_mariadb-clients() {
   pkgdesc='MariaDB client tools'
-  depends=('libmariadbclient' 'zlib' 'openssl' 'jemalloc')
+  depends=("libmariadbclient=${pkgver}" 'zlib' 'openssl' 'jemalloc')
   conflicts=('mysql-clients')
   provides=("mysql-clients=$pkgver")
 
@@ -105,7 +124,7 @@ package_mariadb-clients() {
   # install man pages
   install -d "$pkgdir"/usr/share/man/man1
   for man in mysql mysqladmin mysqlcheck mysqldump mysqlimport mysqlshow mysqlslap; do
-    install -m644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
+    install -m0644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
   done
 
   # provided by mariadb
@@ -118,15 +137,15 @@ package_mytop() {
   depends=('perl' 'perl-dbd-mysql' 'perl-term-readkey')
 
   cd build
-  install -Dm755 scripts/mytop "$pkgdir"/usr/bin/mytop
+  install -Dm0755 scripts/mytop "$pkgdir"/usr/bin/mytop
 }
 
 package_mariadb() {
   pkgdesc='Fast SQL database server, drop-in replacement for MySQL'
   backup=('etc/mysql/my.cnf')
   install=mariadb.install
-  depends=('mariadb-clients' 'inetutils' 'libaio' 'libxml2' 'pcre' 'jemalloc'
-           'lz4' 'boost-libs' 'lzo' 'libevent')
+  depends=("mariadb-clients=${pkgver}" 'inetutils' 'libaio' 'libxml2' 'pcre' 'jemalloc'
+           'lz4' 'boost-libs' 'lzo' 'libevent' 'libsystemd')
   optdepends=('perl-dbd-mysql: for mysqlhotcopy, mysql_convert_table_format and mysql_setpermission')
   conflicts=('mysql')
   provides=("mysql=$pkgver")
@@ -135,16 +154,35 @@ package_mariadb() {
   cd build
   make DESTDIR="$pkgdir" install
 
-  install -Dm644 "$pkgdir"/usr/share/mysql/my-medium.cnf "$pkgdir"/etc/mysql/my.cnf
-  install -Dm755 ../mariadb-post.sh "$pkgdir"/usr/bin/mysqld-post
-  install -Dm644 ../mariadb.service "$pkgdir"/usr/lib/systemd/system/mysqld.service
-  install -Dm644 ../mariadb-tmpfile.conf "$pkgdir"/usr/lib/tmpfiles.d/mysql.conf
+  cd "$pkgdir"
 
-  install -dm700 "$pkgdir"/var/lib/mysql
-  chown -R 89:89 "$pkgdir"/var/lib/mysql &>/dev/null
+  # We specified INSTALL_SYSCONFDIR and INSTALL_SYSCONF2DIR to have proper paths
+  # in binaries and support file. But we want our own files...
+  # TOOD: Change to upstream file layout with version 10.2.x?
+  rm -r etc/
+  install -Dm0644 usr/share/mysql/my-medium.cnf etc/mysql/my.cnf
+
+  install -Dm0644 "${srcdir}"/mariadb-tmpfile.conf usr/lib/tmpfiles.d/mariadb.conf
+  install -Dm0644 "${srcdir}"/mariadb-sysusers.conf usr/lib/sysusers.d/mariadb.conf
+  ln -s mariadb.service usr/lib/systemd/system/mysqld.service
+  ln -s mariadb@.service usr/lib/systemd/system/mysqld@.service
+
+  install -dm0700 var/lib/mysql
+  chown -R 89:89 var/lib/mysql &>/dev/null
+
+  # move aclocal and pkgconfig files
+  install -D -m0644 usr/share/mysql/aclocal/mysql.m4 usr/share/aclocal/mysql.m4
+  install -D -m0644 usr/share/mysql/pkgconfig/mariadb.pc usr/share/pkgconfig/mariadb.pc
+  rm -r usr/share/mysql/{aclocal,pkgconfig}
+ 
+  # move to proper licenses directories
+  install -d usr/share/licenses/mariadb
+  mv usr/share/doc/mariadb/COPYING* usr/share/licenses/mariadb/
+
+  # already installed to real systemd unit directory
+  rm -r usr/share/mysql/systemd/
 
   # provided by libmariadbclient
-  cd "$pkgdir"
   rm usr/bin/{mysql_config,mysql_client_test_embedded,mysqltest_embedded}
   rm usr/lib/libmysql*
   rm -r usr/include/

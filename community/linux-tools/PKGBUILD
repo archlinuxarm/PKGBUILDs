@@ -5,6 +5,7 @@
 #  - removed x86_energy_perf_policy and turbostat build/package, uses x86 asm
 #  - removed numactl dep
 #  - use tarball source
+#  - add GPIO and IIO utilities packages
 
 pkgbase=linux-tools
 pkgname=(
@@ -15,19 +16,21 @@ pkgname=(
   'perf'
   'tmon'
   'usbip'
+  'gpio-utils'
+  'iio-utils'
 )
-pkgver=4.6
-pkgrel=2
+pkgver=4.10
+pkgrel=1.1
 license=('GPL2')
 arch=('i686' 'x86_64')
-url='http://www.kernel.org'
-options=('!strip')
+url='https://www.kernel.org'
+options=('!strip' '!distcc')
 makedepends=('git')
 # split packages need all package dependencies set manually in makedepends
 # kernel source deps
 makedepends+=('asciidoc' 'xmlto')
 # perf deps
-makedepends+=('perl' 'python2' 'libnewt' 'elfutils' 'libunwind' 'audit' 'gtk2')
+makedepends+=('perl' 'python2' 'slang' 'elfutils' 'libunwind' 'audit' 'gtk2')
 # cpupower deps
 makedepends+=('pciutils')
 # usbip deps
@@ -36,28 +39,27 @@ makedepends+=('glib2' 'sysfsutils' 'udev')
 makedepends+=('ncurses')
 groups=("$pkgbase")
 source=("https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-${pkgver}.tar.xz"
+        #'https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.9.9.xz'
         'cpupower.default'
         'cpupower.systemd'
         'cpupower.service'
-        'usbipd.service'
-        '02-archlinux-paths.patch'
-        '04-fix-usip-h-path.patch')
-md5sums=('SKIP'
+        'usbipd.service')
+md5sums=('b5e7f6b9b2fe1b6cc7bc56a3a0bfc090'
          '56883c159381ba89e50ab8ea65efec77'
          '34f5ecc19770a1abbcd0fd65bfd1f065'
          '86c4e419e4ba80835c330d49ba3f56ad'
-         'bb35634f480325a78b943f7e10165e86'
-         '1bc4f8c7a21a30e1a873d07e69fb698b'
-         'a73ea3ea6d9c9ecb1cc910871eead3ff')
+         'bb35634f480325a78b943f7e10165e86')
 
 prepare() {
   cd linux-$pkgver
+  # apply stable kernel patch
+  #patch -p1 -N -i "$srcdir"/patch-4.7.5
   # apply patch from the source array (should be a pacman feature)
   local filename
   for filename in "${source[@]}"; do
     if [[ "$filename" =~ \.patch$ ]]; then
-      msg2 "Applying patch $filename"
-      patch -p1 -N -i "$srcdir/$filename"
+      msg2 "Applying patch ${filename##*/}"
+      patch -p1 -N -i "$srcdir/${filename##*/}"
     fi
   done
 }
@@ -70,10 +72,11 @@ build() {
 
   msg2 'perf'
   pushd linux-$pkgver/tools/perf
-  make \
+  make -f Makefile.perf \
     prefix=/usr \
-    DESTDIR="$pkgdir" \
-    WERROR=0 \
+    lib=lib/perf \
+    perfexecdir=lib/perf \
+    NO_SDT=1 \
     PYTHON=python2 \
     PYTHON_CONFIG=python2-config \
     PERF_VERSION=$pkgver-$pkgrel \
@@ -101,6 +104,16 @@ build() {
 
   msg2 'cgroup_event_listener'
   pushd linux-$pkgver/tools/cgroup
+  make
+  popd
+
+  msg2 'gpio'
+  pushd linux-$pkgver/tools/gpio
+  make -j1
+  popd
+
+  msg2 'iio'
+  pushd linux-$pkgver/tools/iio
   make
   popd
 }
@@ -132,23 +145,28 @@ package_libtraceevent() {
 
 package_perf() {
   pkgdesc='Linux kernel performance auditing tool'
-  depends=('perl' 'python2' 'libnewt' 'elfutils' 'libunwind' 'binutils'
+  depends=('perl' 'python2' 'slang' 'elfutils' 'libunwind' 'binutils'
            'audit')
   optdepends=('gtk2: support GTK2 browser for perf report')
 
   cd linux-$pkgver/tools/perf
-  make \
+  make -f Makefile.perf \
     prefix=/usr \
-    DESTDIR="$pkgdir" \
-    WERROR=0 \
+    lib=lib/perf \
+    perfexecdir=lib/perf \
+    NO_SDT=1 \
     PYTHON=python2 \
     PYTHON_CONFIG=python2-config \
     PERF_VERSION=$pkgver-$pkgrel \
+    DESTDIR="$pkgdir" \
     install install-man
   cd "$pkgdir"
+  # add linker search path
+  mkdir "$pkgdir/etc/ld.so.conf.d"
+  echo '/usr/lib/perf' > "$pkgdir/etc/ld.so.conf.d/$pkgname.conf"
   # move completion in new directory
   install -Dm644 etc/bash_completion.d/perf usr/share/bash-completion/completions/perf
-  rm -r etc
+  rm -r etc/bash_completion.d
   # no exec on usr/share
   find usr/share -type f -exec chmod a-x {} \;
 }
@@ -203,6 +221,22 @@ package_cgroup_event_listener() {
 
   cd linux-$pkgver/tools/cgroup
   install -Dm755 cgroup_event_listener "$pkgdir/usr/bin/cgroup_event_listener"
+}
+
+package_gpio-utils() {
+  pkgdesc='GPIO character device utilities'
+  depends=('glibc')
+
+  cd linux-$pkgver/tools/gpio
+  make install DESTDIR="$pkgdir"
+}
+
+package_iio-utils() {
+  pkgdesc='Industrial IO utilities'
+  depends=('glibc')
+
+  cd linux-$pkgver/tools/iio
+  make install INSTALL_ROOT="$pkgdir"
 }
 
 # vim:set ts=2 sw=2 et:

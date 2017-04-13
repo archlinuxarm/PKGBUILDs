@@ -1,0 +1,76 @@
+# $Id$
+# Maintainer: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - added switches for our architectures
+
+pkgname=go
+epoch=2
+pkgver=1.8.1
+pkgrel=1
+pkgdesc='Core compiler tools for the Go programming language'
+arch=(i686 x86_64)
+url='http://golang.org/'
+license=(BSD)
+makedepends=(git go)
+options=(!strip staticlibs)
+_commit=a4c18f063b6659079ca2848ca217a0587dabc001
+source=(git+https://go.googlesource.com/go#commit=$_commit)
+md5sums=('SKIP')
+
+export GOOS=linux
+case "$CARCH" in
+  x86_64) export GOARCH=amd64 ;;
+  i686) export GOARCH=386 GO386=387 ;;
+  arm) export GOARCH=arm GOARM=5 ;;
+  armv6h) export GOARCH=arm GOARM=6 ;;
+  armv7h) export GOARCH=arm GOARM=7 ;;
+  aarch64) export GOARCH=arm64 ;;
+esac
+export GOROOT_FINAL=/usr/lib/go
+export GOROOT_BOOTSTRAP=/usr/lib/go
+
+build() {
+  export GOROOT="$srcdir/$pkgname"
+  export GOBIN="$GOROOT/bin"
+  export GOPATH="$srcdir/"
+
+  cd $pkgname/src
+  ./make.bash --no-clean
+}
+
+check() {
+  export GOROOT="$srcdir/$pkgname"
+  export GOBIN="$GOROOT/bin"
+  export PATH="$srcdir/$pkgname-$pkgver/bin:$PATH"
+  export GO_TEST_TIMEOUT_SCALE=2
+
+  # The cgo_test and race tests fail via run.bash but not if run manually.
+  # Assume that five "failed" messages are okay and just re-run failed tests.
+  cd $pkgname/src
+  ./run.bash --no-rebuild -v -v -v -k |& tee run.log
+  if (( $(grep -c Failed: run.log) > 5 )) && grep -q FAILED run.log; then
+    return 1
+  fi
+
+  go tool dist test -v -v -v -run=^cgo_test$
+  go tool dist test -v -v -v -run=^race$
+}
+
+package() {
+  cd $pkgbase
+
+  install -d "$pkgdir/usr/bin" "$pkgdir/usr/lib/go" "$pkgdir/usr/share/doc/go"
+  cp -a bin pkg src lib "$pkgdir/usr/lib/go"
+  cp -r doc/* "$pkgdir/usr/share/doc/go"
+
+  ln -sf /usr/lib/go/bin/go "$pkgdir/usr/bin/go"
+  ln -sf /usr/lib/go/bin/gofmt "$pkgdir/usr/bin/gofmt"
+  ln -sf /usr/share/doc/go "$pkgdir/usr/lib/go/doc"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/go/LICENSE"
+  install -Dm644 VERSION "$pkgdir/usr/lib/go/VERSION"
+
+  rm -rf "$pkgdir/usr/lib/go/pkg/bootstrap"
+  rm -rf "$pkgdir/usr/lib/go/pkg/tool/*/api"
+}

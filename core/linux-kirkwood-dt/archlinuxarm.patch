@@ -1,31 +1,6 @@
-diff -ruN a/arch/arm/boot/dts/kirkwood-nsa320.dts b/arch/arm/boot/dts/kirkwood-nsa320.dts
---- a/arch/arm/boot/dts/kirkwood-nsa320.dts	2016-03-13 22:28:54.000000000 -0600
-+++ b/arch/arm/boot/dts/kirkwood-nsa320.dts	2016-03-15 20:36:16.470111122 -0600
-@@ -193,10 +193,19 @@
- 		};
- 	};
- 
-+	hwmon {
-+		compatible = "zyxel,nsa320-mcu";
-+		pinctrl-0 = <&pmx_mcu_data &pmx_mcu_clk &pmx_mcu_act>;
-+		pinctrl-names = "default";
-+
-+		data-gpios = <&gpio0 14 GPIO_ACTIVE_HIGH>;
-+		clk-gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>;
-+		act-gpios = <&gpio0 17 GPIO_ACTIVE_LOW>;
-+	};
-+
- 	/* The following pins are currently not assigned to a driver,
- 	   some of them should be configured as inputs.
--	pinctrl-0 = <&pmx_mcu_data &pmx_mcu_clk &pmx_mcu_act
--		     &pmx_htp &pmx_vid_b1
-+	pinctrl-0 = <&pmx_htp &pmx_vid_b1
- 		     &pmx_power_resume_data &pmx_power_resume_clk>; */
- };
- 
 diff -ruN a/arch/arm/boot/dts/kirkwood-pogo_e02.dts b/arch/arm/boot/dts/kirkwood-pogo_e02.dts
---- a/arch/arm/boot/dts/kirkwood-pogo_e02.dts	2016-03-13 22:28:54.000000000 -0600
-+++ b/arch/arm/boot/dts/kirkwood-pogo_e02.dts	2016-03-15 20:36:16.475111102 -0600
+--- a/arch/arm/boot/dts/kirkwood-pogo_e02.dts	2016-10-02 17:24:33.000000000 -0600
++++ b/arch/arm/boot/dts/kirkwood-pogo_e02.dts	2016-10-02 23:41:08.542632805 -0600
 @@ -38,7 +38,7 @@
  		health {
  			label = "pogo_e02:green:health";
@@ -36,8 +11,8 @@ diff -ruN a/arch/arm/boot/dts/kirkwood-pogo_e02.dts b/arch/arm/boot/dts/kirkwood
  		fault {
  			label = "pogo_e02:orange:fault";
 diff -ruN a/drivers/ata/sata_mv.c b/drivers/ata/sata_mv.c
---- a/drivers/ata/sata_mv.c	2016-03-13 22:28:54.000000000 -0600
-+++ b/drivers/ata/sata_mv.c	2016-03-15 20:36:16.415111342 -0600
+--- a/drivers/ata/sata_mv.c	2016-10-02 17:24:33.000000000 -0600
++++ b/drivers/ata/sata_mv.c	2016-10-03 00:07:50.934801409 -0600
 @@ -72,6 +72,7 @@
  #include <scsi/scsi_cmnd.h>
  #include <scsi/scsi_device.h>
@@ -50,64 +25,89 @@ diff -ruN a/drivers/ata/sata_mv.c b/drivers/ata/sata_mv.c
  {
  	int want_ncq = (protocol == ATA_PROT_NCQ);
  
-+	ledtrig_ide_activity(ap->port_no);
++	ledtrig_sata_activity(ap->port_no);
 +
  	if (pp->pp_flags & MV_PP_FLAG_EDMA_EN) {
  		int using_ncq = ((pp->pp_flags & MV_PP_FLAG_NCQ_EN) != 0);
  		if (want_ncq != using_ncq)
 diff -ruN a/drivers/leds/trigger/Kconfig b/drivers/leds/trigger/Kconfig
---- a/drivers/leds/trigger/Kconfig	2016-03-13 22:28:54.000000000 -0600
-+++ b/drivers/leds/trigger/Kconfig	2016-03-15 20:36:16.445111222 -0600
-@@ -35,7 +35,6 @@
+--- a/drivers/leds/trigger/Kconfig	2016-10-02 17:24:33.000000000 -0600
++++ b/drivers/leds/trigger/Kconfig	2016-10-02 23:54:28.033717682 -0600
+@@ -41,6 +41,12 @@
+ 	  This allows LEDs to be controlled by disk activity.
+ 	  If unsure, say Y.
  
- config LEDS_TRIGGER_IDE_DISK
- 	bool "LED IDE Disk Trigger"
--	depends on IDE_GD_ATA
- 	depends on LEDS_TRIGGERS
- 	help
- 	  This allows LEDs to be controlled by IDE disk activity.
-diff -ruN a/drivers/leds/trigger/ledtrig-ide-disk.c b/drivers/leds/trigger/ledtrig-ide-disk.c
---- a/drivers/leds/trigger/ledtrig-ide-disk.c	2016-03-13 22:28:54.000000000 -0600
-+++ b/drivers/leds/trigger/ledtrig-ide-disk.c	2016-03-15 20:45:22.852900230 -0600
-@@ -17,19 +17,29 @@
- 
- #define BLINK_DELAY 30
- 
--DEFINE_LED_TRIGGER(ledtrig_ide);
-+DEFINE_LED_TRIGGER(ledtrig_ide1);
-+DEFINE_LED_TRIGGER(ledtrig_ide2);
- static unsigned long ide_blink_delay = BLINK_DELAY;
- 
--void ledtrig_ide_activity(void)
-+void ledtrig_ide_activity(int port_number)
- {
--	led_trigger_blink_oneshot(ledtrig_ide,
--				  &ide_blink_delay, &ide_blink_delay, 0);
++config LEDS_TRIGGER_SATA
++	bool "LED SATA Disk Trigger fir Kirkwood SOC"
++	depends on LEDS_TRIGGERS
++	help
++	  This allows LEDs to be controlled by IDE disk activity.
++
+ config LEDS_TRIGGER_MTD
+ 	bool "LED MTD (NAND/NOR) Trigger"
+ 	depends on MTD
+diff -ruN a/drivers/leds/trigger/Makefile b/drivers/leds/trigger/Makefile
+--- a/drivers/leds/trigger/Makefile	2016-10-02 17:24:33.000000000 -0600
++++ b/drivers/leds/trigger/Makefile	2016-10-02 23:52:47.634208429 -0600
+@@ -1,6 +1,7 @@
+ obj-$(CONFIG_LEDS_TRIGGER_TIMER)	+= ledtrig-timer.o
+ obj-$(CONFIG_LEDS_TRIGGER_ONESHOT)	+= ledtrig-oneshot.o
+ obj-$(CONFIG_LEDS_TRIGGER_DISK)		+= ledtrig-disk.o
++obj-$(CONFIG_LEDS_TRIGGER_SATA)         += ledtrig-sata.o
+ obj-$(CONFIG_LEDS_TRIGGER_MTD)		+= ledtrig-mtd.o
+ obj-$(CONFIG_LEDS_TRIGGER_HEARTBEAT)	+= ledtrig-heartbeat.o
+ obj-$(CONFIG_LEDS_TRIGGER_BACKLIGHT)	+= ledtrig-backlight.o
+diff -ruN a/drivers/leds/trigger/ledtrig-sata.c b/drivers/leds/trigger/ledtrig-sata.c
+--- a/drivers/leds/trigger/ledtrig-sata.c	1969-12-31 17:00:00.000000000 -0700
++++ b/drivers/leds/trigger/ledtrig-sata.c	2016-10-03 00:09:26.434336496 -0600
+@@ -0,0 +1,43 @@
++/*
++ * LED SATA-Disk Activity Trigger
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/leds.h>
++
++#define BLINK_DELAY 30
++
++DEFINE_LED_TRIGGER(ledtrig_sata1);
++DEFINE_LED_TRIGGER(ledtrig_sata2);
++
++void ledtrig_sata_activity(int port_number)
++{
++	unsigned long sata_blink_delay = BLINK_DELAY;
++
 +	switch (port_number) {
 +		case 0:
-+			led_trigger_blink_oneshot(ledtrig_ide1, &ide_blink_delay, &ide_blink_delay, 0);
++			led_trigger_blink_oneshot(ledtrig_sata1, &sata_blink_delay, &sata_blink_delay, 0);
 +			break;
 +		case 1:
-+			led_trigger_blink_oneshot(ledtrig_ide2, &ide_blink_delay, &ide_blink_delay, 0);
++			led_trigger_blink_oneshot(ledtrig_sata2, &sata_blink_delay, &sata_blink_delay, 0);
 +			break;
 +		default:
 +			break;
-+	}
- }
- EXPORT_SYMBOL(ledtrig_ide_activity);
- 
- static int __init ledtrig_ide_init(void)
- {
--	led_trigger_register_simple("ide-disk", &ledtrig_ide);
-+	led_trigger_register_simple("ide-disk1", &ledtrig_ide1);
-+	led_trigger_register_simple("ide-disk2", &ledtrig_ide2);
- 	return 0;
- }
- device_initcall(ledtrig_ide_init);
++       }
++}
++EXPORT_SYMBOL(ledtrig_sata_activity);
++
++static int __init ledtrig_sata_init(void)
++{
++       led_trigger_register_simple("sata-disk1", &ledtrig_sata1);
++       led_trigger_register_simple("sata-disk2", &ledtrig_sata2);
++
++	return 0;
++}
++device_initcall(ledtrig_sata_init);
 diff -ruN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
---- a/drivers/mmc/core/core.c	2016-03-13 22:28:54.000000000 -0600
-+++ b/drivers/mmc/core/core.c	2016-03-15 20:36:16.450111202 -0600
-@@ -850,7 +850,7 @@
+--- a/drivers/mmc/core/core.c	2016-10-02 17:24:33.000000000 -0600
++++ b/drivers/mmc/core/core.c	2016-10-02 23:41:08.547632780 -0600
+@@ -857,7 +857,7 @@
  			 */
  			limit_us = 3000000;
  		else
@@ -117,9 +117,9 @@ diff -ruN a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
  		/*
  		 * SDHC cards always use these fixed values.
 diff -ruN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
---- a/drivers/mmc/core/sd.c	2016-03-13 22:28:54.000000000 -0600
-+++ b/drivers/mmc/core/sd.c	2016-03-15 20:36:16.450111202 -0600
-@@ -365,6 +365,15 @@
+--- a/drivers/mmc/core/sd.c	2016-10-02 17:24:33.000000000 -0600
++++ b/drivers/mmc/core/sd.c	2016-10-02 23:41:08.552632755 -0600
+@@ -363,6 +363,15 @@
  		return -ENOMEM;
  	}
  
@@ -136,8 +136,8 @@ diff -ruN a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
  	if (err)
  		goto out;
 diff -ruN a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
---- a/drivers/mmc/host/mvsdio.c	2016-03-13 22:28:54.000000000 -0600
-+++ b/drivers/mmc/host/mvsdio.c	2016-03-15 20:36:16.455111182 -0600
+--- a/drivers/mmc/host/mvsdio.c	2016-10-02 17:24:33.000000000 -0600
++++ b/drivers/mmc/host/mvsdio.c	2016-10-02 23:41:08.552632755 -0600
 @@ -23,6 +23,7 @@
  #include <linux/of_irq.h>
  #include <linux/mmc/host.h>
@@ -155,17 +155,18 @@ diff -ruN a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
  	cmdreg = MVSD_CMD_INDEX(cmd->opcode);
  
 diff -ruN a/include/linux/leds.h b/include/linux/leds.h
---- a/include/linux/leds.h	2016-03-13 22:28:54.000000000 -0600
-+++ b/include/linux/leds.h	2016-03-15 20:36:16.455111182 -0600
-@@ -320,9 +320,9 @@
- 
- /* Trigger specific functions */
- #ifdef CONFIG_LEDS_TRIGGER_IDE_DISK
--extern void ledtrig_ide_activity(void);
-+extern void ledtrig_ide_activity(int port_number);
- #else
--static inline void ledtrig_ide_activity(void) {}
-+static inline void ledtrig_ide_activity(int port_number) {}
+--- a/include/linux/leds.h	2016-10-02 17:24:33.000000000 -0600
++++ b/include/linux/leds.h	2016-10-03 00:15:52.467581672 -0600
+@@ -331,6 +331,12 @@
+ static inline void ledtrig_disk_activity(void) {}
  #endif
  
- #if defined(CONFIG_LEDS_TRIGGER_CAMERA) || defined(CONFIG_LEDS_TRIGGER_CAMERA_MODULE)
++#ifdef CONFIG_LEDS_TRIGGER_SATA
++extern void ledtrig_sata_activity(int port_number);
++#else
++static inline void ledtrig_sata_activity(int port_number) {}
++#endif
++
+ #ifdef CONFIG_LEDS_TRIGGER_MTD
+ extern void ledtrig_mtd_activity(void);
+ #else

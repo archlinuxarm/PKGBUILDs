@@ -1,0 +1,151 @@
+# $Id$
+# Maintainer: Ray Rashif <schiv@archlinux.org>
+# Contributor: Daniele Paolella <danielepaolella@email.it>
+# Contributor: Philipp Überbacher <hollunder at gmx dot at>
+# Contributor: Thomas Bahn <thomas-bahn at gmx dot net>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - modified upstream patch for AArch64:
+#    https://github.com/jackaudio/jack2/commit/693451c36106542c5c5b5ba46d5d89aec783252e
+
+pkgbase=jack2
+pkgname=('jack2' 'jack2-dbus')
+#pkgname= # single build (overrides split)
+_tarname=jack
+pkgver=1.9.10
+pkgrel=6.1
+arch=('i686' 'x86_64')
+url="http://jackaudio.org/"
+backup=(etc/security/limits.d/99-audio.conf)
+license=('GPL')
+makedepends=('python2-dbus' 'libffado' 'celt' 'opus' 'libsamplerate')
+source=("https://dl.dropbox.com/u/28869550/jack-$pkgver.tar.bz2"
+        '99-audio.conf'
+        '40-hpet-permissions.rules'
+        'jack1compat.diff'
+        'gcc6.patch'
+        'aarch64.patch')
+md5sums=('4aeb91d7ae0cabce98355436ed4f217a'
+         'ae65b7c9ebe0fff6c918ba9d97ae342d'
+         '471aad533ff56c5d3cbbf65ce32cadef'
+         '8c367d60a6375ebacf0d53ad651a0486'
+         '2a28b64d7672f9c38dd777e380b81291'
+         'bc182b43d293c066293a65e950894249')
+
+_isbuild() {
+  printf "%s\n" ${pkgname[@]} | grep -qx $1
+}
+
+_pyfix() {
+  sed -i 's:bin/env python:bin/env python2:' \
+    "$pkgdir/usr/bin/jack_control"
+}
+
+_wafconf() {
+  python2 waf configure --prefix=/usr \
+                        --alsa \
+                        --firewire $@
+
+  # not building with doxygen
+  # see https://github.com/jackaudio/jack2/issues/22
+}
+
+prepare() {
+  cd "$srcdir"
+
+  # Some optimisation bug exists for current GCC
+  # see http://gcc.gnu.org/bugzilla/show_bug.cgi?id=53663
+  #export CFLAGS="${CFLAGS/-O[0-9]/-O0}"
+  #export CXXFLAGS="$CFLAGS"
+
+  # fix doxygen building
+  # TODO: report upstream, but redundant until github issue 22 resolves
+  #sed -i 's:build/default/html:html:' $_tarname-$pkgver/wscript
+
+
+  (
+    cd $_tarname-$pkgver
+    patch -Np1 -i $srcdir/gcc6.patch
+
+    # see https://bugs.archlinux.org/task/47839
+    patch -Np1 -i $srcdir/jack1compat.diff
+
+    # upstream AArch64 patch
+    patch -Np1 -i $srcdir/aarch64.patch
+  )
+
+  # we may do 2 different builds
+  cp -r $_tarname-$pkgver $_tarname-dbus-$pkgver
+
+}
+
+build() {
+  cd "$srcdir"
+
+  # mixed dbus/classic build
+  if _isbuild jack2; then
+    cd $_tarname-$pkgver
+    msg2 "Running Mixed D-Bus/Classic build"
+    _wafconf --classic --dbus
+    python2 waf build $MAKEFLAGS
+    cd ..
+  fi
+
+  # dbus-ONLY build
+  if _isbuild jack2-dbus; then
+    cd $_tarname-dbus-$pkgver
+    msg2 "Running D-Bus-only build"
+    _wafconf --dbus
+    python2 waf build $MAKEFLAGS
+    cd ..
+  fi
+}
+
+package_jack2() {
+  ! _isbuild jack2 && return 0
+
+  pkgdesc="The next-generation JACK with SMP support"
+  depends=('libsamplerate' 'celt' 'opus' 'libffado')
+  optdepends=('python2-dbus: jack_control')
+  conflicts=('jack')
+  provides=('jack' 'jackmp' 'jackdmp' 'jackdbus')
+
+  cd "$srcdir/$_tarname-$pkgver"
+
+  python2 waf install --destdir="$pkgdir"
+
+  # fix for major python transition
+  _pyfix
+
+  # configure realtime access/scheduling
+  # see https://bugs.archlinux.org/task/26343
+  install -Dm644 "$srcdir/99-audio.conf" \
+    "$pkgdir/etc/security/limits.d/99-audio.conf"
+
+  install -Dm644 "$srcdir/40-hpet-permissions.rules" \
+    "$pkgdir/usr/lib/udev/rules.d/40-hpet-permissions.rules"
+}
+
+package_jack2-dbus() {
+  ! _isbuild jack2-dbus && return 0
+
+  pkgdesc="The next-generation JACK with SMP support (for D-BUS interaction only)"
+  depends=('libsamplerate' 'celt' 'opus' 'libffado')
+  optdepends=('python2-dbus: jack_control')
+  conflicts=('jack' 'jack2')
+  provides=('jack' 'jack2' 'jackmp' 'jackdmp' 'jackdbus')
+
+  cd "$srcdir/$_tarname-dbus-$pkgver"
+
+  python2 waf install --destdir="$pkgdir"
+
+  _pyfix
+
+  install -Dm644 "$srcdir/99-audio.conf" \
+    "$pkgdir/etc/security/limits.d/99-audio.conf"
+
+  install -Dm644 "$srcdir/40-hpet-permissions.rules" \
+    "$pkgdir/usr/lib/udev/rules.d/40-hpet-permissions.rules"
+}
+
+# vim:set ts=2 sw=2 et:

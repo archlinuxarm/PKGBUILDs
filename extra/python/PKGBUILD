@@ -7,31 +7,32 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - removed valgrind from makedepends
+#  - configure with --without-lto
 
 pkgname=python
-pkgver=3.5.1
+pkgver=3.6.0
 pkgrel=2
-_pybasever=3.5
+_pybasever=3.6
 pkgdesc="Next generation of the python high-level scripting language"
 arch=('i686' 'x86_64')
 license=('custom')
 url="http://www.python.org/"
 depends=('expat' 'bzip2' 'gdbm' 'openssl' 'libffi' 'zlib')
-makedepends=('tk' 'sqlite' 'bluez-libs' 'mpdecimal')
-checkdepends=('gdb' 'xorg-server-xvfb')
+makedepends=('tk' 'sqlite' 'bluez-libs' 'mpdecimal' 'llvm' 'gdb' 'xorg-server-xvfb')
 optdepends=('python-setuptools'
             'python-pip'
             'sqlite'
             'mpdecimal: for decimal'
             'xz: for lzma'
             'tk: for tkinter')
-options=('!makeflags')
 provides=('python3')
 replaces=('python3')
-source=("http://www.python.org/ftp/python/${pkgver%rc*}/Python-${pkgver}.tar.xz"
+source=("https://www.python.org/ftp/python/${pkgver%rc*}/Python-${pkgver}.tar.xz"{,.asc}
         dont-make-libpython-readonly.patch)
-sha1sums=('0186da436db76776196612b98bb9c2f76acfe90e'
+sha1sums=('18ebf7d726782967d967dc00e3aa08b334fbdd5c'
+          'SKIP'
           'c22b24324b8e53326702de439c401d97927ee3f2')
+validpgpkeys=('0D96DF4D4110E5C43FBFB17F2D347EA6AA65421D')  # Ned Deily (Python release signing key) <nad@python.org>
 
 prepare() {
   cd Python-${pkgver}
@@ -58,6 +59,8 @@ build() {
               --enable-shared \
               --with-threads \
               --with-computed-gotos \
+              --enable-optimizations \
+              --without-lto \
               --enable-ipv6 \
               --with-system-expat \
               --with-dbmliborder=gdbm:ndbm \
@@ -66,31 +69,25 @@ build() {
               --enable-loadable-sqlite-extensions \
               --without-ensurepip
 
-  make EXTRA_CFLAGS="$CFLAGS"
+  LC_CTYPE=en_US.UTF-8 xvfb-run make EXTRA_CFLAGS="$CFLAGS"
 }
 
 check() {
-  # Failures:
-  # test_pathlib & test_posixpath: https://bugs.python.org/issue24950
-  # test_gdb
-  # test_distutils: because of our EXTRA_CFLAGS
-  # test_nntplib: downloading external files and failed
-
-  # Hacks:
-  # test_tk: xvfb-run
-  # test_unicode_file: LC_CTYPE=en_US.utf-8
-  # test_gdb: SHELL=/bin/sh
+  # test_gdb is expected to fail with LTO
 
   cd Python-${pkgver}
-  SHELL=/bin/sh \
   LD_LIBRARY_PATH="${srcdir}/Python-${pkgver}":${LD_LIBRARY_PATH} \
-  LC_CTYPE=en_US.utf-8 xvfb-run \
-    "${srcdir}/Python-${pkgver}/python" -m test.regrtest -v -uall || warning "Expected failure"
+  LC_CTYPE=en_US.UTF-8 xvfb-run \
+    "${srcdir}/Python-${pkgver}/python" -m test.regrtest -v -uall -x test_gdb
 }
 
 package() {
   cd Python-${pkgver}
-  make DESTDIR="${pkgdir}" EXTRA_CFLAGS="$CFLAGS" install maninstall
+
+  # Hack to avoid building again
+  sed -i 's/^all:.*$/all: build_all/' Makefile
+
+  make DESTDIR="${pkgdir}" EXTRA_CFLAGS="$CFLAGS" install
 
   # Why are these not done by default...
   ln -s python3               "${pkgdir}"/usr/bin/python
@@ -99,17 +96,10 @@ package() {
   ln -s pydoc3                "${pkgdir}"/usr/bin/pydoc
   ln -s python${_pybasever}.1 "${pkgdir}"/usr/share/man/man1/python.1
 
-  # Fix FS#22552
-  ln -sf ../../libpython${_pybasever}m.so \
-    "${pkgdir}/usr/lib/python${_pybasever}/config-${_pybasever}m/libpython${_pybasever}m.so"
-
   # some useful "stuff" FS#46146
   install -dm755 "${pkgdir}"/usr/lib/python${_pybasever}/Tools/{i18n,scripts}
   install -m755 Tools/i18n/{msgfmt,pygettext}.py "${pkgdir}"/usr/lib/python${_pybasever}/Tools/i18n/
   install -m755 Tools/scripts/{README,*py} "${pkgdir}"/usr/lib/python${_pybasever}/Tools/scripts/
-
-  # Clean-up reference to build directory
-  sed -i "s|$srcdir/Python-${pkgver}:||" "$pkgdir/usr/lib/python${_pybasever}/config-${_pybasever}m/Makefile"
 
   # License
   install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"

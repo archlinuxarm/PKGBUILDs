@@ -1,0 +1,88 @@
+# $Id$
+# Maintainer: Ronald van Haren <ronald@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+# Contributor: Tobias Powalowski <tpowa@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to enable/disable OpenGL via a switch
+#  - cmake with -DENABLE_OPENGL=OFF
+
+pkgbase=digikam
+pkgname=('digikam' 'kipi-plugins')
+_pkgver=5.5.0
+pkgver=${_pkgver//-/_} # for beta versions
+pkgrel=1
+pkgdesc="Digital photo management application for KDE"
+arch=('i686' 'x86_64')
+license=('GPL')
+url="http://www.digikam.org/"
+makedepends=('extra-cmake-modules' 'libkipi' 'libksane' 'liblqr' 'opencv' 'boost'
+             'doxygen' 'lensfun' 'eigen' 'kdoctools' 'marble-common' 'kdesignerplugin'
+             'kfilemetadata' 'akonadi-contacts' 'qtav' 'threadweaver' 'kcalcore'
+             'knotifyconfig' 'libmediawiki' 'libkvkontakte')
+source=("http://download.kde.org/stable/${pkgname}/${pkgname}-${_pkgver}.tar.xz"
+        '0001-optionally-enable-OpenGL.patch')
+sha256sums=('df9cbf1b8dbfb9235cebc97e77c02fcb1498c5a905c7fd3b9fb42fd7accc6252'
+          'eb78bedfc8465c34b2c08d239085ccaf2e745d71')
+
+prepare() {
+  mkdir -p build
+
+# sv docs fail to build
+  sed -e '/sv/d' -i $pkgname-$pkgver/doc-translated/CMakeLists.txt
+
+  # OpenGL switch
+  cd $pkgname-$pkgver
+  patch -p1 -d core -i ${srcdir}/0001-optionally-enable-OpenGL.patch
+}
+
+build() {
+  cd build
+
+  cmake ../${pkgname}-${_pkgver} \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=OFF \
+    -DENABLE_KFILEMETADATASUPPORT=ON \
+    -DENABLE_MEDIAPLAYER=ON \
+    -DENABLE_AKONADICONTACTSUPPORT=ON \
+    -DENABLE_MYSQLSUPPORT=ON \
+    -DENABLE_OPENCV3=ON \
+    -DENABLE_APPSTYLES=ON \
+    -DENABLE_OPENGL=OFF
+  make
+}
+
+package_digikam() {
+  pkgdesc="Digital photo management application for KDE"
+  depends=('liblqr' 'libkipi' 'lensfun' 'opencv' 'akonadi-contacts'
+	'knotifyconfig' 'libksane' 'kfilemetadata' 'qtav' 'marble-common' 'threadweaver' 'kcalcore')
+  optdepends=('kipi-plugins: export to various online services'
+              'hugin: panorama tool' 'qt5-imageformats: WEBP format support')
+
+  cd build/core
+  make DESTDIR="$pkgdir" install
+  cd $srcdir/build/doc
+  make DESTDIR="$pkgdir" install
+  cd $srcdir/build/po
+  make DESTDIR="$pkgdir" install
+
+# Provided by kipi-plugins
+  rm "$pkgdir"/usr/share/locale/*/LC_MESSAGES/{kipiplugin*,libkvkontakte}.mo
+}
+
+package_kipi-plugins() {
+  pkgdesc="A collection of plugins extending the KDE graphics and image applications as digiKam"
+  depends=('kio' 'libkipi')
+  optdepends=('libmediawiki: MediaWiki Export plugin'
+              'libkvkontakte: VKontakte.ru Exporter plugin')
+
+  cd build/extra
+  make DESTDIR="$pkgdir" install
+  cd $srcdir/build/po
+  make DESTDIR="$pkgdir" install
+
+# Provided by digikam
+  rm "$pkgdir"/usr/share/locale/*/LC_MESSAGES/digikam.mo
+}

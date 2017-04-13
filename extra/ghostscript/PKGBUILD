@@ -5,24 +5,23 @@
 #  - build v7 and v8 with -fPIC
 
 pkgname=ghostscript
-pkgver=9.19
+pkgver=9.21
 pkgrel=1
 pkgdesc="An interpreter for the PostScript language"
 arch=('i686' 'x86_64')
 license=('AGPL' 'custom')
-depends=('libxt' 'libcups' 'fontconfig' 'jasper' 'zlib' 'libpng>=1.5.7' 'libjpeg'
-         'libtiff>=4.0.0' 'lcms2' 'dbus' 'libpaper')
+depends=('libxt' 'libcups' 'fontconfig' 'zlib' 'libpng' 'libjpeg'
+          'jbig2dec' 'libtiff' 'lcms2' 'dbus' 'libpaper' 'ijs')
 makedepends=('gtk3' 'gnutls' 'hardening-wrapper')
 optdepends=('texlive-core:      needed for dvipdf'
             'gtk3:              needed for gsx')
 url="http://www.ghostscript.com/"
-source=(https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs${pkgver/./}/ghostscript-${pkgver}.tar.bz2
-        #http://downloads.ghostscript.com/public/ghostscript-${pkgver}.tar.bz2
+source=(https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs${pkgver/./}/ghostscript-${pkgver}.tar.xz
         ghostscript-sys-zlib.patch)
-#options=('!makeflags')
+options=('!makeflags')
 # https://github.com/ArtifexSoftware/ghostpdl-downloads/releases
-sha1sums=('202e234d54a4ccd667b57c9ae8b48bd65fafd503'
-          'e054caf753df4d67221b29a2eac66130653f7556')
+sha256sums=('2be1d014888a34187ad4bbec19ab5692cc943bd1cb14886065aeb43a3393d053'
+            'c08c7e1354aaa243e753517c61ff86a799a49e0177c7bf6fe0029abc693386f6')
 
 prepare() {
   cd ghostscript-${pkgver}
@@ -38,7 +37,7 @@ build() {
   # force it to use system-libs
   # keep heavily patched included openjpeg, leads to segfault with system openjpeg
   # https://bugs.archlinux.org/task/38226
-  rm -rf jpeg libpng zlib jasper expat tiff lcms lcms2 freetype cups/libs # jbig2dec is in community
+  rm -rfv cups/libs freetype ijs jbig2dec jpeg lcms2 libpng tiff zlib
 
   autoconf --force
 
@@ -46,7 +45,7 @@ build() {
 	--enable-dynamic \
 	--with-ijs \
 	--with-jbig2dec \
-	--with-omni \
+	--without-omni \
 	--with-x \
 	--with-drivers=ALL\
 	--with-fontpath=/usr/share/fonts/Type1:/usr/share/fonts \
@@ -54,17 +53,10 @@ build() {
 	--enable-freetype \
 	--enable-openjpeg \
 	--without-luratech \
-	--without-omni \
 	--with-system-libtiff \
 	--with-libpaper \
 	--disable-compile-inits #--help # needed for linking with system-zlib
-  make
-
-  # Build IJS
-  cd ijs
-  sed -i "s:AM_PROG_CC_STDC:AC_PROG_CC:g" configure.ac
-  ./autogen.sh
-  ./configure --prefix=/usr --enable-shared --disable-static
+  make so
   make
 }
 
@@ -74,6 +66,9 @@ package() {
 	cups_serverroot="${pkgdir}"/etc/cups \
 	cups_serverbin="${pkgdir}"/usr/lib/cups install install-so
 
+  # drop full libs linked gs, prefer gsc dynamically linked against libgs; FS#50422
+  ln -sf /usr/bin/gsc "${pkgdir}"/usr/bin/gs
+
   # install missing doc files # http://bugs.archlinux.org/task/18023
   install -m 644 "${srcdir}"/ghostscript-${pkgver}/doc/{VectorDevices.htm,gs-vms.hlp,gsdoc.el,pscet_status.txt} "${pkgdir}"/usr/share/ghostscript/$pkgver/doc/
   
@@ -82,10 +77,6 @@ package() {
   # remove unwanted localized man-pages
   rm -rf "$pkgdir"/usr/share/man/[^man1]*
 
-  # install IJS
-  cd ijs
-  make DESTDIR="${pkgdir}" install
-  
   # remove filters that are now maintained in cups-filters as upstream home
   rm -rf "$pkgdir"/usr/lib/cups/filter/{gstopxl,gstoraster}
 }

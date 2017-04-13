@@ -11,6 +11,7 @@
 #  - add arm to _JARCH and _DOC_ARCH
 #  - configure with --with-jvm-variants=zero
 #  - adjust doc package to use linux-${_DOC_ARCH}-normal-zero-release instead of normal-server-release
+#  - prevent downgrading hotspot optimization with CFLAGS
 
 buildarch=22
 
@@ -19,11 +20,11 @@ pkgname=('jre8-openjdk-headless' 'jre8-openjdk' 'jdk8-openjdk' 'openjdk8-src' 'o
 pkgbase=java8-openjdk
 _java_ver=8
 # Found @ http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html
-_jdk_update=92
-_jdk_build=14
+_jdk_update=121
+_jdk_build=13
 pkgver=${_java_ver}.u${_jdk_update}
 _repo_ver=jdk${_java_ver}u${_jdk_update}-b${_jdk_build}
-pkgrel=1
+pkgrel=1.1
 arch=('i686' 'x86_64')
 url='http://openjdk.java.net/'
 license=('custom')
@@ -38,15 +39,18 @@ source=(jdk8u-${_repo_ver}.tar.gz::${_url_src}/archive/${_repo_ver}.tar.gz
         jaxws-${_repo_ver}.tar.gz::${_url_src}/jaxws/archive/${_repo_ver}.tar.gz
         jaxp-${_repo_ver}.tar.gz::${_url_src}/jaxp/archive/${_repo_ver}.tar.gz
         langtools-${_repo_ver}.tar.gz::${_url_src}/langtools/archive/${_repo_ver}.tar.gz
-        nashorn-${_repo_ver}.tar.gz::${_url_src}/nashorn/archive/${_repo_ver}.tar.gz)
-sha256sums=('19bc6028c18dd1993f734dc49991c181138e2e85ead42354d7236fb3c6169e16'
-            '287edac284f4b97f48a14fea331455c3807bcffd51612278decb0ac265303069'
-            '653821c6d3e542b4922aeedea6e25efb6d3c6ea2aaa0f5b038e6af972accf814'
-            '9a344a13bb327c5533c22c95b2cf3935d1d4c1612366e1d142b265dd6b93fe69'
-            '77aea5c781d6614b4be391befc59e3017d2d9c9303b6bc2ca9d316cb35954a89'
-            '63eff7fe1f6a0dd7ec0c450724a403dcff986e026b5b9ae9ac46edc7222f798c'
-            '374d12d1434172c775f0ecd944d0a903cd56264a4c9d5ef0be038715e47e67fd'
-            '76a18e240a8498c8d2a3a261b7845c8062dbf85941425adcd96f9e879141b3e6')
+        nashorn-${_repo_ver}.tar.gz::${_url_src}/nashorn/archive/${_repo_ver}.tar.gz
+        build_with_gcc6.patch)
+
+sha256sums=('7b59600a2a19f63dda188cd19a4fd7a7f467a6f7ce3474df0cb3005ba8a540db'
+            '0fa534d45890b8cfb92c6ed39d2d80c60901e9e17c440fc8abf2f57a730dae2f'
+            '1a8af5e51986046827fccfcda94f9fc41738667c67a71e5c78936d4906939255'
+            '594f5e1c7cdffa97c1686115d9db3c7f40049d9f1dfc05cd171947fe6c20c681'
+            'b1a774d15fea52d0e7308981853c25cd88ffe7ff68a0bf61a518c44e77bcf2ad'
+            '31ef7c27c2f1fb78ce6be5c96b0b5435cd814868f2b7a05a2ed3c5c062596c9d'
+            '08da4dcb698a0ba2d7a417732823a2797c38f3e267a95829ee2403c4b1ad456e'
+            'ec388bdb56ca5886312e4a8c75aeb703102c04f86011c4e4d911a7896fa4d5a5'
+            'dcf5f495620231068b0c925a33ba7246bbeb85e9ae822b30ab77a66839c2d3b6')
 
 case "${CARCH}" in
   'x86_64') _JARCH=amd64 ; _DOC_ARCH=x86_64 ;;
@@ -70,6 +74,8 @@ prepare() {
   do
     ln -s ../${subrepo}-${_repo_ver} ${subrepo}
   done
+
+  patch -p1 < ../build_with_gcc6.patch
 }
 
 build() {
@@ -78,6 +84,11 @@ build() {
   unset JAVA_HOME
   # http://icedtea.classpath.org/bugzilla/show_bug.cgi?id=1346
   export MAKEFLAGS=${MAKEFLAGS/-j*}
+  # https://hydra.nixos.org/build/41230444/log
+  export CFLAGS="-Wno-error=deprecated-declarations"
+
+  # prevent downgrading hotspot optimization
+  CFLAGS=`echo $CFLAGS | sed -e 's/-O2//'` && CXXFLAGS="$CFLAGS"
 
   install -d -m 755 "${srcdir}/${_prefix}/"
   sh configure \

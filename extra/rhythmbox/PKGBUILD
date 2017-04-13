@@ -1,0 +1,80 @@
+# $Id$
+# Maintainer: Jan de Groot <jgc@archlinux.org>
+# Contributor: Giovanni Scafora <giovanni@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - configure with --disable-more-warnings to silence -Wcast-align on 32bit
+
+pkgname=rhythmbox
+pkgver=3.4.1
+pkgrel=3
+pkgdesc="Music playback and management application"
+arch=(i686 x86_64)
+license=(GPL)
+url="https://wiki.gnome.org/Apps/Rhythmbox"
+depends=(dconf gst-plugins-base gst-plugins-good libsoup json-glib libnotify libpeas
+         media-player-info totem-plparser tdb python-gobject libgudev grilo)
+makedepends=(itstool intltool brasero gobject-introspection vala grilo libdmapsharing lirc libgpod
+             libmtp gtk-doc clutter-gst clutter-gtk mx yelp-tools git)
+checkdepends=(check xorg-server-xvfb)
+optdepends=('gst-plugins-ugly: Extra media codecs'
+            'gst-plugins-bad: Extra media codecs'
+            'gst-libav: Extra media codecs'
+            'brasero: Audio CD Recorder plugin'
+            'libdmapsharing: DAAP Music Sharing plugin'
+            'grilo-plugins: Grilo media browser plugin'
+            'lirc: LIRC plugin'
+            'libgpod: Portable Players - iPod plugin'
+            'libmtp: Portable Players - MTP plugin'
+            'gvfs-mtp: Portable Players - Android plugin'
+            'mx: Visualiser plugin'
+            'clutter-gtk: Visualiser plugin'
+            'clutter-gst: Visualiser plugin')
+options=('!emptydirs')
+_commit=7f3624b6b4902932dc9df87ac55f5c71651260f7  # tags/v3.4.1^0
+source=("git+https://git.gnome.org/browse/rhythmbox#commit=$_commit"
+        0001-Port-to-clutter-gst-3.0.patch)
+sha256sums=('SKIP'
+            '996e654effda4f1d081377c837d600fdca6b97319e7f4f55f0307d046aab6a59')
+
+pkgver() {
+  cd $pkgname
+  git describe --tags | sed 's/^v//;s/-/+/g'
+}
+
+prepare() {
+  cd $pkgname
+  patch -Np1 -i ../0001-Port-to-clutter-gst-3.0.patch
+  NOCONFIGURE=1 ./autogen.sh
+}
+
+build() {
+  cd $pkgname
+  ./configure --prefix=/usr --sysconfdir=/etc \
+      --libexecdir=/usr/lib/rhythmbox \
+      MOZILLA_PLUGINDIR=/usr/lib/epiphany/plugins \
+      --localstatedir=/var --disable-static \
+      --enable-daap --enable-python --enable-vala \
+      --enable-gtk-doc --disable-more-warnings
+
+  # https://bugzilla.gnome.org/show_bug.cgi?id=655517
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+
+  make
+}
+
+check() {
+  cd $pkgname
+  glib-compile-schemas --targetdir=tests --schema-file=data/org.gnome.rhythmbox.gschema.xml
+  GSETTINGS_BACKEND=memory \
+  GSETTINGS_SCHEMA_DIR="$PWD/tests" \
+  CK_TIMEOUT_MULTIPLIER=3 \
+  xvfb-run -a -n 63 -s '-extension GLX' make check
+}
+
+package() {
+  cd $pkgname
+  make DESTDIR="$pkgdir" install
+  rm -r "$pkgdir/usr/lib/rhythmbox/sample-plugins"
+  rm -r "$pkgdir/usr/lib/rhythmbox/plugins/rbzeitgeist"
+}

@@ -4,28 +4,35 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - mozconfig additions used in xulrunner, just in case
 
+highmem=1
+
 pkgname=seamonkey
-pkgver=2.40
-pkgrel=1
+pkgver=2.46
+pkgrel=2
 pkgdesc="SeaMonkey internet suite"
 arch=('i686' 'x86_64')
 license=('MPL')
-depends=('alsa-lib'  'dbus-glib'  'desktop-file-utils'  'gtk2' 'hunspell'  'libevent'  'libnotify'  'libvpx'  'libxt' 'mime-types'  'mozilla-common'  'nss'  'sqlite'  'startup-notification' 'libpulse' 'icu' 'gconf')
+depends=('alsa-lib'  'dbus-glib'  'desktop-file-utils'  'gtk2' 'gtk3' 'hunspell'  'libevent'  'libnotify'  'libvpx'  'libxt' 'mime-types'  'mozilla-common'  'nss'  'sqlite'  'startup-notification' 'libpulse' 'icu' 'gconf')
 makedepends=('unzip' 'zip' 'pkg-config'  'python2' 'yasm' 'wireless_tools' 'mesa' 'autoconf2.13' 'imake' 'python3' 'gst-plugins-base')
 optdepends=('gst-plugins-base: vorbis decoding, ogg demuxing'
             'gst-plugins-bad: aac, vp8 and opus decoding'
             'gst-plugins-good: webm and mp4 demuxing'
             'gst-plugins-ugly: h.264 decoding')
-install=$pkgname.install
 url="http://www.seamonkey-project.org/"
 source=(https://archive.mozilla.org/pub/mozilla.org/seamonkey/releases/$pkgver/source/seamonkey-$pkgver.source.tar.xz
         mozconfig
         seamonkey-2.0-lang.patch
-        rhbz-966424.patch)
-md5sums=('5789df8f96e14577c275f10fdf8462f3'
-         '806cb42b072a8e749685ae6eafefb4ec'
-         '25b6fe16ac24cd5c852213e5c1adb272'
-         '8c1578232b7a60fa1caa9a0b322d1e2b')
+        rhbz-966424.patch
+        mozbug1323209.patch
+        mozbug1329272.patch
+        xulrunner-27.0-build-arm.patch)
+sha256sums=('39c84ce6fa1ed7c30152473e0dcd858df07437e84b29e5a18973db437a28a912'
+            '9a730ec71744e9e674a7922cd573fe2428f39ee53b0c3c8912053a910975f1d8'
+            'ab19d10fbd6258aec37ab5e5efb12429814b2c24a1193284a48dd654311b4e2e'
+            '746cb474c5a2c26fc474256e430e035e604b71b27df1003d4af85018fa263f4a'
+            '87fb92e45f161d47b9e3ca31bcce60555bc33d633116dab4baa3bfba6ad965c4'
+            '33c7031781357faf5fba7140d7723bf301c1569068922477742ac958ee82e62b'
+            'bc83b8a51c81a401da2fbe1f7cd0843248c32607d3a51119585df074d797922e')
 
 prepare() {
   cd "$pkgname-$pkgver"
@@ -33,10 +40,16 @@ prepare() {
   #patch -Np1 -i ../seamonkey-2.0-lang.patch
 
   # FS#48404
-  echo "ac_add_options --enable-gstreamer=1.0" >> .mozconfig
+  #echo "ac_add_options --enable-gstreamer=1.0" >> .mozconfig
 
   # https://bugs.archlinux.org/task/41689
   patch -Np1 -d mozilla -i ../../rhbz-966424.patch
+
+  # Support NSS 3.28
+  patch -Np1 -d mozilla -i ../../mozbug1323209.patch
+
+  # Bugfix for icu detection
+  patch -Np1 -d mozilla -i ../../mozbug1329272.patch
 
   # Don't exit with error when some libs are missing which we have in
   # system.
@@ -47,6 +60,10 @@ prepare() {
 
   # 2.26 build fix from wgnie (blfs ch 37)
   sed -i 's/$(MOZ_ZLIB_CFLAGS)/& $(MOZ_PIXMAN_CFLAGS)/' config/config.mk
+
+  [[ $CARCH != "aarch64" ]] && echo "ac_add_options --disable-elf-hack" >> .mozconfig
+  LDFLAGS+=" -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
+  patch -p2 -d mozilla -i "${srcdir}"/xulrunner-27.0-build-arm.patch
 }
 
 build() {
@@ -56,6 +73,10 @@ build() {
   export MOZ_MAKE_FLAGS="$MAKEFLAGS"
   unset MAKEFLAGS
   unset CPPFLAGS
+
+  # GCC 6
+  CFLAGS+=" -fno-delete-null-pointer-checks -fno-lifetime-dse -fno-schedule-insns2"
+  CXXFLAGS+=" -fno-delete-null-pointer-checks -fno-lifetime-dse -fno-schedule-insns2"
 
   make -j1 -f client.mk build
 }
@@ -81,3 +102,4 @@ package() {
   rm -f "$pkgdir/usr/lib/pkgconfig/"seamonkey-ns{s,pr}.pc
   #rm -r "$pkgdir"/usr/{include,lib/seamonkey-devel-$pkgver,share/idl}
 }
+

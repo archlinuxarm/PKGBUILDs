@@ -12,8 +12,6 @@ declare -A exclude
 exclude['Win32']=1
 # no integer-simple because we use integer-gmp
 exclude['integer-simple']=1
-# integer-gmp was replaced with integer-gmp2
-exclude['integer-gmp']=1
 # extract excluded libraries from ghc.mk
 for exclude_pkg in $(sed 's/PKGS_THAT_ARE_INTREE_ONLY := //p' -n src/ghc-${pkgver}/ghc.mk); do
   exclude[${exclude_pkg}]=1

@@ -7,53 +7,38 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - mozconfig changes for ARM
-#  - patch to remove NEON/SIMD checks from configure
-#  - memory saving LDFLAGS
-#  - disable jemalloc on aarch64
-#  - disable ion on !aarch64
+#  - remove cargo makedepend
 
-buildarch=28
+buildarch=12
 highmem=1
 
 pkgname=thunderbird
-pkgver=45.1.1
-pkgrel=1
+pkgver=52.0
+pkgrel=2
 pkgdesc="Standalone mail and news reader from mozilla.org"
-arch=('i686' 'x86_64')
-license=('MPL' 'GPL' 'LGPL')
-url="http://www.mozilla.org/thunderbird/"
-depends=('gtk2' 'mozilla-common' 'libxt' 'startup-notification' 'mime-types'
-         'dbus-glib' 'alsa-lib' 'libvpx' 'icu' 'libevent' 'nss' 'hunspell'
-         'sqlite' 'ttf-font')
-makedepends=('unzip' 'zip' 'diffutils' 'python2' 'yasm' 'mesa' 'imake' 'gconf'
-             'libpulse' 'inetutils')
-optdepends=('libcanberra: for sound support')
-options=('!emptydirs' '!makeflags')
+arch=(i686 x86_64)
+license=(MPL GPL LGPL)
+url="https://www.mozilla.org/thunderbird/"
+depends=(gtk3 gtk2 mozilla-common libxt startup-notification mime-types dbus-glib alsa-lib ffmpeg
+         libvpx libevent nss hunspell sqlite ttf-font icu)
+makedepends=(unzip zip diffutils python2 yasm mesa imake gconf libpulse inetutils xorg-server-xvfb
+             autoconf2.13)
+optdepends=('libcanberra: sound support')
+options=(!emptydirs !makeflags)
 source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz
-        mozconfig
         thunderbird.desktop
-        thunderbird-install-dir.patch
-        firefox-gcc-6.0.patch mozilla-1228540.patch mozilla-1228540-1.patch
-        vendor.js
-        no-neon.patch)
-options=('!emptydirs' '!makeflags')
-sha256sums=('107d103c30b4f666ede1ec197156f94456117783087518fe1af4557d548b718e'
-            'e6ab613a6d15668ac6856b591d07efa4a338671dad4ce09e9254662848462ee5'
-            '3fba13d88aeb003ab0811ef739463858172ce0662a1c7d62835df3d83ddbb8fb'
+        thunderbird-install-dir.patch rust-i686.patch fix-wifi-scanner.diff)
+sha256sums=('44e148b1ebd4135a6923a5403792035cf170745e7e99c4ec85142988dd6b26c6'
+            'e44c55501f650a4e80b9c353b81f33e07ca65808db831eff6ca616aded233827'
             '24599eab8862476744fe1619a9a53a5b8cdcab30b3fc5767512f31d3529bd05d'
-            '4d1e1ddabc9e975ed39f49e134559a29e01cd49439e358233f1ede43bf5a52bf'
-            '2588c567fec88b44b65f0cd111e8769361c138d4c964310684f7bb80066f8f9f'
-            'd1ccbaf0973615c57f7893355e5cd3a89efb4e91071d0ec376e429b50cf6ed19'
-            'e4ea8e6788163d9f8db8f1f40023db3ea0a1358f9a4510169f2d4c4fe6a887ed'
-            '59f40d8b2480aa67bf76f4f119826b6828a6a59cc040caf1ab5a6e19eef44c6e')
+            'f61ea706ce6905f568b9bdafd1b044b58f20737426f0aa5019ddb9b64031a269'
+            '9765bca5d63fb5525bbd0520b7ab1d27cabaed697e2fc7791400abc3fa4f13b8')
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
 # get your own set of keys. Feel free to contact foutrelis@archlinux.org for
 # more information.
 _google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
-_google_default_client_id=413772536636.apps.googleusercontent.com
-_google_default_client_secret=0ZChLK6AxeA3Isu96MkwqDR4
 
 # Mozilla API keys (see https://location.services.mozilla.com/api)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -61,58 +46,82 @@ _google_default_client_secret=0ZChLK6AxeA3Isu96MkwqDR4
 # more information.
 _mozilla_api_key=16674381-f021-49de-8622-3021c5942aff
 
-
 prepare() {
-  cd $pkgname-$pkgver
+  mkdir path
+  ln -s /usr/bin/python2 path/python
 
-  cp ../mozconfig .mozconfig
+  cd $pkgname-$pkgver
   patch -Np1 -i ../thunderbird-install-dir.patch
 
-  # Required for GCC 6
-  patch -d mozilla -Np1 < ../firefox-gcc-6.0.patch
-  patch -d mozilla -Np1 < ../mozilla-1228540.patch
-  patch -d mozilla -Np1 < ../mozilla-1228540-1.patch
+  # https://bugzilla.mozilla.org/show_bug.cgi?id=1314968
+  patch -d mozilla -Np1 < ../fix-wifi-scanner.diff
 
-  patch -Np0 -i ../no-neon.patch
+  # Build with the rust targets we actually ship
+  patch -d mozilla -Np1 < ../rust-i686.patch
 
   echo -n "$_google_api_key" >google-api-key
-  echo "ac_add_options --with-google-api-keyfile=\"$PWD/google-api-key\"" >>.mozconfig
-
-  echo -n "$_google_default_client_id $_google_default_client_secret" >google-oauth-api-key
-  echo "ac_add_options --with-google-oauth-api-keyfile=\"$PWD/google-oauth-api-key\"" >>.mozconfig
-
   echo -n "$_mozilla_api_key" >mozilla-api-key
-  echo "ac_add_options --with-mozilla-api-keyfile=\"$PWD/mozilla-api-key\"" >>.mozconfig
 
-  mkdir "$srcdir/path"
-  ln -s /usr/bin/python2 "$srcdir/path/python"
+  cat >.mozconfig <<END
+ac_add_options --enable-application=mail
+ac_add_options --enable-calendar
 
-  if [[ $CARCH == "aarch64" ]]; then
-    echo "ac_add_options --disable-jemalloc" >> .mozconfig
-    echo 'ac_add_options --enable-optimize="-O2"' >> .mozconfig
-  else
-    echo "ac_add_options --disable-ion" >> .mozconfig
-  fi
+ac_add_options --prefix=/usr
+ac_add_options --enable-release
+ac_add_options --enable-gold
+ac_add_options --enable-pie
+
+# Branding
+ac_add_options --enable-official-branding
+ac_add_options --enable-update-channel=release
+ac_add_options --with-distribution-id=org.archlinux
+
+# Keys
+ac_add_options --with-google-api-keyfile=${PWD@Q}/google-api-key
+ac_add_options --with-mozilla-api-keyfile=${PWD@Q}/mozilla-api-key
+
+# System libraries
+ac_add_options --with-system-nspr
+ac_add_options --with-system-nss
+ac_add_options --with-system-icu
+ac_add_options --with-system-jpeg
+ac_add_options --with-system-zlib
+ac_add_options --with-system-bz2
+ac_add_options --with-system-libevent
+ac_add_options --with-system-libvpx
+ac_add_options --enable-system-hunspell
+ac_add_options --enable-system-sqlite
+ac_add_options --enable-system-ffi
+ac_add_options --enable-system-pixman
+
+# Features
+ac_add_options --enable-startup-notification
+ac_add_options --disable-crashreporter
+ac_add_options --enable-alsa
+ac_add_options --disable-updater
+
+STRIP_FLAGS="--strip-debug"
+
+ac_add_options --disable-elf-hack
+ac_add_options --disable-ion
+ac_add_options --disable-webrtc
+END
 }
 
 build() {
   cd $pkgname-$pkgver
- 
+
   # _FORTIFY_SOURCE causes configure failures
   CPPFLAGS+=" -O2"
 
   # Hardening
   LDFLAGS+=" -Wl,-z,now"
 
-  # GCC 6
-  CFLAGS+=" -fno-delete-null-pointer-checks -fno-lifetime-dse -fno-schedule-insns2"
-  CXXFLAGS+=" -fno-delete-null-pointer-checks -fno-lifetime-dse -fno-schedule-insns2"
-
-  # Help with memory usage
-  LDFLAGS+=" -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
-
   export PATH="$srcdir/path:$PATH"
 
+  # Do PGO
+  #xvfb-run -a -n 95 -s "-extension GLX -screen 0 1280x1024x24" \
+  #  make -f client.mk build MOZ_PGO=1
   make -f client.mk build
 }
 
@@ -120,22 +129,53 @@ package() {
   cd $pkgname-$pkgver
   make -f client.mk DESTDIR="$pkgdir" INSTALL_SDK= install
 
-  install -Dm644 ../vendor.js "$pkgdir/usr/lib/thunderbird/defaults/preferences/vendor.js"
+  _vendorjs="$pkgdir/usr/lib/thunderbird/defaults/preferences/vendor.js"
+  install -Dm644 /dev/stdin "$_vendorjs" <<END
+// Use LANG environment variable to choose locale
+pref("intl.locale.matchOS", true);
+
+// Disable default mailer checking.
+pref("mail.shell.checkDefaultMail", false);
+
+// Don't disable our bundled extensions in the application directory
+pref("extensions.autoDisableScopes", 11);
+pref("extensions.shownSelectionUI", true);
+END
+
+  _distini="$pkgdir/usr/lib/thunderbird/distribution/distribution.ini"
+  install -Dm644 /dev/stdin "$_distini" <<END
+[Global]
+id=archlinux
+version=1.0
+about=Mozilla Thunderbird for Arch Linux
+
+[Preferences]
+app.distributor=archlinux
+app.distributor.channel=$pkgname
+app.partner.archlinux=archlinux
+END
 
   for i in 16 22 24 32 48 256; do
-      install -Dm644 other-licenses/branding/thunderbird/mailicon$i.png \
-          "$pkgdir/usr/share/icons/hicolor/${i}x${i}/apps/thunderbird.png"
+    install -Dm644 other-licenses/branding/thunderbird/mailicon$i.png \
+      "$pkgdir/usr/share/icons/hicolor/${i}x${i}/apps/thunderbird.png"
   done
 
   install -Dm644 ../thunderbird.desktop \
-      "$pkgdir/usr/share/applications/thunderbird.desktop"
+    "$pkgdir/usr/share/applications/thunderbird.desktop"
 
   # Use system-provided dictionaries
-  rm -rf "$pkgdir"/usr/lib/thunderbird/{dictionaries,hyphenation}
-  ln -s /usr/share/hunspell "$pkgdir/usr/lib/thunderbird/dictionaries"
-  ln -s /usr/share/hyphen "$pkgdir/usr/lib/thunderbird/hyphenation"
+  rm -r "$pkgdir"/usr/lib/thunderbird/dictionaries
+  ln -Ts /usr/share/hunspell "$pkgdir/usr/lib/thunderbird/dictionaries"
+  ln -Ts /usr/share/hyphen "$pkgdir/usr/lib/thunderbird/hyphenation"
 
-  # Replace duplicate binary with symlink
+  # Install a wrapper to avoid confusion about binary path
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/thunderbird" <<END
+#!/bin/sh
+exec /usr/lib/thunderbird/thunderbird "\$@"
+END
+
+  # Replace duplicate binary with wrapper
   # https://bugzilla.mozilla.org/show_bug.cgi?id=658850
-  ln -sf thunderbird "$pkgdir/usr/lib/thunderbird/thunderbird-bin"
+  ln -srf "$pkgdir/usr/bin/thunderbird" \
+    "$pkgdir/usr/lib/thunderbird/thunderbird-bin"
 }

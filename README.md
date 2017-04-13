@@ -42,7 +42,7 @@ have changed significantly enough from upstream or AUR to no longer qualify as
 being in those respective locations here.
 
 
-##Custom PKGBUILD variables for the build system
+## Custom PKGBUILD variables for the build system
 These variables are used to help control the build system used by Arch Linux
 ARM, and are not a part of the official PKGBUILD specification.
 

@@ -10,15 +10,15 @@
 # Contributor: Gerardo Exequiel Pozzi <vmlinuz386@yahoo.com.ar>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - v5: disable compiler-rt, don't install in clang package
-#  - v5: patch to remove ThreadPool: unsupported c++ usage
-#  - v5: disable lldb, unsupported c++ usage
-#  - v8: disable lldb, unsupported architecture
+#  - disable v5
+
+buildarch=28
+highmem=1
 
 pkgname=('llvm' 'llvm-libs' 'llvm-ocaml' 'lldb' 'clang' 'clang-tools-extra')
-pkgver=3.8.0
-pkgrel=1
-_ocaml_ver=4.02.3
+pkgver=3.9.1
+pkgrel=2
+_ocaml_ver=4.04.0
 arch=('i686' 'x86_64')
 url="http://llvm.org/"
 license=('custom:University of Illinois/NCSA Open Source License')
@@ -32,25 +32,24 @@ source=(http://llvm.org/releases/$pkgver/llvm-$pkgver.src.tar.xz{,.sig}
         http://llvm.org/releases/$pkgver/clang-tools-extra-$pkgver.src.tar.xz{,.sig}
         http://llvm.org/releases/$pkgver/compiler-rt-$pkgver.src.tar.xz{,.sig}
         http://llvm.org/releases/$pkgver/lldb-$pkgver.src.tar.xz{,.sig}
-        D17567-PR23529-Sema-part-of-attrbute-abi_tag-support.patch
-        D18035-PR23529-Mangler-part-of-attrbute-abi_tag-support.patch
-        llvm-Config-llvm-config.h
-        remove-threadpool.patch)
-sha256sums=('555b028e9ee0f6445ff8f949ea10e9cd8be0d084840e21fbbe1d31d51fc06e46'
+        AMDGPU-Fix-an-interaction-between-WQM-and-polygon-stippling.patch
+        msan-prevent-initialization-failure-with-newer-glibc.patch
+        llvm-Config-llvm-config.h)
+sha256sums=('1fd90354b9cf19232e8f168faf2220e79be555df3aa743242700879e8fd329ee'
             'SKIP'
-            '04149236de03cf05232d68eb7cb9c50f03062e339b68f4f8a03b650a11536cf9'
+            'e6c4cebb96dee827fa0470af313dff265af391cb6da8d429842ef208c8f25e63'
             'SKIP'
-            'afbda810106a6e64444bc164b921be928af46829117c95b996f2678ce4cb1ec4'
+            '29a5b65bdeff7767782d4427c7c64d54c3a8684bc6b217b74a70e575e4813635'
             'SKIP'
-            'c8d3387e55f229543dac1941769120f24dc50183150bf19d1b070d53d29d56b0'
+            'd30967b1a5fa51a2503474aacc913e69fd05ae862d37bf310088955bdb13ec99'
             'SKIP'
-            'e3f68f44147df0433e7989bf6ed1c58ff28d7c68b9c47553cb9915f744785a35'
+            '7e3311b2a1f80f4d3426e09f9459d079cab4d698258667e50a46dccbaaa460fc'
             'SKIP'
-            '406754764e83d58bc3b859ab4b7893abd48c760278c4619cf4341ef9b9b75c85'
-            'd2ea6d06352d378961a6970cdefb23ef1ba8e4c046c0ace0c479e2dd674aabce'
-            '597dc5968c695bbdbb0eac9e8eb5117fcd2773bc91edf5ec103ecffffab8bc48'
-            'ea686a21076aeefdb81af22ab7e5d786e4f6d490507320275f443d8bcf663040')
-validpgpkeys=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D')
+            'adadc41090ab0eb33fe4449a0ea3f02b15d03f186262dd89576848a2c66d0ce6'
+            '8e4f194c2283b91644a7fff43bc4e58c36b5507f2a4d90b72f275c0bd7511c20'
+            '597dc5968c695bbdbb0eac9e8eb5117fcd2773bc91edf5ec103ecffffab8bc48')
+validpgpkeys=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D'
+              '11E521D646982372EB577A1F8F0871F202119294')
 
 prepare() {
   cd "$srcdir/llvm-$pkgver.src"
@@ -63,18 +62,13 @@ prepare() {
 
   mv "$srcdir/compiler-rt-$pkgver.src" projects/compiler-rt
 
-  [[ $CARCH != 'aarch64' && $CARCH != 'arm' ]] && mv "$srcdir/lldb-$pkgver.src" tools/lldb
+  mv "$srcdir/lldb-$pkgver.src" tools/lldb
 
-  # https://llvm.org/bugs/show_bug.cgi?id=23529
-  patch -d tools/clang -Np2 <../D17567-PR23529-Sema-part-of-attrbute-abi_tag-support.patch
-  patch -d tools/clang -Np0 <../D18035-PR23529-Mangler-part-of-attrbute-abi_tag-support.patch
+  # https://bugs.freedesktop.org/show_bug.cgi?id=99078
+  patch -Rp1 -i ../AMDGPU-Fix-an-interaction-between-WQM-and-polygon-stippling.patch
 
-  if [[ $CARCH == "arm" ]]; then
-    patch -p1 -i ../remove-threadpool.patch
-    rm lib/Support/ThreadPool.cpp
-    rm include/llvm/Support/ThreadPool.h
-    rm unittests/Support/ThreadPool.cpp
-  fi
+  # https://reviews.llvm.org/D24736
+  patch -Np0 -d projects/compiler-rt <../msan-prevent-initialization-failure-with-newer-glibc.patch
 
   mkdir build
 }
@@ -82,24 +76,23 @@ prepare() {
 build() {
   cd "$srcdir/llvm-$pkgver.src/build"
 
-  [[ $CARCH == "arm" ]] && CONFIG="-DLLVM_BUILD_EXTERNAL_COMPILER_RT=ON"
-
   cmake \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DLLVM_BUILD_LLVM_DYLIB=ON \
-    -DLLVM_DYLIB_EXPORT_ALL=ON \
     -DLLVM_LINK_LLVM_DYLIB=ON \
+    -DLLVM_INSTALL_UTILS=ON \
     -DLLVM_ENABLE_RTTI=ON \
     -DLLVM_ENABLE_FFI=ON \
     -DLLVM_BUILD_TESTS=ON \
     -DLLVM_BUILD_DOCS=ON \
     -DLLVM_ENABLE_SPHINX=ON \
     -DLLVM_ENABLE_DOXYGEN=OFF \
+    -DLLDB_DISABLE_LIBEDIT=1 \
     -DSPHINX_WARNINGS_AS_ERRORS=OFF \
     -DFFI_INCLUDE_DIR=$(pkg-config --variable=includedir libffi) \
     -DLLVM_BINUTILS_INCDIR=/usr/include \
-    $CONFIG ..
+    ..
 
   make
   make ocaml_doc
@@ -113,8 +106,7 @@ build() {
 check() {
   cd "$srcdir/llvm-$pkgver.src/build"
   make check
-  make check-clang || { [[ $CARCH == i686 ]] && warning \
-    'Ignoring clang test failures caused by name mangling differences'; }
+  make check-clang
 }
 
 package_llvm() {
@@ -184,13 +176,15 @@ package_llvm-ocaml() {
 package_lldb() {
   pkgdesc="Next generation, high-performance debugger"
   url="http://lldb.llvm.org/"
-  depends=('libedit' 'libxml2' 'python2' 'python2-six')
-
-  [[ $CARCH == "aarch64" || $CARCH == "arm" ]] && return
+  depends=('libxml2' 'python2' 'python2-six')
 
   cd "$srcdir/llvm-$pkgver.src"
 
   make -C build/tools/lldb DESTDIR="$pkgdir" install
+
+  # https://bugs.archlinux.org/task/50759
+  sed -i "/import_module('_lldb')/s/_lldb/lldb.&/" \
+  "$pkgdir/usr/lib/python2.7/site-packages/lldb/__init__.py"
 
   # Remove bundled six library
   rm "$pkgdir/usr/lib/python2.7/site-packages/six.py"
@@ -215,7 +209,7 @@ package_clang() {
   cd "$srcdir/llvm-$pkgver.src"
 
   make -C build/tools/clang DESTDIR="$pkgdir" install
-  [[ $CARCH != "arm" ]] && make -C build/projects/compiler-rt DESTDIR="$pkgdir" install
+  make -C build/projects/compiler-rt DESTDIR="$pkgdir" install
 
   # Remove documentation sources
   rm -r "$pkgdir"/usr/share/doc/$pkgname/html/{_sources,.buildinfo}
@@ -253,10 +247,8 @@ package_clang-tools-extra() {
   make -C build/tools/clang/tools/extra DESTDIR="$pkgdir" install
 
   # Use Python 2
-  sed -i \
-    -e 's|env python$|&2|' \
-    -e 's|/usr/bin/python$|&2|' \
-    "$pkgdir"/usr/share/clang/{clang-tidy-diff,run-clang-tidy}.py
+  sed -i 's|/usr/bin/env python|&2|' \
+    "$pkgdir"/usr/share/clang/{clang-tidy-diff,run-clang-tidy,run-find-all-symbols}.py
 
   install -Dm644 tools/clang/tools/extra/LICENSE.TXT \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

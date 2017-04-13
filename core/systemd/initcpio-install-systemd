@@ -93,6 +93,13 @@ add_systemd_unit() {
     fi
 }
 
+add_systemd_drop_in() {
+    local unit=$1 dropin_name=$2
+
+    mkdir -p "$BUILDROOT/etc/systemd/system/$unit.d"
+    cat >"$BUILDROOT/etc/systemd/system/$unit.d/$2.conf"
+}
+
 build() {
     local rules unit
 
@@ -100,6 +107,7 @@ build() {
     add_binary /bin/mount
     add_binary /usr/bin/kmod /usr/bin/modprobe
     add_binary /usr/lib/systemd/systemd /init
+    add_binary /usr/bin/sulogin
 
     map add_binary \
         /usr/bin/systemd-tmpfiles \
@@ -139,12 +147,15 @@ build() {
             systemd-journald.service \
             systemd-journald-audit.socket \
             systemd-journald-dev-log.socket \
+            systemd-modules-load.service \
             systemd-tmpfiles-setup-dev.service \
             systemd-udev-trigger.service \
             systemd-udevd-control.socket \
             systemd-udevd-kernel.socket \
             systemd-udevd.service \
-            timers.target
+            timers.target \
+            rescue.target \
+            emergency.target
 
     add_symlink "/usr/lib/systemd/system/default.target" "initrd.target"
     add_symlink "/usr/lib/systemd/system/ctrl-alt-del.target" "reboot.target"
@@ -152,14 +163,29 @@ build() {
     # udev wants /etc/group since it doesn't launch with --resolve-names=never
     add_file "/etc/nsswitch.conf"
     add_binary "$(readlink -f /usr/lib/libnss_files.so)"
-    add_file "/etc/passwd"
-    add_file "/etc/group"
+
+    echo "root:x:0:0:root:/:/bin/sh" >"$BUILDROOT/etc/passwd"
+    echo "root:x:0:root" >"$BUILDROOT/etc/group"
+    echo "root::::::::" >"$BUILDROOT/etc/shadow"
+
+    add_systemd_drop_in systemd-udevd.service resolve-names <<EOF
+[Service]
+ExecStart=
+ExecStart=/usr/lib/systemd/systemd-udevd --resolve-names=never
+EOF
+
+    add_dir "/etc/modules-load.d"
+    (
+      . "$_f_config"
+      set -f
+      printf "%s\n" $MODULES >"$BUILDROOT/etc/modules-load.d/MODULES.conf"
+    )
 }
 
 help() {
     cat <<HELPEOF
 This will install a basic systemd setup in your initramfs, and is meant to
-replace the 'base', 'usr', 'udev' and 'timestamp' hooks. Other hooks with runtime
+replace the 'base', 'usr', 'udev' and 'resume' hooks. Other hooks with runtime
 components will need to be ported, and will not work as intended. You also may
 wish to still include the 'base' hook (before this hook) to ensure that a
 rescue shell exists on your initramfs.

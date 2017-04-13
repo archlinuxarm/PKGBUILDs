@@ -1,51 +1,62 @@
 # U-Boot: Raspberry Pi
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
 
-buildarch=4
+buildarch=12
 
 pkgname=uboot-raspberrypi
-pkgver=2016.03
+pkgver=2017.03
 pkgrel=1
 pkgdesc="U-Boot for Raspberry Pi"
-arch=('armv7h')
+arch=('armv7h' 'aarch64')
 url='http://www.denx.de/wiki/U-Boot/WebHome'
 license=('GPL')
-backup=('boot/boot.txt' 'boot/boot.scr')
+backup=('boot/boot.txt' 'boot/boot.scr' 'boot/config.txt')
 makedepends=('bc' 'dtc' 'git')
-conflicts=('linux-raspberrypi')
-source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver}.tar.bz2"
+conflicts_armv7h=('linux-raspberrypi')
+source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver/rc/-rc}.tar.bz2"
         '0001-arch-linux-arm-modifications.patch'
-        'boot.txt'
+        'boot.txt.v2'
+        'boot.txt.v3'
         'mkscr')
-md5sums=('973c1d896be751321cc3aafa564f64b2'
-         '2fc5fdd1fb48545336a2f534772d7477'
-         '3631f52fb2a0e940bbcc04ea80701d9a'
+md5sums=('52fed6ce16e0c4a50e2cd4defdf9097a'
+         'f8ae1ac4c0bd70712a7cb36967ad35fb'
+         '69e883f0b8d1686b32bdf79684623f06'
+         'f59affa04863de0ffe3211ee6f17248d'
          '021623a04afd29ac3f368977140cfbfd')
 
 prepare() {
-  cd u-boot-${pkgver}
+  cd u-boot-${pkgver/rc/-rc}
 
   git apply ../0001-arch-linux-arm-modifications.patch
 }
 
 build() {
-  cd u-boot-${pkgver}
+  cd u-boot-${pkgver/rc/-rc}
 
   unset CFLAGS
   unset CXXFLAGS
   unset CPPFLAGS
 
-  make distclean 
-  make rpi_2_config
+  make distclean
+  [[ $CARCH == "armv7h" ]] && make rpi_2_config
+  [[ $CARCH == "aarch64" ]] && make rpi_3_config
+  echo 'CONFIG_IDENT_STRING=" Arch Linux ARM"' >> .config
   make EXTRAVERSION=-${pkgrel}
 }
 
 package() {
-  cd u-boot-${pkgver}
+  cd u-boot-${pkgver/rc/-rc}
 
   mkdir -p "${pkgdir}"/boot
 
-  cp u-boot.bin ${pkgdir}/boot/kernel7.img
+  if [[ $CARCH == "armv7h" ]]; then
+    cp u-boot.bin ${pkgdir}/boot/kernel7.img
+    cp ../boot.txt.v2 ../boot.txt
+  elif [[ $CARCH == "aarch64" ]]; then
+    cp u-boot.bin ${pkgdir}/boot/kernel8.img
+    cp ../boot.txt.v3 ../boot.txt
+    echo "enable_uart=1" > ${pkgdir}/boot/config.txt
+  fi
 
   tools/mkimage -A arm -O linux -T script -C none -n "U-Boot boot script" -d ../boot.txt "${pkgdir}"/boot/boot.scr
   cp ../{boot.txt,mkscr} "${pkgdir}"/boot

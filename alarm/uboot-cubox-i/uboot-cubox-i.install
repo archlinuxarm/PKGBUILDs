@@ -1,25 +1,35 @@
 flash_uboot() {
-  echo "A new U-Boot version needs to be flashed onto /dev/mmcblk0."
+  if mountpoint -d /boot > /dev/null 2>&1; then
+    base=/boot
+  else
+    base=/
+  fi
+  major=$(mountpoint -d $base | cut -f 1 -d ':')
+  minor=$(expr $(mountpoint -d $base | cut -f 2 -d ':') - 1)
+  device=/dev/$(cat /proc/partitions | awk {'if ($1 == "'${major}'" && $2 == "'${minor}'") print $4 '})
+
+  echo "A new U-Boot version needs to be flashed onto ${device}."
   echo "Do you want to do this now? [y|N]"
   read -r shouldwe
   if [[ $shouldwe =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    dd if=/boot/SPL of=/dev/mmcblk0 bs=1K seek=1
-    dd if=/boot/u-boot.img of=/dev/mmcblk0 bs=1K seek=42
+    dd if=/boot/SPL of=${device} bs=1K seek=1
+    dd if=/boot/u-boot.img of=${device} bs=1K seek=69
     sync
   else
     echo "You can do this later by running:"
-    echo "# dd if=/boot/SPL of=/dev/mmcblk0 bs=1K seek=1"
-    echo "# dd dd if=/boot/u-boot.img of=/dev/mmcblk0 bs=1K seek=42"
+    echo "# dd if=/boot/SPL of=${device} bs=1K seek=1"
+    echo "# dd if=/boot/u-boot.img of=${device} bs=1K seek=69"
   fi
 }
 
-## arg 1:  the new package version
 post_install() {
   flash_uboot
 }
 
-## arg 1:  the new package version
-## arg 2:  the old package version
 post_upgrade() {
   flash_uboot
+  if (( $(vercmp $2 2017.01-1) < 0 )); then
+    echo ' >>> Note: uEnv.txt is no longer sourced. Make any customizations within /boot/boot.txt'
+    echo '           and run ./mkscr within /boot to convert it to the boot.scr file.'
+  fi
 }
