@@ -1,0 +1,90 @@
+From 335b9a8aa72f06c033d5d0284e140e3cae4f3efa Mon Sep 17 00:00:00 2001
+From: Douglas Anderson <dianders@chromium.org>
+Date: Tue, 11 Apr 2017 15:55:43 -0700
+Subject: [PATCH 10/10] mmc: dw_mmc: Don't allow Runtime PM for SDIO cards
+
+According to the SDIO standard interrupts are normally signalled in a
+very complicated way.  They require the card clock to be running and
+require the controller to be paying close attention to the signals
+coming from the card.  This simply can't happen with the clock stopped
+or with the controller in a low power mode.
+
+To that end, we'll disable runtime_pm when we detect that an SDIO card
+was inserted.  This is much like with what we do with the special
+"SDMMC_CLKEN_LOW_PWR" bit that dw_mmc supports.
+
+NOTE: we specifically do this Runtime PM disabling at card init time
+rather than in the enable_sdio_irq() callback.  This is _different_
+than how SDHCI does it.  Why do we do it differently?
+
+- Unlike SDHCI, dw_mmc uses the standard sdio_irq code in Linux (AKA
+  dw_mmc doesn't set MMC_CAP2_SDIO_IRQ_NOTHREAD).
+- Because we use the standard sdio_irq code:
+  - We see a constant stream of enable_sdio_irq(0) and
+    enable_sdio_irq(1) calls.  This is because the standard code
+    disables interrupts while processing and re-enables them after.
+  - While interrupts are disabled, there's technically a period where
+    we could get runtime disabled while processing interrupts.
+  - If we are runtime disabled while processing interrupts, we'll
+    reset the controller at resume time (see dw_mci_runtime_resume),
+    which seems like a terrible idea because we could possibly have
+    another interrupt pending.
+
+To fix the above isues we'd want to put something in the standard
+sdio_irq code that makes sure to call pm_runtime get/put when
+interrupts are being actively being processed.  That's possible to do,
+but it seems like a more complicated mechanism when we really just
+want the runtime pm disabled always for SDIO cards given that all the
+other bits needed to get Runtime PM vs. SDIO just aren't there.
+
+NOTE: at some point in time someone might come up with a fancy way to
+do SDIO interrupts and still allow (some) amount of runtime PM.
+Technically we could turn off the card clock if we used an alternate
+way of signaling SDIO interrupts (and out of band interrupt is one way
+to do this).  We probably wouldn't actually want to fully runtime
+suspend in this case though--at least not with the current
+dw_mci_runtime_resume() which basically fully resets the controller at
+resume time.
+
+Fixes: e9ed8835e990 ("mmc: dw_mmc: add runtime PM callback")
+Cc: <stable@vger.kernel.org>
+Reported-by: Brian Norris <briannorris@chromium.org>
+Signed-off-by: Douglas Anderson <dianders@chromium.org>
+---
+ drivers/mmc/host/dw_mmc.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mmc/host/dw_mmc.c b/drivers/mmc/host/dw_mmc.c
+index a9ac0b457313..8718432751c5 100644
+--- a/drivers/mmc/host/dw_mmc.c
++++ b/drivers/mmc/host/dw_mmc.c
+@@ -22,6 +22,7 @@
+ #include <linux/ioport.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
+ #include <linux/seq_file.h>
+ #include <linux/slab.h>
+ #include <linux/stat.h>
+@@ -1621,10 +1622,16 @@ static void dw_mci_init_card(struct mmc_host *mmc, struct mmc_card *card)
+ 
+ 		if (card->type == MMC_TYPE_SDIO ||
+ 		    card->type == MMC_TYPE_SD_COMBO) {
+-			set_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags);
++			if (!test_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags)) {
++				pm_runtime_get_noresume(mmc->parent);
++				set_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags);
++			}
+ 			clk_en_a = clk_en_a_old & ~clken_low_pwr;
+ 		} else {
+-			clear_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags);
++			if (test_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags)) {
++				pm_runtime_put_noidle(mmc->parent);
++				clear_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags);
++			}
+ 			clk_en_a = clk_en_a_old | clken_low_pwr;
+ 		}
+ 
+-- 
+2.12.1
+
