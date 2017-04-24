@@ -1,0 +1,97 @@
+# $Id: PKGBUILD 287592 2017-01-28 07:20:49Z pierre $
+# Maintainer: Pierre Schmitz <pierre@archlinux.de>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - set ARM architecture targets
+
+pkgname=openssl-1.0
+_ver=1.0.2k
+# use a pacman compatible version scheme
+pkgver=${_ver/[a-z]/.${_ver//[0-9.]/}}
+#pkgver=$_ver
+pkgrel=3
+pkgdesc='The Open Source toolkit for Secure Sockets Layer and Transport Layer Security'
+arch=('i686' 'x86_64')
+url='https://www.openssl.org'
+license=('custom:BSD')
+depends=('perl')
+optdepends=('ca-certificates')
+options=('!makeflags')
+source=("https://www.openssl.org/source/openssl-${_ver}.tar.gz"
+        "https://www.openssl.org/source/openssl-${_ver}.tar.gz.asc"
+        'no-rpath.patch'
+        'ssl3-test-failure.patch'
+        'openssl-1.0-versioned-symbols.patch')
+md5sums=('f965fc0bf01bf882b31314b61391ae65'
+         'SKIP'
+         'dc78d3d06baffc16217519242ce92478'
+         '62fc492252edd3283871632bb77fadbe'
+         'fb9dab4e571c1110375c8375f809b78e')
+validpgpkeys=('8657ABB260F056B1E5190839D9C4D26D0E604491')
+
+prepare() {
+	cd $srcdir/openssl-$_ver
+
+	# remove rpath: http://bugs.archlinux.org/task/14367
+	patch -p0 -i $srcdir/no-rpath.patch
+
+	# disable a test that fails when ssl3 is disabled
+	patch -p1 -i $srcdir/ssl3-test-failure.patch
+
+	# add symbol versioning to prevent conflicts with openssl 1.1 symbols (Debian)
+	patch -p1 -i "$srcdir"/openssl-1.0-versioned-symbols.patch
+}
+
+build() {
+	cd "$srcdir/openssl-$_ver"
+
+	if [ "${CARCH}" == 'x86_64' ]; then
+		openssltarget='linux-x86_64'
+		optflags='enable-ec_nistp_64_gcc_128'
+	elif [ "${CARCH}" == 'i686' ]; then
+		openssltarget='linux-elf'
+		optflags=''
+	elif [ "${CARCH}" == 'arm' -o "${CARCH}" == 'armv6h' -o "${CARCH}" == 'armv7h' ]; then
+		openssltarget='linux-armv4'
+		optflags=''
+	elif [ "${CARCH}" == 'aarch64' ]; then
+		openssltarget='linux-aarch64'
+		optflags=''
+	fi
+
+	# mark stack as non-executable: http://bugs.archlinux.org/task/12434
+	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib/openssl-1.0 \
+		shared no-ssl3-method ${optflags} \
+		"${openssltarget}" \
+		"-Wa,--noexecstack ${CPPFLAGS} ${CFLAGS} ${LDFLAGS}"
+
+	make depend
+	make
+}
+
+check() {
+	cd "$srcdir/openssl-$_ver"
+	make test
+}
+
+package() {
+	cd "$srcdir/openssl-$_ver"
+
+	make INSTALL_PREFIX="$pkgdir" install_sw
+
+	# Move some files around
+	install -m755 -d "$pkgdir/usr/include/openssl-1.0"
+	mv "$pkgdir/usr/include/openssl" "$pkgdir/usr/include/openssl-1.0/"
+	mv "$pkgdir/usr/lib/openssl-1.0/libcrypto.so.1.0.0" "$pkgdir/usr/lib/"
+	mv "$pkgdir/usr/lib/openssl-1.0/libssl.so.1.0.0" "$pkgdir/usr/lib/"
+	ln -sf ../libssl.so.1.0.0 "$pkgdir/usr/lib/openssl-1.0/libssl.so"
+        ln -sf ../libcrypto.so.1.0.0 "$pkgdir/usr/lib/openssl-1.0/libcrypto.so"
+	mv "$pkgdir/usr/bin/openssl" "$pkgdir/usr/bin/openssl-1.0"
+
+	# Update includedir in .pc files
+	sed -e 's|/include$|/include/openssl-1.0|' -i "$pkgdir"/usr/lib/openssl-1.0/pkgconfig/*.pc
+
+	rm -rf "$pkgdir"/{etc,usr/bin/c_rehash}
+
+	install -D -m644 LICENSE $pkgdir/usr/share/licenses/${pkgname}/LICENSE
+}
