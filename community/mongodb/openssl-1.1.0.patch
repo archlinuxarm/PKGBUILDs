@@ -1,0 +1,71 @@
+diff --git a/src/mongo/crypto/crypto_openssl.cpp b/src/mongo/crypto/crypto_openssl.cpp
+index ca6844a..cd9bf17 100644
+--- a/src/mongo/crypto/crypto_openssl.cpp
++++ b/src/mongo/crypto/crypto_openssl.cpp
+@@ -45,19 +45,26 @@ namespace crypto {
+  * Computes a SHA-1 hash of 'input'.
+  */
+ bool sha1(const unsigned char* input, const size_t inputLen, unsigned char* output) {
+-    EVP_MD_CTX digestCtx;
+-    EVP_MD_CTX_init(&digestCtx);
+-    ON_BLOCK_EXIT(EVP_MD_CTX_cleanup, &digestCtx);
++    EVP_MD_CTX *digestCtx;
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
++    digestCtx = (EVP_MD_CTX*) malloc(sizeof(EVP_MD_CTX));
++    EVP_MD_CTX_init(digestCtx);
++    ON_BLOCK_EXIT(free, digestCtx);
++    ON_BLOCK_EXIT(EVP_MD_CTX_cleanup, digestCtx);
++#else
++    digestCtx = EVP_MD_CTX_new();
++    ON_BLOCK_EXIT(EVP_MD_CTX_free, digestCtx);
++#endif
+ 
+-    if (1 != EVP_DigestInit_ex(&digestCtx, EVP_sha1(), NULL)) {
++    if (1 != EVP_DigestInit_ex(digestCtx, EVP_sha1(), NULL)) {
+         return false;
+     }
+ 
+-    if (1 != EVP_DigestUpdate(&digestCtx, input, inputLen)) {
++    if (1 != EVP_DigestUpdate(digestCtx, input, inputLen)) {
+         return false;
+     }
+ 
+-    return (1 == EVP_DigestFinal_ex(&digestCtx, output, NULL));
++    return (1 == EVP_DigestFinal_ex(digestCtx, output, NULL));
+ }
+ 
+ /*
+diff --git a/src/mongo/util/net/ssl_manager.cpp b/src/mongo/util/net/ssl_manager.cpp
+index 504e3d5..16c34fa 100644
+--- a/src/mongo/util/net/ssl_manager.cpp
++++ b/src/mongo/util/net/ssl_manager.cpp
+@@ -741,7 +741,7 @@ bool SSLManager::_parseAndValidateCertificate(const std::string& keyFile,
+                                               const std::string& keyPassword,
+                                               std::string* subjectName,
+                                               Date_t* serverCertificateExpirationDate) {
+-    BIO* inBIO = BIO_new(BIO_s_file_internal());
++    BIO* inBIO = BIO_new(BIO_s_file());
+     if (inBIO == NULL) {
+         error() << "failed to allocate BIO object: " << getSSLErrorMessage(ERR_get_error());
+         return false;
+@@ -800,7 +800,7 @@ bool SSLManager::_setupPEM(SSL_CTX* context,
+         return false;
+     }
+ 
+-    BIO* inBio = BIO_new(BIO_s_file_internal());
++    BIO* inBio = BIO_new(BIO_s_file());
+     if (!inBio) {
+         error() << "failed to allocate BIO object: " << getSSLErrorMessage(ERR_get_error());
+         return false;
+@@ -1276,7 +1276,11 @@ SSLPeerInfo SSLManager::parseAndValidatePeerCertificateDeprecated(const SSLConne
+ 
+ StatusWith<stdx::unordered_set<RoleName>> SSLManager::_parsePeerRoles(X509* peerCert) const {
+     // exts is owned by the peerCert
++#if OPENSSL_VERSION_NUMBER < 0x10100000L
+     STACK_OF(X509_EXTENSION)* exts = peerCert->cert_info->extensions;
++#else
++    const STACK_OF(X509_EXTENSION)* exts = X509_get0_extensions(peerCert);
++#endif
+ 
+     int extCount = 0;
+     if (exts) {
