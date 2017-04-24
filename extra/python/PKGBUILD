@@ -10,8 +10,8 @@
 #  - configure with --without-lto
 
 pkgname=python
-pkgver=3.6.0
-pkgrel=2
+pkgver=3.6.1
+pkgrel=1
 _pybasever=3.6
 pkgdesc="Next generation of the python high-level scripting language"
 arch=('i686' 'x86_64')
@@ -28,14 +28,19 @@ optdepends=('python-setuptools'
 provides=('python3')
 replaces=('python3')
 source=("https://www.python.org/ftp/python/${pkgver%rc*}/Python-${pkgver}.tar.xz"{,.asc}
+        test_socket_aead_kernel49.patch
         dont-make-libpython-readonly.patch)
-sha1sums=('18ebf7d726782967d967dc00e3aa08b334fbdd5c'
+sha1sums=('91d880a2a9fcfc6753cbfa132bf47a47e17e7b16'
           'SKIP'
+          '54df54d984fae381e471494e9b7f028a9f792eaf'
           'c22b24324b8e53326702de439c401d97927ee3f2')
 validpgpkeys=('0D96DF4D4110E5C43FBFB17F2D347EA6AA65421D')  # Ned Deily (Python release signing key) <nad@python.org>
 
 prepare() {
   cd Python-${pkgver}
+
+  # Test suite fix for Linux 4.9.
+  patch -p1 -i ../test_socket_aead_kernel49.patch
 
   # FS#45809
   patch -p1 -i ../dont-make-libpython-readonly.patch
@@ -69,15 +74,24 @@ build() {
               --enable-loadable-sqlite-extensions \
               --without-ensurepip
 
-  LC_CTYPE=en_US.UTF-8 xvfb-run make EXTRA_CFLAGS="$CFLAGS"
+  # Obtain next free server number for xvfb-run; this even works in a chroot environment.
+  export servernum=99
+  while ! xvfb-run -a -n "$servernum" /bin/true 2>/dev/null; do servernum=$((servernum+1)); done
+
+  LC_CTYPE=en_US.UTF-8 xvfb-run -a -n "$servernum" make EXTRA_CFLAGS="$CFLAGS"
 }
 
 check() {
   # test_gdb is expected to fail with LTO
 
   cd Python-${pkgver}
+
+  # Obtain next free server number for xvfb-run; this even works in a chroot environment.
+  export servernum=99
+  while ! xvfb-run -a -n "$servernum" /bin/true 2>/dev/null; do servernum=$((servernum+1)); done
+
   LD_LIBRARY_PATH="${srcdir}/Python-${pkgver}":${LD_LIBRARY_PATH} \
-  LC_CTYPE=en_US.UTF-8 xvfb-run \
+  LC_CTYPE=en_US.UTF-8 xvfb-run -a -n "$servernum" \
     "${srcdir}/Python-${pkgver}/python" -m test.regrtest -v -uall -x test_gdb
 }
 
