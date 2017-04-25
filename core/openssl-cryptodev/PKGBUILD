@@ -17,7 +17,7 @@ _ver=1.0.2h
 # use a pacman compatible version scheme
 pkgver=${_ver/[a-z]/.${_ver//[0-9.]/}}
 #pkgver=$_ver
-pkgrel=1
+pkgrel=2
 pkgdesc='The Open Source toolkit for Secure Sockets Layer and Transport Layer Security'
 arch=('arm' 'armv7h')
 url='https://www.openssl.org'
@@ -26,8 +26,8 @@ depends=('perl')
 optdepends=('ca-certificates')
 options=('!makeflags')
 backup=('etc/ssl/openssl.cnf')
-conflicts=('openssl')
-provides=("openssl=${pkgver}")
+conflicts=('openssl-1.0')
+provides=("openssl-1.0=${pkgver}")
 _cryptover=1.8
 
 source=("https://www.openssl.org/source/${_pkgname}-${_ver}.tar.gz"
@@ -77,7 +77,7 @@ build() {
 	fi
 
 	# mark stack as non-executable: http://bugs.archlinux.org/task/12434
-	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib \
+	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib/openssl-1.0 \
 		-DHAVE_CRYPTODEV -DHASH_MAX_LEN=64 \
 		shared threads no-ssl3-method \
 		"${openssltarget}" \
@@ -98,7 +98,23 @@ check() {
 
 package() {
 	depends=('cryptodev_friendly')
-	cd $srcdir/$_pkgname-$_ver
-	make INSTALL_PREFIX=$pkgdir MANDIR=/usr/share/man MANSUFFIX=ssl install
-	install -D -m644 LICENSE $pkgdir/usr/share/licenses/$_pkgname/LICENSE
+	cd "$srcdir/openssl-$_ver"
+
+	make INSTALL_PREFIX="$pkgdir" install_sw
+
+	# Move some files around
+	install -m755 -d "$pkgdir/usr/include/openssl-1.0"
+	mv "$pkgdir/usr/include/openssl" "$pkgdir/usr/include/openssl-1.0/"
+	mv "$pkgdir/usr/lib/openssl-1.0/libcrypto.so.1.0.0" "$pkgdir/usr/lib/"
+	mv "$pkgdir/usr/lib/openssl-1.0/libssl.so.1.0.0" "$pkgdir/usr/lib/"
+	ln -sf ../libssl.so.1.0.0 "$pkgdir/usr/lib/openssl-1.0/libssl.so"
+        ln -sf ../libcrypto.so.1.0.0 "$pkgdir/usr/lib/openssl-1.0/libcrypto.so"
+	mv "$pkgdir/usr/bin/openssl" "$pkgdir/usr/bin/openssl-1.0"
+
+	# Update includedir in .pc files
+	sed -e 's|/include$|/include/openssl-1.0|' -i "$pkgdir"/usr/lib/openssl-1.0/pkgconfig/*.pc
+
+	rm -rf "$pkgdir"/{etc,usr/bin/c_rehash}
+
+	install -D -m644 LICENSE $pkgdir/usr/share/licenses/${pkgname}/LICENSE
 }
