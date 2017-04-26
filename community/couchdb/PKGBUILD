@@ -1,0 +1,69 @@
+# $Id$
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Vitaliy Berdinskikh ur6lad[at]i.ua
+# Contributor: Michael Fellinger <m.fellinger@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch and rebuild rebar on AArch64
+
+pkgname=couchdb
+pkgver=2.0.0
+pkgrel=9
+pkgdesc="A document-oriented database that can be queried and indexed in a MapReduce fashion using JSON"
+arch=('i686' 'x86_64')
+url="http://couchdb.apache.org"
+license=('APACHE')
+depends=('icu' 'erlang-nox' 'js185' 'openssl-1.0' 'curl' 'util-linux')
+makedepends=('autoconf-archive' 'git')
+install=couchdb.install
+backup=('etc/couchdb/local.ini'
+	'etc/couchdb/vm.args')
+validpgpkeys=('E0AF0A194D55C84E4A19A801CDB0C0F904F4EE9B'
+	      'D2B17F9DA23C0A10991AF2E3D9EE01E47852AEE4')
+source=("http://www.eu.apache.org/dist/couchdb/source/$pkgver/apache-couchdb-$pkgver.tar.gz"{,.asc}
+	"https://github.com/rebar/rebar/commit/f9b850c428dae6cf6673ff076d863d5b6c343569.patch"
+	"couchdb.service"
+	"couchdb.tmpfiles"
+	"datadirs.ini")
+md5sums=('402fc02df28a5297a56cedebbae42524'
+         'SKIP'
+         'ed7d01517ab6bc82fce1871715046ae4'
+         '38cea6d9b533a22dadc22538a921c282'
+         '1e254ebe32eeb061be64193bafa35dbf'
+         'cd649a705805e6193ae72aea33a2e4bd')
+
+prepare() {
+  cd "$srcdir/apache-couchdb-$pkgver"
+  sed -i 's|$ROOTDIR/etc/vm.args|/etc/couchdb/vm.args|' rel/overlay/bin/couchdb
+  if [[ $CARCH == aarch64 ]]; then
+    cd src/rebar
+    patch -p1 -i "$srcdir/f9b850c428dae6cf6673ff076d863d5b6c343569.patch"
+    ./bootstrap
+    cp rebar ../../bin
+  fi
+}
+
+build() {
+  cd "$srcdir/apache-couchdb-$pkgver"
+  ./configure
+  make release
+}
+
+package() {
+  cd "$srcdir/apache-couchdb-$pkgver"
+  install -dm0755 "$pkgdir"/usr/lib/
+  install -dm0755 "$pkgdir"/etc/couchdb/
+  install -dm0755 "$pkgdir"/var/lib/couchdb/
+
+  cp -r rel/couchdb "$pkgdir"/usr/lib/couchdb
+  mv "$pkgdir"/usr/lib/couchdb/etc/local.ini "$pkgdir"/etc/couchdb/local.ini
+  mv "$pkgdir"/usr/lib/couchdb/etc/vm.args "$pkgdir"/etc/couchdb/vm.args
+
+  # use system erts
+#  rm -rf "$pkgdir"/usr/lib/couchdb/erts-*
+#  _erts=$(cd /usr/lib/erlang/ && ls -1d erts-*)
+#  ln -s /usr/lib/erlang/${_erts} "$pkgdir"/usr/lib/couchdb/${_erts}
+
+  install -Dm0644 "$srcdir"/$pkgname.service "$pkgdir"/usr/lib/systemd/system/$pkgname.service
+  install -Dm0644 "$srcdir"/datadirs.ini "$pkgdir"/usr/lib/couchdb/etc/datadirs.ini
+}
