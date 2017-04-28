@@ -2,84 +2,71 @@
 # Maintainer: Pierre Schmitz <pierre@archlinux.de>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - use linux-armv4 target for our architectures
-#  - cryptodev-enabled version
-#
-#	moonman <moonman [dot] ca [at] gmail [dot] com>
-#  - get cryptodev.h from cryptodev tarball instead of the kernel headers
-#  - patches from cryptodev developers for openssl
+#  - set ARM architecture targets
+# Oleg Rakhmanov <oleg@archlinuxarm.org>
+#  - cryptodev enabled version   
 
 buildarch=6
 
 pkgname=openssl-cryptodev
 _pkgname=openssl
-_ver=1.0.2h
+_ver=1.1.0e
 # use a pacman compatible version scheme
 pkgver=${_ver/[a-z]/.${_ver//[0-9.]/}}
 #pkgver=$_ver
-pkgrel=2
+pkgrel=1
 pkgdesc='The Open Source toolkit for Secure Sockets Layer and Transport Layer Security'
 arch=('arm' 'armv7h')
 url='https://www.openssl.org'
 license=('custom:BSD')
 depends=('perl')
 optdepends=('ca-certificates')
-options=('!makeflags')
 backup=('etc/ssl/openssl.cnf')
-conflicts=('openssl-1.0')
-provides=("openssl-1.0=${pkgver}")
-_cryptover=1.8
+conflicts=('openssl')
+provides=("openssl=${pkgver}")
+_cryptodevver=1.9
 
 source=("https://www.openssl.org/source/${_pkgname}-${_ver}.tar.gz"
-        'no-rpath.patch'
-        'ssl3-test-failure.patch'
+        "https://www.openssl.org/source/${_pkgname}-${_ver}.tar.gz.asc"
         'ca-dir.patch'
-        "http://download.gna.org/cryptodev-linux/cryptodev-linux-${_cryptover}.tar.gz"
-        'fix_sig-gen_and_allow_copy_evp_contexts.patch')
-
-md5sums=('9392e65072ce4b614c1392eefc1f23d0'
-         'dc78d3d06baffc16217519242ce92478'
-         '62fc492252edd3283871632bb77fadbe'
-         '3bf51be3a1bbd262be46dc619f92aa90'
-         '02644cc4cd02301e0b503a332eb2f0b5'
-         '91c72fe6b89e3134bc61cfb4311bf348')
+        "https://github.com/cryptodev-linux/cryptodev-linux/archive/cryptodev-linux-${_cryptodevver}.tar.gz")
+md5sums=('51c42d152122e474754aea96f66928c6'
+         'SKIP'
+         '02b53865fb70faef763e262b4971aa4b'
+         'e5aacd2293cea9c94f71ca2e0b4dea57')
 validpgpkeys=('8657ABB260F056B1E5190839D9C4D26D0E604491')
 
 prepare() {
-        cd $srcdir/${_pkgname}-$_ver
+	cd $srcdir/$_pkgname-$_ver
 
-        # remove rpath: http://bugs.archlinux.org/task/14367
-        patch -p0 -i $srcdir/no-rpath.patch
+	# set ca dir to /etc/ssl by default
+	patch -p0 -i $srcdir/ca-dir.patch
 
-	# disable a test that fails when ssl3 is disabled
-	patch -p1 -i $srcdir/ssl3-test-failure.patch
-
-        # set ca dir to /etc/ssl by default
-        patch -p0 -i $srcdir/ca-dir.patch
-
-        msg2 "Patch eng_cryptodev.c"
-        patch -p1 -i $srcdir/fix_sig-gen_and_allow_copy_evp_contexts.patch
-
-        # Copy the header file
-        cp -u ${srcdir}/cryptodev-linux-${_cryptover}/crypto/cryptodev.h ${srcdir}/openssl-${_ver}/crypto/
-
+	# Copy the header file
+	cp -u ${srcdir}/cryptodev-linux-cryptodev-linux-${_cryptodevver}/crypto/cryptodev.h ${srcdir}/openssl-${_ver}/crypto/
 }
 
 build() {
-	cd $srcdir/${_pkgname}-$_ver
+	cd $srcdir/$_pkgname-$_ver
 
 	if [ "${CARCH}" == 'x86_64' ]; then
 		openssltarget='linux-x86_64'
+		optflags='enable-ec_nistp_64_gcc_128'
 	elif [ "${CARCH}" == 'i686' ]; then
 		openssltarget='linux-elf'
-	elif [ "${CARCH}" == 'arm' -o "${CARCH}" == 'armv7h' ]; then
+		optflags=''
+	elif [ "${CARCH}" == 'arm' -o "${CARCH}" == 'armv6h' -o "${CARCH}" == 'armv7h' ]; then
 		openssltarget='linux-armv4'
+		optflags=''
+	elif [ "${CARCH}" == 'aarch64' ]; then
+		openssltarget='linux-aarch64'
+		optflags='no-afalgeng'
 	fi
 
 	# mark stack as non-executable: http://bugs.archlinux.org/task/12434
-	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib/openssl-1.0 \
+	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib \
 		-DHAVE_CRYPTODEV -DHASH_MAX_LEN=64 \
-		shared threads no-ssl3-method \
+		shared no-ssl3-method ${optflags} \
 		"${openssltarget}" \
 		"-Wa,--noexecstack ${CPPFLAGS} ${CFLAGS} ${LDFLAGS}"
 
@@ -97,24 +84,7 @@ check() {
 }
 
 package() {
-	depends=('cryptodev_friendly')
-	cd "$srcdir/openssl-$_ver"
-
-	make INSTALL_PREFIX="$pkgdir" install_sw
-
-	# Move some files around
-	install -m755 -d "$pkgdir/usr/include/openssl-1.0"
-	mv "$pkgdir/usr/include/openssl" "$pkgdir/usr/include/openssl-1.0/"
-	mv "$pkgdir/usr/lib/openssl-1.0/libcrypto.so.1.0.0" "$pkgdir/usr/lib/"
-	mv "$pkgdir/usr/lib/openssl-1.0/libssl.so.1.0.0" "$pkgdir/usr/lib/"
-	ln -sf ../libssl.so.1.0.0 "$pkgdir/usr/lib/openssl-1.0/libssl.so"
-        ln -sf ../libcrypto.so.1.0.0 "$pkgdir/usr/lib/openssl-1.0/libcrypto.so"
-	mv "$pkgdir/usr/bin/openssl" "$pkgdir/usr/bin/openssl-1.0"
-
-	# Update includedir in .pc files
-	sed -e 's|/include$|/include/openssl-1.0|' -i "$pkgdir"/usr/lib/openssl-1.0/pkgconfig/*.pc
-
-	rm -rf "$pkgdir"/{etc,usr/bin/c_rehash}
-
-	install -D -m644 LICENSE $pkgdir/usr/share/licenses/${pkgname}/LICENSE
+	cd $srcdir/$_pkgname-$_ver
+	make DESTDIR=$pkgdir MANDIR=/usr/share/man MANSUFFIX=ssl install_sw install_ssldirs install_man_docs
+	install -D -m644 LICENSE $pkgdir/usr/share/licenses/$_pkgname/LICENSE
 }
