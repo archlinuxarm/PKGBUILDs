@@ -1,0 +1,63 @@
+Index: src/i18n.cc
+diff --git a/src/i18n.cc b/src/i18n.cc
+index d2245ef34a9a319a53b4cf4b4ea05ec095fef2d5..7c22871ff5e440f771659d44a0db013b34ec2105 100644
+--- a/src/i18n.cc
++++ b/src/i18n.cc
+@@ -30,8 +30,13 @@
+ #include "unicode/ucol.h"
+ #include "unicode/ucurr.h"
+ #include "unicode/unum.h"
++#include "unicode/uvernum.h"
+ #include "unicode/uversion.h"
+ 
++#if U_ICU_VERSION_MAJOR_NUM >= 59
++#include "unicode/char16ptr.h"
++#endif
++
+ namespace v8 {
+ namespace internal {
+ 
+@@ -270,8 +275,13 @@ icu::DecimalFormat* CreateICUNumberFormat(
+       }
+ 
+       UErrorCode status_digits = U_ZERO_ERROR;
++#if U_ICU_VERSION_MAJOR_NUM >= 59
+       uint32_t fraction_digits = ucurr_getDefaultFractionDigits(
+-        currency.getTerminatedBuffer(), &status_digits);
++          icu::toUCharPtr(currency.getTerminatedBuffer()), &status_digits);
++#else
++      uint32_t fraction_digits = ucurr_getDefaultFractionDigits(
++          currency.getTerminatedBuffer(), &status_digits);
++#endif
+       if (U_SUCCESS(status_digits)) {
+         number_format->setMinimumFractionDigits(fraction_digits);
+         number_format->setMaximumFractionDigits(fraction_digits);
+Index: src/runtime/runtime-i18n.cc
+diff --git a/src/runtime/runtime-i18n.cc b/src/runtime/runtime-i18n.cc
+index 0b45381914641a824e36e99eaa0d315bf96252aa..e89175a37db11aa6990888e26e6bb989cf7c36b5 100644
+--- a/src/runtime/runtime-i18n.cc
++++ b/src/runtime/runtime-i18n.cc
+@@ -43,6 +43,7 @@
+ #include "unicode/uloc.h"
+ #include "unicode/unistr.h"
+ #include "unicode/unum.h"
++#include "unicode/ustring.h"
+ #include "unicode/uversion.h"
+ 
+ 
+@@ -609,10 +610,11 @@ RUNTIME_FUNCTION(Runtime_InternalCompare) {
+     String::FlatContent flat2 = string2->GetFlatContent();
+     std::unique_ptr<uc16[]> sap1;
+     std::unique_ptr<uc16[]> sap2;
+-    const UChar* string_val1 = GetUCharBufferFromFlat(flat1, &sap1, length1);
+-    const UChar* string_val2 = GetUCharBufferFromFlat(flat2, &sap2, length2);
+-    result =
+-        collator->compare(string_val1, length1, string_val2, length2, status);
++    icu::UnicodeString string_val1(
++        FALSE, GetUCharBufferFromFlat(flat1, &sap1, length1), length1);
++    icu::UnicodeString string_val2(
++        FALSE, GetUCharBufferFromFlat(flat2, &sap2, length2), length2);
++    result = collator->compare(string_val1, string_val2, status);
+   }
+   if (U_FAILURE(status)) return isolate->ThrowIllegalOperation();
+ 
