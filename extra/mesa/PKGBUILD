@@ -7,8 +7,8 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'libva-mesa-driver')
-pkgver=17.0.4
-pkgrel=2
+pkgver=17.0.5
+pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
@@ -23,7 +23,7 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-glapi-Link-with-glapi-when-built-shared.patch
         0002-fixup-EGL-Implement-the-libglvnd-interface-for-EGL-v.patch
         glvnd-fix-gl-dot-pc.patch)
-sha256sums=('1269dc8545a193932a0779b2db5bce9be4a5f6813b98c38b93b372be8362a346'
+sha256sums=('668efa445d2f57a26e5c096b1965a685733a3b57d9c736f9d6460263847f9bfe'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
             '75ab53ad44b95204c788a2988e97a5cb963bdbf6072a5466949a2afb79821c8f'
