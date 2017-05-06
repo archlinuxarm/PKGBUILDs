@@ -1,0 +1,43 @@
+sd_fuse() {
+  device=$1
+
+  if [ ! -b /dev/${device} ]; then
+    echo "No MMC device to flash, exiting."
+    exit 0
+  fi
+
+  echo "BL1 fusing"
+  dd if=/boot/bl1.bin.hardkernel of=/dev/${device} conv=fsync bs=1 count=442
+  dd if=/boot/bl1.bin.hardkernel of=/dev/${device} conv=fsync bs=512 skip=1 seek=1
+  echo "u-boot fusing"
+  dd if=/boot/u-boot.gxbb of=/dev/${device} conv=fsync bs=512 seek=97
+}
+
+flash_uboot() {
+  if mountpoint -d /boot > /dev/null 2>&1; then
+    base=/boot
+  else
+    base=/
+  fi
+  major=$(mountpoint -d $base | cut -f 1 -d ':')
+  minor=$(expr $(mountpoint -d $base | cut -f 2 -d ':') - 1)
+  device=$(cat /proc/partitions | awk {'if ($1 == "'${major}'" && $2 == "'${minor}'") print $4 '})
+
+  echo "A new U-Boot version needs to be flashed onto /dev/${device}."
+  echo "Do you want to do this now? [y|N]"
+  read -r shouldwe
+  if [[ $shouldwe =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    sd_fuse $device
+  else
+    echo "You can do this later by running:"
+    echo "# cd /boot; ./sd_fusing.sh /dev/${device}"
+  fi
+}
+
+post_install() {
+  flash_uboot
+}
+
+post_upgrade() {
+  flash_uboot
+}

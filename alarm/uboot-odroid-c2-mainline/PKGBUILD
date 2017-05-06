@@ -1,0 +1,59 @@
+# U-Boot: ODROID-C2
+# Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
+
+buildarch=8
+
+pkgname=uboot-odroid-c2-mainline
+pkgver=2017.05rc3
+pkgrel=1
+pkgdesc="Mainline U-Boot for ODROID-C2"
+arch=('aarch64')
+url='http://www.denx.de/wiki/U-Boot/WebHome'
+license=('GPL')
+install=$pkgname.install
+makedepends=('git' 'bc' 'dtc' 'meson-tools')
+backup=('boot/boot.txt' 'boot/boot.scr')
+_commit=3eb97d48991decdd5dea537c8c2325cbb0611089
+source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver/rc/-rc}.tar.bz2"
+        "https://github.com/hardkernel/u-boot/archive/${_commit}.tar.gz"
+        'sd_fusing.sh'
+        'boot.txt'
+        'mkscr')
+md5sums=('2448e8ccf3e140c7a3506e0c1f68fc37'
+         '448f16a7f15871a2c5686689c0be5ef0'
+         'c1222a54697dc5025f059024d41b9659'
+         '4258258571f02d00d4b38d03b563dc2b'
+         '021623a04afd29ac3f368977140cfbfd')
+
+build() {
+  cd u-boot-${pkgver/rc/-rc}
+
+  unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
+
+  make distclean
+  make odroid-c2_defconfig
+  echo 'CONFIG_IDENT_STRING=" Arch Linux ARM"' >> .config
+  make EXTRAVERSION=-${pkgrel}
+
+  cd ../u-boot-${_commit}
+  make -C tools/fip_create
+}
+
+package() {
+  install -d "${pkgdir}"/boot
+
+  u-boot-${_commit}/tools/fip_create/fip_create \
+    --bl30  u-boot-${_commit}/fip/gxb/bl30.bin \
+    --bl301 u-boot-${_commit}/fip/gxb/bl301.bin \
+    --bl31  u-boot-${_commit}/fip/gxb/bl31.bin \
+    --bl33  u-boot-${pkgver/rc/-rc}/u-boot.bin \
+    fip.bin
+  cat u-boot-${_commit}/fip/gxb/bl2.package fip.bin > boot_new.bin
+  amlbootsig boot_new.bin u-boot.img
+  dd if=u-boot.img of=u-boot.gxbb bs=512 skip=96
+
+  cp u-boot-${_commit}/sd_fuse/bl1.bin.hardkernel u-boot.gxbb "${pkgdir}"/boot
+
+  u-boot-${pkgver/rc/-rc}/tools/mkimage -A arm -O linux -T script -C none -n "U-Boot boot script" -d boot.txt "${pkgdir}"/boot/boot.scr
+  cp boot.txt mkscr sd_fusing.sh "${pkgdir}"/boot
+}
