@@ -1,0 +1,65 @@
+# $Id$
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Contributor: Jan de Groot <jgc@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - removed makedepend on valgrind
+
+pkgname=gst-libav
+pkgver=1.12.0
+pkgrel=1
+pkgdesc="GStreamer Multimedia Framework ffmpeg Plugin"
+url="https://gstreamer.freedesktop.org/"
+arch=(i686 x86_64)
+license=(GPL)
+depends=(gst-plugins-base-libs bzip2 ffmpeg)
+makedepends=(python gtk-doc autoconf-archive git)
+provides=("gst-ffmpeg=$pkgver-$pkgrel")
+_commit=011dc043c8253c3c56caf2f34542e76bcb1f7dba  # tags/1.12.0^0
+source=("git+https://anongit.freedesktop.org/git/gstreamer/gst-libav#commit=$_commit"
+        "gst-common::git+https://anongit.freedesktop.org/git/gstreamer/common"
+        "git+https://git.videolan.org/git/ffmpeg")
+sha256sums=('SKIP'
+            'SKIP'
+            'SKIP')
+
+pkgver() {
+  cd $pkgname
+  git describe --tags | sed 's/-/+/g'
+}
+
+prepare() {
+  cd $pkgname
+
+  git submodule init
+  git config --local submodule.common.url "$srcdir/gst-common"
+  git config --local submodule.gst-libs/ext/libav.url "$srcdir/ffmpeg"
+  git submodule update
+
+  NOCONFIGURE=1 ./autogen.sh
+}
+
+build() {
+  cd $pkgname
+
+  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var --libexecdir=/usr/lib \
+    --with-package-name="GStreamer ffmpeg Plugin (Arch Linux)" \
+    --with-package-origin="http://www.archlinux.org/" \
+    --with-system-libav --with-libav-extra-configure="--enable-runtime-cpudetect" \
+    --enable-experimental --enable-gtk-doc --disable-static
+
+  # https://bugzilla.gnome.org/show_bug.cgi?id=655517
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+
+  make
+}
+
+check() {
+  cd $pkgname
+  make check
+}
+
+package() {
+  cd $pkgname
+  make DESTDIR="$pkgdir" install
+}
