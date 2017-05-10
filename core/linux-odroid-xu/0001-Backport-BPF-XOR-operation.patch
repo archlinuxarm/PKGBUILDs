@@ -1,0 +1,139 @@
+diff --git a/arch/x86/net/bpf_jit_comp.c b/arch/x86/net/bpf_jit_comp.c
+index 0597f95..db99f9a 100644
+--- a/arch/x86/net/bpf_jit_comp.c
++++ b/arch/x86/net/bpf_jit_comp.c
+@@ -309,6 +309,19 @@ void bpf_jit_compile(struct sk_filter *fp)
+ 				else
+ 					EMIT1_off32(0x0d, K);	/* or imm32,%eax */
+ 				break;
++			case BPF_S_ANC_ALU_XOR_X: /* A ^= X; */
++			case BPF_S_ALU_XOR_X:
++				seen |= SEEN_XREG;
++				EMIT2(0x31, 0xd8);		/* xor %ebx,%eax */
++				break;
++			case BPF_S_ALU_XOR_K: /* A ^= K; */
++				if (K == 0)
++					break;
++				if (is_imm8(K))
++					EMIT3(0x83, 0xf0, K);	/* xor imm8,%eax */
++				else
++					EMIT1_off32(0x35, K);	/* xor imm32,%eax */
++				break;
+ 			case BPF_S_ALU_LSH_X: /* A <<= X; */
+ 				seen |= SEEN_XREG;
+ 				EMIT4(0x89, 0xd9, 0xd3, 0xe0);	/* mov %ebx,%ecx; shl %cl,%eax */
+diff --git a/include/linux/filter.h b/include/linux/filter.h
+index f2e5315..97cecfb 100644
+--- a/include/linux/filter.h
++++ b/include/linux/filter.h
+@@ -74,6 +74,9 @@ struct sock_fprog {	/* Required for SO_ATTACH_FILTER. */
+ #define         BPF_LSH         0x60
+ #define         BPF_RSH         0x70
+ #define         BPF_NEG         0x80
++#define		BPF_MOD		0x90
++#define		BPF_XOR		0xa0
++
+ #define         BPF_JA          0x00
+ #define         BPF_JEQ         0x10
+ #define         BPF_JGT         0x20
+@@ -127,7 +130,8 @@ struct sock_fprog {	/* Required for SO_ATTACH_FILTER. */
+ #define SKF_AD_HATYPE	28
+ #define SKF_AD_RXHASH	32
+ #define SKF_AD_CPU	36
+-#define SKF_AD_MAX	40
++#define SKF_AD_ALU_XOR_X	40
++#define SKF_AD_MAX	44
+ #define SKF_NET_OFF   (-0x100000)
+ #define SKF_LL_OFF    (-0x200000)
+ 
+@@ -192,10 +196,14 @@ enum {
+ 	BPF_S_ALU_MUL_K,
+ 	BPF_S_ALU_MUL_X,
+ 	BPF_S_ALU_DIV_X,
++	BPF_S_ALU_MOD_K,
++	BPF_S_ALU_MOD_X,
+ 	BPF_S_ALU_AND_K,
+ 	BPF_S_ALU_AND_X,
+ 	BPF_S_ALU_OR_K,
+ 	BPF_S_ALU_OR_X,
++	BPF_S_ALU_XOR_K,
++	BPF_S_ALU_XOR_X,
+ 	BPF_S_ALU_LSH_K,
+ 	BPF_S_ALU_LSH_X,
+ 	BPF_S_ALU_RSH_K,
+@@ -240,6 +248,7 @@ enum {
+ 	BPF_S_ANC_RXHASH,
+ 	BPF_S_ANC_CPU,
+ 	BPF_S_ANC_SECCOMP_LD_W,
++	BPF_S_ANC_ALU_XOR_X,
+ };
+ 
+ #endif /* __KERNEL__ */
+diff --git a/net/core/filter.c b/net/core/filter.c
+index 21237ce..56116a4 100644
+--- a/net/core/filter.c
++++ b/net/core/filter.c
+@@ -159,6 +159,14 @@ unsigned int sk_run_filter(const struct sk_buff *skb,
+ 		case BPF_S_ALU_DIV_K:
+ 			A = reciprocal_divide(A, K);
+ 			continue;
++		case BPF_S_ALU_MOD_X:
++			if (X == 0)
++				return 0;
++			A %= X;
++			continue;
++		case BPF_S_ALU_MOD_K:
++			A %= K;
++			continue;
+ 		case BPF_S_ALU_AND_X:
+ 			A &= X;
+ 			continue;
+@@ -171,6 +179,13 @@ unsigned int sk_run_filter(const struct sk_buff *skb,
+ 		case BPF_S_ALU_OR_K:
+ 			A |= K;
+ 			continue;
++		case BPF_S_ANC_ALU_XOR_X:
++		case BPF_S_ALU_XOR_X:
++			A ^= X;
++			continue;
++		case BPF_S_ALU_XOR_K:
++			A ^= K;
++			continue;
+ 		case BPF_S_ALU_LSH_X:
+ 			A <<= X;
+ 			continue;
+@@ -462,10 +477,14 @@ int sk_chk_filter(struct sock_filter *filter, unsigned int flen)
+ 		[BPF_ALU|BPF_MUL|BPF_K]  = BPF_S_ALU_MUL_K,
+ 		[BPF_ALU|BPF_MUL|BPF_X]  = BPF_S_ALU_MUL_X,
+ 		[BPF_ALU|BPF_DIV|BPF_X]  = BPF_S_ALU_DIV_X,
++		[BPF_ALU|BPF_MOD|BPF_K]  = BPF_S_ALU_MOD_K,
++		[BPF_ALU|BPF_MOD|BPF_X]  = BPF_S_ALU_MOD_X,
+ 		[BPF_ALU|BPF_AND|BPF_K]  = BPF_S_ALU_AND_K,
+ 		[BPF_ALU|BPF_AND|BPF_X]  = BPF_S_ALU_AND_X,
+ 		[BPF_ALU|BPF_OR|BPF_K]   = BPF_S_ALU_OR_K,
+ 		[BPF_ALU|BPF_OR|BPF_X]   = BPF_S_ALU_OR_X,
++		[BPF_ALU|BPF_XOR|BPF_K]  = BPF_S_ALU_XOR_K,
++		[BPF_ALU|BPF_XOR|BPF_X]  = BPF_S_ALU_XOR_X,
+ 		[BPF_ALU|BPF_LSH|BPF_K]  = BPF_S_ALU_LSH_K,
+ 		[BPF_ALU|BPF_LSH|BPF_X]  = BPF_S_ALU_LSH_X,
+ 		[BPF_ALU|BPF_RSH|BPF_K]  = BPF_S_ALU_RSH_K,
+@@ -524,6 +543,11 @@ int sk_chk_filter(struct sock_filter *filter, unsigned int flen)
+ 				return -EINVAL;
+ 			ftest->k = reciprocal_value(ftest->k);
+ 			break;
++		case BPF_S_ALU_MOD_K:
++			/* check for division by zero */
++			if (ftest->k == 0)
++				return -EINVAL;
++			break;
+ 		case BPF_S_LD_MEM:
+ 		case BPF_S_LDX_MEM:
+ 		case BPF_S_ST:
+@@ -571,6 +595,7 @@ int sk_chk_filter(struct sock_filter *filter, unsigned int flen)
+ 			ANCILLARY(HATYPE);
+ 			ANCILLARY(RXHASH);
+ 			ANCILLARY(CPU);
++			ANCILLARY(ALU_XOR_X);
+ 			}
+ 		}
+ 		ftest->code = code;
