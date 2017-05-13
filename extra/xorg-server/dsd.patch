@@ -1,0 +1,242 @@
+--- xorg-server-1.13.3.orig/hw/xfree86/dri2/dri2.c	2014-02-25 10:37:59.002464709 -0600
++++ xorg-server-1.13.3/hw/xfree86/dri2/dri2.c	2014-02-25 11:38:29.229158820 -0600
+@@ -101,6 +101,7 @@
+     int swap_limit;             /* for N-buffering */
+     unsigned long serialNumber;
+     Bool needInvalidate;
++    Bool client_created;
+     int prime_id;
+     PixmapPtr prime_slave_pixmap;
+     PixmapPtr redirectpixmap;
+@@ -215,6 +216,7 @@
+     if (pPriv == NULL)
+         return NULL;
+ 
++    pPriv->client_created = FALSE;
+     pPriv->dri2_screen = ds;
+     pPriv->drawable = pDraw;
+     pPriv->width = pDraw->width;
+@@ -343,6 +345,15 @@
+     int rc;
+ 
+     pPriv = DRI2GetDrawable(pDraw);
++    if (pPriv && dri2_id_out == NULL && pPriv->client_created) {
++        /* We already allocated a DRI2Drawable for this drawable, the client
++         * has called into this function (so will receive invalidate events)
++         * and now we're being called by the client again (we know this because
++         * the caller doesn't care about the dri2_id). This means we don't need
++         * to allocate another one, we have nothing else to do. */
++        pPriv->prime_id = dri2_client->prime_id;
++        return Success;
++    }
+     if (pPriv == NULL)
+         pPriv = DRI2AllocateDrawable(pDraw);
+     if (pPriv == NULL)
+@@ -357,6 +368,11 @@
+ 
+     if (dri2_id_out)
+         *dri2_id_out = dri2_id;
++    else {
++        /* The client has called in for the first time, it will now receive
++         * invalidate events. Record this for later. */
++        pPriv->client_created = TRUE;
++    }
+ 
+     return Success;
+ }
+--- xorg-server-1.13.3.orig/hw/xfree86/dri2/dri2ext.c	2014-02-25 11:53:24.965926993 -0600
++++ xorg-server-1.13.3/hw/xfree86/dri2/dri2ext.c	2014-02-25 13:58:51.972824608 -0600
+@@ -53,6 +53,14 @@
+ 
+ static int DRI2EventBase;
+ 
++/* Data shared by ProcDRI2SwapBuffers and the asynchronous callback
++ * DRI2SwapEvent */
++struct SwapBuffersData {
++	CARD64 swap_target;
++	int refcnt;
++	DrawablePtr pDrawable;
++	CARD16 sequence;
++};
+ 
+ static Bool
+ validDrawable(ClientPtr client, XID drawable, Mask access_mode,
+@@ -355,6 +363,24 @@
+     rep->swap_lo = sbc & 0xffffffff;
+ }
+ 
++static void swap_buffers_data_unref(struct SwapBuffersData *data)
++{
++	if (--data->refcnt == 0)
++		free(data);
++}
++
++static void send_swap_buffers_reply(ClientPtr client, struct SwapBuffersData *data)
++{
++    xDRI2SwapBuffersReply rep = {
++        .type = X_Reply,
++        .length = 0,
++        .sequenceNumber = data->sequence,
++    };
++
++    load_swap_reply(&rep, data->swap_target);
++    WriteToClient(client, sizeof(xDRI2SwapBuffersReply), &rep);
++}
++
+ static CARD64
+ vals_to_card64(CARD32 lo, CARD32 hi)
+ {
+@@ -365,11 +391,11 @@
+ DRI2SwapEvent(ClientPtr client, void *data, int type, CARD64 ust, CARD64 msc,
+               CARD32 sbc)
+ {
+-    DrawablePtr pDrawable = data;
++    struct SwapBuffersData *sbdata = data;
+     xDRI2BufferSwapComplete2 event = {
+         .type = DRI2EventBase + DRI2_BufferSwapComplete,
+         .event_type = type,
+-        .drawable = pDrawable->id,
++        .drawable = sbdata->pDrawable->id,
+         .ust_hi = (CARD64) ust >> 32,
+         .ust_lo = ust & 0xffffffff,
+         .msc_hi = (CARD64) msc >> 32,
+@@ -377,6 +403,12 @@
+         .sbc = sbc
+     };
+ 
++    if (DRI2NeedAsyncSwapBuffersReply(sbdata->pDrawable)) {
++        send_swap_buffers_reply(client, sbdata);
++        AttendClient(client);
++    }
++
++    swap_buffers_data_unref(data);
+     WriteEventsToClient(client, 1, (xEvent *) &event);
+ }
+ 
+@@ -384,14 +416,11 @@
+ ProcDRI2SwapBuffers(ClientPtr client)
+ {
+     REQUEST(xDRI2SwapBuffersReq);
+-    xDRI2SwapBuffersReply rep = {
+-        .type = X_Reply,
+-        .sequenceNumber = client->sequence,
+-        .length = 0
+-    };
+     DrawablePtr pDrawable;
+-    CARD64 target_msc, divisor, remainder, swap_target;
++    CARD64 target_msc, divisor, remainder;
++    struct SwapBuffersData *data;
+     int status;
++    Bool need_async_swap_reply;
+ 
+     REQUEST_SIZE_MATCH(xDRI2SwapBuffersReq);
+ 
+@@ -399,6 +428,8 @@
+                        DixReadAccess | DixWriteAccess, &pDrawable, &status))
+         return status;
+ 
++    need_async_swap_reply = DRI2NeedAsyncSwapBuffersReply(pDrawable);
++
+     /*
+      * Ensures an out of control client can't exhaust our swap queue, and
+      * also orders swaps.
+@@ -406,19 +437,49 @@
+     if (DRI2ThrottleClient(client, pDrawable))
+         return Success;
+ 
++    data = malloc(sizeof(struct SwapBuffersData));
++    /* DRI2SwapEvent() above might feel like the obvious place to free the
++     * data struct we just allocated. But consider the following sequence of
++     * events (and understand that swap_target is stored in data):
++     * 1. DRI2SwapBuffers accesses swap_target
++     * 2. DRI2SwapBuffers calls into ScheduleSwap
++     * 3. ScheduleSwap blits and calls DRI2SwapEvent before returning
++     * 4. Back in DRI2SwapBuffers, we access swap_target again
++     *
++     * If we had freed data in step 3, we would have a use-after-free in
++     * step 4.
++     *
++     * So, we set up a refcount of 2. One ref is owned by this function, and
++     * one ref is owned by DRI2SwapEvent. We only free the data once both
++     * functions are done. */
++    data->refcnt = 2;
++    data->pDrawable = pDrawable;
++    data->sequence = client->sequence;
++
+     target_msc = vals_to_card64(stuff->target_msc_lo, stuff->target_msc_hi);
+     divisor = vals_to_card64(stuff->divisor_lo, stuff->divisor_hi);
+     remainder = vals_to_card64(stuff->remainder_lo, stuff->remainder_hi);
+ 
++    /* If we're sending the reply later, we need to avoid processing any
++     * more requests from this client until that point. */
++    if (need_async_swap_reply)
++        IgnoreClient(client);
++
+     status = DRI2SwapBuffers(client, pDrawable, target_msc, divisor, remainder,
+-                             &swap_target, DRI2SwapEvent, pDrawable);
+-    if (status != Success)
+-        return BadDrawable;
++                             &data->swap_target, DRI2SwapEvent, data);
+ 
+-    load_swap_reply(&rep, swap_target);
++    if (status != Success) {
++        swap_buffers_data_unref(data);
++        swap_buffers_data_unref(data);
++        if (need_async_swap_reply)
++            AttendClient(client);
++        return BadDrawable;
++    }
+ 
+-    WriteToClient(client, sizeof(xDRI2SwapBuffersReply), &rep);
++    if (!need_async_swap_reply)
++        send_swap_buffers_reply(client, data);
+ 
++    swap_buffers_data_unref(data);
+     return Success;
+ }
+ 
+--- xorg-server-1.13.3.orig/hw/xfree86/dri2/dri2.c	2014-02-25 11:53:24.965926993 -0600
++++ xorg-server-1.13.3/hw/xfree86/dri2/dri2.c	2014-02-25 13:58:04.412115594 -0600
+@@ -116,6 +116,7 @@
+     int fd;
+     unsigned int lastSequence;
+     int prime_id;
++    Bool need_async_swapbuffers_reply;
+ 
+     DRI2CreateBufferProcPtr CreateBuffer;
+     DRI2DestroyBufferProcPtr DestroyBuffer;
+@@ -1104,7 +1105,11 @@
+     return FALSE;
+ }
+ 
+-
++Bool
++DRI2NeedAsyncSwapBuffersReply(DrawablePtr pDraw)
++{
++    return DRI2GetScreen(pDraw->pScreen)->need_async_swapbuffers_reply;
++}
+ 
+ int
+ DRI2SwapBuffers(ClientPtr client, DrawablePtr pDraw, CARD64 target_msc,
+@@ -1549,6 +1554,12 @@
+         if (!ds->driverNames)
+             goto err_out;
+         ds->driverNames[0] = info->driverName;
++
++        /* Mali incorrectly assumes that a return from SwapBuffers means that
++         * buffers have been swapped, it doesn't wait for the relevant event.
++         * In this case, we work around this annoyance by delaying the
++         * SwapBuffers reply until the swap has actually completed. */
++        ds->need_async_swapbuffers_reply = strcmp(info->driverName, "armsoc") == 0;
+     }
+     else {
+         ds->numDrivers = info->numDrivers;
+--- xorg-server-1.13.3.orig/hw/xfree86/dri2/dri2.h	2014-02-25 11:53:24.965926993 -0600
++++ xorg-server-1.13.3/hw/xfree86/dri2/dri2.h	2014-02-25 11:53:24.961926959 -0600
+@@ -359,4 +359,6 @@
+                                   CARD64 *value);
+ 
+ extern _X_EXPORT DrawablePtr DRI2UpdatePrime(DrawablePtr pDraw, DRI2BufferPtr pDest);
++
++extern Bool DRI2NeedAsyncSwapBuffersReply(DrawablePtr pDraw);
+ #endif
