@@ -7,30 +7,24 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'libva-mesa-driver')
-pkgver=17.0.5
+pkgver=17.1.0
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
-             'libomxil-bellagio' 'clang' 'libglvnd')
+             'libomxil-bellagio' 'clang' 'libglvnd' 'libunwind' 'lm_sensors')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        remove-libpthread-stubs.patch
-        0001-EGL-Implement-the-libglvnd-interface-for-EGL-v2.patch
         0001-Fix-linkage-against-shared-glapi.patch
-        0001-glapi-Link-with-glapi-when-built-shared.patch
-        0002-fixup-EGL-Implement-the-libglvnd-interface-for-EGL-v.patch
+        0001-glxglvnddispatch-Add-missing-dispatch-for-GetDriverC.patch
         glvnd-fix-gl-dot-pc.patch)
-sha256sums=('668efa445d2f57a26e5c096b1965a685733a3b57d9c736f9d6460263847f9bfe'
+sha256sums=('cf234a6ed4764673886b6661553b54675776ef0898f774716173cec890ac3b17'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
-            '75ab53ad44b95204c788a2988e97a5cb963bdbf6072a5466949a2afb79821c8f'
-            '1d3475dc2f4f3e450cf313130d3ce965f933f396058828fa843c0df8115feeb9'
             'c68d1522f9bce4ce31c92aa7a688da49f13043f5bb2254795b76dea8f47130b7'
-            '064dcd5a3ab1b7c23383e2cafbd37859e4c353f8839671d9695c6f7c2ef3260b'
-            '81d0ced62f61677ea0cf5f69a491093409fa1370f2ef045c41106ca8bf9c46f6'
+            '4a0620f9197a65f830e3c512faba374a4bde45fee9e11f82321774c24d08232d'
             '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 validpgpkeys+=('946D09B5E4C9845E63075FF1D961C596A7203456') #  "Andres Gomez <tanty@igalia.com>"
@@ -38,17 +32,11 @@ validpgpkeys+=('946D09B5E4C9845E63075FF1D961C596A7203456') #  "Andres Gomez <tan
 prepare() {
   cd ${srcdir}/mesa-${pkgver}
 
-  # Now mesa checks for libpthread-stubs - so remove the check
-  patch -Np1 -i ../remove-libpthread-stubs.patch
-  
   # glvnd support patches - from Fedora
-  # https://patchwork.freedesktop.org/series/12354/, v3 & v4
-  patch -Np1 -i ../0001-EGL-Implement-the-libglvnd-interface-for-EGL-v2.patch
-  patch -Np1 -i ../0002-fixup-EGL-Implement-the-libglvnd-interface-for-EGL-v.patch
   # non-upstreamed ones
   patch -Np1 -i ../glvnd-fix-gl-dot-pc.patch
   patch -Np1 -i ../0001-Fix-linkage-against-shared-glapi.patch
-  patch -Np1 -i ../0001-glapi-Link-with-glapi-when-built-shared.patch
+  patch -Np1 -i ../0001-glxglvnddispatch-Add-missing-dispatch-for-GetDriverC.patch
 
   autoreconf -fiv
 }
@@ -63,12 +51,14 @@ build() {
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
     --with-gallium-drivers=freedreno,nouveau,swrast,virgl,vc4${GALLIUM} \
     --with-dri-drivers=nouveau,swrast \
-    --with-egl-platforms=x11,drm,wayland \
+    --with-platforms=x11,drm,wayland \
     --disable-xvmc \
-    --enable-gallium-llvm \
+    --enable-llvm \
     --enable-llvm-shared-libs \
     --enable-shared-glapi \
     --enable-libglvnd \
+    --enable-libunwind \
+    --enable-lmsensors \
     --enable-egl \
     --enable-glx \
     --enable-glx-tls \
@@ -77,11 +67,11 @@ build() {
     --enable-gbm \
     --enable-dri \
     --enable-gallium-osmesa \
+    --enable-gallium-extra-hud \
     --enable-texture-float \
     --enable-omx \
     --enable-nine \
     --with-clang-libdir=/usr/lib
-    #--with-sha1=libgcrypt \
 
   make
 
@@ -92,7 +82,7 @@ build() {
 
 package_libva-mesa-driver() {
   pkgdesc="VA-API implementation for gallium"
-  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence')
+  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence' 'lm_sensors' 'libunwind')
 
   install -m755 -d ${pkgdir}/usr/lib
   cp -rv ${srcdir}/fakeinstall/usr/lib/dri ${pkgdir}/usr/lib
@@ -104,7 +94,7 @@ package_libva-mesa-driver() {
 package_mesa() {
   pkgdesc="an open-source implementation of the OpenGL specification"
   depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'libelf' 
-           'libomxil-bellagio' 'libtxc_dxtn' 'llvm-libs' 'libglvnd')
+           'libomxil-bellagio' 'libtxc_dxtn' 'libunwind' 'llvm-libs' 'lm_sensors' 'libglvnd')
   optdepends=('opengl-man-pages: for the OpenGL API man pages'
               'mesa-vdpau: for accelerated video playback'
               'libva-mesa-driver: for accelerated video playback')

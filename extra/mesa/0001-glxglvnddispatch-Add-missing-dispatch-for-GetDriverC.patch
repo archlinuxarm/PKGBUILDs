@@ -1,0 +1,88 @@
+From efa4f2ebc1e788c3f1cfcf3842058cf838171653 Mon Sep 17 00:00:00 2001
+From: Hans de Goede <hdegoede@redhat.com>
+Date: Mon, 20 Mar 2017 08:41:26 +0100
+Subject: [PATCH] glxglvnddispatch: Add missing dispatch for GetDriverConfig
+
+Together with some fixes to xdriinfo this fixes xdriinfo not working
+with glvnd.
+
+Since apps (xdriinfo) expect GetDriverConfig to work without going to
+need through the dance to setup a glxcontext (which is a reasonable
+expectation IMHO), the dispatch for this ends up significantly different
+then any other dispatch function.
+
+This patch gets the job done, but I'm not really happy with how this
+patch turned out, suggestions for a better fix are welcome.
+
+Cc: Kyle Brenneman <kbrenneman@nvidia.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ src/glx/g_glxglvnddispatchfuncs.c   | 18 ++++++++++++++++++
+ src/glx/g_glxglvnddispatchindices.h |  1 +
+ 2 files changed, 19 insertions(+)
+
+diff --git a/src/glx/g_glxglvnddispatchfuncs.c b/src/glx/g_glxglvnddispatchfuncs.c
+index b5e3398..040cdf8 100644
+--- a/src/glx/g_glxglvnddispatchfuncs.c
++++ b/src/glx/g_glxglvnddispatchfuncs.c
+@@ -4,6 +4,7 @@
+  */
+ #include <stdlib.h>
+ 
++#include "glxclient.h"
+ #include "glxglvnd.h"
+ #include "glxglvnddispatchfuncs.h"
+ #include "g_glxglvnddispatchindices.h"
+@@ -50,6 +51,7 @@ const char * const __glXDispatchTableStrings[DI_LAST_INDEX] = {
+     __ATTRIB(GetCurrentDisplayEXT),
+     // glXGetCurrentDrawable implemented by libglvnd
+     // glXGetCurrentReadDrawable implemented by libglvnd
++    __ATTRIB(GetDriverConfig),
+     // glXGetFBConfigAttrib implemented by libglvnd
+     __ATTRIB(GetFBConfigAttribSGIX),
+     __ATTRIB(GetFBConfigFromVisualSGIX),
+@@ -334,6 +336,21 @@ static Display *dispatch_GetCurrentDisplayEXT(void)
+ 
+ 
+ 
++static const char *dispatch_GetDriverConfig(const char *driverName)
++{
++    /*
++     * The options are constant for a given driverName, so we do not need
++     * a context (and apps expect to be able to call this without one).
++     */
++#if defined(GLX_DIRECT_RENDERING) && !defined(GLX_USE_APPLEGL)
++    return glXGetDriverConfig(driverName);
++#else
++    return NULL;
++#endif
++}
++
++
++
+ static int dispatch_GetFBConfigAttribSGIX(Display *dpy, GLXFBConfigSGIX config,
+                                           int attribute, int *value_return)
+ {
+@@ -939,6 +956,7 @@ const void * const __glXDispatchFunctions[DI_LAST_INDEX + 1] = {
+     __ATTRIB(DestroyGLXPbufferSGIX),
+     __ATTRIB(GetContextIDEXT),
+     __ATTRIB(GetCurrentDisplayEXT),
++    __ATTRIB(GetDriverConfig),
+     __ATTRIB(GetFBConfigAttribSGIX),
+     __ATTRIB(GetFBConfigFromVisualSGIX),
+     __ATTRIB(GetMscRateOML),
+diff --git a/src/glx/g_glxglvnddispatchindices.h b/src/glx/g_glxglvnddispatchindices.h
+index 05a2c8c..3ba50a7 100644
+--- a/src/glx/g_glxglvnddispatchindices.h
++++ b/src/glx/g_glxglvnddispatchindices.h
+@@ -39,6 +39,7 @@ typedef enum __GLXdispatchIndex {
+     DI_GetCurrentDisplayEXT,
+     // GetCurrentDrawable implemented by libglvnd
+     // GetCurrentReadDrawable implemented by libglvnd
++    DI_GetDriverConfig,
+     // GetFBConfigAttrib implemented by libglvnd
+     DI_GetFBConfigAttribSGIX,
+     DI_GetFBConfigFromVisualSGIX,
+-- 
+2.9.3
+
