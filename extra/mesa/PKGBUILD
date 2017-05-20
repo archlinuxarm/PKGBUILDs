@@ -45,11 +45,12 @@ build() {
   cd ${srcdir}/mesa-${pkgver}
 
   [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,imx"
+  [[ $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",vc4"
 
   ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
-    --with-gallium-drivers=freedreno,nouveau,swrast,virgl,vc4${GALLIUM} \
+    --with-gallium-drivers=freedreno,nouveau,swrast,virgl${GALLIUM} \
     --with-dri-drivers=nouveau,swrast \
     --with-platforms=x11,drm,wayland \
     --disable-xvmc \
