@@ -12,7 +12,7 @@ pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
-             'libomxil-bellagio' 'clang' 'libglvnd' 'libunwind' 'lm_sensors')
+             'libomxil-bellagio' 'clang' 'libglvnd' 'lm_sensors')
 url="http://mesa3d.sourceforge.net"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
@@ -57,7 +57,6 @@ build() {
     --enable-llvm-shared-libs \
     --enable-shared-glapi \
     --enable-libglvnd \
-    --enable-libunwind \
     --enable-lmsensors \
     --enable-egl \
     --enable-glx \
@@ -82,7 +81,7 @@ build() {
 
 package_libva-mesa-driver() {
   pkgdesc="VA-API implementation for gallium"
-  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence' 'lm_sensors' 'libunwind')
+  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence' 'lm_sensors')
 
   install -m755 -d ${pkgdir}/usr/lib
   cp -rv ${srcdir}/fakeinstall/usr/lib/dri ${pkgdir}/usr/lib
@@ -94,7 +93,7 @@ package_libva-mesa-driver() {
 package_mesa() {
   pkgdesc="an open-source implementation of the OpenGL specification"
   depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'libelf' 
-           'libomxil-bellagio' 'libtxc_dxtn' 'libunwind' 'llvm-libs' 'lm_sensors' 'libglvnd')
+           'libomxil-bellagio' 'libtxc_dxtn' 'llvm-libs' 'lm_sensors' 'libglvnd')
   optdepends=('opengl-man-pages: for the OpenGL API man pages'
               'mesa-vdpau: for accelerated video playback'
               'libva-mesa-driver: for accelerated video playback')
