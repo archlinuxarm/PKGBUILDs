@@ -1,0 +1,83 @@
+From c1b6d56f2f3ee437a787705d42abdb7a2a23dd86 Mon Sep 17 00:00:00 2001
+From: Ronny Lorenz <ronny@tbi.univie.ac.at>
+Date: Tue, 8 Dec 2015 15:24:16 +0100
+Subject: [PATCH 4/8] wlan-ng: fix sparse warning in prism2fw.c
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Fix the following sparse warning :
+
+In file included from drivers/staging/wlan-ng/prism2usb.c:5:0:
+drivers/staging/wlan-ng/prism2fw.c: In function
+‘read_cardpda.constprop.43’:
+drivers/staging/wlan-ng/prism2fw.c:792:1: warning: the frame size of
+1068 bytes is larger than 1024 bytes [-Wframe-larger-than=]
+
+The variable to 'struct p80211msg_p2req_readpda' was previously being created
+on the stack, which inturn exeeded the frame size limit, resulting in a
+sparse warning. This patch alloctes the memory to the structure dynamically
+and the operations are left unchanged.
+
+Signed-off-by: A Raghavendra Rao <arrao@cdac.in>
+---
+ drivers/staging/wlan-ng/prism2fw.c | 33 +++++++++++++++++++--------------
+ 1 file changed, 19 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/staging/wlan-ng/prism2fw.c b/drivers/staging/wlan-ng/prism2fw.c
+index 0dfd2a4..54a3bf5 100644
+--- a/drivers/staging/wlan-ng/prism2fw.c
++++ b/drivers/staging/wlan-ng/prism2fw.c
+@@ -767,30 +767,35 @@ static int plugimage(struct imgchunk *fchunk, unsigned int nfchunks,
+ static int read_cardpda(struct pda *pda, wlandevice_t *wlandev)
+ {
+ 	int result = 0;
+-	struct p80211msg_p2req_readpda msg;
++	struct p80211msg_p2req_readpda *msg;
++
++	msg = kzalloc(sizeof(*msg), GFP_KERNEL);
++	if (!msg)
++		return -ENOMEM;
+ 
+ 	/* set up the msg */
+-	msg.msgcode = DIDmsg_p2req_readpda;
+-	msg.msglen = sizeof(msg);
+-	strcpy(msg.devname, wlandev->name);
+-	msg.pda.did = DIDmsg_p2req_readpda_pda;
+-	msg.pda.len = HFA384x_PDA_LEN_MAX;
+-	msg.pda.status = P80211ENUM_msgitem_status_no_value;
+-	msg.resultcode.did = DIDmsg_p2req_readpda_resultcode;
+-	msg.resultcode.len = sizeof(u32);
+-	msg.resultcode.status = P80211ENUM_msgitem_status_no_value;
+-
+-	if (prism2mgmt_readpda(wlandev, &msg) != 0) {
++	msg->msgcode = DIDmsg_p2req_readpda;
++	msg->msglen = sizeof(msg);
++	strcpy(msg->devname, wlandev->name);
++	msg->pda.did = DIDmsg_p2req_readpda_pda;
++	msg->pda.len = HFA384x_PDA_LEN_MAX;
++	msg->pda.status = P80211ENUM_msgitem_status_no_value;
++	msg->resultcode.did = DIDmsg_p2req_readpda_resultcode;
++	msg->resultcode.len = sizeof(u32);
++	msg->resultcode.status = P80211ENUM_msgitem_status_no_value;
++
++	if (prism2mgmt_readpda(wlandev, msg) != 0) {
+ 		/* prism2mgmt_readpda prints an errno if appropriate */
+ 		result = -1;
+-	} else if (msg.resultcode.data == P80211ENUM_resultcode_success) {
+-		memcpy(pda->buf, msg.pda.data, HFA384x_PDA_LEN_MAX);
++	} else if (msg->resultcode.data == P80211ENUM_resultcode_success) {
++		memcpy(pda->buf, msg->pda.data, HFA384x_PDA_LEN_MAX);
+ 		result = mkpdrlist(pda);
+ 	} else {
+ 		/* resultcode must've been something other than success */
+ 		result = -1;
+ 	}
+ 
++	kfree(msg);
+ 	return result;
+ }
+ 
+-- 
+2.6.3
+
