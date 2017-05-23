@@ -1,0 +1,55 @@
+# Maintainer: l3iggs <l3iggs@live.com>
+
+buildarch=4
+
+pkgname=linux-imx6-7
+pkgdesc="Linux kernel and modules suitable for systems with Freescale's i.MX6 or i.MX7 processors"
+_kernel_series=v4.x
+pkgver=4.1
+pkgrel=1
+arch=('armv7h')
+url="http://www.kernel.org/"
+license=('GPL2')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools')
+options=('!strip')
+source=("http://www.kernel.org/pub/linux/kernel/${_kernel_series}/linux-${pkgver}.tar.xz" "config.stub")
+md5sums=('fe9dc0f6729f36400ea81aa41d614c37'
+         '89286875da749425677e4efb112e962d')
+
+prepare() {
+  cd "${srcdir}/linux-${pkgver}"
+
+  make imx_v6_v7_defconfig
+  scripts/kconfig/merge_config.sh -r .config "${srcdir}/config.stub"
+
+  # add pkgrel to extraversion
+  sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
+
+  # don't run depmod on 'make install'. We'll do this ourselves in packaging
+  sed -i '2iexit 0' scripts/depmod.sh
+}
+
+build() {
+  cd "${srcdir}/linux-${pkgver}"
+
+  # get kernel version
+  make prepare
+
+  make ${MAKEFLAGS} zImage modules dtbs
+}
+
+package() {
+  cd "${srcdir}/linux-${pkgver}"
+
+  _kernver="$(make kernelrelease)"
+
+  # set correct depmod command for install
+  sed \
+    -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
+    -i "${startdir}/${pkgname}.install"
+
+  INSTALL_MOD_PATH="${pkgdir}/usr" make modules_install
+  INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" make dtbs_install
+  install -m755 "${srcdir}/linux-${pkgver}/arch/arm/boot/zImage" "${pkgdir}/boot/zImage"
+  INSTALL_PATH="${pkgdir}/boot" make zinstall
+}
