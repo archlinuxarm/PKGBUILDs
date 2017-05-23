@@ -1,0 +1,109 @@
+# $Id$
+# Contributor: John Sowiak <john@archlinux.org>
+# Contributor: tobias <tobias@archlinux.org>
+# Maintainer: Sven-Hendrik Haase <sh@lutzhaase.com>
+
+# ALARM: Popolon <popolon@popolon.org>
+#  - patch to fix building on non-x86 platforms (this doesn't add neon optimized code)
+
+# Sometimes blender.org takes some time to release patch releases and because Arch users
+# are impatient, we sometimes need to build from git directly.
+# Update because I get so many queries on this:
+# Due to our other rolling deps, it's sometimes not possible to build Blender stable releases.
+# More often than not, a new openshadinglanguage breaks it and I could either backport fixes
+# or simply roll with a new version. I usually choose the latter when the former seems
+# unreasonable.
+
+_gittag=v2.76
+#_gitcommit=e24ea81d65416d778ded6c7b9698dd673e2ed6b9
+
+pkgname=blender
+pkgver=2.76
+#[[ -n $_gitcommit ]] && pkgver=${pkgver}.git1.${_gitcommit}
+pkgrel=2
+epoch=17
+pkgdesc="A fully integrated 3D graphics creation suite"
+arch=('i686' 'x86_64' 'armv7h')
+license=('GPL')
+url="http://www.blender.org"
+depends=('libpng' 'libtiff' 'openexr' 'python' 'desktop-file-utils' 'python-requests'
+         'shared-mime-info' 'hicolor-icon-theme' 'xdg-utils' 'glew' 'openjpeg'
+         'freetype2' 'openal' 'ffmpeg' 'fftw' 'boost-libs' 'opencollada'
+         'openimageio' 'libsndfile' 'jack' 'opencolorio' 'openshadinglanguage'
+         'jemalloc' 'libspnav' 'ptex' 'opensubdiv')
+makedepends=('cmake' 'boost' 'mesa' 'git' 'llvm35')
+[[ $CARCH == x86_64 ]] && makedepends+=('cuda')
+optdepends=('cuda: cycles renderer cuda support')
+options=(!strip)
+install=blender.install
+source=("git://git.blender.org/blender-addons.git"
+        "git://git.blender.org/blender-addons-contrib.git"
+        "git://git.blender.org/blender-translations.git"
+        "git://git.blender.org/scons.git"
+        blender-2.76.arm-neon.patch)
+if [[ -n $_gittag ]]; then
+    source+=("${pkgname}-${pkgver}::git://git.blender.org/blender.git#tag=${_gittag}")
+else
+    source+=("${pkgname}-${pkgver}::git://git.blender.org/blender.git#commit=${_gitcommit}")
+fi
+md5sums=('SKIP'
+         'SKIP'
+         'SKIP'
+         'SKIP'
+         '56b9067f6920fa3ec3a1c9bf4d6382dd'
+         'SKIP')
+
+prepare() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  git submodule init
+  git config submodule."release/scripts/addons".url ${srcdir}/blender-addons
+  git config submodule."release/scripts/addons_contrib".url ${srcdir}/blender-addons-contrib
+  git config submodule."release/datafiles/locale".url ${srcdir}/blender-translations
+  git config submodule."scons".url ${srcdir}/scons
+  git submodule update
+}
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  # qnd patch
+#  sed -i 's/^#include <x86intrin.h>//g' intern/cycles/util/util_optimization.h
+  patch -p0 -i ../blender-2.76.arm-neon.patch
+
+  if [ ! -d build ]; then
+   mkdir build
+  fi
+  cd build
+
+  [[ $CARCH == i686 ]] && BUILDCUDA="OFF" || BUILDCUDA="ON"
+  cmake -C../build_files/cmake/config/blender_full.cmake .. \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DWITH_INSTALL_PORTABLE=OFF \
+    -DWITH_PYTHON_INSTALL=OFF \
+    -DOPENIMAGEIO_ROOT_DIR=/usr \
+    -DWITH_LLVM=ON \
+    -DWITH_SYSTEM_OPENJPEG=ON \
+    -DWITH_GL_PROFILE_CORE=OFF \
+    -DWITH_GL_PROFILE_ES20=OFF \
+    -DLLVM_VERSION=3.5 \
+    -DLLVM_STATIC=ON \
+    -DWITH_CYCLES_CUDA_BINARIES=$BUILDCUDA \
+    -DWITH_CYCLES_OSL=ON \
+    -DWITH_CYCLES_PTEX=ON \
+    -DWITH_OPENSUBDIV=ON \
+    -DPYTHON_VERSION=3.5 \
+    -DPYTHON_LIBPATH=/usr/lib \
+    -DPYTHON_LIBRARY=python3.5m \
+    -DPYTHON_INCLUDE_DIRS=/usr/include/python3.5m
+  make -j4
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver/build"
+
+  make DESTDIR="${pkgdir}" install
+  python -m compileall "${pkgdir}/usr/share/blender"
+  python -O -m compileall "${pkgdir}/usr/share/blender"
+}
