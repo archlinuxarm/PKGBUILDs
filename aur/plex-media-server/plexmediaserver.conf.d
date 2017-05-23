@@ -1,3 +1,5 @@
+LC_ALL=en_US.UTF-8
+LANG=en_US.UTF-8
 LD_LIBRARY_PATH=/opt/plexmediaserver
 PLEX_MEDIA_SERVER_HOME=/opt/plexmediaserver
 PLEX_MEDIA_SERVER_APPLICATION_SUPPORT_DIR=/var/lib/plex
