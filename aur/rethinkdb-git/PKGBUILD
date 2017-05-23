@@ -1,0 +1,55 @@
+# Maintainer: Marc McIntosh <email@marcmcintosh.ninja>
+pkgname=rethinkdb-git
+_tag=rethinkdb
+pkgrel=1
+pkgdesc="Distributed powerful and scalable NoSQL database packaged for ARMv7h"
+url="http://rethinkdb.com/"
+arch=('armv6h' 'armv7h')
+license=('AGLP')
+depends=('protobuf' 'ncurses' 'curl' 'icu')
+makedepends=('git' 'boost' 'python2' 'wget')
+backup=(etc/rethinkdb/instances.d/default.conf)
+install="rethinkdb.install"
+options=(!emptydirs)
+source=( git+https://github.com/MarcMcIntosh/rethinkdb
+	rethinkdb.service
+	rethinkdb-tmpfile.conf
+)
+md5sums=('SKIP'
+         '813e87ef4c66cde9775342919d5e66ae'
+         '2212a40cf71209f1b0b05d2cf272e651')
+prepare() {
+  mkdir "${srcdir}/bin"
+  ln -s /usr/bin/python2 ${srcdir}/bin/python
+  [[ $CARCH == "armv7h" ]] && sed -e 's|-Darm_version=6 -Darm_fpu=vfpv2|-Darm_version=7 -Darm_fpu=vfpv3-d16 -Darm_float_abi=hard|' -i ${srcdir}/${_tag}/mk/support/pkg/v8.sh 
+}
+pkgver() {
+  cd "${srcdir}/${_tag}" 
+  ( set -o pipefail git describe --long 2>/dev/null \
+    | sed 's/\([^-]*-g\)/r\1/;s/-/./g'  || printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)" )
+}
+build() {
+  cd "${srcdir}/${_tag}"
+  export PATH=${srcdir}/bin:$PATH
+  ./configure \
+    --with-system-malloc \
+    --allow-fetch \
+    --fetch v8 \
+    --fetch re2 \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var
+  make ALLOW_WARNINGS=1
+}
+package() {
+  cd $_tag
+  make DESTDIR="$pkgdir" install
+  install -Dm644 "$srcdir"/rethinkdb-tmpfile.conf "$pkgdir"/usr/lib/tmpfiles.d/rethinkdb.conf
+  install -Dm644 "$srcdir"/rethinkdb.service "$pkgdir"/usr/lib/systemd/system/rethinkdb@.service
+  mv "$pkgdir"/etc/rethinkdb/default.conf.sample "$pkgdir"/etc/rethinkdb/instances.d/default.conf
+  sed -e 's|# directory=/var/lib/rethinkdb|directory=/var/lib/rethinkdb|' \
+    -e 's|# pid-file=/var/run/rethinkdb/rethinkdb.pid|pid-file=/var/run/rethinkdb/default.pid |' \
+    -i "$pkgdir"/etc/rethinkdb/instances.d/default.conf
+  rm -r "$pkgdir"/etc/init.d
+  rm -rf ${srcdir}/bin
+}
