@@ -7,9 +7,8 @@
 
 pkgbase=mariadb
 pkgname=('libmariadbclient' 'mariadb-clients' 'mytop' 'mariadb')
-pkgver=10.1.23
-_pkgver=${pkgver/.a/a}
-pkgrel=2
+pkgver=10.1.24
+pkgrel=1
 arch=('i686' 'x86_64')
 license=('GPL')
 url='http://mariadb.org/'
@@ -20,14 +19,14 @@ source=("https://ftp.heanet.ie/mirrors/mariadb/mariadb-$pkgver/source/mariadb-$p
         '0001-openssl-1-1-0.patch'
         'mariadb-sysusers.conf'
         'mariadb-tmpfile.conf')
-sha256sums=('54d8114e24bfa5e3ebdc7d69e071ad1471912847ea481b227d204f9d644300bf'
+sha256sums=('b3df99ae5b1ec8cf6cede4cbc4ae3f54ce66464549cba6d56d9ff4d24e4d551e'
             'SKIP'
-            'f337505ce421aea82693ab95372ce93fde3ea0351e0b6b78c26c9e1154df174c'
+            '41d80d3ff78251bd3e05ed5c40b63e4ac71153832a00c86443be5a111daad354'
             'e1a22777c65854041f16fc0a2db3218d17b4d7e7ec7ab7a77cf49c71277c1515'
             '2af318c52ae0fe5428e8a9245d1b0fc3bc5ce153842d1563329ceb1edfa83ddd')
 
 prepare() {
-  cd $pkgbase-$_pkgver/
+  cd $pkgbase-$pkgver/
 
   # Changes to the upstream unit files:
   #  * remove the alias from unit files, we install symlinks in package function
@@ -44,7 +43,7 @@ build() {
   mkdir build
   cd build
 
-  cmake ../$pkgbase-$_pkgver \
+  cmake ../$pkgbase-$pkgver \
     -DCMAKE_AR=/usr/bin/gcc-ar \
     -DCMAKE_RANLIB=/usr/bin/gcc-ranlib \
     -DBUILD_CONFIG=mysql_release \
@@ -96,21 +95,21 @@ package_libmariadbclient() {
   pkgdesc='MariaDB client libraries'
   depends=('openssl' 'libaio' 'zlib' 'pcre' 'lz4' 'lzo' 'xz')
   conflicts=('libmysqlclient')
-  provides=("libmysqlclient=$pkgver")
-  options=('staticlibs')
 
   cd build
-  for dir in include libmysql libmysqld libservices; do
+
+  for dir in libmysql libmysqld libservices include; do
     make -C $dir DESTDIR="$pkgdir" install
   done
 
-  install -Dm0755 scripts/mysql_config "$pkgdir"/usr/bin/mysql_config
-  install -d "$pkgdir"/usr/share/man/man1
-  for man in mysql_config mysql_client_test_embedded mysqltest_embedded; do
-    install -m0644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
-  done
+  install -D -m0755 scripts/mysql_config "$pkgdir"/usr/bin/mysql_config
+  install -D -m0644 "$srcdir"/$pkgbase-$pkgver/man/mysql_config.1 "$pkgdir"/usr/share/man/man1/mysql_config.1
 
-  rm "$pkgdir"/usr/lib/libmysql{client,client_r,d}.a
+  install -D -m0644 support-files/mariadb.pc "$pkgdir"/usr/share/pkgconfig/mariadb.pc
+  install -D -m0644 "$srcdir"/$pkgbase-$pkgver/support-files/mysql.m4 "$pkgdir"/usr/share/aclocal/mysql.m4
+
+  # remove static libraries
+  rm "$pkgdir"/usr/lib/*.a
 }
 
 package_mariadb-clients() {
@@ -120,17 +119,13 @@ package_mariadb-clients() {
   provides=("mysql-clients=$pkgver")
 
   cd build
+
   make -C client DESTDIR="$pkgdir" install
 
   # install man pages
-  install -d "$pkgdir"/usr/share/man/man1
-  for man in mysql mysqladmin mysqlcheck mysqldump mysqlimport mysqlshow mysqlslap; do
-    install -m0644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
+  for man in mysql mysql_plugin mysql_upgrade mysqladmin mysqlbinlog mysqlcheck mysqldump mysqlimport mysqlshow mysqlslap mysqltest; do
+    install -D -m0644 "$srcdir"/$pkgbase-$pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
   done
-
-  # provided by mariadb
-  rm "$pkgdir"/usr/bin/{mysql_{plugin,upgrade},mysqlbinlog,mysqltest}
-
 }
 
 package_mytop() {
@@ -138,12 +133,14 @@ package_mytop() {
   depends=('perl' 'perl-dbd-mysql' 'perl-term-readkey')
 
   cd build
+
   install -Dm0755 scripts/mytop "$pkgdir"/usr/bin/mytop
 }
 
 package_mariadb() {
   pkgdesc='Fast SQL database server, drop-in replacement for MySQL'
-  backup=('etc/mysql/my.cnf')
+  backup=('etc/mysql/my.cnf'
+          'etc/mysql/wsrep.cnf')
   install=mariadb.install
   depends=("mariadb-clients=${pkgver}" 'inetutils' 'libaio' 'libxml2' 'pcre' 'jemalloc'
            'lz4' 'boost-libs' 'lzo' 'libevent' 'libsystemd')
@@ -153,6 +150,7 @@ package_mariadb() {
   options=('emptydirs')
 
   cd build
+
   make DESTDIR="$pkgdir" install
 
   cd "$pkgdir"
@@ -162,6 +160,7 @@ package_mariadb() {
   # TOOD: Change to upstream file layout with version 10.2.x?
   rm -r etc/
   install -Dm0644 usr/share/mysql/my-medium.cnf etc/mysql/my.cnf
+  install -Dm0644 usr/share/mysql/wsrep.cnf etc/mysql/wsrep.cnf
 
   install -Dm0644 "${srcdir}"/mariadb-tmpfile.conf usr/lib/tmpfiles.d/mariadb.conf
   install -Dm0644 "${srcdir}"/mariadb-sysusers.conf usr/lib/sysusers.d/mariadb.conf
@@ -171,11 +170,6 @@ package_mariadb() {
   install -dm0700 var/lib/mysql
   chown -R 89:89 var/lib/mysql &>/dev/null
 
-  # move aclocal and pkgconfig files
-  install -D -m0644 usr/share/mysql/aclocal/mysql.m4 usr/share/aclocal/mysql.m4
-  install -D -m0644 usr/share/mysql/pkgconfig/mariadb.pc usr/share/pkgconfig/mariadb.pc
-  rm -r usr/share/mysql/{aclocal,pkgconfig}
- 
   # move to proper licenses directories
   install -d usr/share/licenses/mariadb
   mv usr/share/doc/mariadb/COPYING* usr/share/licenses/mariadb/
@@ -184,14 +178,15 @@ package_mariadb() {
   rm -r usr/share/mysql/systemd/
 
   # provided by libmariadbclient
-  rm usr/bin/{mysql_config,mysql_client_test_embedded,mysqltest_embedded}
+  rm usr/bin/mysql_config
   rm usr/lib/libmysql*
+  rm usr/share/man/man1/mysql_config.1
   rm -r usr/include/
-  rm usr/share/man/man1/{mysql_config,mysql_client_test_embedded,mysqltest_embedded}.1
+  rm -r usr/share/mysql/{aclocal,pkgconfig}
 
   # provided by mariadb-clients
-  rm usr/bin/{mysql,mysqladmin,mysqlcheck,mysqldump,mysqlimport,mysqlshow,mysqlslap}
-  rm usr/share/man/man1/{mysql,mysqladmin,mysqlcheck,mysqldump,mysqlimport,mysqlshow,mysqlslap}.1
+  rm usr/bin/{mysql,mysql_plugin,mysql_upgrade,mysqladmin,mysqlbinlog,mysqlcheck,mysqldump,mysqlimport,mysqlshow,mysqlslap,mysqltest}
+  rm usr/share/man/man1/{mysql,mysql_plugin,mysql_upgrade,mysqladmin,mysqlbinlog,mysqlcheck,mysqldump,mysqlimport,mysqlshow,mysqlslap,mysqltest}.1
 
   # provided by mytop
   rm usr/bin/mytop
