@@ -3,39 +3,45 @@
 # Contributer: Dave Higham <pepedog@archlinuxarm.org>
 
 buildarch=4
+
 pkgbase=linux-utilite
-_commit=a1af73cc39fa38f98018562e0a783362e1ef4bba
-_srcname=utilite-${_commit}
+_srcname="rel_imx_4.1.15_1.1.1_patch"
 _kernelname=${pkgbase#linux}
 _desc="CompuLab Utilite alternate kernel"
-pkgver=3.0.35
-pkgrel=18
+pkgver=4.1.15
+pkgrel=1
 arch=('armv7h')
 url="https://github.com/wolfgar/utilite/tree/devel"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'uboot-mkimage')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'uboot-mkimage' 'lzop')
 options=('!strip')
-source=("https://github.com/wolfgar/utilite/archive/${_commit}.tar.gz"
+source=("http://git.freescale.com/git/cgit.cgi/imx/linux-2.6-imx.git/snapshot/rel_imx_4.1.15_1.1.1_patch.tar.bz2"
+        "http://www.compulab.com/wp-content/uploads/2017/01/cm-fx6_linux_2017-01-11.zip"
+        'Fix-the-compile-issue-under-gcc6.patch'
         'config'
-        'https://raw.github.com/Freescale/meta-fsl-arm/46de5ee9dec3486c3e081f9f39ac1a0f967afd54/recipes-kernel/linux/linux-imx-3.0.35/ENGR00278350-gpu-viante-4.6.9p13-kernel-part-integra.patch'
-        'sd8787_uapsta.bin.ihex.tar.gz')
+        'linux.preset'
+        '99-linux.hook')
 
-md5sums=('fb70368d8fba959c85edfb2317e5a951'
-         'a318d5475e0ef6fd0681b2f4f64b0ff3'
-         '41941771adfed8b55574a7434d2c3393'
-         'ea1f9de6fa07294481df3c89f30ae303')
+md5sums=('450bc8c20cf2285316a3764a189fdc67'
+         '5c0e841e6c5ba19bc16f5e915e43a22b'
+         'd2faae2634ba2115a3cde201165970fd'
+         '3f4da3bad807f139c3752b3b687d5bac'
+         '63b4d7aebff66bdb4b0a825e761d9656'
+         '79fa396e3f9a09a85156d6d7c2d34b58')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
+  # Apply CM-FX6 patch
+  patch -Np1 -i "${srcdir}/cm-fx6-linux/kernel/linux-4.1.15-cm-fx6-8.0.patch"
+
+  # Apply GCC6 patch
+  patch -Np1 -i "${srcdir}/Fix-the-compile-issue-under-gcc6.patch"
+
+  # Apply GCC7 patch
+  cp include/linux/compiler-gcc6.h include/linux/compiler-gcc7.h
+
   cat "${srcdir}/config" > ./.config
-
-  # Add builtin firmware
-  mkdir firmware/mrvl
-  cp ../sd8787_uapsta.bin.ihex firmware/mrvl/
-
-  # allow use of 3.10.17 gpu binaries
-  patch --ignore-whitespace -p1 < ../ENGR00278350-gpu-viante-4.6.9p13-kernel-part-integra.patch
 
   # add pkgrel to extraversion
   sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
@@ -72,16 +78,21 @@ build() {
 
   #yes "" | make config
 
+  # Get all FX6 dts files
+  DTB=$(ls -al arch/arm/boot/dts | awk '(/fx6.*dts$/)&&($0=$NF)&&(gsub(/dts/,"dtb"))' ORS=" ")
+
   # build!
-  make ${MAKEFLAGS} uImage modules
+  make ${MAKEFLAGS} zImage modules ${DTB}
 }
 
 _package() {
   pkgdesc="The Linux Kernel and modules - ${_desc}"
   depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
+  backup=("etc/mkinitcpio.d/${pkgbase}.preset")
   provides=('kernel26' "linux=${pkgver}")
   conflicts=('linux')
+  replaces=('linux-armv7')
   install=${pkgname}.install
 
   cd "${srcdir}/${_srcname}"
@@ -95,7 +106,8 @@ _package() {
 
   mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
-  cp arch/$KARCH/boot/uImage "${pkgdir}/boot/uImage"
+  cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
+  cp arch/arm/boot/dts/*fx6*.dtb "${pkgdir}/boot/"
 
   # set correct depmod command for install
   sed \
@@ -103,17 +115,28 @@ _package() {
     -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
     -i "${startdir}/${pkgname}.install"
 
+  # install mkinitcpio preset file for kernel
+  install -D -m644 "${srcdir}/linux.preset" "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
+  sed \
+    -e "1s|'linux.*'|'${pkgbase}'|" \
+    -e "s|ALL_kver=.*|ALL_kver=\"${_kernver}\"|" \
+    -i "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
+
+  # install pacman hook for initramfs regeneration
+  sed "s|%PKGBASE%|${pkgbase}|g" "${srcdir}/99-linux.hook" |
+    install -D -m644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/99-${pkgbase}.hook"
+
   # remove build and source links
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
   # remove the firmware
   rm -rf "${pkgdir}/lib/firmware"
   # gzip -9 all modules to save 100MB of space
-  find "${pkgdir}" -name '*.ko' |xargs -P 2 -n 1 gzip -9
+  #find "${pkgdir}" -name '*.ko' |xargs -P 2 -n 1 gzip -9
   # make room for external modules
-  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
+  ln -s "../extramodules-${_basekernel}${_kernelname:--ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
   # add real version for building modules and running depmod from post_install/upgrade
-  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
-  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
+  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}${_kernelname:--ARCH}"
+  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}${_kernelname:--ARCH}/version"
 
   # Now we call depmod...
   depmod -b "$pkgdir" -F System.map "$_kernver"
@@ -130,82 +153,106 @@ _package-headers() {
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
 
-  cd "${pkgdir}/usr/lib/modules/${_kernver}"
-  ln -sf ../../../src/linux-${_kernver} build
-
   cd "${srcdir}/${_srcname}"
   install -D -m644 Makefile \
-    "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
+    "${pkgdir}/usr/lib/modules/${_kernver}/build/Makefile"
   install -D -m644 kernel/Makefile \
-    "${pkgdir}/usr/src/linux-${_kernver}/kernel/Makefile"
+    "${pkgdir}/usr/lib/modules/${_kernver}/build/kernel/Makefile"
   install -D -m644 .config \
-    "${pkgdir}/usr/src/linux-${_kernver}/.config"
+    "${pkgdir}/usr/lib/modules/${_kernver}/build/.config"
 
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/include"
 
-  for i in acpi asm-generic config crypto drm generated linux math-emu \
-    media net pcmcia scsi sound trace video xen; do
-    cp -a include/${i} "${pkgdir}/usr/src/linux-${_kernver}/include/"
+  for i in acpi asm-generic config crypto drm generated keys linux math-emu \
+    media net pcmcia scsi soc sound trace uapi video xen; do
+    cp -a include/${i} "${pkgdir}/usr/lib/modules/${_kernver}/build/include/"
   done
 
   # copy arch includes for external modules
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH
-  cp -a arch/$KARCH/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/
-#  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-mx6
-#  cp -a arch/$KARCH/mach-mx6/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/mach-mx6/
-  mkdir -p ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-mxc
-  cp -a arch/$KARCH/plat-mxc/include ${pkgdir}/usr/src/linux-${_kernver}/arch/$KARCH/plat-mxc/
+  mkdir -p ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH
+  cp -a arch/$KARCH/include ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/
+#  for i in dove exynos omap2; do
+#    mkdir -p ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/mach-${i}
+#    cp -a arch/$KARCH/mach-${i}/include ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/mach-${i}/
+#  done
+#  for i in omap orion samsung versatile; do
+#    mkdir -p ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/plat-${i}
+#    cp -a arch/$KARCH/plat-${i}/include ${pkgdir}/usr/lib/modules/${_kernver}/build/arch/$KARCH/plat-${i}/
+#  done
 
   # copy files necessary for later builds, like nvidia and vmware
-  cp Module.symvers "${pkgdir}/usr/src/linux-${_kernver}"
-  cp -a scripts "${pkgdir}/usr/src/linux-${_kernver}"
+  cp Module.symvers "${pkgdir}/usr/lib/modules/${_kernver}/build"
+  cp -a scripts "${pkgdir}/usr/lib/modules/${_kernver}/build"
 
   # fix permissions on scripts dir
-  chmod og-w -R "${pkgdir}/usr/src/linux-${_kernver}/scripts"
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/.tmp_versions"
+  chmod og-w -R "${pkgdir}/usr/lib/modules/${_kernver}/build/scripts"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/.tmp_versions"
 
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/arch/${KARCH}/kernel"
 
-  cp arch/${KARCH}/Makefile "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/"
+  cp arch/${KARCH}/Makefile "${pkgdir}/usr/lib/modules/${_kernver}/build/arch/${KARCH}/"
 
-  if [ "${CARCH}" = "i686" ]; then
-    cp arch/${KARCH}/Makefile_32.cpu "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/"
-  fi
-
-  cp arch/${KARCH}/kernel/asm-offsets.s "${pkgdir}/usr/src/linux-${_kernver}/arch/${KARCH}/kernel/"
+  cp arch/${KARCH}/kernel/asm-offsets.s "${pkgdir}/usr/lib/modules/${_kernver}/build/arch/${KARCH}/kernel/"
 
   # add docbook makefile
   install -D -m644 Documentation/DocBook/Makefile \
-    "${pkgdir}/usr/src/linux-${_kernver}/Documentation/DocBook/Makefile"
+    "${pkgdir}/usr/lib/modules/${_kernver}/build/Documentation/DocBook/Makefile"
 
   # add dm headers
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/drivers/md"
-  cp drivers/md/*.h "${pkgdir}/usr/src/linux-${_kernver}/drivers/md"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/md"
+  cp drivers/md/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/md"
 
   # add inotify.h
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/include/linux"
-  cp include/linux/inotify.h "${pkgdir}/usr/src/linux-${_kernver}/include/linux/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/include/linux"
+  cp include/linux/inotify.h "${pkgdir}/usr/lib/modules/${_kernver}/build/include/linux/"
 
   # add wireless headers
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
-  cp net/mac80211/*.h "${pkgdir}/usr/src/linux-${_kernver}/net/mac80211/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/net/mac80211/"
+  cp net/mac80211/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/net/mac80211/"
+
+  # add dvb headers for external modules
+  # in reference to:
+  # http://bugs.archlinux.org/task/9912
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-core"
+  cp drivers/media/dvb-core/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-core/"
+  # and...
+  # http://bugs.archlinux.org/task/11194
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/include/config/dvb/"
+  cp include/config/dvb/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/include/config/dvb/"
+
+  # add dvb headers for http://mcentral.de/hg/~mrec/em28xx-new
+  # in reference to:
+  # http://bugs.archlinux.org/task/13146
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-frontends/"
+  cp drivers/media/dvb-frontends/lgdt330x.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-frontends/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/i2c/"
+  cp drivers/media/i2c/msp3400-driver.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/i2c/"
+
+  # add dvb headers
+  # in reference to:
+  # http://bugs.archlinux.org/task/20402
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/usb/dvb-usb"
+  cp drivers/media/usb/dvb-usb/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/usb/dvb-usb/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-frontends"
+  cp drivers/media/dvb-frontends/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-frontends/"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/tuners"
+  cp drivers/media/tuners/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/tuners/"
 
   # add xfs and shmem for aufs building
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs"
-  mkdir -p "${pkgdir}/usr/src/linux-${_kernver}/mm"
-  cp fs/xfs/xfs_sb.h "${pkgdir}/usr/src/linux-${_kernver}/fs/xfs/xfs_sb.h"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/fs/xfs"
+  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/mm"
 
   # copy in Kconfig files
-  for i in `find . -name "Kconfig*"`; do
-    mkdir -p "${pkgdir}"/usr/src/linux-${_kernver}/`echo ${i} | sed 's|/Kconfig.*||'`
-    cp ${i} "${pkgdir}/usr/src/linux-${_kernver}/${i}"
+  for i in $(find . -name "Kconfig*"); do
+    mkdir -p "${pkgdir}"/usr/lib/modules/${_kernver}/build/`echo ${i} | sed 's|/Kconfig.*||'`
+    cp ${i} "${pkgdir}/usr/lib/modules/${_kernver}/build/${i}"
   done
 
-  chown -R root.root "${pkgdir}/usr/src/linux-${_kernver}"
-  find "${pkgdir}/usr/src/linux-${_kernver}" -type d -exec chmod 755 {} \;
+  chown -R root.root "${pkgdir}/usr/lib/modules/${_kernver}/build"
+  find "${pkgdir}/usr/lib/modules/${_kernver}/build" -type d -exec chmod 755 {} \;
 
   # strip scripts directory
-  find "${pkgdir}/usr/src/linux-${_kernver}/scripts" -type f -perm -u+w 2>/dev/null | while read binary ; do
+  find "${pkgdir}/usr/lib/modules/${_kernver}/build/scripts" -type f -perm -u+w 2>/dev/null | while read binary ; do
     case "$(file -bi "${binary}")" in
       *application/x-sharedlib*) # Libraries (.so)
         /usr/bin/strip ${STRIP_SHARED} "${binary}";;
@@ -215,9 +262,8 @@ _package-headers() {
         /usr/bin/strip ${STRIP_BINARIES} "${binary}";;
     esac
   done
-
   # remove unneeded architectures
-  rm -rf "${pkgdir}"/usr/src/linux-${_kernver}/arch/{alpha,arm26,avr32,blackfin,cris,frv,h8300,ia64,m32r,m68k,m68knommu,mips,microblaze,mn10300,parisc,powerpc,ppc,s390,sh,sh64,sparc,sparc64,um,v850,x86,xtensa}
+  rm -rf "${pkgdir}"/usr/lib/modules/${_kernver}/build/arch/{alpha,arc,arm26,arm64,avr32,blackfin,c6x,cris,frv,h8300,hexagon,ia64,m32r,m68k,m68knommu,metag,mips,microblaze,mn10300,openrisc,parisc,powerpc,ppc,s390,score,sh,sh64,sparc,sparc64,tile,unicore32,um,v850,x86,xtensa}
 }
 
 pkgname=("${pkgbase}" "${pkgbase}-headers")
