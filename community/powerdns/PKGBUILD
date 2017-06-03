@@ -1,0 +1,101 @@
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Contributor: Alexander Rødseth <rodseth@gmail.com>
+# Contributor: Jan de Groot <jgc@archlinux.org>
+# Contributor: Kevin Mihelich <kevin@archlinuxarm.org>
+# Contributor: Remi Gacogne <rgacogne[at]archlinux[dot]org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - explicitly link v5/v6 with libatomic
+
+pkgname=powerdns
+pkgver=4.0.3
+pkgrel=5
+pkgdesc='Authoritative DNS server'
+url='http://www.powerdns.com/'
+arch=('i686' 'x86_64')
+license=('GPL2')
+depends=('boost-libs' 'libsodium' 'systemd' 'lua' 'openssl' 'protobuf' 'sqlite')
+makedepends=('boost' 'setconf' 'libmariadbclient' 'postgresql-libs' 'lua' 'libldap'
+             'sqlite' 'geoip' 'yaml-cpp' 'pkg-config')
+optdepends=('libmariadbclient: MariaDB/MySQL backend'
+            'postgresql-libs: PostgreSQL backend'
+            'libldap: LDAP backend'
+            'geoip: GeoIP backend'
+            'yaml-cpp: GeoIP backend')
+provides=('pdns')
+conflicts=('pdns')
+backup=('etc/powerdns/pdns.conf')
+source=(https://downloads.powerdns.com/releases/pdns-${pkgver}.tar.bz2{,.asc}
+        fix-${pkgver}-tests.patch)
+sha512sums=('58d33ac6cf457a916bae6abd8d2dc17f76fbcd1bd9e649948584dd669f5596b43e3e4d91841700ea1ea2cd1ac102749e503cd9075273540f33a2321e20d8bfc2'
+            'SKIP'
+            '9f6b3d794495c21280f1077b644dd6ecc10112823806c9a4db9b0819445e6450eb1a874c95199e918b7a1ad09e83192cc09d3ecf02d11b7da7488e6e03c3810a')
+validpgpkeys=('B76CD4671C0968BAA87DE61C5E50715BF2FFE1A7') # Pieter Lexis <pieter.lexis@powerdns.com>
+
+prepare() {
+  cd pdns-${pkgver}
+  patch -p1 < "${srcdir}/fix-${pkgver}-tests.patch"
+
+  # Default settings
+  for keyvalue in \
+    allow-recursion=127.0.0.1 \
+    chroot=/var/empty \
+    config-dir=/etc/powerdns \
+    daemon=no \
+    distributor-threads=3 \
+    guardian=no \
+    local-port=53 \
+    loglevel=3 \
+    module-dir=/usr/lib/powerdns \
+    setgid=nobody \
+    setuid=nobody \
+    socket-dir=/var/run \
+    webserver=no
+  do
+    setconf -a pdns.conf "${keyvalue}"
+  done
+
+  # Using simple so we can bind it to a chroot
+  sed 's|notify|simple|' -i pdns/pdns.service.in
+}
+
+build() {
+  cd pdns-${pkgver}
+  [[ $CARCH == arm || $CARCH == armv6h ]] && LIBS="-latomic"
+  LIBS=$LIBS ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc/powerdns \
+    --libexecdir=/usr/lib \
+    --libdir=/usr/lib \
+    --mandir=/usr/share/man \
+    --with-modules='' \
+    --with-dynmodules="bind gmysql geoip gpgsql gsqlite3 ldap lua pipe random remote" \
+    --docdir=/usr/share/doc/powerdns \
+    --sbindir=/usr/bin \
+    --bindir=/usr/bin \
+    --with-sqlite3 \
+    --enable-libsodium \
+    --enable-tools \
+    --disable-dependency-tracking \
+    --disable-silent-rules \
+    --enable-reproducible \
+    --enable-unit-tests \
+    --enable-systemd
+  make
+}
+
+check() {
+  make -C pdns-${pkgver} check
+}
+
+package() {
+  cd pdns-${pkgver}
+  make DESTDIR="${pkgdir}" install
+  # apply defaults to generated pdns.conf
+  mv "${pkgdir}/etc/powerdns/pdns.conf"{-dist,}
+  cat pdns.conf >> "${pkgdir}/etc/powerdns/pdns.conf"
+  # adjust modules dir to match pkgname
+  mv "${pkgdir}/usr/lib/"{pdns,powerdns}
+}
+
+# vim: ts=2 sw=2 et:
