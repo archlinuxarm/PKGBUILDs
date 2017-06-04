@@ -43,8 +43,9 @@ build() {
 
   [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,imx"
   [[ $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",vc4"
+  [[ $CARCH == arm || $CARCH == armv6h ]] && LIBS="-latomic"
 
-  ./configure --prefix=/usr \
+  LIBS=$LIBS ./configure --prefix=/usr \
     --sysconfdir=/etc \
     --with-dri-driverdir=/usr/lib/xorg/modules/dri \
     --with-gallium-drivers=freedreno,nouveau,swrast,virgl${GALLIUM} \
