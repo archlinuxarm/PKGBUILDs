@@ -1,0 +1,118 @@
+From 27bab2297187099229a1e4304d8feb866c8da55a Mon Sep 17 00:00:00 2001
+From: "dongseong.hwang" <dongseong.hwang@intel.com>
+Date: Tue, 18 Apr 2017 16:44:55 -0700
+Subject: [PATCH] ClientNativePixmapFactoryDmabuf uses ioctl, instead of
+ drmIoctl.
+
+DMA_BUF_SYNC ioctl is not drmIoctl, because it uses dma-buf fd, instead of drm
+device fd.
+
+In addition, remove LOCAL_ prefix to fix build failure >= kernel 4.6
+
+Actually, ChromeOS doesn't need this local DMA_BUF_SYNC definition as all
+verion of kernel for cros has dma-buf.h header.
+https://chromium-review.googlesource.com/c/459544/
+However, there is not any way to distinguish real ChromeOS build and
+current_os="chromeos" build, so remain the local definition to ChromeOS as
+well.
+
+BUG=584248
+R=reveman@chromium.org
+
+Review-Url: https://codereview.chromium.org/2805503003
+Cr-Commit-Position: refs/heads/master@{#465425}
+---
+ ui/gfx/linux/client_native_pixmap_dmabuf.cc | 49 +++++++++++++----------------
+ 1 file changed, 21 insertions(+), 28 deletions(-)
+
+diff --git a/ui/gfx/linux/client_native_pixmap_dmabuf.cc b/ui/gfx/linux/client_native_pixmap_dmabuf.cc
+index d656c338f0a6..1bb441dc25ce 100644
+--- a/ui/gfx/linux/client_native_pixmap_dmabuf.cc
++++ b/ui/gfx/linux/client_native_pixmap_dmabuf.cc
+@@ -7,36 +7,35 @@
+ #include <fcntl.h>
+ #include <linux/version.h>
+ #include <stddef.h>
++#include <sys/ioctl.h>
+ #include <sys/mman.h>
+ #include <xf86drm.h>
+ 
+ #include "base/debug/crash_logging.h"
+ #include "base/memory/ptr_util.h"
++#include "base/posix/eintr_wrapper.h"
+ #include "base/process/memory.h"
+ #include "base/process/process_metrics.h"
+ #include "base/strings/stringprintf.h"
+ #include "base/trace_event/trace_event.h"
+ 
+-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 6, 0)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0)
++#include <linux/dma-buf.h>
++#else
+ #include <linux/types.h>
+ 
+-struct local_dma_buf_sync {
++struct dma_buf_sync {
+   __u64 flags;
+ };
+ 
+-#define LOCAL_DMA_BUF_SYNC_READ (1 << 0)
+-#define LOCAL_DMA_BUF_SYNC_WRITE (2 << 0)
+-#define LOCAL_DMA_BUF_SYNC_RW \
+-  (LOCAL_DMA_BUF_SYNC_READ | LOCAL_DMA_BUF_SYNC_WRITE)
+-#define LOCAL_DMA_BUF_SYNC_START (0 << 2)
+-#define LOCAL_DMA_BUF_SYNC_END (1 << 2)
++#define DMA_BUF_SYNC_READ (1 << 0)
++#define DMA_BUF_SYNC_WRITE (2 << 0)
++#define DMA_BUF_SYNC_RW (DMA_BUF_SYNC_READ | DMA_BUF_SYNC_WRITE)
++#define DMA_BUF_SYNC_START (0 << 2)
++#define DMA_BUF_SYNC_END (1 << 2)
+ 
+-#define LOCAL_DMA_BUF_BASE 'b'
+-#define LOCAL_DMA_BUF_IOCTL_SYNC \
+-  _IOW(LOCAL_DMA_BUF_BASE, 0, struct local_dma_buf_sync)
+-
+-#else
+-#include <linux/dma-buf.h>
++#define DMA_BUF_BASE 'b'
++#define DMA_BUF_IOCTL_SYNC _IOW(DMA_BUF_BASE, 0, struct dma_buf_sync)
+ #endif
+ 
+ namespace gfx {
+@@ -44,25 +43,19 @@ namespace gfx {
+ namespace {
+ 
+ void PrimeSyncStart(int dmabuf_fd) {
+-  struct local_dma_buf_sync sync_start = {0};
++  struct dma_buf_sync sync_start = {0};
+ 
+-  sync_start.flags = LOCAL_DMA_BUF_SYNC_START | LOCAL_DMA_BUF_SYNC_RW;
+-#if DCHECK_IS_ON()
+-  int rv =
+-#endif
+-      drmIoctl(dmabuf_fd, LOCAL_DMA_BUF_IOCTL_SYNC, &sync_start);
+-  DPLOG_IF(ERROR, rv) << "Failed DMA_BUF_SYNC_START";
++  sync_start.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_RW;
++  int rv = HANDLE_EINTR(ioctl(dmabuf_fd, DMA_BUF_IOCTL_SYNC, &sync_start));
++  PLOG_IF(ERROR, rv) << "Failed DMA_BUF_SYNC_START";
+ }
+ 
+ void PrimeSyncEnd(int dmabuf_fd) {
+-  struct local_dma_buf_sync sync_end = {0};
++  struct dma_buf_sync sync_end = {0};
+ 
+-  sync_end.flags = LOCAL_DMA_BUF_SYNC_END | LOCAL_DMA_BUF_SYNC_RW;
+-#if DCHECK_IS_ON()
+-  int rv =
+-#endif
+-      drmIoctl(dmabuf_fd, LOCAL_DMA_BUF_IOCTL_SYNC, &sync_end);
+-  DPLOG_IF(ERROR, rv) << "Failed DMA_BUF_SYNC_END";
++  sync_end.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_RW;
++  int rv = HANDLE_EINTR(ioctl(dmabuf_fd, DMA_BUF_IOCTL_SYNC, &sync_end));
++  PLOG_IF(ERROR, rv) << "Failed DMA_BUF_SYNC_END";
+ }
+ 
+ }  // namespace
+-- 
+2.13.0
+

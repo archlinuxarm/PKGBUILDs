@@ -10,6 +10,7 @@
 
 buildarch=12
 highmem=1
+noautobuild=1
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
@@ -18,6 +19,7 @@ declare -rgA _system_libs=(
   [flac]=flac
   [harfbuzz-ng]=harfbuzz-icu
   #[icu]=icu           # Enable again when upstream supports ICU 59
+  [libdrm]=
   [libjpeg]=libjpeg
   [libpng]=libpng
   #[libvpx]=libvpx     # https://bugs.gentoo.org/show_bug.cgi?id=611394
@@ -31,14 +33,14 @@ declare -rgA _system_libs=(
 )
 
 pkgname=chromium
-pkgver=58.0.3029.110
+pkgver=59.0.3071.86
 pkgrel=1
 _launcher_ver=3
 pkgdesc="A web browser built for speed, simplicity, and security"
 arch=('i686' 'x86_64' 'armv7h' 'aarch64')
 url="https://www.chromium.org/Home"
 license=('BSD')
-depends=('gtk2' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libexif' 'libgcrypt'
+depends=('gtk3' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libcups' 'libgcrypt'
          'ttf-font' 'systemd' 'dbus' 'libpulse' 'perl' 'perl-file-basedir'
          'pciutils' 'desktop-file-utils' 'hicolor-icon-theme')
 depends+=(${_system_libs[@]})
@@ -50,8 +52,11 @@ install=chromium.install
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
         chromium-launcher-$_launcher_ver.tar.gz::https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver.tar.gz
         chromium.desktop
-        chromium-system-ffmpeg-r4.patch
-        chromium-gn-bootstrap-r2.patch
+        chromium-system-ffmpeg-r6.patch
+        0001-ClientNativePixmapFactoryDmabuf-uses-ioctl-instead-o.patch
+        0001-Fix-kernel-version-condition-for-including-dma-buf.h.patch
+        chromium-blink-gcc7.patch
+        chromium-v8-gcc7.patch
         chromium-widevine.patch
         0001-ARM-toolchain-fixes.patch)
 sha256sums=('f24cef3dd2acf9dd5ccdeeca47fea42d1c1ddff32b7375dc9e0cd35a4e8d78ff'
@@ -85,8 +90,18 @@ prepare() {
   sed "s/@WIDEVINE_VERSION@/Pinkie Pie/" ../chromium-widevine.patch |
     patch -Np1
 
+  # https://bugs.chromium.org/p/chromium/issues/detail?id=707604
+  patch -Np1 -i ../0001-ClientNativePixmapFactoryDmabuf-uses-ioctl-instead-o.patch
+  patch -Np1 -i ../0001-Fix-kernel-version-condition-for-including-dma-buf.h.patch
+
+  # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=853347
+  patch -Np1 -i ../chromium-blink-gcc7.patch
+
+  # https://bugs.chromium.org/p/chromium/issues/detail?id=614289
+  patch -Np1 -i ../chromium-v8-gcc7.patch
+
   # Fixes from Gentoo
-  patch -Np1 -i ../chromium-system-ffmpeg-r4.patch
+  patch -Np1 -i ../chromium-system-ffmpeg-r6.patch
 
   patch -Np1 -i ../chromium-gn-bootstrap-r2.patch
 
@@ -120,7 +135,7 @@ prepare() {
 }
 
 build() {
-  make -C "$srcdir/chromium-launcher-$_launcher_ver" PREFIX=/usr
+  make -C "$srcdir/chromium-launcher-$_launcher_ver" PREFIX=/usr GTK=3
 
   cd "$srcdir/$pkgname-$pkgver"
 
@@ -140,6 +155,7 @@ build() {
     'proprietary_codecs=true'
     'link_pulseaudio=true'
     'linux_use_bundled_binutils=false'
+    'use_gtk3=true'
     'use_gconf=false'
     'use_gnome_keyring=false'
     'use_gold=false'
@@ -147,6 +163,7 @@ build() {
     'enable_hangout_services_extension=true'
     'enable_widevine=true'
     'enable_nacl=false'
+    'enable_swiftshader=false'
     "google_api_key=\"${_google_api_key}\""
     "google_default_client_id=\"${_google_default_client_id}\""
     "google_default_client_secret=\"${_google_default_client_secret}\""
