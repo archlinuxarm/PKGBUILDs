@@ -7,7 +7,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'libva-mesa-driver')
-pkgver=17.1.1
+pkgver=17.1.2
 pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
@@ -19,13 +19,14 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
         0001-Fix-linkage-against-shared-glapi.patch
         0002-glvnd-fix-gl-dot-pc.patch)
-sha256sums=('aed503f94c0c1630a162a3e276f4ee12a86764cee4cb92338ea2dea99a04e7ef'
+sha256sums=('0937804f43746339b1f9540d8f9c8b4a1bb3d3eec0e4020eac283b8799798239'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
             'c68d1522f9bce4ce31c92aa7a688da49f13043f5bb2254795b76dea8f47130b7'
             '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
-validpgpkeys+=('946D09B5E4C9845E63075FF1D961C596A7203456') #  "Andres Gomez <tanty@igalia.com>"
+validpgpkeys+=('946D09B5E4C9845E63075FF1D961C596A7203456') # Andres Gomez <tanty@igalia.com>
+validpgpkeys+=('E3E8F480C52ADD73B278EE78E1ECBE07D7D70895') # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
 
 prepare() {
   cd ${srcdir}/mesa-${pkgver}
