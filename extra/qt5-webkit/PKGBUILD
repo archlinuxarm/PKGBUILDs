@@ -1,62 +1,53 @@
 # $Id: PKGBUILD 240297 2015-06-03 10:22:03Z fyan $
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - icu makedepend
-#  - patch for soft-float armv5
-#  - patch for AArch64 support in qtwebkit
+#  - disable jit on v5/v6
+#  - disable OpenGL
+
+highmem=1
 
 pkgname=qt5-webkit
-_qtver=5.9.0
+_qtver=5.212.0-alpha2
 pkgver=${_qtver/-/}
 pkgrel=1
-arch=('i686' 'x86_64')
+arch=(i686 x86_64)
 url='http://qt-project.org/'
-license=('GPL3' 'LGPL3' 'FDL' 'custom')
+license=(GPL3 LGPL3 FDL custom)
 pkgdesc='Classes for a WebKit2 based implementation and a new QML API'
-depends=('qt5-location' 'qt5-sensors' 'qt5-webchannel' 'libwebp' 'libxslt' 'libxcomposite' 'gst-plugins-base')
-makedepends=('ruby' 'gperf' 'python' 'icu' 'qt5-doc' 'qt5-tools')
+depends=(qt5-location qt5-sensors qt5-webchannel libwebp libxslt libxcomposite gst-plugins-base hyphen)
+makedepends=(cmake ruby gperf python2 qt5-doc qt5-tools)
 optdepends=('gst-plugins-good: Webm codec support')
-conflicts=('qt')
-groups=('qt' 'qt5')
+conflicts=(qt5-webkit-ng)
+replaces=(qt5-webkit-ng)
+groups=(qt qt5)
 _pkgfqn="${pkgname/5-/}-opensource-src-${_qtver}"
-source=("http://download.qt.io/community_releases/${pkgver%.*}/${_qtver}-final/qtwebkit-opensource-src-${_qtver}.tar.xz"
-        qt5-webkit-icu59.patch
-        qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch
-        0001-Add-ARM-64-support.patch)
-sha256sums=('8dad193b740055a998312e04a040f2e32a923c0823b2d239b24eab08276a4e04'
-            '3bc9c7202f5cb055311ffb8a14145cef89060c00002f4cd5b4f4bf210bd56295'
-            'f8a00464d786a0adaa840813256fcaa9885d5914c604ca66d3c750bb79161b46'
-            'a1abdfd978198c5b3d76637131bd76793735f1d94f0eea04e1b223967e58bc6e')
+source=("https://github.com/annulen/webkit/releases/download/qtwebkit-$_qtver/qtwebkit-$_qtver.tar.xz")
+sha256sums=('f8f901de567e11fc5659402b6b827eac75505ff9c5072d8e919aa306003f8f8a')
 
 prepare() {
   mkdir -p build
-
-# Fix build with ICU 59 (PLD linux)
-  cd ${_pkgfqn}
-  patch -p1 -i ../qt5-webkit-icu59.patch
-
-# ARM fixes
-  patch -p1 -i ../qt5webkit-0002-Fix-QtWebKit-build-on-ARM-softfp.patch
-  patch -p1 -i ../0001-Add-ARM-64-support.patch
 }
 
 build() {
-  cd build  
+  cd build
 
-  qmake ../${_pkgfqn}
+  [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && CONFIG="-DENABLE_JIT=OFF"
+
+  cmake ../qtwebkit-$_qtver \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DPORT=Qt \
+    -DENABLE_TOOLS=OFF \
+    -DENABLE_OPENGL=OFF $CONFIG
   make
-  make docs
 }
 
 package() {
   cd build
-  make INSTALL_ROOT="$pkgdir" install install_docs
-
-  # Drop QMAKE_PRL_BUILD_DIR because reference the build dir
-  find "$pkgdir/usr/lib" -type f -name '*.prl' \
-    -exec sed -i -e '/^QMAKE_PRL_BUILD_DIR/d' {} \;
+  make DESTDIR="$pkgdir" install
 
   install -d "$pkgdir"/usr/share/licenses
   ln -s /usr/share/licenses/qt5-base "$pkgdir"/usr/share/licenses/${pkgname}
