@@ -3,13 +3,12 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - do not use LLINT assembly for v5/v6
-#  - strip -O3 from cmake generated makefiles, solves ICE
 #  - remove Atomics.cpp from build for v5/v6 - https://bugs.webkit.org/show_bug.cgi?id=161900
 
 highmem=1
 
 pkgname=webkit2gtk
-pkgver=2.16.4
+pkgver=2.16.5
 pkgrel=1
 pkgdesc="GTK+ Web content engine library"
 arch=(i686 x86_64)
@@ -17,20 +16,18 @@ url="https://webkitgtk.org/"
 license=(custom)
 depends=(libxt libxslt enchant geoclue2 gst-plugins-base-libs
          libsecret libwebp harfbuzz-icu gtk3 libnotify hyphen)
-makedepends=(gtk2 gperf gobject-introspection ruby gtk-doc cmake python python2)
+makedepends=(gtk2 gperf gobject-introspection ruby gtk-doc cmake python python2 ninja)
 optdepends=('gtk2: Netscape plugin support'
             'gst-plugins-base: free media decoding'
             'gst-plugins-good: media decoding'
             'gst-libav: nonfree media decoding')
-options=(!emptydirs)
-
 source=(https://webkitgtk.org/releases/webkitgtk-${pkgver}.tar.xz{,.asc}
-        icu59.patch gcc7-memcpy.patch
+        icu59.patch gcc7.patch
         remove_atomics.patch)
-sha256sums=('f9aba4338319bd539785345144e28c8027dc8cb526b2e443e0c8f2c0239f5128'
+sha256sums=('8e0396f3428e757898c5856e642eed4fcd5a20ae03d96d3eaa03b76634be7dd4'
             'SKIP'
             'eb791b9c8dcb84996904846dedf8c3ddf1a5fde32330177f3f0071510bd8ca6d'
-            '025e36bef353f850598a9bd9d91bc1aa2e2f75db9f46c252ec2f861726299189'
+            '0c8e7e0b7cb4379d59eca4a93df84c984a44feb979ad1b6c1f964192290e25f5'
             '410449817b1b181737538be10d96d6d8aec134285f6288e80c96fbfdd5d19519')
 validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3')
 
@@ -39,7 +36,7 @@ prepare() {
   cd webkitgtk-$pkgver
 
   patch -Np1 -i ../icu59.patch
-  patch -Np1 -i ../gcc7-memcpy.patch  # https://bugs.webkit.org/show_bug.cgi?id=173407
+  patch -Np1 -i ../gcc7.patch  # https://bugs.webkit.org/show_bug.cgi?id=173407
 
   sed -i '1s/python$/&2/' Tools/gtk/generate-gtkdoc
   rm -r Source/ThirdParty/gtest/
@@ -55,26 +52,20 @@ build() {
   # do not use LLINT assembly for v5/v6
   [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && CONFIG="-DENABLE_JIT=OFF"
 
-  cmake -DPORT=GTK -DCMAKE_BUILD_TYPE=Release \
+  cmake -G Ninja -DPORT=GTK -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_SKIP_RPATH=ON -DCMAKE_INSTALL_PREFIX=/usr \
         -DLIB_INSTALL_DIR=/usr/lib -DLIBEXEC_INSTALL_DIR=/usr/lib/webkit2gtk-4.0 \
         -DENABLE_GTKDOC=ON -DPYTHON_EXECUTABLE=/usr/bin/python2 $CONFIG ../webkitgtk-$pkgver
-
-  # strip -O3 from cmake generated makefiles
-  find ./ -type f -exec sed -i -e 's/-O3//g' {} \;
-
-  make
+  ninja
 }
 
 package() {
   cd build
-  make DESTDIR="$pkgdir" install
+  DESTDIR="$pkgdir" ninja install
 
-  install -m755 -d "$pkgdir/usr/share/licenses/webkit2gtk"
-  cd "$srcdir/webkitgtk-$pkgver/Source"
-  for f in $(find -name 'COPYING*' -or -name 'LICENSE*'); do
-    echo $f >> "$pkgdir/usr/share/licenses/webkit2gtk/LICENSE"
-    cat $f >> "$pkgdir/usr/share/licenses/webkit2gtk/LICENSE"
-    echo "" >> "$pkgdir/usr/share/licenses/webkit2gtk/LICENSE"
-  done
+  cd ../webkitgtk-$pkgver/Source
+  while IFS= read -d $'\0' -r _f; do
+    echo "### $_f ###"; cat "$_f"; echo
+  done < <(find . -name 'COPYING*' -or -name 'LICENSE*' -print0) \
+    | install -Dm644 /dev/stdin "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
