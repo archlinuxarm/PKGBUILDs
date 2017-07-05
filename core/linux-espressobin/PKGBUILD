@@ -4,26 +4,55 @@
 buildarch=8
 
 pkgbase=linux-espressobin
-_commit=96b436a66a296f7a6539a655ab9d3fdd84e9e3a7
-_srcname=linux-espressobin-${_commit}
+_srcname=linux-4.12
 _kernelname=${pkgbase#linux}
 _desc="Globalscale ESPRESSOBin"
-pkgver=4.4.71
+pkgver=4.12.0
 pkgrel=1
 arch=('aarch64')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
-source=("https://github.com/kmihelich/linux-espressobin/archive/${_commit}.tar.gz"
+source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
+        #"http://www.kernel.org/pub/linux/kernel/v4.x/patch-${pkgver}.xz"
+        '0001-ARM64-dts-marvell-armada37xx-Fix-timer-interrupt-spe.patch'
+        '0002-ARM64-dts-marvell-armada37xx-Fix-GIC-maintenance-int.patch'
+        '0003-ARM64-dts-marvell-armada37xx-Enable-memory-mapped-GI.patch'
+        '0004-ARM64-dts-marvell-armada37xx-Wire-PMUv3.patch'
+        '0005-ARM64-dts-marvell-armada37xx-Enable-USB2-on-espresso.patch'
+        '0006-arm64-dts-marvell-Enable-second-SDHCI-controller-in-.patch'
+        '0007-arm64-dts-marvell-Add-microsd-card-definition-for-th.patch'
+        '0008-arm64-marvell-armada37xx-Add-eth0-alias.patch'
         'config'
         'linux.preset')
-md5sums=('2dd69313c30aaa9570018b5600b35934'
-         'b357b234a97e2c716023fa3e5f0e7c35'
-         'c275a5855f013054b48083e9006949a4')
+md5sums=('fc454157e2d024d401a60905d6481c6b'
+         '7b2bb6f5cfd91f1e0b98693b4c2be795'
+         'ad38796bd014a3a2f371cb705629391a'
+         '71e1896b02c2c36372b23c41f74bf3cc'
+         '3537c6f3729f2cb7e528eec15bec849b'
+         'b007cd30ca2261e9f7f7a14fadb5e999'
+         '19b64449ee336a42255411a0025fd5d1'
+         'a14447adca3b29fb28a30de451e39488'
+         '80a477685ba907e83b3b0c10a36bc5f0'
+         'aafe13461c5fed44285f685025ec610f'
+         'd8d30aa4a9d4c2b8d4ea53faf46ccf80')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
+
+  # add upstream patch
+  #git apply --whitespace=nowarn ../patch-${pkgver}
+
+  # ALARM patches
+  git apply ../0001-ARM64-dts-marvell-armada37xx-Fix-timer-interrupt-spe.patch
+  git apply ../0002-ARM64-dts-marvell-armada37xx-Fix-GIC-maintenance-int.patch
+  git apply ../0003-ARM64-dts-marvell-armada37xx-Enable-memory-mapped-GI.patch
+  git apply ../0004-ARM64-dts-marvell-armada37xx-Wire-PMUv3.patch
+  git apply ../0005-ARM64-dts-marvell-armada37xx-Enable-USB2-on-espresso.patch
+  git apply ../0006-arm64-dts-marvell-Enable-second-SDHCI-controller-in-.patch
+  git apply ../0007-arm64-dts-marvell-Add-microsd-card-definition-for-th.patch
+  git apply ../0008-arm64-marvell-armada37xx-Add-eth0-alias.patch
 
   cat "${srcdir}/config" > ./.config
 
@@ -62,14 +91,15 @@ build() {
 
   # build!
   unset LDFLAGS
-  make ${MAKEFLAGS} Image modules dtbs
+  make ${MAKEFLAGS} Image Image.gz modules dtbs
 }
 
 _package() {
   pkgdesc="The Linux Kernel and modules - ${_desc}"
-  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7' 'uboot-tools')
+  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
   optdepends=('crda: to set the correct wireless channels of your country')
   provides=('kernel26' "linux=${pkgver}")
+  replaces=('linux-armv8')
   conflicts=('linux')
   backup=("etc/mkinitcpio.d/${pkgbase}.preset")
   install=${pkgname}.install
@@ -86,7 +116,7 @@ _package() {
   mkdir -p "${pkgdir}"/{lib/modules,lib/firmware}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
   make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
-  cp arch/$KARCH/boot/Image "${pkgdir}/boot"
+  cp arch/$KARCH/boot/Image{,.gz} "${pkgdir}/boot"
 
   # set correct depmod command for install
   sed \
@@ -105,13 +135,11 @@ _package() {
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
   # remove the firmware
   rm -rf "${pkgdir}/lib/firmware"
-  # gzip -9 all modules to save 100MB of space
-  find "${pkgdir}" -name '*.ko' |xargs -P 2 -n 1 gzip -9
   # make room for external modules
-  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
+  ln -s "../extramodules-${_basekernel}${_kernelname:--ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
   # add real version for building modules and running depmod from post_install/upgrade
-  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
-  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
+  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}${_kernelname:--ARCH}"
+  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}${_kernelname:--ARCH}/version"
 
   # Now we call depmod...
   depmod -b "$pkgdir" -F System.map "$_kernver"
@@ -127,6 +155,7 @@ _package() {
 _package-headers() {
   pkgdesc="Header files and scripts for building modules for linux kernel - ${_desc}"
   provides=("linux-headers=${pkgver}")
+  replaces=('linux-armv8-headers')
   conflicts=('linux-headers')
 
   install -dm755 "${pkgdir}/usr/lib/modules/${_kernver}"
@@ -141,8 +170,8 @@ _package-headers() {
 
   mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/include"
 
-  for i in acpi asm-generic config crypto drm generated keys linux math-emu \
-    media net pcmcia scsi soc sound trace uapi video xen; do
+  for i in acpi asm-generic clocksource config crypto drm generated keys linux \
+    math-emu media net pcmcia scsi soc sound trace uapi video xen; do
     cp -a include/${i} "${pkgdir}/usr/lib/modules/${_kernver}/build/include/"
   done
 
