@@ -11,46 +11,55 @@ highmem=1
 
 pkgbase=gmic
 pkgname=("gmic" "gimp-plugin-gmic" "zart")
-pkgver=2.0.0
-_commit=440f068f665597aa10d8e01cc8b73cafdf0e4479
-pkgrel=2
+pkgver=2.0.2
+gmic_qt_ver=2.0.0
+_commit=c43f88d9537c58be4eeac515282eec8096c4a797
+pkgrel=1
 arch=("i686" "x86_64")
 url="http://gmic.eu/"
 license=("custom:CeCILL")
-makedepends=('gimp' 'qt4' 'fftw' 'openexr' 'opencv' 'mesa' 'gtk2' 'git' 'hdf5')
+makedepends=('gimp' 'qt5-base' 'fftw' 'openexr' 'opencv' 'mesa' 'gtk2' 'git' 'hdf5')
 source=("https://gmic.eu/files/source/gmic_$pkgver.tar.gz"
 	"git://github.com/dtschump/gmic-community.git#commit=${_commit}"
-	"gmic_stdlib.h-$pkgver::http://gmic.eu/gmic_stdlib.h"
-	"CImg.h-$pkgver::https://github.com/dtschump/CImg/blob/master/CImg.h?raw=true")
-sha256sums=('27c57f0ca630895a0dab5c0eff854f3133a29743267c4aa196dc2d1936463ca4'
+	"https://github.com/c-koi/gmic-qt/archive/v$gmic_qt_ver.tar.gz")
+sha256sums=('7da9f08d62a9d23fc8badbc7c819cf76f4a9ce3db763710268fdcb80d83ecfc6'
             'SKIP'
-            '5557eba6da03e8c1df2bb2f36644577245540b247e71b130b6aa03c45c87b8d9'
-            '27d35b0c402897e270f74cbca7b90541cfe860b308b868f96b06fa372fdbd6be')
+            '286fc5be19f7ad63b9a20e22ed62064c4cc2bf5113caf59d835e6cd09d81b822')
 
 prepare() {
   mv "${srcdir}/gmic-${pkgver}" "${srcdir}/gmic"
   cd "${srcdir}/gmic"
-  sed -i -e 's|qmake zart.pro|qmake-qt4 zart.pro|g' \
-    -e 's|/etc/bash_completion.d|/usr/share/bash-completion/completions|g' \
-    src/Makefile
+
   ln -sf ../gmic-community/zart zart
+  ln -sf ../gmic-qt-$gmic_qt_ver gmic-qt
+
   sed -i "s|-mtune=generic|${CFLAGS}|" src/Makefile
 
-  mkdir -p ../CImg
-  cp -L ../gmic_stdlib.h-$pkgver src/gmic_stdlib.h
-  cp -L ../CImg.h-$pkgver ../CImg/CImg.h
+  sed -i -e 's|/etc/bash_completion.d|/usr/share/bash-completion/completions|g' \
+    src/Makefile
+  sed -i -e 's|-Ofast|-O2 -fno-fast-math|g' \
+    gmic-qt/gmic_qt.pro
 }
 
 build() {
   cd "${srcdir}/gmic"
-  (cd zart && qmake-qt4 -o Makefile zart.pro)
+
+  unset CFLAGS
+
+  unset CXXFLAGS
+  export CPPFLAGS="-Wno-implicit-fallthrough -Wno-format-truncation -fno-fast-math"
+
+  export QMAKE_CXXFLAGS="-fno-fast-math"
+  export QMAKE_CPPFLAGS="-fno-fast-math"
+
+  (cd zart && qmake -o Makefile zart.pro)
   make -C src all WGET=/bin/true
   make -C zart all WGET=/bin/true
 }
 
 package_gmic() {
   pkgdesc="GREYC's Magic Image Converter: image processing framework"
-  depends=("opencv" "fftw" "libtiff" "libjpeg" "libpng" "openexr" "libx11" "hdf5")
+  depends=("opencv" "fftw" "libtiff" "libjpeg" "libpng" "openexr" "libx11" "hdf5" "curl")
 
   cd "${srcdir}/gmic"
   make -C src install DESTDIR="$pkgdir" USR="/usr"
@@ -60,18 +69,18 @@ package_gmic() {
 
 package_zart() {
   pkgdesc="A GUI for G'MIC real-time manipulations on the output of a webcam"
-  depends=("opencv" "fftw" "qt4")
+  depends=("opencv" "fftw" "qt5-base")
 
   cd "${srcdir}/gmic"
   install -Dm755 zart/zart "${pkgdir}/usr/bin/zart"
-  install -Dm644 COPYING "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 zart/Licence_CeCILL_V2-en.html "${pkgdir}/usr/share/licenses/${pkgname}/Licence_CeCILL_V2-en.html"
 }
 
 package_gimp-plugin-gmic() {
   pkgdesc="Gimp plugin for the G'MIC image processing framework"
-  depends=("opencv" "gimp" "fftw")
+  depends=("opencv" "gimp" "fftw" "qt5-base" "curl")
 
   cd "${srcdir}/gmic"
-  install -Dm755 src/gmic_gimp_gtk "${pkgdir}/usr/lib/gimp/2.0/plug-ins/gmic_gimp"
-  install -Dm644 COPYING "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm755 gmic-qt/gmic_gimp_qt "${pkgdir}/usr/lib/gimp/2.0/plug-ins/gmic_gimp"
+  install -Dm644 gmic-qt/COPYING "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }
