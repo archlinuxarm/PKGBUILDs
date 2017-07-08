@@ -1,0 +1,62 @@
+From 5acd395167ab5797cbe39c8732ff509e21a587d0 Mon Sep 17 00:00:00 2001
+From: Rasmus Villemoes <linux@rasmusvillemoes.dk>
+Date: Thu, 5 Nov 2015 18:45:05 -0800
+Subject: [PATCH 11/14] include/linux/compiler-gcc.h: hide assume_aligned
+ attribute from sparse
+
+The patch "slab.h: sprinkle __assume_aligned attributes" causes *tons* of
+whinges if you do 'make C=2' with sparse 0.5.0:
+
+  CHECK   drivers/media/usb/pwc/pwc-if.c
+include/linux/slab.h:307:43: error: attribute '__assume_aligned__': unknown attribute
+include/linux/slab.h:308:58: error: attribute '__assume_aligned__': unknown attribute
+include/linux/slab.h:337:73: error: attribute '__assume_aligned__': unknown attribute
+include/linux/slab.h:375:74: error: attribute '__assume_aligned__': unknown attribute
+include/linux/slab.h:378:80: error: attribute '__assume_aligned__': unknown attribute
+
+sparse apparently pretends to be gcc >= 4.9, yet isn't prepared to handle
+all the function attributes supported by those gccs and complains loudly.
+So hide the definition of __assume_aligned from it (so that the generic
+one in compiler.h gets used).
+
+Signed-off-by: Rasmus Villemoes <linux@rasmusvillemoes.dk>
+Reported-by: Valdis Kletnieks <Valdis.Kletnieks@vt.edu>
+Tested-By: Valdis Kletnieks <valdis.kletnieks@vt.edu>
+Cc: Christopher Li <sparse@chrisli.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+(cherry picked from commit 8748dd5c98f7fe506ccb31a094833401ed120915)
+---
+ include/linux/compiler-gcc.h | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/include/linux/compiler-gcc.h b/include/linux/compiler-gcc.h
+index e28b089..d536812 100644
+--- a/include/linux/compiler-gcc.h
++++ b/include/linux/compiler-gcc.h
+@@ -196,6 +196,22 @@
+ #define __visible	__attribute__((externally_visible))
+ #endif
+ 
++#if GCC_VERSION >= 40900 && !defined(__CHECKER__)
++/*
++ * __assume_aligned(n, k): Tell the optimizer that the returned
++ * pointer can be assumed to be k modulo n. The second argument is
++ * optional (default 0), so we use a variadic macro to make the
++ * shorthand.
++ *
++ * Beware: Do not apply this to functions which may return
++ * ERR_PTRs. Also, it is probably unwise to apply it to functions
++ * returning extra information in the low bits (but in that case the
++ * compiler should see some alignment anyway, when the return value is
++ * massaged by 'flags = ptr & 3; ptr &= ~3;').
++ */
++#define __assume_aligned(a, ...) __attribute__((__assume_aligned__(a, ## __VA_ARGS__)))
++#endif
++
+ /*
+  * GCC 'asm goto' miscompiles certain code sequences:
+  *
+-- 
+2.8.3
+
