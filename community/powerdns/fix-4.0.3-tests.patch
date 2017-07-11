@@ -1,0 +1,100 @@
+From 00c6f2b9f5173c98cc883332f5ecf8b941715abc Mon Sep 17 00:00:00 2001
+From: Remi Gacogne <remi.gacogne@powerdns.com>
+Date: Fri, 13 Jan 2017 14:02:19 +0100
+Subject: [PATCH] Fix AtomicCounter unit tests on 32-bit
+
+---
+ pdns/misc.hh            | 3 ++-
+ pdns/test-statbag_cc.cc | 4 ++--
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/pdns/misc.hh b/pdns/misc.hh
+index 50e8dca..2e0e65a 100644
+--- a/pdns/misc.hh
++++ b/pdns/misc.hh
+@@ -373,7 +373,8 @@ inline bool pdns_iequals_ch(const char a, const char b)
+ }
+ 
+ 
+-typedef std::atomic<unsigned long> AtomicCounter ;
++typedef unsigned long AtomicCounterInner;
++typedef std::atomic<AtomicCounterInner> AtomicCounter ;
+ 
+ // FIXME400 this should probably go? 
+ struct CIStringCompare: public std::binary_function<string, string, bool>
+diff --git a/pdns/test-statbag_cc.cc b/pdns/test-statbag_cc.cc
+index 3330451..4abbcd0 100644
+--- a/pdns/test-statbag_cc.cc
++++ b/pdns/test-statbag_cc.cc
+@@ -83,7 +83,7 @@ BOOST_AUTO_TEST_CASE(test_StatBagBasic) {
+ 
+ #ifdef UINTPTR_MAX  
+ #if UINTPTR_MAX > 0xffffffffULL
+-    BOOST_CHECK_EQUAL(sizeof(unsigned long), 8);
++    BOOST_CHECK_EQUAL(sizeof(AtomicCounterInner), 8);
+     s.set("c", 1ULL<<33);
+     BOOST_CHECK_EQUAL(s.read("c"), (1ULL<<33) );
+     s.inc("c");
+@@ -94,7 +94,7 @@ BOOST_AUTO_TEST_CASE(test_StatBagBasic) {
+     s.inc("c");
+     BOOST_CHECK_EQUAL(s.read("c"), 0 );
+ #else
+-    BOOST_CHECK_EQUAL(sizeof(AtomicCounter::native_t), 4);
++    BOOST_CHECK_EQUAL(sizeof(AtomicCounterInner), 4);
+     BOOST_CHECK_EQUAL(~0UL, 0xffffffffUL);
+     s.set("c", ~0UL);
+     BOOST_CHECK_EQUAL(s.read("c"), 0xffffffffUL );
+From 6cbfa73b35a5cc7325b58625c0698576fb99601f Mon Sep 17 00:00:00 2001
+From: Remi Gacogne <remi.gacogne@powerdns.com>
+Date: Sun, 15 Jan 2017 21:45:27 +0100
+Subject: [PATCH] Fix negative port detection for IPv6 addresses on 32-bit
+
+On a 32-bit Arch, our `test_ComboAddress` unit test fails because
+`ComboAddress("[::1]:-6")` is considered valid. This is caused by
+`stoul()` not throwing for a negative value and returning an `unsigned
+long` value using unsigned integer wraparound rules. Since we used to
+store the result value in a `signed int` and treat negative values
+as if the port was not set, the test failed.
+---
+ pdns/misc.cc | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/pdns/misc.cc b/pdns/misc.cc
+index 10912ff..c80b4d5 100644
+--- a/pdns/misc.cc
++++ b/pdns/misc.cc
+@@ -710,7 +710,8 @@ int makeIPv6sockaddr(const std::string& addr, struct sockaddr_in6* ret)
+   if(addr.empty())
+     return -1;
+   string ourAddr(addr);
+-  int port = -1;
++  bool portSet = false;
++  unsigned int port;
+   if(addr[0]=='[') { // [::]:53 style address
+     string::size_type pos = addr.find(']');
+     if(pos == string::npos || pos + 2 > addr.size() || addr[pos+1]!=':')
+@@ -718,6 +719,7 @@ int makeIPv6sockaddr(const std::string& addr, struct sockaddr_in6* ret)
+     ourAddr.assign(addr.c_str() + 1, pos-1);
+     try {
+       port = pdns_stou(addr.substr(pos+2));
++      portSet = true;
+     }
+     catch(std::out_of_range) {
+       return -1;
+@@ -744,12 +746,12 @@ int makeIPv6sockaddr(const std::string& addr, struct sockaddr_in6* ret)
+     freeaddrinfo(res);
+   }
+ 
+-  if(port > 65535)
+-    // negative ports are found with the pdns_stou above
+-    return -1;
++  if(portSet) {
++    if(port > 65535)
++      return -1;
+ 
+-  if(port >= 0)
+     ret->sin6_port = htons(port);
++  }
+ 
+   return 0;
+ }
