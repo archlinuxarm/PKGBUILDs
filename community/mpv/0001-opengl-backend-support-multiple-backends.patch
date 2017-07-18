@@ -1,0 +1,291 @@
+From 9c397af0dabfff7177bcb76409af5b8f9ae608cf Mon Sep 17 00:00:00 2001
+From: Drew DeVault <sir@cmpwn.com>
+Date: Thu, 27 Apr 2017 17:19:58 -0400
+Subject: [PATCH 1/4] --opengl-backend: support multiple backends
+
+Will attempt each backend specified in order. The x11 backend is still
+preferred, even on Wayland, but the user can now use
+--opengl-backend=wayland,x11 to prefer wayland and fall back to x11 if
+wayland is unavailable.
+---
+ video/out/opengl/context.c | 66 +++++++++++++++++++++++++++++++++++++++++-----
+ video/out/opengl/context.h |  8 ++----
+ video/out/vo_opengl.c      |  7 +++--
+ 3 files changed, 64 insertions(+), 17 deletions(-)
+
+diff --git a/video/out/opengl/context.c b/video/out/opengl/context.c
+index 72311e11fa..568bb662b8 100644
+--- a/video/out/opengl/context.c
++++ b/video/out/opengl/context.c
+@@ -89,6 +89,30 @@ static const struct mpgl_driver *const backends[] = {
+ #endif
+ };
+ 
++static bool get_desc(struct m_obj_desc *dst, int index)
++{
++    if (index >= MP_ARRAY_SIZE(backends) - 1)
++        return false;
++    const struct mpgl_driver *driver = backends[index];
++    *dst = (struct m_obj_desc) {
++        .name = driver->name,
++        .description = driver->name,
++        .priv_size = sizeof(struct mpgl_driver),
++        .p = driver,
++    };
++    return true;
++}
++
++// for backend option
++const struct m_obj_list mpgl_backend_list = {
++    .get_desc = get_desc,
++    .description = "OpenGL windowing backends",
++    .allow_unknown_entries = true,
++    .allow_disable_entries = true,
++    .allow_trailer = true,
++    .disallow_positional_parameters = true,
++};
++
+ // 0-terminated list of desktop GL versions a backend should try to
+ // initialize. The first entry is the most preferred version.
+ const int mpgl_preferred_gl_versions[] = {
+@@ -100,7 +124,7 @@ const int mpgl_preferred_gl_versions[] = {
+     0
+ };
+ 
+-int mpgl_find_backend(const char *name)
++static int mpgl_find_backend(const char *name)
+ {
+     if (name == NULL || strcmp(name, "auto") == 0)
+         return -1;
+@@ -126,7 +150,7 @@ int mpgl_validate_backend_opt(struct mp_log *log, const struct m_option *opt,
+     return mpgl_find_backend(s) >= -1 ? 1 : M_OPT_INVALID;
+ }
+ 
+-static void *get_native_display(void *pctx, const char *name)
++static void *get_native_display(const char *name)
+ {
+     MPGLContext *ctx = pctx;
+     if (!ctx->native_display_type || !name)
+@@ -186,11 +210,41 @@ cleanup:
+ 
+ // Create a VO window and create a GL context on it.
+ //  vo_flags: passed to the backend's create window function
+-MPGLContext *mpgl_init(struct vo *vo, const char *backend_name, int vo_flags)
++MPGLContext *mpgl_init(struct vo *vo, struct m_obj_settings *backend_list, int vo_flags)
+ {
+     MPGLContext *ctx = NULL;
+-    int index = mpgl_find_backend(backend_name);
+-    if (index == -1) {
++    if (backend_list && backend_list[0].name) {
++        int n;
++        for (n = 0; backend_list[n].name; n++) {
++            // Something like "--opengl-backend=name," allows fallback to autoprobing.
++            int index = mpgl_find_backend(backend_list[n].name);
++            if (index == -1 || strlen(backend_list[n].name) == 0)
++                goto autoprobe;
++            if (index == -2) {
++                MP_FATAL(vo, "Unknown opengl backend '%s'\n", backend_list[n].name);
++                exit(-2);
++                return NULL;
++            }
++            ctx = init_backend(vo, backends[index], true, vo_flags);
++            if (ctx)
++                break;
++        }
++        if (!ctx && !vo->probing) {
++            // Now try with probing off
++            for (n = 0; backend_list[n].name; n++) {
++                int index = mpgl_find_backend(backend_list[n].name);
++                ctx = init_backend(vo, backends[index], false, vo_flags);
++                if (ctx)
++                    break;
++            }
++            if (!ctx) {
++                // Backend explicitly requested, but unable to fulfill
++                return NULL;
++            }
++        }
++    }
++    if (!ctx) {
++autoprobe:
+         for (int n = 0; n < MP_ARRAY_SIZE(backends); n++) {
+             ctx = init_backend(vo, backends[n], true, vo_flags);
+             if (ctx)
+@@ -204,8 +258,6 @@ MPGLContext *mpgl_init(struct vo *vo, const char *backend_name, int vo_flags)
+                     break;
+             }
+         }
+-    } else if (index >= 0) {
+-        ctx = init_backend(vo, backends[index], false, vo_flags);
+     }
+     return ctx;
+ }
+diff --git a/video/out/opengl/context.h b/video/out/opengl/context.h
+index 229c5ef54f..7cf439c1a0 100644
+--- a/video/out/opengl/context.h
++++ b/video/out/opengl/context.h
+@@ -100,17 +100,13 @@ typedef struct MPGLContext {
+     void *priv;
+ } MPGLContext;
+ 
+-MPGLContext *mpgl_init(struct vo *vo, const char *backend_name, int vo_flags);
++MPGLContext *mpgl_init(struct vo *vo, struct m_obj_settings *backend_list, int vo_flags);
+ void mpgl_uninit(MPGLContext *ctx);
+ int mpgl_reconfig_window(struct MPGLContext *ctx);
+ int mpgl_control(struct MPGLContext *ctx, int *events, int request, void *arg);
+ void mpgl_start_frame(struct MPGLContext *ctx);
+ void mpgl_swap_buffers(struct MPGLContext *ctx);
+ 
+-int mpgl_find_backend(const char *name);
+-
+-struct m_option;
+-int mpgl_validate_backend_opt(struct mp_log *log, const struct m_option *opt,
+-                              struct bstr name, struct bstr param);
++extern const struct m_obj_list mpgl_backend_list;
+ 
+ #endif
+diff --git a/video/out/vo_opengl.c b/video/out/vo_opengl.c
+index 9b3f944e21..91e55b3b2f 100644
+--- a/video/out/vo_opengl.c
++++ b/video/out/vo_opengl.c
+@@ -55,7 +55,7 @@ struct vo_opengl_opts {
+     int allow_sw;
+     int swap_interval;
+     int vsync_fences;
+-    char *backend;
++    struct m_obj_settings *backend_list;
+     int es;
+     int pattern[2];
+ };
+@@ -383,7 +383,7 @@ static int preinit(struct vo *vo)
+     if (p->opts.allow_sw)
+         vo_flags |= VOFLAG_SW;
+ 
+-    p->glctx = mpgl_init(vo, p->opts.backend, vo_flags);
++    p->glctx = mpgl_init(vo, p->opts.backend_list, vo_flags);
+     if (!p->glctx)
+         goto err_out;
+     p->gl = p->glctx->gl;
+@@ -438,8 +438,7 @@ const struct vo_driver video_out_opengl = {
+         OPT_FLAG("opengl-waitvsync", opts.waitvsync, 0),
+         OPT_INT("opengl-swapinterval", opts.swap_interval, 0),
+         OPT_FLAG("opengl-debug", opts.use_gl_debug, 0),
+-        OPT_STRING_VALIDATE("opengl-backend", opts.backend, 0,
+-                            mpgl_validate_backend_opt),
++        OPT_SETTINGSLIST("opengl-backend", opts.backend_list, 0, &mpgl_backend_list ),
+         OPT_FLAG("opengl-sw", opts.allow_sw, 0),
+         OPT_CHOICE("opengl-es", opts.es, 0, ({"no", -1}, {"auto", 0},
+                                              {"yes", 1}, {"force2", 2})),
+From 4e89fae50f70d065ff8ffee40aa8dffe8131210e Mon Sep 17 00:00:00 2001
+From: Drew DeVault <sir@cmpwn.com>
+Date: Thu, 27 Apr 2017 17:51:39 -0400
+Subject: [PATCH 2/4] Update mpv.1
+---
+ DOCS/man/options.rst | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index 925c501881..5d57720e3d 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -4480,9 +4480,10 @@ The following video options are currently all specific to ``--vo=opengl`` and
+     Continue even if a software renderer is detected.
+ 
+ ``--opengl-backend=<sys>``
+-    The value ``auto`` (the default) selects the windowing backend. You can
+-    also pass ``help`` to get a complete list of compiled in backends (sorted
+-    by autoprobe order).
++    Specify a priority list of windowing backends to use with OpenGL. The value
++    ``auto`` (the default) automatically probes for the most suitable backend.
++    You can also pass ``help`` to get a complete list of compiled in backends
++    (sorted by autoprobe order).
+ 
+     auto
+         auto-select (default)
+From 3fb437fa09ebf20635c02f41ce0e3d13423d1454 Mon Sep 17 00:00:00 2001
+From: Drew DeVault <sir@cmpwn.com>
+Date: Thu, 27 Apr 2017 20:12:51 -0400
+Subject: [PATCH 3/4] Let options handle invalid backends
+---
+ video/out/opengl/context.c | 17 +++++++++--------
+ 1 file changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/video/out/opengl/context.c b/video/out/opengl/context.c
+index 568bb662b8..8aa44b67cc 100644
+--- a/video/out/opengl/context.c
++++ b/video/out/opengl/context.c
+@@ -91,6 +91,14 @@ static const struct mpgl_driver *const backends[] = {
+ 
+ static bool get_desc(struct m_obj_desc *dst, int index)
+ {
++    if (index == 0) {
++        *dst = (struct m_obj_desc) {
++            .name = "auto",
++            .description = "automatically select most suitable backend"
++        };
++        return true;
++    }
++    index--;
+     if (index >= MP_ARRAY_SIZE(backends) - 1)
+         return false;
+     const struct mpgl_driver *driver = backends[index];
+@@ -107,8 +115,6 @@ static bool get_desc(struct m_obj_desc *dst, int index)
+ const struct m_obj_list mpgl_backend_list = {
+     .get_desc = get_desc,
+     .description = "OpenGL windowing backends",
+-    .allow_unknown_entries = true,
+-    .allow_disable_entries = true,
+     .allow_trailer = true,
+     .disallow_positional_parameters = true,
+ };
+@@ -218,13 +224,8 @@ MPGLContext *mpgl_init(struct vo *vo, struct m_obj_settings *backend_list, int v
+         for (n = 0; backend_list[n].name; n++) {
+             // Something like "--opengl-backend=name," allows fallback to autoprobing.
+             int index = mpgl_find_backend(backend_list[n].name);
+-            if (index == -1 || strlen(backend_list[n].name) == 0)
++            if (index < 0 || strlen(backend_list[n].name) == 0)
+                 goto autoprobe;
+-            if (index == -2) {
+-                MP_FATAL(vo, "Unknown opengl backend '%s'\n", backend_list[n].name);
+-                exit(-2);
+-                return NULL;
+-            }
+             ctx = init_backend(vo, backends[index], true, vo_flags);
+             if (ctx)
+                 break;
+From 605785c4846ecaa969309f7fb63cfba59751ba61 Mon Sep 17 00:00:00 2001
+From: Drew DeVault <sir@cmpwn.com>
+Date: Fri, 26 May 2017 15:31:24 -0400
+Subject: [PATCH 4/4] Updates following HEAD
+---
+ video/out/opengl/context.c | 17 +----------------
+ 1 file changed, 1 insertion(+), 16 deletions(-)
+
+diff --git a/video/out/opengl/context.c b/video/out/opengl/context.c
+index 8aa44b67cc..4cc0829c90 100644
+--- a/video/out/opengl/context.c
++++ b/video/out/opengl/context.c
+@@ -141,22 +141,7 @@ static int mpgl_find_backend(const char *name)
+     return -2;
+ }
+ 
+-int mpgl_validate_backend_opt(struct mp_log *log, const struct m_option *opt,
+-                              struct bstr name, struct bstr param)
+-{
+-    if (bstr_equals0(param, "help")) {
+-        mp_info(log, "OpenGL windowing backends:\n");
+-        mp_info(log, "    auto (autodetect)\n");
+-        for (int n = 0; n < MP_ARRAY_SIZE(backends); n++)
+-            mp_info(log, "    %s\n", backends[n]->name);
+-        return M_OPT_EXIT;
+-    }
+-    char s[20];
+-    snprintf(s, sizeof(s), "%.*s", BSTR_P(param));
+-    return mpgl_find_backend(s) >= -1 ? 1 : M_OPT_INVALID;
+-}
+-
+-static void *get_native_display(const char *name)
++static void *get_native_display(void *pctx, const char *name)
+ {
+     MPGLContext *ctx = pctx;
+     if (!ctx->native_display_type || !name)
