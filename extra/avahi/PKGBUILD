@@ -1,0 +1,90 @@
+# $Id$
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Contributor: Gaetan Bisson <bisson@archlinux.org>
+# Contributor: Douglas Soares de Andrade <douglas@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove make/opt depends on mono
+
+pkgname=avahi
+pkgver=0.7
+pkgrel=1
+pkgdesc='Service Discovery for Linux using mDNS/DNS-SD -- compatible with Bonjour'
+url='https://github.com/lathiat/avahi'
+license=(LGPL)
+arch=(i686 x86_64)
+depends=(expat libdaemon glib2 libcap gdbm dbus)
+makedepends=(git qt4 pygtk intltool gtk-sharp-2 gobject-introspection gtk3
+             xmltoman python-dbus python-gobject)
+optdepends=('gtk3: avahi-discover, avahi-discover-standalone, bshell, bssh, bvnc'
+            'gtk2: gtk2 bindings'
+            'qt4: qt4 bindings'
+            'pygtk: avahi-bookmarks'
+            'python2-twisted: avahi-bookmarks'
+            'nss-mdns: NSS support for mDNS'
+            'python-gobject: avahi-discover'
+            'python-dbus: avahi-discover')
+install=avahi.install
+backup=(etc/avahi/{hosts,avahi-daemon.conf}
+        usr/lib/avahi/service-types.db)
+_commit=6242e5f0fe001b7de2ccaa9431db279b2ee76b83  # tags/v0.7
+source=("git+https://github.com/lathiat/avahi#commit=$_commit"
+        0001-avahi-python-Use-the-agnostic-DBM-interface.patch)
+sha256sums=('SKIP'
+            '5e2347d73349cee56c17ef53b69418d0b083e2fe26d19af61ef2ba55ef43cf16')
+
+pkgver() {
+  cd $pkgname
+  git describe --tags | sed 's/^v//;s/-/+/g'
+}
+
+prepare() {
+  cd $pkgname
+  patch -Np1 -i ../0001-avahi-python-Use-the-agnostic-DBM-interface.patch
+  NOCONFIGURE=1 ./autogen.sh
+}
+
+build() {
+  cd $pkgname
+  export MOC_QT4=/usr/bin/moc-qt4 PYTHON=/usr/bin/python3
+
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --sbindir=/usr/bin \
+    --disable-monodoc \
+    --disable-qt3 \
+    --enable-compat-libdns_sd \
+    --with-distro=archlinux \
+    --with-avahi-priv-access-group=network \
+    --with-autoipd-user=avahi \
+    --with-autoipd-group=avahi \
+    --with-systemdsystemunitdir=/usr/lib/systemd/system
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+
+  cp -a avahi-python/avahi avahi-python/avahi2
+
+  make
+  make -C avahi-python/avahi2 PYTHON=/usr/bin/python2
+}
+
+package() {
+  cd $pkgname
+  make DESTDIR="$pkgdir" install
+  make DESTDIR="$pkgdir" -C avahi-python/avahi2 install \
+    PYTHON=/usr/bin/python2 pythondir=/usr/lib/python2.7/site-packages
+
+  # this isn't ported
+  sed -i '1s|python3|python2|' "$pkgdir/usr/bin/avahi-bookmarks"
+
+  # mdnsresponder compat
+  ln -s avahi-compat-libdns_sd/dns_sd.h "$pkgdir/usr/include/dns_sd.h"
+
+  # move example services https://bugs.archlinux.org/task/47822
+  install -d "$pkgdir/usr/share/doc/$pkgname"
+  mv "$pkgdir"/etc/avahi/services/{,sftp-}ssh.service \
+    "$pkgdir/usr/share/doc/$pkgname/"
+
+  rmdir "$pkgdir"/run
+}
