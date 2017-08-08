@@ -14,21 +14,21 @@ highmem=1
 noautobuild=1
 
 pkgname=firefox
-pkgver=54.0.1
+pkgver=55.0
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
 arch=(i686 x86_64)
 license=(MPL GPL LGPL)
 url="https://www.mozilla.org/firefox/"
 depends=(gtk3 gtk2 mozilla-common libxt startup-notification mime-types dbus-glib alsa-lib ffmpeg
-         nss hunspell sqlite ttf-font libpulse icu libvpx)
+         nss hunspell sqlite ttf-font libpulse)
 makedepends=(unzip zip diffutils python2 yasm mesa imake gconf inetutils xorg-server-xvfb
              autoconf2.13 cargo)
 optdepends=('networkmanager: Location detection via available WiFi networks'
             'libnotify: Notification integration'
             'pulseaudio: Audio support'
             'speech-dispatcher: Text-to-Speech')
-options=(!emptydirs !makeflags !strip)
+options=(!emptydirs !makeflags)
 source=(https://ftp.mozilla.org/pub/mozilla.org/firefox/releases/$pkgver/source/firefox-$pkgver.source.tar.xz
         $pkgname.desktop firefox-symbolic.svg
         firefox-install-dir.patch no-crmf.diff fix-wifi-scanner.diff
@@ -85,7 +85,6 @@ ac_add_options --enable-update-channel=release
 ac_add_options --with-distribution-id=org.archlinux
 export MOZILLA_OFFICIAL=1
 export MOZ_TELEMETRY_REPORTING=1
-export MOZ_SOURCE_REPO=${_repo@Q}
 export MOZ_ADDON_SIGNING=1
 export MOZ_REQUIRE_SIGNING=1
 
@@ -99,11 +98,8 @@ ac_add_options --disable-webrtc
 # System libraries
 ac_add_options --with-system-nspr
 ac_add_options --with-system-nss
-ac_add_options --with-system-icu
-ac_add_options --with-system-jpeg
 ac_add_options --with-system-zlib
 ac_add_options --with-system-bz2
-ac_add_options --with-system-libvpx
 ac_add_options --enable-system-hunspell
 ac_add_options --enable-system-sqlite
 ac_add_options --enable-system-ffi
@@ -113,8 +109,6 @@ ac_add_options --enable-system-pixman
 ac_add_options --enable-startup-notification
 ac_add_options --disable-crashreporter
 ac_add_options --disable-updater
-
-STRIP_FLAGS="--strip-debug"
 END
 
   if [[ $CARCH == "armv7h" ]]; then
@@ -132,20 +126,20 @@ build() {
   # _FORTIFY_SOURCE causes configure failures
   CPPFLAGS+=" -O2"
 
-  # Hardening
-  LDFLAGS+=" -Wl,-z,now"
-
   export PATH="$srcdir/path:$PATH"
+  export MOZ_SOURCE_REPO="$_repo"
 
   # Do PGO
   #xvfb-run -a -n 95 -s "-extension GLX -screen 0 1280x1024x24" \
-  #  make -f client.mk build MOZ_PGO=1
-  make -f client.mk build
+  #  MOZ_PGO=1 ./mach build
+  ./mach build
+  ./mach buildsymbols
 }
 
 package() {
   cd $pkgname-$pkgver
-  make -f client.mk DESTDIR="$pkgdir" INSTALL_SDK= install
+  DESTDIR="$pkgdir" ./mach install
+  find . -name '*crashreporter-symbols.zip' -exec cp -fvt "$startdir" {} +
 
   _vendorjs="$pkgdir/usr/lib/$pkgname/browser/defaults/preferences/vendor.js"
   install -Dm644 /dev/stdin "$_vendorjs" <<END
