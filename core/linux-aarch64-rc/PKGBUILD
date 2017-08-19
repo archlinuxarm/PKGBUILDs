@@ -3,7 +3,7 @@
 
 buildarch=8
 
-_rcver=4.12
+_rcver=4.13
 _rcrel=5
 
 pkgbase=linux-aarch64-rc
@@ -11,7 +11,7 @@ _srcname=linux-${_rcver}-rc${_rcrel}
 _kernelname=${pkgbase#linux}
 _desc="AArch64 multi-platform (release candidate)"
 pkgver=${_rcver}.rc${_rcrel}
-pkgrel=1
+pkgrel=2
 arch=('aarch64')
 url="http://www.kernel.org/"
 license=('GPL2')
@@ -19,18 +19,32 @@ makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://git.kernel.org/torvalds/t/${_srcname}.tar.gz"
         '0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch'
+        '0002-arm64-dts-rockchip-enable-sdmmc-controller-on-rk3399.patch'
+        '0003-arm64-dts-rockchip-disable-pwm0-on-rk3399-firefly.patch'
+        '0004-Revert-arm64-dts-qcom-Collapse-usb-support-into-one-.patch'
+        '0005-of-Fix-DMA-mask-generation.patch'
         'config'
-        'linux.preset')
-md5sums=('026421981675bb42c005ea7f8a910a68'
-         '1d852d09fa6ec38017b3ebe631c02d32'
-         '4fa881c77f74764353778daa83642145'
-         '25d8f6983c9a616946848c0e075a949c')
+        'linux.preset'
+        '99-linux.hook')
+md5sums=('a694a893f7750c0c1dad9231210f2212'
+         'd4d9e69e2c6f17333cbe8fca8e54f842'
+         '7a8ae6a56f63e8d3485ce5ef3ae934f1'
+         '33d0c547f73e7ec3336a361fafff923b'
+         '100ef048b8ec475e14442a81b388a203'
+         'ce0d7d63d17c330fd81ff9f801fb7777'
+         '621f6e80ad6846cd34a4f0d1f76ecabb'
+         '25d8f6983c9a616946848c0e075a949c'
+         '1d4477026533efaa0358a40855d50a83')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
   # ALARM patches
   git apply ../0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch
+  git apply ../0002-arm64-dts-rockchip-enable-sdmmc-controller-on-rk3399.patch
+  git apply ../0003-arm64-dts-rockchip-disable-pwm0-on-rk3399-firefly.patch
+  git apply ../0004-Revert-arm64-dts-qcom-Collapse-usb-support-into-one-.patch
+  git apply ../0005-of-Fix-DMA-mask-generation.patch
 
   cat "${srcdir}/config" > ./.config
 
@@ -109,6 +123,10 @@ _package() {
     -e "s|ALL_kver=.*|ALL_kver=\"${_kernver}\"|" \
     -i "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
 
+  # install pacman hook for initramfs regeneration
+  sed "s|%PKGBASE%|${pkgbase}|g" "${srcdir}/99-linux.hook" |
+    install -D -m644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/99-${pkgbase}.hook"
+
   # remove build and source links
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
   # remove the firmware
@@ -148,8 +166,8 @@ _package-headers() {
 
   mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/include"
 
-  for i in acpi asm-generic config crypto drm generated keys linux math-emu \
-    media net pcmcia scsi soc sound trace uapi video xen; do
+  for i in acpi asm-generic clocksource config crypto drm generated keys linux \
+    math-emu media net pcmcia scsi soc sound trace uapi video xen; do
     cp -a include/${i} "${pkgdir}/usr/lib/modules/${_kernver}/build/include/"
   done
 
@@ -170,10 +188,6 @@ _package-headers() {
   cp arch/${KARCH}/Makefile "${pkgdir}/usr/lib/modules/${_kernver}/build/arch/${KARCH}/"
 
   cp arch/${KARCH}/kernel/asm-offsets.s "${pkgdir}/usr/lib/modules/${_kernver}/build/arch/${KARCH}/kernel/"
-
-  # add docbook makefile
-  install -D -m644 Documentation/DocBook/Makefile \
-    "${pkgdir}/usr/lib/modules/${_kernver}/build/Documentation/DocBook/Makefile"
 
   # add dm headers
   mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/md"

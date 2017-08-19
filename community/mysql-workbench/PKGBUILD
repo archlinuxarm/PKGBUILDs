@@ -13,10 +13,10 @@ buildarch=28
 
 pkgname=mysql-workbench
 pkgver=6.3.9
-pkgrel=4
-_mysql_version=5.7.18
+pkgrel=5
+_mysql_version=5.7.19
 _connector_version=1.1.9
-_gdal_version=2.2.0
+_gdal_version=2.2.1
 _boost_version=1.59.0
 pkgdesc='A cross-platform, visual database design tool developed by MySQL'
 arch=('i686' 'x86_64')
@@ -29,6 +29,9 @@ depends=('cairo' 'ctemplate' 'desktop-file-utils' 'freetype2' 'gtkmm3'
 optdepends=('gnome-keyring: store SSH/MySQL passwords in GNOME password manager'
 	'python2-pyodbc: database migration')
 makedepends=('cmake' 'boost' 'mesa' 'swig' 'java-runtime' 'imagemagick')
+# this breaks at runtime with our default build flags
+# TODO: remove in future
+options=('!buildflags')
 validpgpkeys=('A4A9406876FCBD3C456770C88C718D3B5072E1F5')
 source=("https://cdn.mysql.com/Downloads/MySQLGUITools/mysql-workbench-community-${pkgver}-src.tar.gz"{,.asc}
 	"https://cdn.mysql.com/Downloads/MySQL-${_mysql_version%.*}/mysql-${_mysql_version}.tar.gz"{,.asc}
@@ -41,14 +44,15 @@ source=("https://cdn.mysql.com/Downloads/MySQLGUITools/mysql-workbench-community
 	'0003-add-option-to-hide-nonstandard-server-warning.patch'
 	'0004-fix-build-for-i686.patch'
 	'0005-gdal-use-CPLFree.patch'
+	'0006-mysql-include-my_dir.patch'
 	'arch_linux_profile.xml')
 sha256sums=('607af29481821b25c13c8b28011162c9d6d5e9ef96df5f664408116b88308951'
             'SKIP'
-            '0b5d71ed608656cd8181d3bb0434d3e36bac192899038dbdddf5a7594aaea1a2'
+            '3e51e76f93179ca7b165a7008a6cc14d56195b3aef35d26d3ac194333d291eb1'
             'SKIP'
             '3e31847a69a4e5c113b7c483731317ec4533858e3195d3a85026a0e2f509d2e4'
             'SKIP'
-            '0d4c326862e0f118e17418c042c2bcd037b25abd3fb198e1fc5d40b11a9fc8ea'
+            '927098d54083ac919a497f787b835b099e9a194f2e5444dbff901f7426b86066'
             '727a932322d94287b62abb1bd2d41723eec4356a7728909e38adb65ca25241ca'
             '9d3e866b610460664522520f73b81777b5626fb0a282a5952b9800b751550bf7'
             'b189e15c6b6f5a707357d9a9297f39ee3a33264fd28b44d5de6f537f851f82cf'
@@ -56,9 +60,15 @@ sha256sums=('607af29481821b25c13c8b28011162c9d6d5e9ef96df5f664408116b88308951'
             '3c9097af599f08388c471d6fd02f40ea72e5759eaa89f731e662852a5e67feea'
             '68295716c55e5f7b07b3ec1162b512b33a0563952a0eb4ef6fd71d852c61de11'
             '0965b4f12a0ae26bea131f05c7383d4a9b068d556b092ad23e19e1d8f6895531'
+            'd97a1fec15e0dc4491e79ce380f6f994f1c4b387d960c13e178a18b0299c0436'
             '2ade582ca25f6d6d748bc84a913de39b34dcaa6e621a77740fe143007f2833af')
 
 prepare() {
+	cd "${srcdir}/mysql-${_mysql_version}"
+
+	# fix build without server
+	patch -Np1 < "${srcdir}"/0006-mysql-include-my_dir.patch
+
 	cd "${srcdir}/mysql-workbench-community-${pkgver}-src/"
 
 	# Disable 'Help' -> 'Check for Updates'
@@ -77,6 +87,12 @@ prepare() {
 	# gdal: use CPLFree()
 	patch -Np1 < "${srcdir}"/0005-gdal-use-CPLFree.patch
 
+	# GCC 7.x introduced some new warnings, remove '-Werror' for the build to complete
+	sed -i '/^set/s|-Werror -Wall|-Wall|' CMakeLists.txt
+
+	# GCC 7.x complains about unsupported flag
+	sed -i 's|-Wno-deprecated-register||' ext/scintilla/gtk/CMakeLists.txt
+
 	# we need python 2.x
 	sed -i '/^FIND_PROGRAM(PYTHON_EXEC /c FIND_PROGRAM(PYTHON_EXEC "python2")' \
 		CMakeLists.txt
@@ -86,13 +102,10 @@ prepare() {
 }
 
 build() {
-	# this uses deprecated auto_ptr...
-	# we known that, so do not flood the logs
-	CXXFLAGS="${CXXFLAGS} -Wno-deprecated-declarations"
-
 	# Build mysql
 	cd "${srcdir}/mysql-${_mysql_version}"
 	cmake . \
+		-DWITHOUT_SERVER=ON \
 		-DBUILD_CONFIG=mysql_release \
 		-DCMAKE_INSTALL_PREFIX=/usr \
 		-DCMAKE_INSTALL_LIBDIR=lib \

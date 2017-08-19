@@ -12,9 +12,9 @@ _prefix=/usr
 pkgbase=kodi-rbp-git
 _suffix=rbp-git
 pkgname=("kodi-$_suffix" "kodi-eventclients-$_suffix" "kodi-tools-texturepacker-$_suffix" "kodi-dev-$_suffix")
-pkgver=17.1rc1.20170223
-_tag=17.1rc1-Krypton
-pkgrel=3
+pkgver=17.4rc1.20170811
+_tag=17.4rc1-Krypton
+pkgrel=1
 arch=('armv6h' 'armv7h')
 url="http://kodi.tv"
 license=('GPL2')
@@ -30,34 +30,43 @@ source=("xbmc-$_tag.tar.gz::https://github.com/xbmc/xbmc/archive/$_tag.tar.gz"
         '99-kodi.rules'
         'https://github.com/popcornmix/xbmc/commit/0c320b6cdd4fb409be45008e6b9042463d54b742.patch'
         'https://github.com/popcornmix/xbmc/commit/4d983105d7fd65b1d92f2ae2602e6e1cdcaddbe0.patch'
-        'polkit.rules')
-sha256sums=('a614128c065d561fccd4167f25eddbad3875328f1e81f627ffe3d0b17958aa07'
+        'polkit.rules'
+        'hifiberry_digi.patch'
+        'fix-python-lib-path.patch')
+
+sha256sums=('dd0604419528e00e14669c5c2ae9285ea60a7588eebf203bd2f399f9b8033e8c'
             '5235068d5800d69f0287087815990e7fe8d6572733d60c8800546d35f608e87f'
             'b31570f95654434b01fd8531612fbb6be77cbc1c519dd60f92feae26eb160f3d'
-            '813f8c622c341eefb33774115199d2abe9c189cf2ce52e79719dbd42d48a1274'
-            'd830c010ead152bc9a9ba6b812c985d6e649bda7480fec9b3c451f5ea03ba792'
-            '9ea592205023ba861603d74b63cdb73126c56372a366dc4cb7beb379073cbb96')
+            '6f23df9cf214502f0a446edf07b18ce1855e549cabb1cd94ac9180770ba48ee4'
+            '82057eccc4cadbd568dda76103dcc667754194e926ede78e43d70b3a17bbb5e5'
+            '9ea592205023ba861603d74b63cdb73126c56372a366dc4cb7beb379073cbb96'
+            '0b9d951911a8576c26dec8a31f394282677e48afff49b9579448121d27b8509e'
+            '1c07c9fdd8e2958262cf917e4266c4933fcd06529c111e3cb0cbaaa05c934033')
 
 prepare() {
   cd "$srcdir/xbmc-$_tag"
+  # python2 patch fix
+  patch -p1 -i "$srcdir/fix-python-lib-path.patch"
 
   # ffmpeg: Automatic switch to software decode for GMC with more than one warp point
   patch -Np1 -i "$srcdir/0c320b6cdd4fb409be45008e6b9042463d54b742.patch"
   # fix for files with GMC
   patch -Np1 -i "$srcdir/4d983105d7fd65b1d92f2ae2602e6e1cdcaddbe0.patch"
+  # fix for lack of passthrough audio with hifiberry-digi+ card
+  patch -Np1 -i "$srcdir/hifiberry_digi.patch"
 
   [[ -d kodi-build ]] && rm -rf kodi-build
   mkdir $srcdir/kodi-build
 }
 
 build() {
-  cd "kodi-build"
+  cd kodi-build
 
   # -DCPU=arm1176jzf-s for rpi1
   # -DCPU=cortex-a7 for rpi2
   # -DCPU=cortex-a53 for rpi3
   
-  [[ $CARCH == "armv6h" ]] && _CPU=arm1176jzf-s
+  [[ $CARCH == "armv6h" ]] && _CPU=arm1176jzf-s && LDFLAGS+=" -latomic"
   [[ $CARCH == "armv7h" ]] && _CPU=cortex-a7
 
   cmake -DCMAKE_INSTALL_PREFIX=/usr \
@@ -73,7 +82,7 @@ build() {
     -DLIRC_DEVICE=/run/lirc/lircd \
     ../"xbmc-$_tag"/project/cmake
 
-  make VERBOSE=1
+  make
   make preinstall
 }
 
@@ -81,14 +90,12 @@ package_kodi-rbp-git() {
   pkgdesc="A software media player and entertainment hub for digital media (Raspberry Pi)"
   depends=('hicolor-icon-theme' 'fribidi' 'lzo' 'smbclient' 'libtiff' 'libva' 'libpng' 'libcdio'
            'yajl' 'libmariadbclient' 'libjpeg-turbo' 'libsamplerate' 'libssh' 'libmicrohttpd'
-           'sdl_image' 'python2' 'python2-pillow' 'python2-simplejson' 'libass'
+           'sdl_image' 'python2' 'python2-pillow' 'python2-pybluez' 'python2-simplejson' 'libass'
            'libmpeg2' 'libmad' 'libmodplug' 'jasper' 'rtmpdump' 'xorg-xdpyinfo' 'libbluray'
            'avahi' 'bluez-libs' 'tinyxml' 'raspberrypi-firmware' 'libpulse'
            'libplist' 'swig' 'taglib' 'libxslt' 'libcrossguid-git')
-
   optdepends=(
     'afpfs-ng: Apple airplay and AFP share support'
-    'python2-pybluez: Bluetooth support'
     'libcec-rpi: Pulse-Eight USB-CEC adapter support'
     'libnfs: NFS shares support'
     'lirc: remote controller support'
@@ -98,7 +105,6 @@ package_kodi-rbp-git() {
     'unrar: access compressed files without unpacking them'
     'unzip: access compressed files without unpacking them'
     'upower: used to trigger power management functionality')
-
   install='kodi.install'
   provides=('xbmc' 'kodi')
   conflicts=('xbmc' 'kodi' 'arm-mem-git' 'shairplay-git')
@@ -114,10 +120,10 @@ package_kodi-rbp-git() {
   done
 
   # Licenses
-  install -dm755 ${pkgdir}/usr/share/licenses/${pkgname}
+  install -dm755 "$pkgdir/usr/share/licenses/$pkgname"
   for licensef in LICENSE.GPL copying.txt; do
-    mv ${pkgdir}/usr/share/doc/kodi/${licensef} \
-      ${pkgdir}/usr/share/licenses/${pkgname}
+    mv "$pkgdir/usr/share/doc/kodi/$licensef" \
+      "$pkgdir/usr/share/licenses/$pkgname"
   done
 
   # python2 is being used
@@ -126,7 +132,7 @@ package_kodi-rbp-git() {
 
   install -Dm0644 "$srcdir/kodi.service" "$pkgdir/usr/lib/systemd/system/kodi.service"
   install -Dm0644 "$srcdir/polkit.rules" "$pkgdir/usr/share/polkit-1/rules.d/10-kodi.rules"
-  chmod 0700 "$pkgdir/usr/share/polkit-1/rules.d/"
+  chmod 0750 "$pkgdir/usr/share/polkit-1/rules.d/"
 
   # fix permissions necessary for accelerated video playback
   install -Dm0644 "$srcdir/99-kodi.rules" "$pkgdir/etc/udev/rules.d/99-kodi.rules"
@@ -140,7 +146,7 @@ package_kodi-eventclients-rbp-git() {
   _components=('kodi-eventclients-common'
     'kodi-eventclients-ps3'
     'kodi-eventclients-wiiremote'
-    'kodi-eventclients-xbmc-send' )
+    'kodi-eventclients-xbmc-send')
 
   cd kodi-build
   # install eventclients

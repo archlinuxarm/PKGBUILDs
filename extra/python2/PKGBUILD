@@ -1,0 +1,145 @@
+# $Id$
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Stéphane Gaudreault <stephane@archlinux.org>
+# Contributor: Allan McRae <allan@archlinux.org>
+# Contributor: Jason Chu <jason@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - configure with --without-lto
+
+pkgname=python2
+pkgver=2.7.13
+pkgrel=4
+_pybasever=2.7
+pkgdesc="A high-level scripting language"
+arch=('i686' 'x86_64')
+license=('PSF')
+url="http://www.python.org/"
+depends=('bzip2' 'gdbm' 'openssl' 'zlib' 'expat' 'sqlite' 'libffi')
+makedepends=('tk' 'bluez-libs')
+checkdepends=('gdb' 'file' 'xorg-server-xvfb')
+optdepends=('tk: for IDLE'
+            'python2-setuptools'
+            'python2-pip')
+conflicts=('python<3')
+source=("https://www.python.org/ftp/python/${pkgver%rc?}/Python-${pkgver}.tar.xz"{,.asc}
+        bpo-29697-don-t-use-openssl-1.0-fallback-on-1.1.patch
+        bpo-30714-alpn-changes-for-openssl-1.1.0f.patch
+        descr_ref.patch fix-profile-task.patch)
+sha512sums=('f37c9a28ce129d01e63c84d7db627a06402854578f62d17927334ea21ede318e04bbf66e890e3f47c85333e6b19f6e5581fb3f3e27efd24be27017d1b6529c4b'
+            'SKIP'
+            '115c40c36f2f18474244c758472c6b670a576d8f0289d9add005af1ed23d368738eed09fe2123df38ed5111c37ce31d998ae3db2eeff29fc5ac3065f8ea25211'
+            'b32c2a0f17b3d19720187b68606024886c6b8008b7c61feaf4fe7b26b4547fddc71a2f191f87557d5fe613d06a8bc79ce5f724681a3090559fc34a032ccbf61a'
+            '2e16eb23eb402dbe921c09bce99b400c10939114b4a1ded0e94a744d8cb66427947bc8d07c4fb054f9fe0906d10d1da509fc2273fd136225c0f019cc43dd045d'
+            '5d7b47bfa9f13cf5fb827546189d823033278f96866366fca5257aaf819c92ffb26e2116426c84ab78d9ae3178eebb591fa4b2f22cfc2725e3e3e795fdb5c2b6')
+validpgpkeys=('C01E1CAD5EA2C4F0B8E3571504C367C218ADD4FF')  # Benjamin Peterson
+
+prepare() {
+  cd Python-${pkgver}
+
+  # Temporary workaround for FS#22322
+  # See http://bugs.python.org/issue10835 for upstream report
+  sed -i "/progname =/s/python/python${_pybasever}/" Python/pythonrun.c
+
+  # Enable built-in SQLite module to load extensions (fix FS#22122)
+  sed -i "/SQLITE_OMIT_LOAD_EXTENSION/d" setup.py
+
+  # FS#23997
+  sed -i -e "s|^#.* /usr/local/bin/python|#!/usr/bin/python2|" Lib/cgi.py
+
+  sed -i "s/python2.3/python2/g" Lib/distutils/tests/test_build_scripts.py \
+    Lib/distutils/tests/test_install_scripts.py
+
+  # Ensure that we are using the system copy of various libraries (expat, zlib and libffi),
+  # rather than copies shipped in the tarball
+  rm -r Modules/expat
+  rm -r Modules/zlib
+  rm -r Modules/_ctypes/{darwin,libffi}*
+
+  # clean up #!s
+  find . -name '*.py' | \
+    xargs sed -i "s|#[ ]*![ ]*/usr/bin/env python$|#!/usr/bin/env python2|"
+
+  # Workaround asdl_c.py/makeopcodetargets.py errors after we touched the shebangs
+  touch Include/Python-ast.h Python/Python-ast.c Python/opcode_targets.h
+
+  # https://bugs.python.org/issue29697
+  patch -Np1 -i ../bpo-29697-don-t-use-openssl-1.0-fallback-on-1.1.patch
+
+  # https://bugs.python.org/issue30714
+  patch -Np1 -i ../bpo-30714-alpn-changes-for-openssl-1.1.0f.patch
+
+  # FS#48761
+  # http://bugs.python.org/issue25750
+  patch -Np1 -i ../descr_ref.patch
+
+  # Backport from Python 3.x
+  patch -Np2 -i ../fix-profile-task.patch
+}
+
+build() {
+  cd "${srcdir}/Python-${pkgver}"
+
+  export OPT="${CFLAGS}"
+  ./configure --prefix=/usr \
+              --enable-shared \
+              --with-threads \
+              --enable-optimizations \
+              --without-lto \
+              --enable-ipv6 \
+              --enable-unicode=ucs4 \
+              --with-system-expat \
+              --with-system-ffi \
+              --with-dbmliborder=gdbm:ndbm \
+              --without-ensurepip
+
+  make
+}
+
+check() {
+  # Since 2.7.13,
+  # test_replace_overflow (present in test_bytes, test_str, test_string, test_unicode, test_userstring) segfault on i686
+  # test_bigrepeat (present in test_tuple) segfault on i686
+
+  cd Python-${pkgver}
+  LD_LIBRARY_PATH="${srcdir}/Python-${pkgver}":${LD_LIBRARY_PATH} \
+    xvfb-run "${srcdir}/Python-${pkgver}/python" -m test.regrtest -v -uall -x test_bytes test_str test_string test_tuple test_unicode test_userstring
+}
+
+package() {
+  cd Python-${pkgver}
+
+  # Hack to avoid building again
+  sed -i 's/^all:.*$/all: build_all/' Makefile
+
+  make DESTDIR="${pkgdir}" altinstall maninstall
+
+  rm "${pkgdir}"/usr/share/man/man1/python.1
+
+  ln -sf python${_pybasever}        "${pkgdir}"/usr/bin/python2
+  ln -sf python${_pybasever}-config "${pkgdir}"/usr/bin/python2-config
+  ln -sf python${_pybasever}.1      "${pkgdir}"/usr/share/man/man1/python2.1
+
+  # FS#33954
+  ln -sf python-${_pybasever}.pc    "${pkgdir}"/usr/lib/pkgconfig/python2.pc
+
+  ln -sf ../../libpython${_pybasever}.so "${pkgdir}"/usr/lib/python${_pybasever}/config/libpython${_pybasever}.so
+
+  mv "${pkgdir}"/usr/bin/smtpd.py "${pkgdir}"/usr/lib/python${_pybasever}/
+
+  # some useful "stuff"
+  install -dm755 "${pkgdir}"/usr/lib/python${_pybasever}/Tools/{i18n,scripts}
+  install -m755 Tools/i18n/{msgfmt,pygettext}.py "${pkgdir}"/usr/lib/python${_pybasever}/Tools/i18n/
+  install -m755 Tools/scripts/{README,*py} "${pkgdir}"/usr/lib/python${_pybasever}/Tools/scripts/
+
+  # fix conflicts with python
+  mv "${pkgdir}"/usr/bin/idle{,2}
+  mv "${pkgdir}"/usr/bin/pydoc{,2}
+  mv "${pkgdir}"/usr/bin/2to3{,-2.7}
+
+  # clean-up reference to build directory
+  sed -i "s#${srcdir}/Python-${pkgver}:##" "${pkgdir}"/usr/lib/python${_pybasever}/config/Makefile
+
+  # license
+  install -Dm644 LICENSE "${pkgdir}"/usr/share/licenses/${pkgname}/LICENSE
+}
