@@ -4,49 +4,45 @@
 buildarch=8
 
 pkgname=uboot-pine64
-pkgver=2016.05rc1
+pkgver=2017.07
 pkgrel=1
 pkgdesc="U-Boot for Pine64"
-arch=('armv7h')
+arch=('aarch64')
 url='http://www.denx.de/wiki/U-Boot/WebHome'
 license=('GPL')
 backup=('boot/boot.txt' 'boot/boot.scr')
 makedepends=('bc' 'dtc' 'git')
 install=${pkgname}.install
 source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver/rc/-rc}.tar.bz2"
-        '0001-arch-linux-arm-modifications.patch'
-        'https://archlinuxarm.org/builder/src/pine/bl31.bin'
-        'https://archlinuxarm.org/builder/src/pine/boot0.bin'
-        'https://archlinuxarm.org/builder/src/pine/pine64_image.c'
-        'https://archlinuxarm.org/builder/src/pine/scp.bin'
+        'git+https://github.com/apritzel/arm-trusted-firmware.git#branch=allwinner'
+        '0001-ATF-set-fno-stack-protector.patch'
         'boot.txt'
         'mkscr')
-md5sums=('aa190afb64ae4f59d1a02d351e4ceedd'
-         '77cad572cf8d40a7c9c0c6a1dccd1ccf'
-         '7af966e1c846879b511d73210cc8147f'
-         'cbad13361ebef9b9e0897e1d42c69ba7'
-         '4c2b592d3bece0cbf118c9eee3cd1b8a'
-         '9130de1a9cac42cc0ab8697dcb7b3ae5'
-         '6400a8b8a70816865429404f24aafdef'
+md5sums=('b74741e7a9ad1cf9a5bfa87302b80f2b'
+         'SKIP'
+         '1d3b375fa978f3297d0fd3316f89e68a'
+         'c3fef77aee64903f806c4f4357e5a2ab'
          '021623a04afd29ac3f368977140cfbfd')
 
 prepare() {
-  cd u-boot-${pkgver/rc/-rc}
-
-  git apply ../0001-arch-linux-arm-modifications.patch
+  cd arm-trusted-firmware
+  git apply ../0001-ATF-set-fno-stack-protector.patch
 }
 
 build() {
-  cd u-boot-${pkgver/rc/-rc}
+  unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
 
-  unset CFLAGS
-  unset CXXFLAGS
-  unset CPPFLAGS
+  cd arm-trusted-firmware
 
-  make distclean 
+  make PLAT=sun50iw1p1 DEBUG=1 bl31
+  cp build/sun50iw1p1/debug/bl31.bin ../u-boot-${pkgver/rc/-rc}
+
+  cd ../u-boot-${pkgver/rc/-rc}
+
+  make distclean
   make pine64_plus_defconfig
-  make EXTRAVERSION=-${pkgrel}
-  gcc ../pine64_image.c -o pine64_image
+  echo 'CONFIG_IDENT_STRING=" Arch Linux ARM"' >> .config
+  make -j1 EXTRAVERSION=-${pkgrel}
 }
 
 package() {
@@ -54,11 +50,7 @@ package() {
 
   mkdir -p "${pkgdir}"/boot
 
-  cat ../bl31.bin u-boot.bin > bl31uboot.bin
-  ./pine64_image ../scp.bin bl31uboot.bin u-boot.img
-
-  cp ../boot0.bin u-boot.img ../boot.txt "${pkgdir}"/boot
-
-  sed -i 's|@@FDTFILE@@|allwinner/sun50i-a64-pine64-plus.dtb|' "${pkgdir}"/boot/boot.txt
+  cat spl/sunxi-spl.bin u-boot.itb > u-boot-sunxi-with-spl.bin
+  cp ../boot.txt ../mkscr u-boot-sunxi-with-spl.bin "${pkgdir}"/boot
   tools/mkimage -A arm -O linux -T script -C none -n "U-Boot boot script" -d "${pkgdir}"/boot/boot.txt "${pkgdir}"/boot/boot.scr
 }
