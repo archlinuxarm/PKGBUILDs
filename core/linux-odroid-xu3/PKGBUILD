@@ -4,12 +4,12 @@
 buildarch=4
 
 pkgbase=linux-odroid-xu3
-_commit=748cb8b7fe7077a770f0a0e1b13bd59627de9e24
+_commit=d5cecd656ea0eb5be54080455cd751150866f66b
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3/4"
 pkgver=4.9.44
-pkgrel=1
+pkgrel=2
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
@@ -19,8 +19,8 @@ source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         'config'
         'linux.preset'
         '99-linux.hook')
-md5sums=('9188f3c2c055d9444fc8efb514aa5537'
-         '258cbf52f8f72780486391f900dc428b'
+md5sums=('f618e94267a4eebcfa32266f81e593ae'
+         '09cec4cdb1a4e667d664e2b92720fc58'
          'a84976d500db50cee07177eccfe2f455'
          '79fa396e3f9a09a85156d6d7c2d34b58')
 
