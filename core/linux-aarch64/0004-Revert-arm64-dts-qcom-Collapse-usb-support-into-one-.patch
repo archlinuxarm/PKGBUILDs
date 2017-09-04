@@ -1,0 +1,145 @@
+From 0c9149a1813b56d043fa3db8f8591f0b2677ee50 Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Thu, 17 Aug 2017 21:18:11 -0600
+Subject: [PATCH 4/4] Revert "arm64: dts: qcom: Collapse usb support into one
+ node"
+
+This reverts commit ed75d6a969056cc8f5dd2df3af6c75b792b9116b.
+---
+ arch/arm64/boot/dts/qcom/apq8016-sbc.dtsi | 34 ++++++++---------
+ arch/arm64/boot/dts/qcom/msm8916.dtsi     | 62 ++++++++++++++++---------------
+ 2 files changed, 49 insertions(+), 47 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/apq8016-sbc.dtsi b/arch/arm64/boot/dts/qcom/apq8016-sbc.dtsi
+index bd310ac1967a..f326f4fb4d72 100644
+--- a/arch/arm64/boot/dts/qcom/apq8016-sbc.dtsi
++++ b/arch/arm64/boot/dts/qcom/apq8016-sbc.dtsi
+@@ -215,16 +215,22 @@
+ 		usb@78d9000 {
+ 			extcon = <&usb_id>, <&usb_id>;
+ 			status = "okay";
+-			adp-disable;
+-			hnp-disable;
+-			srp-disable;
+-			ulpi {
+-				phy {
+-					v1p8-supply = <&pm8916_l7>;
+-					v3p3-supply = <&pm8916_l13>;
+-					extcon = <&usb_id>;
+-				};
+-			};
++		};
++
++		ehci@78d9000 {
++			status = "okay";
++		};
++
++		phy@78d9000 {
++			v1p8-supply = <&pm8916_l7>;
++			v3p3-supply = <&pm8916_l13>;
++			vddcx-supply = <&pm8916_s1>;
++			extcon = <&usb_id>, <&usb_id>;
++			dr_mode = "otg";
++			status = "okay";
++			switch-gpio = <&pm8916_gpios 4 GPIO_ACTIVE_HIGH>;
++			pinctrl-names = "default";
++			pinctrl-0 = <&usb_sw_sel_pm>;
+ 		};
+ 
+ 		lpass@07708000 {
+@@ -342,14 +348,6 @@
+ 		pinctrl-0 = <&usb_id_default>;
+ 	};
+ 
+-	usb-switch {
+-		compatible = "toshiba,tc7usb40mu";
+-		switch-gpios = <&pm8916_gpios 4 GPIO_ACTIVE_HIGH>;
+-		extcon = <&usb_id>;
+-		pinctrl-names = "default";
+-		pinctrl-0 = <&usb_sw_sel_pm>;
+-	};
+-
+ 	hdmi-out {
+ 		compatible = "hdmi-connector";
+ 		type = "a";
+diff --git a/arch/arm64/boot/dts/qcom/msm8916.dtsi b/arch/arm64/boot/dts/qcom/msm8916.dtsi
+index 039991f80831..17691abea608 100644
+--- a/arch/arm64/boot/dts/qcom/msm8916.dtsi
++++ b/arch/arm64/boot/dts/qcom/msm8916.dtsi
+@@ -546,40 +546,44 @@
+ 			status = "disabled";
+ 		};
+ 
+-		otg: usb@78d9000 {
++		usb_dev: usb@78d9000 {
+ 			compatible = "qcom,ci-hdrc";
+-			reg = <0x78d9000 0x200>,
+-			      <0x78d9200 0x200>;
++			reg = <0x78d9000 0x400>;
++			dr_mode = "peripheral";
++			interrupts = <GIC_SPI 134 IRQ_TYPE_LEVEL_HIGH>;
++			usb-phy = <&usb_otg>;
++			status = "disabled";
++		};
++
++		usb_host: ehci@78d9000 {
++			compatible = "qcom,ehci-host";
++			reg = <0x78d9000 0x400>;
++			interrupts = <GIC_SPI 134 IRQ_TYPE_LEVEL_HIGH>;
++			usb-phy = <&usb_otg>;
++			status = "disabled";
++		};
++
++		usb_otg: phy@78d9000 {
++			compatible = "qcom,usb-otg-snps";
++			reg = <0x78d9000 0x400>;
+ 			interrupts = <GIC_SPI 134 IRQ_TYPE_LEVEL_HIGH>,
+ 				     <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>;
++
++			qcom,vdd-levels = <500000 1000000 1320000>;
++			qcom,phy-init-sequence = <0x44 0x6B 0x24 0x13>;
++			dr_mode = "peripheral";
++			qcom,otg-control = <2>; // PMIC
++			qcom,manual-pullup;
++
+ 			clocks = <&gcc GCC_USB_HS_AHB_CLK>,
+-				 <&gcc GCC_USB_HS_SYSTEM_CLK>;
+-			clock-names = "iface", "core";
+-			assigned-clocks = <&gcc GCC_USB_HS_SYSTEM_CLK>;
+-			assigned-clock-rates = <80000000>;
+-			resets = <&gcc GCC_USB_HS_BCR>;
+-			reset-names = "core";
+-			phy_type = "ulpi";
+-			dr_mode = "otg";
+-			ahb-burst-config = <0>;
+-			phy-names = "usb-phy";
+-			phys = <&usb_hs_phy>;
+-			status = "disabled";
+-			#reset-cells = <1>;
++				 <&gcc GCC_USB_HS_SYSTEM_CLK>,
++				 <&gcc GCC_USB2A_PHY_SLEEP_CLK>;
++			clock-names = "iface", "core", "sleep";
+ 
+-			ulpi {
+-				usb_hs_phy: phy {
+-					compatible = "qcom,usb-hs-phy-msm8916",
+-						     "qcom,usb-hs-phy";
+-					#phy-cells = <0>;
+-					clocks = <&xo_board>, <&gcc GCC_USB2A_PHY_SLEEP_CLK>;
+-					clock-names = "ref", "sleep";
+-					resets = <&gcc GCC_USB2A_PHY_BCR>, <&otg 0>;
+-					reset-names = "phy", "por";
+-					qcom,init-seq = /bits/ 8 <0x0 0x44
+-						0x1 0x6b 0x2 0x24 0x3 0x13>;
+-				};
+-			};
++			resets = <&gcc GCC_USB2A_PHY_BCR>,
++				 <&gcc GCC_USB_HS_BCR>;
++			reset-names = "phy", "link";
++			status = "disabled";
+ 		};
+ 
+ 		intc: interrupt-controller@b000000 {
+-- 
+2.14.1
+
