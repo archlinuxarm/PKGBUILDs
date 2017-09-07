@@ -1,0 +1,143 @@
+From 49b428470e28ae6ab22083e43fa41abf622f3b0d Mon Sep 17 00:00:00 2001
+From: Eric Engestrom <eric.engestrom@imgtec.com>
+Date: Thu, 31 Aug 2017 16:55:56 +0000
+Subject: util: improve compiler guard
+
+Glibc 2.26 has dropped xlocale.h, but the functions needed (strtod_l()
+and strdof_l()) can be found in stdlib.h.
+Improve the detection method to allow newer builds to still make use of
+the locale-setting.
+
+Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=102454
+Cc: Laurent Carlier <lordheavym@gmail.com>
+Cc: Emil Velikov <emil.l.velikov@gmail.com>
+Cc: Rob Herring <robh@kernel.org>
+Signed-off-by: Eric Engestrom <eric.engestrom@imgtec.com>
+Reviewed-by: Laurent Carlier <lordheavym@gmail.com>
+Reviewed-by: Jose Fonseca <jfonseca@vmware.com>
+
+diff --git a/configure.ac b/configure.ac
+index ac64a38..fb6037e 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -795,6 +795,27 @@ AC_CHECK_HEADER([sys/sysctl.h], [DEFINES="$DEFINES -DHAVE_SYS_SYSCTL_H"])
+ AC_CHECK_FUNC([strtof], [DEFINES="$DEFINES -DHAVE_STRTOF"])
+ AC_CHECK_FUNC([mkostemp], [DEFINES="$DEFINES -DHAVE_MKOSTEMP"])
+ 
++AC_MSG_CHECKING([whether strtod has locale support])
++AC_LINK_IFELSE([AC_LANG_SOURCE([[
++    #define _GNU_SOURCE
++    #include <stdlib.h>
++    #include <locale.h>
++    #ifdef HAVE_XLOCALE_H
++    #include <xlocale.h>
++    #endif
++    int main() {
++       locale_t loc = newlocale(LC_CTYPE_MASK, "C", NULL);
++       const char *s = "1.0";
++       char *end;
++       double d = strtod_l(s, end, loc);
++       float f = strtof_l(s, end, loc);
++       freelocale(loc);
++       return 0;
++    }]])],
++  [DEFINES="$DEFINES -DHAVE_STRTOD_L"];
++   AC_MSG_RESULT([yes]),
++   AC_MSG_RESULT([no]))
++
+ dnl Check to see if dlopen is in default libraries (like Solaris, which
+ dnl has it in libc), or if libdl is needed to get it.
+ AC_CHECK_FUNC([dlopen], [DEFINES="$DEFINES -DHAVE_DLOPEN"],
+diff --git a/scons/gallium.py b/scons/gallium.py
+index c8e47a3..1e35ef4 100755
+--- a/scons/gallium.py
++++ b/scons/gallium.py
+@@ -157,6 +157,19 @@ def check_header(env, header):
+     env = conf.Finish()
+     return have_header
+ 
++def check_functions(env, functions):
++    '''Check if all of the functions exist'''
++
++    conf = SCons.Script.Configure(env)
++    have_functions = True
++
++    for function in functions:
++        if not conf.CheckFunc(function):
++            have_functions = False
++
++    env = conf.Finish()
++    return have_functions
++
+ def check_prog(env, prog):
+     """Check whether this program exists."""
+ 
+@@ -339,6 +352,9 @@ def generate(env):
+         if check_header(env, 'xlocale.h'):
+             cppdefines += ['HAVE_XLOCALE_H']
+ 
++        if check_functions(env, ['strtod_l', 'strtof_l']):
++            cppdefines += ['HAVE_STRTOD_L']
++
+     if platform == 'windows':
+         cppdefines += [
+             'WIN32',
+diff --git a/src/util/strtod.c b/src/util/strtod.c
+index ea7d395..de695d6 100644
+--- a/src/util/strtod.c
++++ b/src/util/strtod.c
+@@ -26,12 +26,12 @@
+ 
+ #include <stdlib.h>
+ 
+-#ifdef _GNU_SOURCE
++#if defined(_GNU_SOURCE) && defined(HAVE_STRTOD_L)
+ #include <locale.h>
+ #ifdef HAVE_XLOCALE_H
+ #include <xlocale.h>
+-static locale_t loc;
+ #endif
++static locale_t loc;
+ #endif
+ 
+ #include "strtod.h"
+@@ -40,7 +40,7 @@ static locale_t loc;
+ void
+ _mesa_locale_init(void)
+ {
+-#if defined(_GNU_SOURCE) && defined(HAVE_XLOCALE_H)
++#if defined(_GNU_SOURCE) && defined(HAVE_STRTOD_L)
+    loc = newlocale(LC_CTYPE_MASK, "C", NULL);
+ #endif
+ }
+@@ -48,7 +48,7 @@ _mesa_locale_init(void)
+ void
+ _mesa_locale_fini(void)
+ {
+-#if defined(_GNU_SOURCE) && defined(HAVE_XLOCALE_H)
++#if defined(_GNU_SOURCE) && defined(HAVE_STRTOD_L)
+    freelocale(loc);
+ #endif
+ }
+@@ -60,7 +60,7 @@ _mesa_locale_fini(void)
+ double
+ _mesa_strtod(const char *s, char **end)
+ {
+-#if defined(_GNU_SOURCE) && defined(HAVE_XLOCALE_H)
++#if defined(_GNU_SOURCE) && defined(HAVE_STRTOD_L)
+    return strtod_l(s, end, loc);
+ #else
+    return strtod(s, end);
+@@ -75,7 +75,7 @@ _mesa_strtod(const char *s, char **end)
+ float
+ _mesa_strtof(const char *s, char **end)
+ {
+-#if defined(_GNU_SOURCE) && defined(HAVE_XLOCALE_H)
++#if defined(_GNU_SOURCE) && defined(HAVE_STRTOD_L)
+    return strtof_l(s, end, loc);
+ #elif defined(HAVE_STRTOF)
+    return strtof(s, end);
+-- 
+cgit v0.10.2
+
+

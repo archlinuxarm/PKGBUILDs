@@ -8,20 +8,22 @@
 pkgbase=mesa
 pkgname=('mesa' 'libva-mesa-driver')
 pkgver=17.1.8
-pkgrel=1
+pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
              'libomxil-bellagio' 'clang' 'libglvnd' 'lm_sensors')
-url="http://mesa3d.sourceforge.net"
+url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        0002-glvnd-fix-gl-dot-pc.patch)
+        0002-glvnd-fix-gl-dot-pc.patch
+        glibc_dropped_xlocale.h.diff)
 sha256sums=('75ed2eaeae26ddd536150f294386468ae2e1a7717948c41cd14b7875be5269db'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
-            '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966')
+            '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966'
+            '6de2adc3dde36d098bfe9977f5052c13e1b2e80a913e4c83d520b2e5349ddbd0')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 validpgpkeys+=('946D09B5E4C9845E63075FF1D961C596A7203456') # Andres Gomez <tanty@igalia.com>
 validpgpkeys+=('E3E8F480C52ADD73B278EE78E1ECBE07D7D70895') # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
@@ -32,6 +34,10 @@ prepare() {
   # glvnd support patches - from Fedora
   # non-upstreamed ones
   patch -Np1 -i ../0002-glvnd-fix-gl-dot-pc.patch
+  
+  # glibc 2.26 dropped xlocale.h leading to corrupted video
+  # https://bugs.archlinux.org/task/55244 / https://bugs.freedesktop.org/show_bug.cgi?id=102454
+  patch -Np1 -i ../glibc_dropped_xlocale.h.diff
 
   autoreconf -fiv
 }
