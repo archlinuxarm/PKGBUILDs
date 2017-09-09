@@ -7,19 +7,19 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'libva-mesa-driver')
-pkgver=17.1.8
+pkgver=17.2.0
 pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
-             'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'elfutils' 'llvm'
-             'libomxil-bellagio' 'clang' 'libglvnd' 'lm_sensors')
+             'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
+             'elfutils' 'llvm' 'libomxil-bellagio' 'clang' 'libglvnd' 'lm_sensors')
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
         0002-glvnd-fix-gl-dot-pc.patch
         glibc_dropped_xlocale.h.diff)
-sha256sums=('75ed2eaeae26ddd536150f294386468ae2e1a7717948c41cd14b7875be5269db'
+sha256sums=('3123448f770eae58bc73e15480e78909defb892f10ab777e9116c9b218094943'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
             '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966'
@@ -103,6 +103,7 @@ package_mesa() {
   provides=('ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri' 'mesa-libgl' 'opengl-driver')
   conflicts=('ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri' 'mesa-libgl')
   replaces=('ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri' 'mesa-libgl')
+  backup=('etc/drirc')
 
   install -m755 -d ${pkgdir}/etc
   cp -rv ${srcdir}/fakeinstall/etc/drirc ${pkgdir}/etc
