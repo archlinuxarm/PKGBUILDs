@@ -1,5 +1,6 @@
 # $Id$
-# Maintainer: Allan McRae <allan@archlinux.org>
+# Maintainer:  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Allan McRae <allan@archlinux.org>
 
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
 # NOTE: libtool requires rebuilt with each new gcc version
@@ -15,33 +16,36 @@
 
 noautobuild=1
 
-pkgname=('gcc' 'gcc-libs' 'gcc-fortran' 'gcc-objc' 'gcc-go')
-pkgver=7.1.1
+pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go)
+pkgver=7.2.0
 _pkgver=${pkgver:0:1}
 _islver=0.18
-pkgrel=4
-_commit=d791474f3fc2133fa0c310e566988b0cbdff321e
-pkgdesc="The GNU Compiler Collection"
-arch=('i686' 'x86_64')
-license=('GPL' 'LGPL' 'FDL' 'custom')
-url="http://gcc.gnu.org"
-makedepends=('binutils>=2.28' 'libmpc' 'doxygen' 'git')
-checkdepends=('dejagnu' 'inetutils')
-options=('!emptydirs' '!distcc')
+pkgrel=2
+pkgdesc='The GNU Compiler Collection'
+arch=(i686 x86_64)
+license=(GPL LGPL FDL custom)
+url='http://gcc.gnu.org'
+makedepends=(binutils libmpc doxygen git)
+checkdepends=(dejagnu inetutils)
+options=(!emptydirs !distcc)
+_commit=1bd23ca8c30f4827c4bea23deedf7ca33a86ffb5
 source=(https://github.com/gcc-mirror/gcc/archive/${_commit}.tar.gz
         http://isl.gforge.inria.fr/isl-${_islver}.tar.bz2
+        c89 c99
         Revert-eeb6872bf.patch
         0001-ARMv5-disable-LDRD-STRD.patch)
-md5sums=('22748db692c5e409b7f3fa9482faa9cb'
+md5sums=('d8a736c9fb58e05c9404be02c65a9e4c'
          '11436d6b205e516635b666090b94ab32'
+         '3d333df77302ed89e06a4a8539943b7d'
+         'da96f545b863e57c6ab2598c1ea9a740'
          'e4c9c8b498b04c0f51d219d025ca8407'
          'a5165d78c473b487637d293a49e01740')
 
-_libdir="usr/lib/gcc/$CHOST/$pkgver"
+_libdir=usr/lib/gcc/$CHOST/$pkgver
 
 prepare() {
   mv gcc-${_commit}* gcc
-  cd ${srcdir}/gcc
+  cd gcc
 
   # link isl for in-tree build
   ln -s ../isl-${_islver} isl
@@ -67,21 +71,21 @@ prepare() {
   [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf --with-arch=armv7-a --with-float=hard --with-fpu=vfpv3-d16"
   [[ $CARCH == "aarch64" ]] && CONFIGFLAG="--host=aarch64-unknown-linux-gnu --build=aarch64-unknown-linux-gnu --with-arch=armv8-a"
 
-  mkdir ${srcdir}/gcc-build
+  mkdir -p "$srcdir/gcc-build"
 
   # Disable LDRD/STRD on ARMv5 (64-bit alignment issues)
   patch -p1 -i ../0001-ARMv5-disable-LDRD-STRD.patch
 }
 
 build() {
-  cd ${srcdir}/gcc-build
+  cd gcc-build
 
   # using -pipe causes spurious test-suite failures
   # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48565
   CFLAGS=${CFLAGS/-pipe/}
   CXXFLAGS=${CXXFLAGS/-pipe/}
 
-  ${srcdir}/gcc/configure --prefix=/usr \
+  "$srcdir/gcc/configure" --prefix=/usr \
       --libdir=/usr/lib \
       --libexecdir=/usr/lib \
       --mandir=/usr/share/man \
@@ -118,7 +122,7 @@ build() {
 }
 
 check() {
-  cd ${srcdir}/gcc-build
+  cd gcc-build
 
   # increase stack size to prevent test failures
   # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=31827
@@ -126,21 +130,19 @@ check() {
 
   # do not abort on error as some are "expected"
   make -k check || true
-  ${srcdir}/gcc/contrib/test_summary
+  "$srcdir/gcc/contrib/test_summary"
 }
 
 
-package_gcc-libs()
-{
-  pkgdesc="Runtime libraries shipped by GCC"
+package_gcc-libs() {
+  pkgdesc='Runtime libraries shipped by GCC'
   groups=('base')
   depends=('glibc>=2.25')
-  options=('!emptydirs' '!strip')
+  options+=(!strip)
 
-  cd ${srcdir}/gcc-build
-
-  make -C $CHOST/libgcc DESTDIR=${pkgdir} install-shared
-  rm ${pkgdir}/${_libdir}/libgcc_eh.a
+  cd gcc-build
+  make -C $CHOST/libgcc DESTDIR="$pkgdir" install-shared
+  rm -f "$pkgdir/$_libdir/libgcc_eh.a"
 
   for lib in libatomic \
              libgfortran \
@@ -151,173 +153,148 @@ package_gcc-libs()
              libsanitizer/{a,l,ub}san \
              libstdc++-v3/src \
              libvtv; do
-    make -C $CHOST/$lib DESTDIR=${pkgdir} install-toolexeclibLTLIBRARIES
+    make -C $CHOST/$lib DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
   done
 
-  [[ $CARCH == "x86_64" || $CARCH == "aarch64" ]] && \
-    make -C $CHOST/libsanitizer/tsan DESTDIR=${pkgdir} install-toolexeclibLTLIBRARIES
+  if [[ $CARCH == "x86_64" || $CARCH == "aarch64" ]]; then
+    make -C $CHOST/libsanitizer/tsan DESTDIR="$pkgdir" install-toolexeclibLTLIBRARIES
+  fi
 
-  make -C $CHOST/libobjc DESTDIR=${pkgdir} install-libs
-
-  make -C $CHOST/libstdc++-v3/po DESTDIR=${pkgdir} install
+  make -C $CHOST/libobjc DESTDIR="$pkgdir" install-libs
+  make -C $CHOST/libstdc++-v3/po DESTDIR="$pkgdir" install
+  #make -C $CHOST/libmpx DESTDIR="$pkgdir" install
+  #rm "$pkgdir"/usr/lib/libmpx.spec
 
   for lib in libgomp \
              libitm \
              libquadmath; do
-    make -C $CHOST/$lib DESTDIR=${pkgdir} install-info
+    make -C $CHOST/$lib DESTDIR="$pkgdir" install-info
   done
 
   # Install Runtime Library Exception
-  install -Dm644 ${srcdir}/gcc/COPYING.RUNTIME \
-    ${pkgdir}/usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION
+  install -Dm644 "$srcdir/gcc/COPYING.RUNTIME" \
+    "$pkgdir/usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION"
 }
 
-package_gcc()
-{
+package_gcc() {
   pkgdesc="The GNU Compiler Collection - C and C++ frontends"
   depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.28' 'libmpc')
   groups=('base-devel')
-  options=('staticlibs')
+  options+=(staticlibs)
 
-  cd ${srcdir}/gcc-build
+  cd gcc-build
 
-  make -C gcc DESTDIR=${pkgdir} install-driver install-cpp install-gcc-ar \
+  make -C gcc DESTDIR="$pkgdir" install-driver install-cpp install-gcc-ar \
     c++.install-common install-headers install-plugin install-lto-wrapper
 
-  install -m755 -t $pkgdir/usr/bin/ gcc/gcov{,-tool}
-  install -m755 -t $pkgdir/${_libdir}/ gcc/{cc1,cc1plus,collect2,lto1}
+  install -m755 -t "$pkgdir/usr/bin/" gcc/gcov{,-tool}
+  install -m755 -t "$pkgdir/${_libdir}/" gcc/{cc1,cc1plus,collect2,lto1}
 
-  make -C $CHOST/libgcc DESTDIR=${pkgdir} install
-  rm ${pkgdir}/usr/lib/libgcc_s.so*
+  make -C $CHOST/libgcc DESTDIR="$pkgdir" install
+  rm "$pkgdir"/usr/lib/libgcc_s.so*
 
-  make -C $CHOST/libstdc++-v3/src DESTDIR=${pkgdir} install
-  make -C $CHOST/libstdc++-v3/include DESTDIR=${pkgdir} install
-  make -C $CHOST/libstdc++-v3/libsupc++ DESTDIR=${pkgdir} install
-  make -C $CHOST/libstdc++-v3/python DESTDIR=${pkgdir} install
+  make -C $CHOST/libstdc++-v3/src DESTDIR="$pkgdir" install
+  make -C $CHOST/libstdc++-v3/include DESTDIR="$pkgdir" install
+  make -C $CHOST/libstdc++-v3/libsupc++ DESTDIR="$pkgdir" install
+  make -C $CHOST/libstdc++-v3/python DESTDIR="$pkgdir" install
 
-  make DESTDIR=${pkgdir} install-libcc1
-  install -d $pkgdir/usr/share/gdb/auto-load/usr/lib
-  mv $pkgdir/usr/lib/libstdc++.so.6.*-gdb.py \
-    $pkgdir/usr/share/gdb/auto-load/usr/lib/
-  rm ${pkgdir}/usr/lib/libstdc++.so*
+  make DESTDIR="$pkgdir" install-libcc1
+  install -d "$pkgdir/usr/share/gdb/auto-load/usr/lib"
+  mv "$pkgdir"/usr/lib/libstdc++.so.6.*-gdb.py \
+    "$pkgdir/usr/share/gdb/auto-load/usr/lib/"
+  rm "$pkgdir"/usr/lib/libstdc++.so*
 
-  make DESTDIR=${pkgdir} install-fixincludes
-  make -C gcc DESTDIR=${pkgdir} install-mkheaders
+  make DESTDIR="$pkgdir" install-fixincludes
+  make -C gcc DESTDIR="$pkgdir" install-mkheaders
 
-  make -C lto-plugin DESTDIR=${pkgdir} install
-  install -dm755 ${pkgdir}/usr/lib/bfd-plugins/
-  ln -s /usr/lib/gcc/$CHOST/${pkgver}/liblto_plugin.so \
-    ${pkgdir}/usr/lib/bfd-plugins/
+  make -C lto-plugin DESTDIR="$pkgdir" install
+  install -dm755 "$pkgdir"/usr/lib/bfd-plugins/
+  ln -s /usr/lib/gcc/$CHOST/$pkgver/liblto_plugin.so \
+    "$pkgdir/usr/lib/bfd-plugins/"
 
-  make -C $CHOST/libgomp DESTDIR=${pkgdir} install-nodist_toolexeclibHEADERS \
+  make -C $CHOST/libgomp DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS \
     install-nodist_libsubincludeHEADERS
-  make -C $CHOST/libitm DESTDIR=${pkgdir} install-nodist_toolexeclibHEADERS
-  make -C $CHOST/libquadmath DESTDIR=${pkgdir} install-nodist_libsubincludeHEADERS
-  make -C $CHOST/libsanitizer DESTDIR=${pkgdir} install-nodist_{saninclude,toolexeclib}HEADERS
-  make -C $CHOST/libsanitizer/asan DESTDIR=${pkgdir} install-nodist_toolexeclibHEADERS
+  make -C $CHOST/libitm DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
+  make -C $CHOST/libquadmath DESTDIR="$pkgdir" install-nodist_libsubincludeHEADERS
+  make -C $CHOST/libsanitizer DESTDIR="$pkgdir" install-nodist_{saninclude,toolexeclib}HEADERS
+  make -C $CHOST/libsanitizer/asan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
 
-  make -C libiberty DESTDIR=${pkgdir} install
-  # install PIC version of libiberty
-  install -m644 ${srcdir}/gcc-build/libiberty/pic/libiberty.a ${pkgdir}/usr/lib
+  make -C libiberty DESTDIR="$pkgdir" install
+  install -m644 libiberty/pic/libiberty.a "$pkgdir/usr/lib"
 
-  make -C gcc DESTDIR=${pkgdir} install-man install-info
-  rm ${pkgdir}/usr/share/man/man1/{gccgo,gfortran}.1
-  rm ${pkgdir}/usr/share/info/{gccgo,gfortran}.info
+  make -C gcc DESTDIR="$pkgdir" install-man install-info
+  rm "$pkgdir"/usr/share/man/man1/{gccgo,gfortran}.1
+  rm "$pkgdir"/usr/share/info/{gccgo,gfortran}.info
 
-  make -C libcpp DESTDIR=${pkgdir} install
-  make -C gcc DESTDIR=${pkgdir} install-po
+  make -C libcpp DESTDIR="$pkgdir" install
+  make -C gcc DESTDIR="$pkgdir" install-po
 
   # many packages expect this symlink
-  ln -s gcc ${pkgdir}/usr/bin/cc
+  ln -s gcc "$pkgdir"/usr/bin/cc
 
   # POSIX conformance launcher scripts for c89 and c99
-  cat > $pkgdir/usr/bin/c89 <<"EOF"
-#!/bin/sh
-fl="-std=c89"
-for opt; do
-  case "$opt" in
-    -ansi|-std=c89|-std=iso9899:1990) fl="";;
-    -std=*) echo "`basename $0` called with non ANSI/ISO C option $opt" >&2
-	    exit 1;;
-  esac
-done
-exec gcc $fl ${1+"$@"}
-EOF
-
-  cat > $pkgdir/usr/bin/c99 <<"EOF"
-#!/bin/sh
-fl="-std=c99"
-for opt; do
-  case "$opt" in
-    -std=c99|-std=iso9899:1999) fl="";;
-    -std=*) echo "`basename $0` called with non ISO C99 option $opt" >&2
-	    exit 1;;
-  esac
-done
-exec gcc $fl ${1+"$@"}
-EOF
-
-  chmod 755 $pkgdir/usr/bin/c{8,9}9
+  install -Dm755 "$srcdir/c89" "$pkgdir/usr/bin/c89"
+  install -Dm755 "$srcdir/c99" "$pkgdir/usr/bin/c99"
 
   # install the libstdc++ man pages
-  make -C $CHOST/libstdc++-v3/doc DESTDIR=$pkgdir doc-install-man
+  make -C $CHOST/libstdc++-v3/doc DESTDIR="$pkgdir" doc-install-man
 
   # Install Runtime Library Exception
-  install -d ${pkgdir}/usr/share/licenses/gcc/
-  ln -s ../gcc-libs/RUNTIME.LIBRARY.EXCEPTION ${pkgdir}/usr/share/licenses/gcc/
+  install -d "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+    "$pkgdir/usr/share/licenses/$pkgname/"
 }
 
-package_gcc-fortran()
-{
-  pkgdesc="Fortran front-end for GCC"
+package_gcc-fortran() {
+  pkgdesc='Fortran front-end for GCC'
   depends=("gcc=$pkgver-$pkgrel")
-  options=('!emptydirs')
 
-  cd ${srcdir}/gcc-build
-  make -C $CHOST/libgfortran DESTDIR=$pkgdir install-cafexeclibLTLIBRARIES \
+  cd gcc-build
+  make -C $CHOST/libgfortran DESTDIR="$pkgdir" install-cafexeclibLTLIBRARIES \
     install-{toolexeclibDATA,nodist_fincludeHEADERS}
-  make -C $CHOST/libgomp DESTDIR=$pkgdir install-nodist_fincludeHEADERS
-  make -C gcc DESTDIR=$pkgdir fortran.install-{common,man,info}
-  install -Dm755 gcc/f951 $pkgdir/${_libdir}/f951
+  make -C $CHOST/libgomp DESTDIR="$pkgdir" install-nodist_fincludeHEADERS
+  make -C gcc DESTDIR="$pkgdir" fortran.install-{common,man,info}
+  install -Dm755 gcc/f951 "$pkgdir/${_libdir}/f951"
 
-  ln -s gfortran ${pkgdir}/usr/bin/f95
+  ln -s gfortran "$pkgdir/usr/bin/f95"
 
   # Install Runtime Library Exception
-  install -d ${pkgdir}/usr/share/licenses/gcc-fortran/
-  ln -s ../gcc-libs/RUNTIME.LIBRARY.EXCEPTION ${pkgdir}/usr/share/licenses/gcc-fortran/
+  install -d "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+    "$pkgdir/usr/share/licenses/$pkgname/"
 }
 
-package_gcc-objc()
-{
-  pkgdesc="Objective-C front-end for GCC"
+package_gcc-objc() {
+  pkgdesc='Objective-C front-end for GCC'
   depends=("gcc=$pkgver-$pkgrel")
 
-  cd ${srcdir}/gcc-build
-  make DESTDIR=$pkgdir -C $CHOST/libobjc install-headers
-  install -dm755 $pkgdir/${_libdir}
-  install -m755 gcc/cc1obj{,plus} $pkgdir/${_libdir}/
+  cd gcc-build
+  make DESTDIR="$pkgdir" -C $CHOST/libobjc install-headers
+  install -dm755 "$pkgdir/${_libdir}"
+  install -m755 gcc/cc1obj{,plus} "$pkgdir/${_libdir}/"
 
   # Install Runtime Library Exception
-  install -d ${pkgdir}/usr/share/licenses/gcc-objc/
-  ln -s ../gcc-libs/RUNTIME.LIBRARY.EXCEPTION ${pkgdir}/usr/share/licenses/gcc-objc/
+  install -d "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+    "$pkgdir/usr/share/licenses/$pkgname/"
 }
 
-package_gcc-go()
-{
-  pkgdesc="Go front-end for GCC"
+package_gcc-go() {
+  pkgdesc='Go front-end for GCC'
   depends=("gcc=$pkgver-$pkgrel")
-  conflicts=('go')
-  options=('!emptydirs')
+  provides=("go=1.8.1")
+  conflicts=(go)
 
-  cd ${srcdir}/gcc-build
-  make -C $CHOST/libgo DESTDIR=$pkgdir install-exec-am
-  rm ${pkgdir}/usr/lib/libgo.so*
-  make -C gcc DESTDIR=$pkgdir go.install-{common,man,info}
-  install -Dm755 gcc/go1 $pkgdir/${_libdir}/go1
+  cd gcc-build
+  make -C $CHOST/libgo DESTDIR="$pkgdir" install-exec-am
+  make DESTDIR="$pkgdir" install-gotools
+  make -C gcc DESTDIR="$pkgdir" go.install-{common,man,info}
 
-  make DESTDIR=${pkgdir} install-gotools
+  rm -f "$pkgdir"/usr/lib/libgo.so*
+  install -Dm755 gcc/go1 "$pkgdir/${_libdir}/go1"
 
   # Install Runtime Library Exception
-  install -d ${pkgdir}/usr/share/licenses/gcc-go/
-  ln -s ../gcc-libs/RUNTIME.LIBRARY.EXCEPTION ${pkgdir}/usr/share/licenses/gcc-go/
+  install -d "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+    "$pkgdir/usr/share/licenses/$pkgname/"
 }
