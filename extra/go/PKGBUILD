@@ -4,19 +4,21 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - added switches for our architectures
 
-pkgname=go
+pkgbase=go
+pkgname=(go go-pie)
 epoch=2
-pkgver=1.8.3
+pkgver=1.9
 pkgrel=1
-pkgdesc='Core compiler tools for the Go programming language'
 arch=(i686 x86_64)
 url='http://golang.org/'
 license=(BSD)
 makedepends=(git go)
 options=(!strip staticlibs)
-_commit=352996a381701cfa0c16e8de29cbde8f3922182f
-source=(git+https://go.googlesource.com/go#commit=$_commit)
-md5sums=('SKIP')
+_commit=c8aec4095e089ff6ac50d18e97c3f46561f14f48
+source=(git+https://go.googlesource.com/go#commit=$_commit
+        default-buildmode-pie.patch)
+md5sums=('SKIP'
+         '4feaf3d9028fff473d5a365389ced4c9')
 
 export GOOS=linux
 case "$CARCH" in
@@ -30,35 +32,45 @@ esac
 export GOROOT_FINAL=/usr/lib/go
 export GOROOT_BOOTSTRAP=/usr/lib/go
 
+prepare() {
+  cp -r $pkgbase ${pkgbase}-pie
+
+  cd ${pkgbase}-pie
+  patch -p1 -i "$srcdir"/default-buildmode-pie.patch
+}
+
 build() {
-  export GOROOT="$srcdir/$pkgname"
   export GOBIN="$GOROOT/bin"
   export GOPATH="$srcdir/"
 
-  cd $pkgname/src
-  ./make.bash --no-clean
+  for _pkgname in ${pkgname[@]}; do
+    export GOROOT="$srcdir/$_pkgname"
+    cd "$srcdir/$_pkgname/src"
+    ./make.bash --no-clean
+  done
 }
 
 check() {
-  export GOROOT="$srcdir/$pkgname"
+  # Run test suite only for unpatched Go as it expects non-PIE ldBuildmode
+  export GOROOT="$srcdir/$pkgbase"
   export GOBIN="$GOROOT/bin"
-  export PATH="$srcdir/$pkgname-$pkgver/bin:$PATH"
+  export PATH="$srcdir/$pkgbase/bin:$PATH"
   export GO_TEST_TIMEOUT_SCALE=2
 
-  # The cgo_test and race tests fail via run.bash but not if run manually.
-  # Assume that five "failed" messages are okay and just re-run failed tests.
-  cd $pkgname/src
-  ./run.bash --no-rebuild -v -v -v -k |& tee run.log
-  if (( $(grep -c Failed: run.log) > 5 )) && grep -q FAILED run.log; then
-    return 1
-  fi
+  cd $pkgbase/src
+  ./run.bash --no-rebuild -v -v -v -k 
 
-  go tool dist test -v -v -v -run=^cgo_test$
-  go tool dist test -v -v -v -run=^race$
+  # ./run.bash --no-rebuild -v -v -v -k |& tee run.log
+  # if (( $(grep -c Failed: run.log) > 5 )) && grep -q FAILED run.log; then
+  #   return 1
+  # fi
+
+  # go tool dist test -v -v -v -run=^cgo_test$
+  # go tool dist test -v -v -v -run=^race$
 }
 
-package() {
-  cd $pkgbase
+_package() {
+  cd "$srcdir/$1"
 
   install -d "$pkgdir/usr/bin" "$pkgdir/usr/lib/go" "$pkgdir/usr/share/doc/go"
   cp -a bin pkg src lib misc "$pkgdir/usr/lib/go"
@@ -73,4 +85,21 @@ package() {
 
   rm -rf "$pkgdir/usr/lib/go/pkg/bootstrap"
   rm -rf "$pkgdir/usr/lib/go/pkg/tool/*/api"
+}
+
+package_go() {
+  pkgdesc='Core compiler tools for the Go programming language'
+  provides=(go-pie)
+  conflicts=(go-pie)
+
+  _package $pkgname
+}
+
+
+package_go-pie() {
+  pkgdesc='Core compiler tools for the Go programming language (with PIE enabled by default)'
+  provides=(go)
+  conflicts=(go)
+
+  _package $pkgname
 }

@@ -1,0 +1,89 @@
+From b0fcd75614be1f97c85cc09dcbbfe7f76bf79904 Mon Sep 17 00:00:00 2001
+From: Stephen Boyd <sboyd@codeaurora.org>
+Date: Thu, 13 Jul 2017 19:20:42 -0700
+Subject: [PATCH 4/5] arm64: dts: qcom: Force host mode for USB on apq8016-sbc
+
+Commit ed75d6a96905 ("arm64: dts: qcom: Collapse usb support into
+one node") breaks host mode support on apq8016-sbc boards. This
+is because the mux driver (tc7usb40mu) hasn't been merged.
+Without that driver, we can't toggle the GPIO going to the mux to
+route out the D+/D- lines to the USB hub that's on the board.
+
+One solution would be to totally revert this change, but that
+opens us up to other problems when two USB drivers are operating
+the same hardware block at the same time. Let's modify the DT so
+that the USB controller is always in host mode and connected to
+the hub so that things like USB keyboards and mouses work. This
+is the mode that most people prefer anyway with these devices. We
+also delete the usb-switch node because the binding was never
+accepted upstream.
+
+In the future, we can add muxing support and then update the DT
+to support both modes at runtime. Patches to support this are
+already on the mailing list.
+
+Fixes: ed75d6a96905 ("arm64: dts: qcom: Collapse usb support into one node")
+Reported-by: Rob Clark <robdclark@gmail.com>
+Signed-off-by: Stephen Boyd <sboyd@codeaurora.org>
+Signed-off-by: Andy Gross <andy.gross@linaro.org>
+---
+ arch/arm64/boot/dts/qcom/apq8016-sbc-pmic-pins.dtsi |  1 +
+ arch/arm64/boot/dts/qcom/apq8016-sbc.dtsi           | 15 +++++----------
+ 2 files changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/apq8016-sbc-pmic-pins.dtsi b/arch/arm64/boot/dts/qcom/apq8016-sbc-pmic-pins.dtsi
+index d94640812194..790b7775b901 100644
+--- a/arch/arm64/boot/dts/qcom/apq8016-sbc-pmic-pins.dtsi
++++ b/arch/arm64/boot/dts/qcom/apq8016-sbc-pmic-pins.dtsi
+@@ -17,6 +17,7 @@
+ 			function = PMIC_GPIO_FUNC_NORMAL;
+ 			power-source = <PM8916_GPIO_VPH>;
+ 			input-disable;
++			output-high;
+ 		};
+ 	};
+ 
+diff --git a/arch/arm64/boot/dts/qcom/apq8016-sbc.dtsi b/arch/arm64/boot/dts/qcom/apq8016-sbc.dtsi
+index bd310ac1967a..efd53ed82a58 100644
+--- a/arch/arm64/boot/dts/qcom/apq8016-sbc.dtsi
++++ b/arch/arm64/boot/dts/qcom/apq8016-sbc.dtsi
+@@ -213,11 +213,14 @@
+ 		};
+ 
+ 		usb@78d9000 {
+-			extcon = <&usb_id>, <&usb_id>;
++			extcon = <&usb_id>;
+ 			status = "okay";
+ 			adp-disable;
+ 			hnp-disable;
+ 			srp-disable;
++			dr_mode = "host";
++			pinctrl-names = "default";
++			pinctrl-0 = <&usb_sw_sel_pm>;
+ 			ulpi {
+ 				phy {
+ 					v1p8-supply = <&pm8916_l7>;
+@@ -337,19 +340,11 @@
+ 
+ 	usb_id: usb-id {
+ 		compatible = "linux,extcon-usb-gpio";
+-		id-gpio = <&msmgpio 121 GPIO_ACTIVE_HIGH>;
++		vbus-gpio = <&msmgpio 121 GPIO_ACTIVE_HIGH>;
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&usb_id_default>;
+ 	};
+ 
+-	usb-switch {
+-		compatible = "toshiba,tc7usb40mu";
+-		switch-gpios = <&pm8916_gpios 4 GPIO_ACTIVE_HIGH>;
+-		extcon = <&usb_id>;
+-		pinctrl-names = "default";
+-		pinctrl-0 = <&usb_sw_sel_pm>;
+-	};
+-
+ 	hdmi-out {
+ 		compatible = "hdmi-connector";
+ 		type = "a";
+-- 
+2.14.1
+

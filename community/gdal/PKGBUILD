@@ -5,25 +5,26 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - drop poppler, currently breaks build
-#  - use uname in path in removing rpath in packaging
 
 pkgname=gdal
 pkgver=2.2.1
-pkgrel=1
+pkgrel=4
 pkgdesc="A translator library for raster geospatial data formats"
 arch=('i686' 'x86_64')
 url="http://www.gdal.org/"
 license=('custom')
 depends=('curl' 'geos' 'giflib' 'hdf5' 'libgeotiff' 'libjpeg-turbo' 'libpng' 'libspatialite' 'libtiff' 'netcdf'
-         'python2' 'python2-numpy' 'cfitsio' 'sqlite' 'libmariadbclient' 'postgresql-libs')
+         'openjpeg2' 'python2' 'python2-numpy' 'cfitsio' 'sqlite' 'libmariadbclient' 'postgresql-libs')
 makedepends=('perl' 'swig' 'chrpath' 'doxygen')
 optdepends=('postgresql: postgresql database support'
             'mariadb: mariadb database support'
             'perl:  perl binding support')
 options=('!emptydirs')
 changelog=$pkgname.changelog
-source=(http://download.osgeo.org/${pkgname}/${pkgver}/${pkgname}-${pkgver}.tar.xz)
-sha256sums=('927098d54083ac919a497f787b835b099e9a194f2e5444dbff901f7426b86066')
+source=(http://download.osgeo.org/${pkgname}/${pkgver}/${pkgname}-${pkgver}.tar.xz
+        gdal-perl-vendor.patch)
+sha256sums=('927098d54083ac919a497f787b835b099e9a194f2e5444dbff901f7426b86066'
+            '20989e5fa499206b42c92280ce084fdf7b2f661a4233fc349611cc57102fe114')
 
 prepare() {
   cd "${srcdir}"/$pkgname-$pkgver
@@ -36,6 +37,9 @@ prepare() {
 
 # Fix mandir
   sed -i "s|^mandir=.*|mandir='\${prefix}/share/man'|" configure
+
+# Fix Perl bindings installation path
+  patch -Np1 -i ../gdal-perl-vendor.patch
 }
 
 build() {
@@ -43,11 +47,11 @@ build() {
   export CFLAGS="$CFLAGS -fno-strict-aliasing"
 
 # bug #23654
-  export LDFLAGS="$LDFLAGS -Wl,--as-needed" 
+  export LDFLAGS="$LDFLAGS -Wl,--as-needed"
 
-  ./configure --prefix=/usr --with-netcdf --with-libtiff --with-sqlite3 \
-              --with-geotiff --with-mysql --with-python --with-curl --with-hdf5 \
-              --with-perl --with-geos --with-png --with-spatialite
+  ./configure --prefix=/usr --with-netcdf --with-libtiff --with-sqlite3 --with-geotiff \
+              --with-mysql --with-python --with-curl --with-hdf5 --with-perl --with-geos \
+              --with-png --with-poppler --with-spatialite --with-openjpeg
 
 # workaround for bug #13646
   sed -i 's/PY_HAVE_SETUPTOOLS=1/PY_HAVE_SETUPTOOLS=/g' ./GDALmake.opt
@@ -59,19 +63,21 @@ build() {
 
 package () {
   cd "${srcdir}"/$pkgname-$pkgver
+
   make DESTDIR="${pkgdir}" install
   make DESTDIR="${pkgdir}" install-man
 
 # install license
-  install -Dm644 LICENSE.TXT "${pkgdir}"/usr/share/licenses/${pkgname}/LICENSE
+  install -Dm644 LICENSE.TXT "${pkgdir}"/usr/share/licenses/$pkgname/LICENSE
 
 #FS15477 clean up junks - still present in 2.2.1
   rm -f "${pkgdir}"/usr/share/man/man1/_build_gdal_src_gdal-${pkgver}_apps_.1
 
 # Remove RPATH
-  chrpath --delete "${pkgdir}"/usr/lib/perl5/$(uname -m)-linux-thread-multi/auto/Geo/OSR/OSR.so
-  chrpath --delete "${pkgdir}"/usr/lib/perl5/$(uname -m)-linux-thread-multi/auto/Geo/OGR/OGR.so
-  chrpath --delete "${pkgdir}"/usr/lib/perl5/$(uname -m)-linux-thread-multi/auto/Geo/GDAL/GDAL.so
-  chrpath --delete "${pkgdir}"/usr/lib/perl5/$(uname -m)-linux-thread-multi/auto/Geo/GDAL/Const/Const.so
-  chrpath --delete "${pkgdir}"/usr/lib/perl5/$(uname -m)-linux-thread-multi/auto/Geo/GNM/GNM.so
+  eval local $(perl -V:vendorarch)
+  chrpath --delete "${pkgdir}"${vendorarch}/auto/Geo/OSR/OSR.so
+  chrpath --delete "${pkgdir}"${vendorarch}/auto/Geo/OGR/OGR.so
+  chrpath --delete "${pkgdir}"${vendorarch}/auto/Geo/GDAL/GDAL.so
+  chrpath --delete "${pkgdir}"${vendorarch}/auto/Geo/GDAL/Const/Const.so
+  chrpath --delete "${pkgdir}"${vendorarch}/auto/Geo/GNM/GNM.so
 }

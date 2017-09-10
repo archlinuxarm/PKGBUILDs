@@ -11,6 +11,7 @@ pkgbase=linux-tools
 pkgname=(
   'cgroup_event_listener'
   'cpupower'
+  'hyperv'
   'libtraceevent'
   'linux-tools-meta'
   'perf'
@@ -19,7 +20,7 @@ pkgname=(
   'gpio-utils'
   'iio-utils'
 )
-pkgver=4.12
+pkgver=4.13
 pkgrel=1
 license=('GPL2')
 arch=('i686' 'x86_64')
@@ -39,14 +40,12 @@ makedepends+=('glib2' 'sysfsutils' 'udev')
 makedepends+=('ncurses')
 groups=("$pkgbase")
 source=("https://cdn.kernel.org/pub/linux/kernel/v4.x/linux-${pkgver}.tar.xz"
-        'https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.12.2.xz'
-        '571299d099dcce0ff32c76e70e32e0ba01e55adc.diff::https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/patch/tools/iio?id=571299d099dcce0ff32c76e70e32e0ba01e55adc'
+#        'https://cdn.kernel.org/pub/linux/kernel/v4.x/patch-4.12.2.xz'
         'cpupower.default'
         'cpupower.systemd'
         'cpupower.service'
         'usbipd.service')
-md5sums=('fc454157e2d024d401a60905d6481c6b'
-         'df72b6950492a79610d443d8992b3293'
+md5sums=('ab1a2abc6f37b752dd2595338bec4e78'
          '6c0bdf6ebe33ca5b3ba4ea1a5668051b'
          '56883c159381ba89e50ab8ea65efec77'
          '34f5ecc19770a1abbcd0fd65bfd1f065'
@@ -56,19 +55,22 @@ md5sums=('fc454157e2d024d401a60905d6481c6b'
 prepare() {
   cd linux-$pkgver
 
-  # apply stable kernel patch
-  #patch -p1 -N -i "$srcdir"/patch-4.7.5
+  # Fix "unwind-libunwind.c:109:11: error: ‘EINVAL’ undeclared" on i686
+  # Not sure why this wasn't an issue until now...
+  sed -i '1i #include <errno.h>' tools/perf/arch/x86/util/unwind-libunwind.c
 
   # apply patch from the source array (should be a pacman feature)
   local filename
   for filename in "${source[@]}"; do
+    filename="${filename##*/}"
     if [[ "$filename" =~ \.patch$ ]]; then
-      msg2 "Applying patch ${filename##*/}"
-      patch -p1 -N -i "$srcdir/${filename##*/}"
+      msg2 "Applying patch $filename"
+      patch -p1 -N -i "$srcdir/$filename"
+    elif [[ "$filename" =~ ^patch- ]]; then
+      msg2 "Applying linux $filename"
+      patch -p1 -N -i "$srcdir/${filename%.*}"
     fi
   done
-  # revert breaking commit for IIO utils
-  patch -p1 -Ri ../571299d099dcce0ff32c76e70e32e0ba01e55adc.diff
 }
 
 build() {
@@ -87,6 +89,7 @@ build() {
     PYTHON=python2 \
     PYTHON_CONFIG=python2-config \
     PERF_VERSION=$pkgver-$pkgrel \
+    DESTDIR="$pkgdir" \
     all man
   popd
 
@@ -114,6 +117,11 @@ build() {
   make
   popd
 
+  msg2 'hv'
+  pushd linux-$pkgver/tools/hv
+  make
+  popd
+
   msg2 'gpio'
   pushd linux-$pkgver/tools/gpio
   make -j1
@@ -131,6 +139,7 @@ package_linux-tools-meta() {
   depends=(
     'cgroup_event_listener'
     'cpupower'
+    'hyperv'
     'libtraceevent'
     'perf'
     'tmon'
@@ -228,6 +237,16 @@ package_cgroup_event_listener() {
 
   cd linux-$pkgver/tools/cgroup
   install -Dm755 cgroup_event_listener "$pkgdir/usr/bin/cgroup_event_listener"
+}
+
+package_hyperv() {
+  pkgdesc='Hyper-V tools'
+  depends=('glibc')
+
+  cd linux-$pkgver/tools/hv
+  for _p in hv_fcopy_daemon hv_kvp_daemon hv_vss_daemon; do
+    install -Dm755 "$_p" "$pkgdir/usr/bin/$_p"
+  done
 }
 
 package_gpio-utils() {
