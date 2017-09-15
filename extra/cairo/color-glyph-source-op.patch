@@ -1,0 +1,39 @@
+From 99427c3f4f6ce7ce3c95c4caa4d2b8ff7c0093d9 Mon Sep 17 00:00:00 2001
+From: Behdad Esfahbod <behdad@behdad.org>
+Date: Tue, 12 Sep 2017 01:35:15 -0400
+Subject: Handle SOURCE and CLEAR operators when painting color glyphs
+
+In cairo, most operators are composited this way:
+
+  ((src IN mask) OP dst) LERP_clip dst
+
+but SOURCE and CLEAR operators are composited this way:
+
+  (src OP dst) LERP_(clip IN mask) dst
+
+(why is this not specified anywhere in the docs or source tree?)
+
+With color glyphs, we were not special-casing SOURCE and CLEAR.
+We do now.
+
+Fixes https://bugs.freedesktop.org/show_bug.cgi?id=102661
+
+diff --git a/src/cairo-surface.c b/src/cairo-surface.c
+index 6f25bd7..35c63d7 100644
+--- a/src/cairo-surface.c
++++ b/src/cairo-surface.c
+@@ -2571,7 +2571,10 @@ composite_one_color_glyph (cairo_surface_t       *surface,
+         pattern = cairo_pattern_create_for_surface ((cairo_surface_t *)glyph_surface);
+         cairo_matrix_init_translate (&matrix, - x, - y);
+         cairo_pattern_set_matrix (pattern, &matrix);
+-        status = surface->backend->paint (surface, op, pattern, clip);
++	if (op == CAIRO_OPERATOR_SOURCE || op == CAIRO_OPERATOR_CLEAR)
++	  status = surface->backend->mask (surface, op, pattern, pattern, clip);
++	else
++	  status = surface->backend->paint (surface, op, pattern, clip);
+     }
+ 
+     return status;
+-- 
+cgit v0.10.2
+
