@@ -7,7 +7,7 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'libva-mesa-driver')
-pkgver=17.2.0
+pkgver=17.2.1
 pkgrel=3
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
@@ -18,12 +18,14 @@ license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
         0002-glvnd-fix-gl-dot-pc.patch
-        glibc_dropped_xlocale.h.diff)
-sha256sums=('3123448f770eae58bc73e15480e78909defb892f10ab777e9116c9b218094943'
+        swr-rast-do-not-crash-on-NULL-strings-returned-by-getenv.patch
+        swr-rast-remove-llvm-fence-atomics-from-generated-files.patch)
+sha256sums=('77385d17827cff24a3bae134342234f2efe7f7f990e778109682571dbbc9ba1e'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
             '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966'
-            '6de2adc3dde36d098bfe9977f5052c13e1b2e80a913e4c83d520b2e5349ddbd0')
+            '2dcbd3b311b18e473000fb496a93a4a7a4ae9f9413aace209c0ea4aebbba715b'
+            'a747e0046eab7bb9c73444549c9c63d078b11b756d2294ba9c7ee0612caf62db')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 validpgpkeys+=('946D09B5E4C9845E63075FF1D961C596A7203456') # Andres Gomez <tanty@igalia.com>
 validpgpkeys+=('E3E8F480C52ADD73B278EE78E1ECBE07D7D70895') # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
@@ -35,9 +37,9 @@ prepare() {
   # non-upstreamed ones
   patch -Np1 -i ../0002-glvnd-fix-gl-dot-pc.patch
   
-  # glibc 2.26 dropped xlocale.h leading to corrupted video
-  # https://bugs.archlinux.org/task/55244 / https://bugs.freedesktop.org/show_bug.cgi?id=102454
-  patch -Np1 -i ../glibc_dropped_xlocale.h.diff
+  # swr driver
+  patch -Np1 -i ../swr-rast-do-not-crash-on-NULL-strings-returned-by-getenv.patch
+  patch -Np1 -i ../swr-rast-remove-llvm-fence-atomics-from-generated-files.patch
 
   autoreconf -fiv
 }
