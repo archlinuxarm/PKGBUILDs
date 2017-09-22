@@ -1,0 +1,76 @@
+diff -u -r qtbase-opensource-src-5.9.1/src/platformsupport/fontdatabases/freetype/qfontengine_ft.cpp qtbase-opensource-src-5.9.1-ftharmony/src/platformsupport/fontdatabases/freetype/qfontengine_ft.cpp
+--- qtbase-opensource-src-5.9.1/src/platformsupport/fontdatabases/freetype/qfontengine_ft.cpp	2017-06-28 11:54:29.000000000 +0200
++++ qtbase-opensource-src-5.9.1-ftharmony/src/platformsupport/fontdatabases/freetype/qfontengine_ft.cpp	2017-09-19 21:31:27.803755180 +0200
+@@ -786,6 +786,7 @@
+     m_subPixelPositionCount = 4;
+     forceAutoHint = false;
+     stemDarkeningDriver = false;
++    hasLcdRendering = false;
+ }
+ 
+ QFontEngineFT::~QFontEngineFT()
+@@ -909,6 +910,15 @@
+     }
+ #endif
+ 
++    FT_Int amajor = 0, aminor = 0, apatch = 0;
++    FT_Library_Version(qt_getFreetype(), &amajor, &aminor, &apatch);
++    if (amajor > 2 || amajor == 2 && (aminor > 8 || aminor == 8 && apatch >= 1))
++        hasLcdRendering = true;
++#if defined(QT_USE_FREETYPE_LCDFILTER)
++    else if (FT_Library_SetLcdFilter(qt_getFreetype(), FT_LCD_FILTER_NONE) == FT_Err_Ok)
++        hasLcdRendering = true;
++#endif
++
+     fontDef.styleName = QString::fromUtf8(face->style_name);
+ 
+     if (!freetype->hbFace) {
+@@ -1165,21 +1175,19 @@
+ 
+     int glyph_buffer_size = 0;
+     QScopedArrayPointer<uchar> glyph_buffer;
++    if (hasLcdRendering && slot->format == FT_GLYPH_FORMAT_OUTLINE && (hsubpixel || vfactor != 1)) {
+ #if defined(QT_USE_FREETYPE_LCDFILTER)
+-    bool useFreetypeRenderGlyph = false;
+-    if (slot->format == FT_GLYPH_FORMAT_OUTLINE && (hsubpixel || vfactor != 1)) {
+-        err = FT_Library_SetLcdFilter(slot->library, (FT_LcdFilter)lcdFilterType);
+-        if (err == FT_Err_Ok)
+-            useFreetypeRenderGlyph = true;
+-    }
++        FT_Library_SetLcdFilter(slot->library, (FT_LcdFilter)lcdFilterType);
++#endif
+ 
+-    if (useFreetypeRenderGlyph) {
+         err = FT_Render_Glyph(slot, hsubpixel ? FT_RENDER_MODE_LCD : FT_RENDER_MODE_LCD_V);
+ 
+         if (err != FT_Err_Ok)
+             qWarning("render glyph failed err=%x face=%p, glyph=%d", err, face, glyph);
+ 
++#if defined(QT_USE_FREETYPE_LCDFILTER)
+         FT_Library_SetLcdFilter(slot->library, FT_LCD_FILTER_NONE);
++#endif
+ 
+         info.height = slot->bitmap.rows / vfactor;
+         info.width = hsubpixel ? slot->bitmap.width / 3 : slot->bitmap.width;
+@@ -1193,9 +1201,7 @@
+             convertRGBToARGB(slot->bitmap.buffer, (uint *)glyph_buffer.data(), info.width, info.height, slot->bitmap.pitch, subpixelType != Subpixel_RGB, false);
+         else if (vfactor != 1)
+             convertRGBToARGB_V(slot->bitmap.buffer, (uint *)glyph_buffer.data(), info.width, info.height, slot->bitmap.pitch, subpixelType != Subpixel_VRGB, false);
+-    } else
+-#endif
+-    {
++    } else {
+     int left  = slot->metrics.horiBearingX;
+     int right = slot->metrics.horiBearingX + slot->metrics.width;
+     int top    = slot->metrics.horiBearingY;
+diff -u -r qtbase-opensource-src-5.9.1/src/platformsupport/fontdatabases/freetype/qfontengine_ft_p.h qtbase-opensource-src-5.9.1-ftharmony/src/platformsupport/fontdatabases/freetype/qfontengine_ft_p.h
+--- qtbase-opensource-src-5.9.1/src/platformsupport/fontdatabases/freetype/qfontengine_ft_p.h	2017-06-28 11:54:29.000000000 +0200
++++ qtbase-opensource-src-5.9.1-ftharmony/src/platformsupport/fontdatabases/freetype/qfontengine_ft_p.h	2017-09-19 21:27:52.433263233 +0200
+@@ -311,6 +311,7 @@
+     bool cacheEnabled;
+     bool forceAutoHint;
+     bool stemDarkeningDriver;
++    bool hasLcdRendering;
+ 
+ private:
+     friend class QFontEngineFTRawFont;
