@@ -1,0 +1,48 @@
+From 66dc09662ae33d44c21a5159885afdcaabb0cbb0 Mon Sep 17 00:00:00 2001
+From: =?utf8?q?Filip=20Ros=C3=A9en?= <filip@atch.se>
+Date: Fri, 23 Sep 2016 13:52:31 +0200
+Subject: [PATCH] video_output/xcb: fix memory-leak in ReleaseDrawable
+
+The problem with the previous implementation is that "n" will never
+be equal to 0 at the relevant part of the code (given the
+unconditional pre-increment a few lines earlier).
+
+These changes fixes the issue by freeing the allocated memory if the
+first element of "used" is NULL (meaning that there are no more
+entities referred to by it).
+
+fixes #17112
+fixes #17293
+
+Signed-off-by: Thomas Guillem <thomas@gllm.fr>
+---
+ modules/video_output/xcb/window.c | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/modules/video_output/xcb/window.c b/modules/video_output/xcb/window.c
+index 02c9dd11e3..0c4f86f68c 100644
+--- a/modules/video_output/xcb/window.c
++++ b/modules/video_output/xcb/window.c
+@@ -538,12 +538,15 @@ static void ReleaseDrawable (vlc_object_t *obj, xcb_window_t window)
+         used[n] = used[n + 1];
+     while (used[++n]);
+ 
+-    if (n == 0)
+-         var_SetAddress (obj->p_libvlc, "xid-in-use", NULL);
++    if (!used[0])
++        var_SetAddress (obj->p_libvlc, "xid-in-use", NULL);
++    else
++        used = NULL;
++
+     vlc_mutex_unlock (&serializer);
+ 
+-    if (n == 0)
+-        free (used);
++    free( used );
++
+     /* Variables are reference-counted... */
+     var_Destroy (obj->obj.libvlc, "xid-in-use");
+ }
+-- 
+2.11.0
+
