@@ -7,8 +7,8 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'libva-mesa-driver')
-pkgver=17.2.1
-pkgrel=3
+pkgver=17.2.2
+pkgrel=1
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -18,14 +18,12 @@ license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
         0002-glvnd-fix-gl-dot-pc.patch
-        swr-rast-do-not-crash-on-NULL-strings-returned-by-getenv.patch
-        swr-rast-remove-llvm-fence-atomics-from-generated-files.patch)
-sha256sums=('77385d17827cff24a3bae134342234f2efe7f7f990e778109682571dbbc9ba1e'
+        swr-rast-do-not-crash-on-NULL-strings-returned-by-getenv.patch)
+sha256sums=('cf522244d6a5a1ecde3fc00e7c96935253fe22f808f064cab98be6f3faa65782'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
             '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966'
-            '2dcbd3b311b18e473000fb496a93a4a7a4ae9f9413aace209c0ea4aebbba715b'
-            'a747e0046eab7bb9c73444549c9c63d078b11b756d2294ba9c7ee0612caf62db')
+            '2dcbd3b311b18e473000fb496a93a4a7a4ae9f9413aace209c0ea4aebbba715b')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 validpgpkeys+=('946D09B5E4C9845E63075FF1D961C596A7203456') # Andres Gomez <tanty@igalia.com>
 validpgpkeys+=('E3E8F480C52ADD73B278EE78E1ECBE07D7D70895') # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
@@ -39,7 +37,6 @@ prepare() {
   
   # swr driver
   patch -Np1 -i ../swr-rast-do-not-crash-on-NULL-strings-returned-by-getenv.patch
-  patch -Np1 -i ../swr-rast-remove-llvm-fence-atomics-from-generated-files.patch
 
   autoreconf -fiv
 }
