@@ -10,11 +10,11 @@
 pkgbase=systemd
 pkgname=('systemd' 'libsystemd' 'systemd-sysvcompat')
 # latest commit on stable branch
-_commit='d52e2bb9c20216972754c054e8534bca28baab66'
+_commit='c1719d8bc924ed59448616bd748671c5c7a66d93'
 # Bump this to latest major release for signed tag verification,
 # the commit count is handled by pkgver() function.
-pkgver=234.11
-pkgrel=9
+pkgver=235.0
+pkgrel=1
 arch=('i686' 'x86_64')
 url="https://www.github.com/systemd/systemd"
 makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
@@ -23,8 +23,9 @@ makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
              'python-lxml' 'quota-tools' 'shadow' 'git'
              'meson' 'libseccomp')
 options=('strip')
-source=("git://github.com/systemd/systemd-stable.git#commit=${_commit}"
-        'git://github.com/systemd/systemd.git' # pull in for tags
+validpgpkeys=('63CDA1E5D3FC22B998D20DD6327F26951A015CC4')  # Lennart Poettering <lennart@poettering.net>
+source=('git://github.com/systemd/systemd-stable.git'
+        'git://github.com/systemd/systemd.git' # pull in for tags, backports & reverts
         'initcpio-hook-udev'
         'initcpio-install-systemd'
         'initcpio-install-udev'
@@ -49,21 +50,8 @@ sha512sums=('SKIP'
             '7d49a948f5d58f662a7d81544254528257ef8c0a08ca560834f09a7cdf566161d2df4d419ebbc2983196cd45c9eeefcd0c4c2c554376916dce42e895262afc30'
             'e521d92674597f82d589b83c378c50c92c881fdb84c436c8b26f7a3436a4c91a20585824a5563933f6868a3023b9ee2fdc7bd58e04bb47c25a0a36e296308fd3'
             '10190fba9f39a8f4b620a0829e0ba8ed63bb4dbeca712966011ee7807880d01ab2abff1a80baafeb6674db70526a473fe585db8190e864f318fc4d6068552618')
-validpgpkeys=(
-  '63CDA1E5D3FC22B998D20DD6327F26951A015CC4'  # Lennart Poettering
-)
 
 _backports=(
-  # cryptsetup: fix infinite timeout (#6486)
-  '0864d311766498563331f486909a0d950ba7de87'
-
-  # process-util: add getpid_cached() as a caching wrapper for getpid()
-  '5c30a6d2b805ae9b5dd0ad003b9ee86b8965bc47'
-  # tree-wide: make use of getpid_cached() wherever we can
-  'df0ff127758809a45105893772de76082d12a26d'
-
-  # call chase_symlinks without the /sysroot prefix (#6411) (FS#54958)
-  '98eda38aed6a10c4f6d6ad0cac6e5361e87de52b'
 )
 
 _reverts=(
@@ -112,6 +100,8 @@ prepare() {
   git remote add upstream ../systemd/
   git fetch --all
 
+  git checkout "${_commit}"
+
   _validate_tag || return
 
   local _commit
@@ -121,12 +111,6 @@ prepare() {
   for _commit in "${_reverts[@]}"; do
     git revert -n "$_commit"
   done
-
-  # core: store the invocation ID in the per-service keyring
-  # core: run each system service with a fresh session keyring
-  git show 'b3415f5daef49642be3d5f417b8880c078420ff7' \
-    '74dd6b515fa968c5710b396a7664cac335e25ca8' \
-    -- . ':!src/test/test-id128.c' | git apply --reverse --index
 }
 
 build() {
@@ -137,9 +121,6 @@ build() {
   CXXFLAGS+=" -fno-lto"
 
   local meson_options=(
-    --buildtype=release
-    -Db_lto=true
-
     -Daudit=false
     -Dgnuefi=false
     -Dima=false
@@ -157,7 +138,7 @@ build() {
     -Dsysvrcnd-path=
   )
 
-  meson "$pkgbase-stable" build "${meson_options[@]}"
+  arch-meson "$pkgbase-stable" build "${meson_options[@]}"
 
   ninja -C build
 }
