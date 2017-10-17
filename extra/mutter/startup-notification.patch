@@ -1,0 +1,45 @@
+From 4ed430b4ef3013c96fa56cdc57b925b42d20ead9 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Florian=20M=C3=BCllner?= <fmuellner@gnome.org>
+Date: Thu, 20 Oct 2016 18:00:04 +0200
+Subject: [PATCH] gtk-shell: Work around non-working startup notifications
+
+GNOME Shell relies on the MetaScreen::startup-sequence-changed signal,
+which is tied to (lib)startup-notification and therefore X11. As a result,
+when we remove the startup sequence of a wayland client, GNOME Shell will
+not be notified about this until startup-notification's timeout is hit.
+As a temporary stop-gap, go through XWayland even for wayland clients,
+so that the signal is emitted when expected.
+
+https://bugzilla.gnome.org/show_bug.cgi?id=768531
+---
+ src/wayland/meta-wayland-gtk-shell.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/wayland/meta-wayland-gtk-shell.c b/src/wayland/meta-wayland-gtk-shell.c
+index d6e249f..9d1a19e 100644
+--- a/src/wayland/meta-wayland-gtk-shell.c
++++ b/src/wayland/meta-wayland-gtk-shell.c
+@@ -219,11 +219,21 @@ gtk_shell_set_startup_id (struct wl_client   *client,
+                           struct wl_resource *resource,
+                           const char         *startup_id)
+ {
++#if 0
+   MetaDisplay *display;
+ 
+   display = meta_get_display ();
+   meta_startup_notification_remove_sequence (display->startup_notification,
+                                              startup_id);
++#else
++  /* HACK: MetaScreen::startup-sequence-changed is currently tied to
++           (lib)startup-notification, which means it only works on X11;
++           so for now, always go through XWayland, even for wayland clients */
++  gdk_x11_display_broadcast_startup_message (gdk_display_get_default (),
++                                             "remove",
++                                             "ID", startup_id,
++                                             NULL);
++#endif
+ }
+ 
+ static void
+-- 
+2.9.3
