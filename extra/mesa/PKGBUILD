@@ -8,7 +8,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'libva-mesa-driver')
 pkgver=17.2.3
-pkgrel=1
+pkgrel=2
 arch=('i686' 'x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -80,8 +80,8 @@ package_libva-mesa-driver() {
   pkgdesc="VA-API implementation for gallium"
   depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence' 'lm_sensors')
 
-  install -m755 -d ${pkgdir}/usr/lib
-  cp -rv ${srcdir}/fakeinstall/usr/lib/dri ${pkgdir}/usr/lib
+  install -m755 -d ${pkgdir}/usr/lib/dri
+  cp -av ${srcdir}/fakeinstall/usr/lib/dri/* ${pkgdir}/usr/lib/dri
    
   install -m755 -d "${pkgdir}/usr/share/licenses/libva-mesa-driver"
   install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libva-mesa-driver/"
