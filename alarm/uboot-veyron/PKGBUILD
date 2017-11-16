@@ -1,0 +1,95 @@
+# U-Boot: Veyron Chromebooks
+# Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
+
+buildarch=4
+
+pkgbase=uboot-veyron
+pkgname=('uboot-minnie' 'uboot-mickey' 'uboot-jerry')
+pkgver=2017.11
+pkgrel=1
+arch=('armv7h')
+url="http://git.denx.de/u-boot.git/"
+license=('GPL')
+makedepends=('git' 'bc' 'dtc' 'vboot-utils' 'python2' 'swig')
+conflicts=('linux-veyron' 'linux-armv7-chromebook')
+install=${pkgbase}.install
+source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver/rc/-rc}.tar.bz2"
+        '0001-rk3288-set-CONFIG_SYS_TEXT_BASE-for-depthcharge.patch'
+        '0002-rockchip-minnie-Add-a-.its-file-for-chromium.patch'
+        '0003-rockchip-mickey-Add-a-.its-file-for-chromium.patch'
+        '0004-dtoc-python2-compatibility.patch'
+        'boot.txt'
+        'mkscr')
+md5sums=('7848f6fd197e2c6ef2eb483dd5bd2858'
+         '1ff4ad552e1c5d32ff0a561f2d6ac702'
+         'a7560967318753fbb2a60b0e15c5254d'
+         '612a0be69d8d55187ffe1782802cf566'
+         'b2080e9a988a5be5356ef1f782ec23f2'
+         '029cb473f59f08834b54cdc3e34c9672'
+         '021623a04afd29ac3f368977140cfbfd')
+
+prepare() {
+  cd u-boot-${pkgver/rc/-rc}
+  git apply ../0001-rk3288-set-CONFIG_SYS_TEXT_BASE-for-depthcharge.patch
+  git apply ../0002-rockchip-minnie-Add-a-.its-file-for-chromium.patch
+  git apply ../0003-rockchip-mickey-Add-a-.its-file-for-chromium.patch
+  git apply ../0004-dtoc-python2-compatibility.patch
+}
+
+build() {
+  cd u-boot-${pkgver/rc/-rc}
+
+  unset LDFLAGS CFLAGS CXXFLAGS
+  export PYTHON=/usr/bin/python2
+
+  for i in chromebook_minnie chromebit_mickey chromebook_jerry; do
+    msg ${i}
+    make O=b/${i} ${i}_defconfig
+    echo 'CONFIG_IDENT_STRING=" Arch Linux ARM"' >> b/${i}/.config
+    make O=b/${i} EXTRAVERSION=-${pkgrel}
+  done
+}
+
+common_package() {
+  name=$1
+  dtb=$2
+
+  cd u-boot-${pkgver/rc/-rc}
+
+  b/${name}/tools/mkimage -f doc/chromium/${name}.its uboot.img
+  echo "" > config
+  dd if=/dev/zero of=bootloader.bin bs=512 count=1
+  vbutil_kernel \
+    --pack uboot.kpart \
+    --version 1 \
+    --vmlinuz uboot.img \
+    --arch arm \
+    --keyblock doc/chromium/devkeys/kernel.keyblock \
+    --signprivate doc/chromium/devkeys/kernel_data_key.vbprivk \
+    --config config \
+    --bootloader bootloader.bin
+  install -Dm644 uboot.kpart "${pkgdir}"/boot/uboot.kpart
+
+  install -Dm644 ../boot.txt "${pkgdir}"/boot/boot.txt
+  sed -i "s/@@FDTFILE@@/${dtb}/" "${pkgdir}"/boot/boot.txt
+  b/${name}/tools/mkimage -A arm -O linux -T script -C none -n "U-Boot boot script" -d "${pkgdir}"/boot/boot.txt "${pkgdir}"/boot/boot.scr
+  install -Dm755 ../mkscr "${pkgdir}"/boot/mkscr
+}
+
+package_uboot-minnie() {
+  pkgdesc="U-Boot for Veyron Minnie Chromebook"
+
+  common_package "chromebook_minnie" "rk3288-veyron-minnie.dtb"
+}
+
+package_uboot-mickey() {
+  pkgdesc="U-Boot for Veyron Mickey Chromebit"
+
+  common_package "chromebit_mickey" "rk3288-veyron-mickey.dtb"
+}
+
+package_uboot-jerry() {
+  pkgdesc="U-Boot for Veyron Jerry Chromebook"
+
+  common_package "chromebook_jerry" "rk3288-veyron-jerry.dtb"
+}
