@@ -1,0 +1,62 @@
+# $Id$
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Arch Haskell Team <arch-haskell@haskell.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - build with -O0 to fix OOM
+
+pkgname=pandoc
+pkgver=2.0.3
+pkgrel=1
+pkgdesc="Conversion between markup formats"
+url="http://pandoc.org"
+license=("GPL")
+arch=('x86_64')
+depends=('ghc-libs' "haskell-http" "haskell-juicypixels" "haskell-sha" "haskell-aeson"
+         "haskell-aeson-pretty" "haskell-base64-bytestring" "haskell-blaze-html"
+         "haskell-blaze-markup" "haskell-case-insensitive" "haskell-cmark-gfm"
+         "haskell-data-default" "haskell-doctemplates" "haskell-glob" "haskell-mtl"
+         "haskell-haddock-library" "haskell-skylighting" "haskell-hslua" "haskell-hslua-module-text"
+         "haskell-http-client" "haskell-syb" "haskell-http-client-tls" "haskell-http-types"
+         "haskell-safe" "haskell-split" "haskell-text" "haskell-texmath" "haskell-network"
+         "haskell-pandoc-types" "haskell-parsec" "haskell-random" "haskell-scientific"
+         "haskell-tagsoup" "haskell-temporary" "haskell-network-uri" "haskell-unordered-containers"
+         "haskell-zip-archive" "haskell-vector" "haskell-xml" "haskell-yaml" "haskell-zlib")
+optdepends=('pandoc-citeproc: for citation rendering with pandoc-citeproc filter'
+            'pandoc-crossref: for numbering figures, equations, tables and cross-references to them with pandoc-crossref filter'
+            'texlive-core: for pdf output')
+conflicts=('haskell-pandoc')
+replaces=('haskell-pandoc')
+makedepends=('ghc' 'haskell-diff' 'haskell-tasty' 'haskell-tasty-hunit' 'haskell-tasty-quickcheck'
+             'haskell-tasty-golden' 'haskell-quickcheck' 'haskell-executable-path')
+source=("https://hackage.haskell.org/packages/archive/${pkgname}/${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha512sums=('92efa19141991d0737f0cda8ca09a812286bd7126e95d295e7c0d8b7b14e0be85a842f12756d0608765d2135f0ced2e786f2ffa8295d68e4b1fc52447336841d')
+
+build() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+
+    runhaskell Setup configure -O0 --enable-shared --enable-executable-dynamic --disable-library-vanilla \
+        --prefix=/usr --docdir="/usr/share/doc/${pkgbase}" --datasubdir="$pkgname" --enable-tests \
+        --dynlibdir=/usr/lib --libsubdir=\$compiler/site-local/\$pkgid \
+            -f-old-locale -fnetwork-uri -f-trypandoc -f-embed_data_files -f-weigh-pandoc -f-static
+    runhaskell Setup build
+    runhaskell Setup register --gen-script
+    runhaskell Setup unregister --gen-script
+    sed -i -r -e "s|ghc-pkg.*update[^ ]* |&'--force' |" register.sh
+    sed -i -r -e "s|ghc-pkg.*unregister[^ ]* |&'--force' |" unregister.sh
+}
+
+check() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+    # TODO: find a way to run pandoc executable in tests with dynamic executable enabled
+    # LD_PRELOAD=$(ls dist/build/libHSpandoc-*-ghc*.so)
+    runhaskell Setup test || warning "Tests failed"
+}
+
+package() {
+    cd "${srcdir}/${pkgbase}-${pkgver}"
+    install -D -m744 register.sh   "${pkgdir}/usr/share/haskell/register/${pkgname}.sh"
+    install -D -m744 unregister.sh "${pkgdir}/usr/share/haskell/unregister/${pkgname}.sh"
+    runhaskell Setup copy --destdir="${pkgdir}"
+    rm -f "${pkgdir}/usr/share/doc/${pkgname}/COPYING.md"
+}
