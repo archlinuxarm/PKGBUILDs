@@ -1,0 +1,48 @@
+From 4f0652c7341b48075a1e197aaffd0be378e29e6f Mon Sep 17 00:00:00 2001
+From: Jorge Ramirez-Ortiz <jorge.ramirez-ortiz@linaro.org>
+Date: Thu, 2 Nov 2017 15:10:21 +0100
+Subject: [PATCH 2/2] mmc: sdhci: don't clear SDHCI_INT_STATUS register during
+ CMD_INHIBIT
+
+Fixes emmc initialization regression on the db410c platform.
+
+Clearing this register while SDHCI_PRESENT_STATE reports
+SDHCI_CMD_INHIBIT leads to undefined behaviour on the db410c.
+
+When commit 7dde50 was merged (mmc: sdhci: Wait for SDHCI_INT_DATA_END
+when transferring), SDHCI transfers transitioned to wait for bit
+SDHCI_INT_DATA_END before flagging transfers done.
+
+Without this patch, the db410 platform fails to initialize its eMMC
+due to all of its transfers timing out (SDHCI_INT_DATA_END is never
+raised after all the blocks have been transferred).
+
+Signed-off-by: Jorge Ramirez-Ortiz <jorge.ramirez-ortiz@linaro.org>
+---
+ drivers/mmc/sdhci.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/mmc/sdhci.c b/drivers/mmc/sdhci.c
+index 11d1f0c24c..f0c5aad7ca 100644
+--- a/drivers/mmc/sdhci.c
++++ b/drivers/mmc/sdhci.c
+@@ -157,7 +157,6 @@ static int sdhci_send_command(struct mmc *mmc, struct mmc_cmd *cmd,
+ 	/* Timeout unit - ms */
+ 	static unsigned int cmd_timeout = SDHCI_CMD_DEFAULT_TIMEOUT;
+ 
+-	sdhci_writel(host, SDHCI_INT_ALL_MASK, SDHCI_INT_STATUS);
+ 	mask = SDHCI_CMD_INHIBIT | SDHCI_DATA_INHIBIT;
+ 
+ 	/* We shouldn't wait for data inihibit for stop commands, even
+@@ -181,6 +180,8 @@ static int sdhci_send_command(struct mmc *mmc, struct mmc_cmd *cmd,
+ 		udelay(1000);
+ 	}
+ 
++	sdhci_writel(host, SDHCI_INT_ALL_MASK, SDHCI_INT_STATUS);
++
+ 	mask = SDHCI_INT_RESPONSE;
+ 	if (!(cmd->resp_type & MMC_RSP_PRESENT))
+ 		flags = SDHCI_CMD_RESP_NONE;
+-- 
+2.14.1
+
