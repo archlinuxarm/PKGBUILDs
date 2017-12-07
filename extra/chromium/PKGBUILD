@@ -11,10 +11,11 @@
 
 buildarch=12
 highmem=1
+noautobuild=1
 
 pkgname=chromium
-pkgver=62.0.3202.94
-pkgrel=2
+pkgver=63.0.3239.84
+pkgrel=1
 _launcher_ver=5
 pkgdesc="A web browser built for speed, simplicity, and security"
 arch=('i686' 'x86_64' 'armv7h' 'aarch64')
@@ -31,9 +32,9 @@ install=chromium.install
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
         chromium-launcher-$_launcher_ver.tar.gz::https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver.tar.gz
         chromium.desktop
-        breakpad-use-ucontext_t.patch
-        crc32c-string-view-check.patch
-        chromium-gn-bootstrap-r17.patch
+        chromium-exclude_unwind_tables.patch
+        chromium-clang-r1.patch
+        chromium-webrtc-r0.patch
         chromium-widevine.patch
         0001-ARM-toolchain-fixes.patch)
 sha256sums=('cabc4d267bf08aabe11c5739048c43dde18c61acf595223a1c3aa1d3499558d4'
@@ -50,13 +51,13 @@ sha256sums=('cabc4d267bf08aabe11c5739048c43dde18c61acf595223a1c3aa1d3499558d4'
 declare -rgA _system_libs=(
   [ffmpeg]=ffmpeg
   [flac]=flac
-  #[freetype]=freetype2      # https://crbug.com/pdfium/733
-  [harfbuzz-ng]=harfbuzz-icu
-  #[icu]=icu                 # https://crbug.com/772655
+  #[freetype]=freetype2         # https://crbug.com/pdfium/733
+  #[harfbuzz-ng]=harfbuzz-icu   # https://crbug.com/768938
+  #[icu]=icu                    # https://crbug.com/772655
   [libdrm]=
   [libjpeg]=libjpeg
-  #[libpng]=libpng           # https://crbug.com/752403#c10
-  #[libvpx]=libvpx           # https://bugs.gentoo.org/611394
+  #[libpng]=libpng              # https://crbug.com/752403#c10
+  #[libvpx]=libvpx              # https://bugs.gentoo.org/611394
   [libwebp]=libwebp
   [libxml]=libxml2
   [libxslt]=libxslt
@@ -99,14 +100,12 @@ prepare() {
   sed "s/@WIDEVINE_VERSION@/Pinkie Pie/" ../chromium-widevine.patch |
     patch -Np1
 
-  # Fix build with glibc 2.26
-  patch -Np1 -i ../breakpad-use-ucontext_t.patch
-
-  # Fix incorrect inclusion of <string_view> in modes other than >= C++17
-  patch -Np1 -d third_party/crc32c/src <../crc32c-string-view-check.patch
+  # https://chromium-review.googlesource.com/c/chromium/src/+/712575
+  patch -Np1 -i ../chromium-exclude_unwind_tables.patch
 
   # Fixes from Gentoo
-  patch -Np1 -i ../chromium-gn-bootstrap-r17.patch
+  patch -Np1 -i ../chromium-clang-r1.patch
+  patch -Np1 -i ../chromium-webrtc-r0.patch
 
   # Use Python 2
   find . -name '*.py' -exec sed -i -r 's|/usr/bin/python$|&2|g' {} +
@@ -139,6 +138,11 @@ build() {
   make -C chromium-launcher-$_launcher_ver
 
   cd "$srcdir/$pkgname-$pkgver"
+
+  if check_buildoption ccache y; then
+    # Avoid falling back to preprocessor mode when sources contain time macros
+    export CCACHE_SLOPPINESS=time_macros
+  fi
 
   export PATH="$srcdir/python2-path:$PATH"
   export TMPDIR="$srcdir/temp"
@@ -191,24 +195,29 @@ package() {
   cd "$srcdir/$pkgname-$pkgver"
 
   install -D out/Release/chrome "$pkgdir/usr/lib/chromium/chromium"
-  install -Dm644 out/Release/chrome.1 "$pkgdir/usr/share/man/man1/chromium.1"
-  install -Dm644 "$srcdir/chromium.desktop" \
+  install -Dm4755 out/Release/chrome_sandbox "$pkgdir/usr/lib/chromium/chrome-sandbox"
+  ln -s /usr/lib/chromium/chromedriver "$pkgdir/usr/bin/chromedriver"
+
+  install -Dm644 chrome/installer/linux/common/desktop.template \
     "$pkgdir/usr/share/applications/chromium.desktop"
+  install -Dm644 chrome/app/resources/manpage.1.in \
+    "$pkgdir/usr/share/man/man1/chromium.1"
+  sed -i \
+    -e "s/@@MENUNAME@@/Chromium/g" \
+    -e "s/@@PACKAGE@@/chromium/g" \
+    -e "s/@@USR_BIN_SYMLINK_NAME@@/chromium/g" \
+    "$pkgdir/usr/share/applications/chromium.desktop" \
+    "$pkgdir/usr/share/man/man1/chromium.1"
 
-  install -Dm4755 out/Release/chrome_sandbox \
-    "$pkgdir/usr/lib/chromium/chrome-sandbox"
-
-  cp -a \
+  cp \
     out/Release/{chrome_{100,200}_percent,resources}.pak \
     out/Release/{*.bin,chromedriver,libwidevinecdmadapter.so} \
-    out/Release/locales \
     "$pkgdir/usr/lib/chromium/"
+  install -Dm644 -t "$pkgdir/usr/lib/chromium/locales" out/Release/locales/*.pak
 
   if [[ -z ${_system_libs[icu]+set} ]]; then
     cp out/Release/icudtl.dat "$pkgdir/usr/lib/chromium/"
   fi
-
-  ln -s /usr/lib/chromium/chromedriver "$pkgdir/usr/bin/chromedriver"
 
   for size in 22 24 48 64 128 256; do
     install -Dm644 "chrome/app/theme/chromium/product_logo_$size.png" \
