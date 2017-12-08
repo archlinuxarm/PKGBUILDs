@@ -1,0 +1,79 @@
+# $Id$
+# Contributor: Ionut Biru <ibiru@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - use tarball source
+#  - remove -flto from CFLAGS
+#  - remove --enable-gold
+
+pkgname=js52
+pkgver=52.5.2
+pkgrel=1
+_ffver=${pkgver%%.*}
+pkgdesc="JavaScript interpreter and libraries - Version $_ffver"
+arch=(x86_64)
+url="https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey"
+license=(MPL)
+depends=(gcc-libs readline zlib sh)
+makedepends=(python2 zip autoconf2.13 mercurial)
+_repo=https://hg.mozilla.org/mozilla-unified
+source=("https://hg.mozilla.org/mozilla-unified/archive/FIREFOX_${pkgver//./_}esr_RELEASE.tar.gz"
+        mozjs52-copy-headers.patch
+        mozjs52-disable-mozglue.patch
+        mozjs52-fix-soname.patch
+        mozjs52-include-configure-script.patch)
+sha256sums=('0d9b017608674edb7f1ac66e547a10e480a584463c2844817e03fa5f0f77b995'
+            'c5b3a88e4d10ef149aba6fc48d431db54ff266323fa22a5d549028fd794423cc'
+            '5a84f02521f37de873991dd360a4c4bfdbdd2fb4a218e11be73f9cbbf02050e8'
+            '06389b8e30465bb8e6fab6144dadedffa30595f143a686524da175b5cf5e8a27'
+            'd91a89acd88bfc747a255050757a0c17139bf5c3508c2e1c3c6bb2056786a344')
+
+prepare() {
+  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE
+
+  # https://anonscm.debian.org/git/pkg-gnome/mozjs52.git/tree/debian/patches
+  patch -Np1 -i ../mozjs52-fix-soname.patch
+  patch -Np1 -i ../mozjs52-copy-headers.patch
+  patch -Np1 -i ../mozjs52-disable-mozglue.patch
+  patch -Np1 -i ../mozjs52-include-configure-script.patch
+}
+
+build() {
+  unset CPPFLAGS
+  CFLAGS+=' -fno-delete-null-pointer-checks -fno-strict-aliasing -fno-tree-vrp'
+  CXXFLAGS+=' -fno-delete-null-pointer-checks -fno-strict-aliasing -fno-tree-vrp'
+  export CC=gcc CXX=g++ PYTHON=/usr/bin/python2
+
+  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/js/src
+  sh configure \
+    --prefix=/usr \
+    --disable-debug \
+    --disable-debug-symbols \
+    --disable-strip \
+    --enable-optimize="-O2" \
+    --enable-pie \
+    --enable-posix-nspr-emulation \
+    --enable-readline \
+    --enable-release \
+    --enable-shared-js \
+    --enable-tests \
+    --with-intl-api \
+    --with-system-zlib \
+    --without-system-icu
+  make
+}
+
+check() {
+  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/js/src
+  python2 tests/jstests.py -d -s -t 300 --no-progress ../../js/src/js/src/shell/js
+  python2 jit-test/jit_test.py -s -t 300 --no-progress ../../js/src/js/src/shell/js basic
+}
+
+package() {
+  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/js/src
+  make DESTDIR="$pkgdir" install
+  rm "$pkgdir"/usr/lib/*.ajs
+  find "$pkgdir"/usr/{lib/pkgconfig,include} -type f -exec chmod -c a-x {} +
+}
+
+# vim:set ts=2 sw=2 et:
