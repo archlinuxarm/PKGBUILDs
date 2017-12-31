@@ -8,9 +8,9 @@
 
 pkgbase=mariadb
 pkgname=('libmariadbclient' 'mariadb-clients' 'mytop' 'mariadb')
-pkgver=10.1.29
+pkgver=10.1.30
 pkgrel=1
-arch=('i686' 'x86_64')
+arch=('x86_64')
 license=('GPL')
 url='http://mariadb.org/'
 makedepends=('cmake' 'zlib' 'libaio' 'libxml2' 'openssl' 'jemalloc'
@@ -19,16 +19,12 @@ validpgpkeys=('199369E5404BD5FC7D2FE43BCBCB082A1BB943DB') # MariaDB Package Sign
 source=("https://ftp.heanet.ie/mirrors/mariadb/mariadb-$pkgver/source/mariadb-$pkgver.tar.gz"{,.asc}
         '0001-openssl-1-1-0.patch'
         '0002-mroonga-after-merge-CMakeLists.txt-fixes.patch'
-        'atomic.patch'
-        'mariadb-sysusers.conf'
-        'mariadb-tmpfile.conf')
-sha256sums=('73bbd5602f52ab5aa4d83f465134871b6c87bda25371d098f6da5a3d98517ed4'
+        'atomic.patch')
+sha256sums=('173a5e5a24819e0a469c3bd09b5c98491676c37c6095882a2ea34c5af0996c88'
             'SKIP'
             '40d298ca77c0459ade4ef9fc68a3a7450273b098b9f7edfb0a5251c5db434cfc'
             '98736aefef21e575e450f8066685ba82771264409412e33491ab0a54e4407ba7'
-            '2ddfe7dc5eae905ed77d7438d6869f9bb26684945c2f82cc19f84926b1cb849f'
-            'e1a22777c65854041f16fc0a2db3218d17b4d7e7ec7ab7a77cf49c71277c1515'
-            '2af318c52ae0fe5428e8a9245d1b0fc3bc5ce153842d1563329ceb1edfa83ddd')
+            '2ddfe7dc5eae905ed77d7438d6869f9bb26684945c2f82cc19f84926b1cb849f')
 
 prepare() {
   cd $pkgbase-$pkgver/
@@ -46,6 +42,9 @@ prepare() {
   # revert to fix the build
   # mroonga after-merge CMakeLists.txt fixes
   patch -Np1 -R < "${srcdir}"/0002-mroonga-after-merge-CMakeLists.txt-fixes.patch
+
+  # let's create the datadir from tmpfiles
+  echo 'd @MYSQL_DATADIR@ 0700 @MYSQLD_USER@ @MYSQLD_USER@ -' >> support-files/tmpfiles.conf.in
 
   if [[ $CARCH == arm || $CARCH == armv6h ]]; then
     patch -p0 -i ../atomic.patch
@@ -77,6 +76,8 @@ build() {
     -DINSTALL_SUPPORTFILESDIR=share/mysql \
     -DINSTALL_MYSQLSHAREDIR=share/mysql \
     -DINSTALL_SHAREDIR=share/mysql \
+    -DINSTALL_SYSTEMD_SYSUSERSDIR=/usr/lib/sysusers.d/ \
+    -DINSTALL_SYSTEMD_TMPFILESDIR=/usr/lib/tmpfiles.d/ \
     -DINSTALL_SYSTEMD_UNITDIR=/usr/lib/systemd/system/ \
     -DWITH_SYSTEMD=yes \
     -DWITH_READLINE=ON \
@@ -176,13 +177,11 @@ package_mariadb() {
   install -Dm0644 usr/share/mysql/my-medium.cnf etc/mysql/my.cnf
   install -Dm0644 usr/share/mysql/wsrep.cnf etc/mysql/wsrep.cnf
 
-  install -Dm0644 "${srcdir}"/mariadb-tmpfile.conf usr/lib/tmpfiles.d/mariadb.conf
-  install -Dm0644 "${srcdir}"/mariadb-sysusers.conf usr/lib/sysusers.d/mariadb.conf
+  mv usr/lib/sysusers.d/{sysusers,mariadb}.conf
+  mv usr/lib/tmpfiles.d/{tmpfiles,mariadb}.conf
+
   ln -s mariadb.service usr/lib/systemd/system/mysqld.service
   ln -s mariadb@.service usr/lib/systemd/system/mysqld@.service
-
-  install -dm0700 var/lib/mysql
-  chown -R 89:89 var/lib/mysql &>/dev/null
 
   # move to proper licenses directories
   install -d usr/share/licenses/mariadb
@@ -190,6 +189,9 @@ package_mariadb() {
 
   # already installed to real systemd unit directory
   rm -r usr/share/mysql/systemd/
+
+  # left over from sysvinit
+  rm usr/bin/rcmysql
 
   # provided by libmariadbclient
   rm usr/bin/mysql_config
