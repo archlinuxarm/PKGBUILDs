@@ -1,49 +1,118 @@
-# $Id$
-# Maintainer: Dan McGee <dan@archlinux.org>
-# Maintainer: Allan McRae <allan@archlinux.org>
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Contributor: Dan McGee <dan@archlinux.org>
+# Contributor: Allan McRae <allan@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - hold for toolchain update, only build for v7/v8
 #  - patch from Fedora for AArch64
+#  - removed lib32 package make/optdepends
 
 buildarch=12
-noautobuild=1
+#noautobuild=1
 
 pkgname=valgrind
 pkgver=3.13.0
-pkgrel=4
-pkgdesc='A tool to help find memory-management problems in programs'
-arch=(x86_64)
-license=(GPL)
+pkgrel=6
+pkgdesc='Tool to help find memory-management problems in programs'
+arch=('x86_64')
+license=('GPL')
 url='http://valgrind.org/'
-depends=('glibc=2.26' perl)
-makedepends=(gdb openmpi)
+depends=('glibc=2.26' 'perl')
+makedepends=('gdb' 'openmpi')
+checkdepends=('procps-ng')
 optdepends=('openmpi: MPI support')
-options=(!emptydirs)
-source=("https://ftp.gwdg.de/pub/linux/sources.redhat.com/$pkgname/$pkgname-$pkgver.tar.bz2"
-        'valgrind-3.13.0-arm64-hwcap.patch')
+provides=('valgrind-multilib')
+replaces=('valgrind-multilib')
+options=('!emptydirs' '!strip')
+source=(https://sourceware.org/pub/valgrind/valgrind-${pkgver}.tar.bz2
+        valgrind-fix-xml-socket.patch
+        valgrind-3.13.0-test-fixes.patch
+        valgrind-3.13.0-amd64-eflags-tests.patch
+        valgrind-3.13.0-gdb-8-testfix.patch
+        valgrind-3.7.0-respect-flags.patch
+        valgrind-3.13.0-arm64-hwcap.patch)
 md5sums=('817dd08f1e8a66336b9ff206400a5369'
+         '0b13c1a080260497e6159bef4401ac1a'
+         '183a51089321fcf117f0f723e8e1940a'
+         '47728e356bb24a34eae52e932dd56c9f'
+         '02ce4a4f96b2dd649b36a7b8b19bd9d1'
+         '470d9881870aacc210b7a6efb64cc9a9'
          'b7c24e58fa058578c9bf6fef4ccdd47d')
 sha512sums=('34e1013cd3815d30a459b86220e871bb0a6209cc9e87af968f347083693779f022e986f211bdf1a5184ad7370cde12ff2cfca8099967ff94732970bd04a97009'
+            '610c1e74a38d5e56a41eb59b25709ad40840e8c50d0d30bea20e9959cd65b99ae44626baf8a77505e5cd2ce70d120ae429a6861165546771395b00e534c3296b'
+            '1cff77e987e2d20ce1563c96d76431c60c142c42afa978e32d3a8c8dda17d0f3c1ba29fe3d0fcf0e7445fa5ca9558690ecdaad259fb9d23f435dcdc0baa9175d'
+            '5cb1643a8eab47ba2daa1438c50f1d29457d5aef69b6902fe3f1c72176ffa82d8048aac03ebc060ab6510cb8f59a9d41cfa1b80cf9661204b54120ee1961a607'
+            'd993b7af3debdbae1e0d997f8fe47a01f83975575a125bee425dfe6f474c6ec72a0c5252e88a762cc4e866dfcb2cb1bf5bab9fead8fb5393faf049fb4aefba4f'
+            'e0cec39381cefeca09ae4794cca309dfac7c8693e6315e137e64f5c33684598726d41cfbb4edf764fe985503b13ff596184ca5fc32b159d500ec092e4cf8838c'
             '5af853399c6abdf8016fd1c2be854b3952b7d7e9ca16c870f84eed72e606e639d5f64de32e60105899f5201b53156380ae460111e05209e843301492742c9bfd')
 
 prepare() {
-  cd $pkgname-$pkgver
-  patch -p1 -i ../valgrind-3.13.0-arm64-hwcap.patch
+  cd ${pkgname}-${pkgver}
+  patch -Np1 < ../valgrind-3.7.0-respect-flags.patch
+  patch -Np1 < ../valgrind-3.13.0-test-fixes.patch
+  patch -Np1 < ../valgrind-3.13.0-amd64-eflags-tests.patch
+  patch -Np1 < ../valgrind-3.13.0-gdb-8-testfix.patch
+  patch -Np1 < ../valgrind-fix-xml-socket.patch
+  patch -Np1 < ../valgrind-3.13.0-arm64-hwcap.patch
 }
 
 build() {
   # valgrind does not like stack protector flags
   CPPFLAGS=${CPPFLAGS/-D_FORTIFY_SOURCE=2/}
-  CFLAGS=${CFLAGS/-fstack-protector-strong/}
-  CXXFLAGS=${CXXFLAGS/-fstack-protector-strong/}
+  CFLAGS=${CFLAGS/-fstack-protector-strong -fno-plt/}
+  CXXFLAGS=${CXXFLAGS/-fstack-protector-strong -fno-plt/}
 
-  cd $pkgname-$pkgver
-  ./configure --prefix=/usr --mandir=/usr/share/man --with-mpicc=mpicc
+  cd ${pkgname}-${pkgver}
+  ./configure \
+    --prefix=/usr \
+    --mandir=/usr/share/man \
+    --with-mpicc=mpicc
   make
 }
 
-package() {
-  cd $pkgname-$pkgver
-  make DESTDIR="$pkgdir" install
+check() {
+  cd ${pkgname}-${pkgver}
+
+  # Make sure a basic binary runs. There should be no errors.
+  ./vg-in-place --error-exitcode=1 /bin/true
+
+  # Make sure no extra CFLAGS, CXXFLAGS or LDFLAGS leak through,
+  # the testsuite sets all flags necessary. See also configure above.
+  make check CFLAGS="" CXXFLAGS="" LDFLAGS=""
+
+  # XXX: run full regtest but only report issues some tests fail duo
+  # current toolchain and expectations, take a manual look if its fine
+  echo ===============TESTING===================
+  make regtest || :
+
+  # Make sure test failures show up in build.log
+  # Gather up the diffs (at most the first 20 lines for each one)
+  MAX_LINES=20
+  diff_files=$(find . -name '*.diff' | sort)
+  if [ z"${diff_files}" = z ] ; then
+    echo "Congratulations, all tests passed!"
+  else
+    warning "Some tests failed!"
+    for f in ${diff_files} ; do
+        echo "=================================================" >> diffs
+        echo "${f}"                                              >> diffs
+        echo "=================================================" >> diffs
+        if [ "$(wc -l < "${f}")" -le ${MAX_LINES} ] ; then
+          cat "${f}"                                             >> diffs
+        else
+          head -n ${MAX_LINES} "${f}"                            >> diffs
+          echo "<truncated beyond ${MAX_LINES} lines>"           >> diffs
+        fi
+    done
+  fi
+  cat diffs
+  echo ===============END TESTING===============
 }
+
+package() {
+  cd ${pkgname}-${pkgver}
+  make DESTDIR="${pkgdir}" install
+  find "${pkgdir}/usr/bin" -type f -executable -exec strip $STRIP_BINARIES {}+ || true
+}
+
+# vim: ts=2 sw=2 et:
