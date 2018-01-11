@@ -1,43 +1,63 @@
 # $Id$
-# Maintainer: Ionut Biru <ibiru@archlinux.org>
+# Maintainer: Bruno Pagani <archange@archlinux.org>
+# Contributor: Ionut Biru <ibiru@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - patch to fix mozilla stupidity
 #  - patch to fix mozilla stupidity
-#  - patch for GCC6
 #  - two patches for AArch64
 
 pkgname=js185
 pkgver=1.0.0
-pkgrel=3.1
+pkgrel=4
 pkgdesc="JavaScript interpreter and libraries (legacy)"
-arch=(i686 x86_64)
+arch=(x86_64)
 url="https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey/Releases/1.8.5"
 license=(MPL)
-depends=(nspr gcc-libs)
+depends=(nspr libffi)
 makedepends=(python2 zip)
-options=(!staticlibs)
-source=(http://ftp.mozilla.org/pub/mozilla.org/js/$pkgname-$pkgver.tar.gz
+source=("https://ftp.mozilla.org/pub/mozilla.org/js/${pkgname}-${pkgver}.tar.gz"
+        'fix-811665.patch'
+        'destdir.patch'
+        'autoconf.patch'
+        'allow-to-build-against-system-libffi.patch'
         ihatemozilla.patch no-neon.patch
-        fix-811665.patch
         Bug-638056-Avoid-The-cacheFlush-support-is-missing-o.patch
         mozjs185-tag.patch)
 md5sums=('a4574365938222adca0a6bd33329cb32'
+         'f810f575c855e136fe32302c1167344f'
+         '27d40e50d8dd25f30e1b71a1902fb7fc'
+         '2bcd0cc9b7eb268de31410bfd97c1282'
+         'd2b063b75f30fb4b9a2b1e8958cbeec4'
          '9add35f52965e4643b9235307d0d6cc5'
          '5d4817fadff71765c9b5d1f7b90f904f'
-         'f810f575c855e136fe32302c1167344f'
          '31d3273a985b88938e229ded36271286'
          'a6a40ac37ab66291c68ceeacc6e73a01')
+sha256sums=('5d12f7e1f5b4a99436685d97b9b7b75f094d33580227aa998c406bbae6f2a687'
+            '2b298b8a693865b38e2b0d33277bb5ffe152c6ecf43648e85113fec586aa4752'
+            '1319d729f382703b3a315c7a1bcc2dc14ed52f1111a194d3531a3503f0d0735e'
+            '524e11a66f0931dc1affcfcf47a87e086b6006ee9b747e2c7caae82334d6ba6b'
+            'eea3f80f72cfde52745fbb24b9d3a3506dd2cdbb08fe53a529d7c9a14f0381a6'
+            '40d3f2778ff111bf75c736018a25c5d5cf02585a1981430d18dd2ec030414771'
+            '99bc474f881950c3d65b09d7a912115cc209d7fbfb4223a819b75d393bd49586'
+            '2f3fdaa47825835d3b54453c0cfb201f15aee2d12631a244106243d2ff5594e5'
+            '90ce234d5223e143cd94f2d2730dd9ec6d96f9fdeee7c4f6754ad4732f202fef')
 
 prepare() {
-  cd js-1.8.5/js/src
+find . -name config.sub -exec chmod +w {} \; -exec cp /usr/share/libtool/build-aux/config.sub {} \;
+find . -name config.guess -exec chmod +w {} \; -exec cp /usr/share/libtool/build-aux/config.guess {} \;
+  cd js-1.8.5
+  
+  patch -p1 -i ../fix-811665.patch
+  patch -p1 -i ../destdir.patch
+  patch -p1 -i ../autoconf.patch
+  patch -p1 -i ../allow-to-build-against-system-libffi.patch
 
-  patch -p3 -i "$srcdir/ihatemozilla.patch"
-  patch -p3 -i "$srcdir/no-neon.patch"
-  patch -p3 -i "$srcdir/fix-811665.patch"
+  patch -p1 -i ../ihatemozilla.patch
+  patch -p1 -i ../no-neon.patch
   if [[ $CARCH == "aarch64" ]]; then
-    patch -p3 -i "$srcdir/Bug-638056-Avoid-The-cacheFlush-support-is-missing-o.patch"
-    patch -p3 -i "$srcdir/mozjs185-tag.patch"
+    patch -p1 -i ../Bug-638056-Avoid-The-cacheFlush-support-is-missing-o.patch
+    patch -p1 -i ../mozjs185-tag.patch
   fi
 }
 
@@ -47,21 +67,28 @@ build() {
   # _FORTIFY_SOURCE causes configure error
   unset CPPFLAGS
 
-  ./configure --prefix=/usr --with-system-nspr \
-     --enable-threadsafe
+  ./configure \
+    --prefix=/usr \
+    --with-system-nspr \
+    --disable-tests \
+    --enable-ctypes \
+    --enable-threadsafe \
+    --enable-system-ffi
+
   make
 }
 
 package() {
   cd js-1.8.5/js/src
-  make DESTDIR="$pkgdir" install
-  install -Dm755 shell/js "$pkgdir/usr/bin/js"
-  find "$pkgdir"/usr/{lib/pkgconfig,include} -type f -exec chmod -x {} +
 
-  # Bad symlinks (absolute, including DESTDIR!)
-  cd "$pkgdir/usr/lib"
-  ln -sf libmozjs185.so.1.0.0 libmozjs185.so.1.0
-  ln -sf libmozjs185.so.1.0 libmozjs185.so
+  make DESTDIR="${pkgdir}" install
+
+  install -Dm755 shell/js -t "${pkgdir}"/usr/bin/
+
+  find "${pkgdir}"/usr/{lib/pkgconfig,include} -type f -exec chmod -x {} +
+
+  # Remove static lib (!staticlibs does not work because name do not match)
+  rm "${pkgdir}"/usr/lib/libmozjs185-1.0.a
 }
 
 # vim:set ts=2 sw=2 et:
