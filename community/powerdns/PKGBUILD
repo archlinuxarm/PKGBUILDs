@@ -3,57 +3,46 @@
 # Contributor: Jan de Groot <jgc@archlinux.org>
 # Contributor: Kevin Mihelich <kevin@archlinuxarm.org>
 # Contributor: Remi Gacogne <rgacogne[at]archlinux[dot]org>
+# Contributor: Pieter Lexis <pieter[dot]lexis[at]powerdns[dot]com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - explicitly link v5/v6 with libatomic
 
 pkgname=powerdns
-pkgver=4.0.5
-pkgrel=3
+pkgver=4.1.0
+pkgrel=2
 pkgdesc='Authoritative DNS server'
-url='http://www.powerdns.com/'
+url='https://www.powerdns.com/'
 arch=('x86_64')
 license=('GPL2')
-depends=('boost-libs' 'libsodium' 'systemd' 'lua' 'openssl' 'protobuf' 'sqlite')
-makedepends=('boost' 'setconf' 'libmariadbclient' 'postgresql-libs' 'lua' 'libldap'
-             'sqlite' 'geoip' 'yaml-cpp' 'pkg-config')
-optdepends=('libmariadbclient: MariaDB/MySQL backend'
-            'postgresql-libs: PostgreSQL backend'
+depends=('boost-libs' 'botan' 'libsodium' 'luajit' 'openssl' 'protobuf'
+         'sqlite' 'systemd' 'lua')
+makedepends=('boost' 'geoip' 'libldap' 'libmariadbclient' 'opendbx' 'pkg-config'
+             'postgresql-libs' 'tinycdb' 'unixodbc' 'yaml-cpp')
+optdepends=('geoip: GeoIP backend'
+            'libmariadbclient: MariaDB/MySQL and MyDNS backend'
             'libldap: LDAP backend'
-            'geoip: GeoIP backend'
+            'opendbx: OpenDBX backend'
+            'postgresql-libs: PostgreSQL backend'
+            'unixodbc: ODBC backend'
+            'tinycdb: TinyDNS backend'
             'yaml-cpp: GeoIP backend')
 provides=('pdns')
 conflicts=('pdns')
 backup=('etc/powerdns/pdns.conf')
-source=(https://downloads.powerdns.com/releases/pdns-${pkgver}.tar.bz2{,.asc})
-sha512sums=('4b0fa932c1d9caf35b988916447aa21c64ebe2a58bdd84417cf09321a21b264cf1057206dc6993a45a3b591eb1dfa49463710c06b6bdfaf6fb17ae6dec6086d9'
-            'SKIP')
+source=(https://downloads.powerdns.com/releases/pdns-${pkgver}.tar.bz2{,.asc}
+        sysusers.conf)
+sha512sums=('4b2b42f4893f8aac3cf07a6c8a3c999cb728a5907a710f1a5c9c8d08377ecb63e202e5eececbefc069c8f1d97a29b2aa607da7cf2bcc6335a72222418e409e77'
+            'SKIP'
+            '522bde8b76367db6edd461fca8f81d50304a4d764addf33774b3e2c5c93a9e72d93993f54ddd4ee887ceeccf70280aceea3ffaf6370d26310e0a7ebbbf61f26a')
 validpgpkeys=('B76CD4671C0968BAA87DE61C5E50715BF2FFE1A7'  # Winkels, Erik <erik.winkels@open-xchange.com>
               '16E12866B7738C73976A57436FFC33439B0D04DF') # Pieter Lexis <pieter.lexis@powerdns.com>
 
 prepare() {
   cd pdns-${pkgver}
-  # Default settings
-  for keyvalue in \
-    allow-recursion=127.0.0.1 \
-    chroot=/var/empty \
-    config-dir=/etc/powerdns \
-    daemon=no \
-    distributor-threads=3 \
-    guardian=no \
-    local-port=53 \
-    loglevel=3 \
-    module-dir=/usr/lib/powerdns \
-    setgid=nobody \
-    setuid=nobody \
-    socket-dir=/var/run \
-    webserver=no
-  do
-    setconf -a pdns.conf "${keyvalue}"
-  done
-
-  # Using simple so we can bind it to a chroot
-  sed 's|notify|simple|' -i pdns/pdns.service.in
+  # Patch the Makefile.in's so /powerdns is used instead of /pdns (for e.g. $LIBDIR)
+  # This allows for running pdns_server without setting `module-dir` in the config.
+  find . -name 'Makefile.in' -exec sed -i 's,pkglibdir = \$(libdir)/@PACKAGE@,pkglibdir = $(libdir)/powerdns,' {} \;
 }
 
 build() {
@@ -62,16 +51,12 @@ build() {
   LIBS=$LIBS ./configure \
     --prefix=/usr \
     --sysconfdir=/etc/powerdns \
-    --libexecdir=/usr/lib \
-    --libdir=/usr/lib \
-    --mandir=/usr/share/man \
-    --with-modules='' \
-    --with-dynmodules="bind gmysql geoip gpgsql gsqlite3 ldap lua pipe random remote" \
-    --docdir=/usr/share/doc/powerdns \
     --sbindir=/usr/bin \
-    --bindir=/usr/bin \
-    --with-sqlite3 \
+    --with-modules='' \
+    --with-dynmodules="bind geoip gmysql godbc gpgsql gsqlite3 ldap lua mydns opendbx pipe random remote tinydns" \
+    --docdir=/usr/share/doc/powerdns \
     --enable-libsodium \
+    --enable-botan \
     --enable-tools \
     --disable-dependency-tracking \
     --disable-silent-rules \
@@ -86,13 +71,11 @@ check() {
 }
 
 package() {
-  cd pdns-${pkgver}
-  make DESTDIR="${pkgdir}" install
-  # apply defaults to generated pdns.conf
+  make -C pdns-${pkgver} DESTDIR="${pkgdir}" install
+  install -D -m644 sysusers.conf "${pkgdir}/usr/lib/sysusers.d/${pkgname}.conf"
   mv "${pkgdir}/etc/powerdns/pdns.conf"{-dist,}
-  cat pdns.conf >> "${pkgdir}/etc/powerdns/pdns.conf"
-  # adjust modules dir to match pkgname
-  mv "${pkgdir}/usr/lib/"{pdns,powerdns}
+  # Ensure we run as the powerdns user
+  sed -i "s,^# \(set.id=\),\1${pkgname}," "${pkgdir}/etc/powerdns/pdns.conf"
 }
 
 # vim: ts=2 sw=2 et:
