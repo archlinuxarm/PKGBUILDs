@@ -7,8 +7,8 @@
 
 pkgbase=mesa
 pkgname=('mesa' 'libva-mesa-driver')
-pkgver=17.3.2
-pkgrel=2
+pkgver=17.3.3
+pkgrel=1
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -17,12 +17,10 @@ url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        0001-loader-dri3-Avoid-freeing-renderbuffers-in-use.patch
         0002-glvnd-fix-gl-dot-pc.patch)
-sha256sums=('e2844a13f2d6f8f24bee65804a51c42d8dc6ae9c36cff7ee61d0940e796d64c6'
+sha256sums=('41bac5de0ef6adc1f41a1ec0f80c19e361298ce02fa81b5f9ba4fdca33a9379b'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
-            '777a5cf59eefc51fb89d60e3f6a47a7b974b794d309f6532ab107c36cd0bad19'
             '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 validpgpkeys+=('946D09B5E4C9845E63075FF1D961C596A7203456') # Andres Gomez <tanty@igalia.com>
@@ -30,9 +28,6 @@ validpgpkeys+=('E3E8F480C52ADD73B278EE78E1ECBE07D7D70895') # Juan Antonio Suáre
 
 prepare() {
   cd ${srcdir}/mesa-${pkgver}
-
-  # https://bugs.freedesktop.org/show_bug.cgi?id=104214
-  patch -Np1 -i ../0001-loader-dri3-Avoid-freeing-renderbuffers-in-use.patch
 
   # glvnd support patches - from Fedora
   # non-upstreamed ones
