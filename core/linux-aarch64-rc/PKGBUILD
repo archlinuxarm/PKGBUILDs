@@ -3,8 +3,8 @@
 
 buildarch=8
 
-_rcver=4.14
-_rcrel=1
+_rcver=4.15
+_rcrel=9
 
 pkgbase=linux-aarch64-rc
 _srcname=linux-${_rcver}-rc${_rcrel}
@@ -15,20 +15,24 @@ pkgrel=1
 arch=('aarch64')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' 'vboot-utils' 'dtc')
 options=('!strip')
 source=("https://git.kernel.org/torvalds/t/${_srcname}.tar.gz"
         '0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch'
         '0002-arm64-dts-rockchip-disable-pwm0-on-rk3399-firefly.patch'
-        '0003-arm64-dts-rockchip-enable-display-subsystem-on-rk339.patch'
         'config'
+        'kernel.its'
+        'kernel.keyblock'
+        'kernel_data_key.vbprivk'
         'linux.preset'
         '99-linux.hook')
-md5sums=('d6ad0821d00e96a84975061a7dca993b'
-         '7202a91360452d28591525fa08d20fa0'
-         '28954404cdc8766aa0d986467904287c'
-         '3580cb7661a2145a43ffa514bcafc1d8'
-         '1ca9f652c39fd65024cb8b47c808cb9b'
+md5sums=('e2fab4831e54e1a188a68d431e63f540'
+         'c656b4169dd6c87f93dfb49edea3ddbf'
+         '79459eaa00aa5de588c73f3076f0907b'
+         '9f4970ac3e70b114041532c81f9579e1'
+         '11a4f35c50f0bde59c30182aa7b797b7'
+         '61c5ff73c136ed07a7aadbf58db3d96a'
+         '584777ae88bce2c5659960151b64c7d8'
          '25d8f6983c9a616946848c0e075a949c'
          '1d4477026533efaa0358a40855d50a83')
 
@@ -38,7 +42,6 @@ prepare() {
   # ALARM patches
   git apply ../0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch
   git apply ../0002-arm64-dts-rockchip-disable-pwm0-on-rk3399-firefly.patch
-  git apply ../0003-arm64-dts-rockchip-enable-display-subsystem-on-rk339.patch
 
   cat "${srcdir}/config" > ./.config
 
@@ -252,7 +255,33 @@ _package-headers() {
   rm -rf "${pkgdir}"/usr/lib/modules/${_kernver}/build/arch/{alpha,arc,arm,arm26,avr32,blackfin,c6x,cris,frv,h8300,hexagon,ia64,m32r,m68k,m68knommu,metag,mips,microblaze,mn10300,openrisc,parisc,powerpc,ppc,s390,score,sh,sh64,sparc,sparc64,tile,unicore32,um,v850,x86,xtensa}
 }
 
-pkgname=("${pkgbase}" "${pkgbase}-headers")
+_package-chromebook() {
+  pkgdesc="The Linux Kernel - ${_desc} - Chromebooks"
+  depends=('linux-aarch64-rc')
+  install=${pkgname}.install
+
+  cd "${srcdir}/${_srcname}"
+
+  mkdir -p "${pkgdir}/boot"
+  cp ../kernel.its .
+
+  mkimage -D "-I dts -O dtb -p 2048" -f kernel.its vmlinux.uimg
+  dd if=/dev/zero of=bootloader.bin bs=512 count=1
+  echo "console=tty0 console=ttyS2,115200n8 earlyprintk=ttyS2,115200n8 init=/sbin/init root=PARTUUID=%U/PARTNROFF=1 rootwait rw noinitrd" > cmdline
+  vbutil_kernel \
+    --pack vmlinux.kpart \
+    --version 1 \
+    --vmlinuz vmlinux.uimg \
+    --arch aarch64 \
+    --keyblock ../kernel.keyblock \
+    --signprivate ../kernel_data_key.vbprivk \
+    --config cmdline \
+    --bootloader bootloader.bin
+
+  cp vmlinux.kpart "${pkgdir}/boot"
+}
+
+pkgname=("${pkgbase}" "${pkgbase}-headers" "${pkgbase}-chromebook")
 for _p in ${pkgname[@]}; do
   eval "package_${_p}() {
     _package${_p#${pkgbase}}

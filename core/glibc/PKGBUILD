@@ -6,59 +6,63 @@
 # NOTE: valgrind requires rebuilt with each major glibc version
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-# - Specify our build host type
-# - Disabled distcc
+#  - Specify our build host type
+#  - Disabled distcc
+#  - Strip out Arch x86 multilib
 
 noautobuild=1
 
 pkgname=glibc
 pkgver=2.26
-pkgrel=4
-pkgdesc='GNU C Library'
-arch=(i686 x86_64)
+pkgrel=11
+arch=(x86_64)
 url='http://www.gnu.org/software/libc'
 license=(GPL LGPL)
-groups=(base)
-depends=('linux-api-headers>=4.10' tzdata filesystem)
 makedepends=(git gd)
-optdepends=('gd: for memusagestat')
-backup=(etc/gai.conf
-        etc/locale.gen
-        etc/nscd.conf)
 options=(!strip staticlibs !distcc)
-install=glibc.install
-_commit=58270c0049404ef2f878fdd45df55f17f0b8c1f7
+_commit=de51f431ed6226ec68ca76e578f2cbd55b6262cb
 source=(git://sourceware.org/git/glibc.git#commit=${_commit}
         locale.gen.txt
         locale-gen
-        0001-Don-t-use-IFUNC-resolver-for-longjmp-or-system-in-li.patch
-        0002-x86-Add-x86_64-to-x86-64-HWCAP-BZ-22093.patch)
+        bz20338.patch)
 md5sums=('SKIP'
          '07ac979b6ab5eeb778d55f041529d623'
          '476e9113489f93b348b21e144b6a8fcf'
-         'cbc073315c00b03898b7fc614274d6b3'
-         'bd9b13f3294b6357baa809e4416b9f44')
-
-# pkgver() {
-#   cd glibc
-#   git describe --tags | sed 's/^glibc-//;s/-/+/g'
-# }
+         'dc0d3ad59aeaaf591b085a77de6e03e9')
 
 prepare() {
   mkdir -p glibc-build
 
   cd glibc
-  patch -p1 -i "$srcdir/0001-Don-t-use-IFUNC-resolver-for-longjmp-or-system-in-li.patch"
-  patch -p1 -i "$srcdir/0002-x86-Add-x86_64-to-x86-64-HWCAP-BZ-22093.patch"
+
+  local i; for i in ${source[@]}; do
+    case ${i%::*} in
+      *.patch)
+        msg2 "Applying ${i}"
+        patch -p1 -i "$srcdir/${i}"
+        ;;
+    esac
+  done
 }
 
 build() {
-  cd glibc-build
+  local _configure_flags=(
+      --prefix=/usr
+      --with-headers=/usr/include
+      --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues
+      --enable-add-ons
+      --enable-bind-now
+      --enable-lock-elision
+      --disable-multi-arch
+      --enable-obsolete-nsl
+      --enable-obsolete-rpc
+      --enable-stack-protector=strong
+      --enable-stackguard-randomization
+      --disable-profile
+      --disable-werror
+  )
 
-  if [[ ${CARCH} = "i686" ]]; then
-    # Hack to fix NPTL issues with Xen, only required on 32bit platforms
-    export CFLAGS="$CFLAGS -mno-tls-direct-seg-refs"
-  fi
+  cd "$srcdir/glibc-build"
 
   # ALARM: Specify build host types
   [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=armv5tel-unknown-linux-gnueabi --build=armv5tel-unknown-linux-gnueabi"
@@ -75,21 +79,9 @@ build() {
   CPPFLAGS=${CPPFLAGS/-D_FORTIFY_SOURCE=2/}
 
   "$srcdir/glibc/configure" \
-      --prefix=/usr \
       --libdir=/usr/lib \
       --libexecdir=/usr/lib \
-      --with-headers=/usr/include \
-      --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
-      --enable-add-ons \
-      --enable-bind-now \
-      --enable-lock-elision \
-      --disable-multi-arch \
-      --enable-obsolete-nsl \
-      --enable-obsolete-rpc \
-      --enable-stack-protector=strong \
-      --enable-stackguard-randomization \
-      --disable-profile \
-      --disable-werror \
+      ${_configure_flags[@]} \
       $CONFIGFLAG
 
   # build libraries with fortify disabled
@@ -115,6 +107,15 @@ check() {
 }
 
 package() {
+  pkgdesc='GNU C Library'
+  depends=('linux-api-headers>=4.10' tzdata filesystem)
+  optdepends=('gd: for memusagestat')
+  install=glibc.install
+  backup=(etc/gai.conf
+          etc/locale.gen
+          etc/nscd.conf)
+  groups=(base)
+
   install -dm755 "$pkgdir/etc"
   touch "$pkgdir/etc/ld.so.conf"
 
@@ -163,14 +164,4 @@ package() {
                       usr/lib/lib{dl,m,nsl,resolv,rt,util}-${pkgver}.so \
                       usr/lib/lib{memusage,pcprofile,SegFault}.so \
                       usr/lib/{audit,gconv}/*.so || true
-
-  if [[ $CARCH = "x86_64" ]]; then
-    strip $STRIP_STATIC usr/lib/lib{m-${pkgver},mvec{,_nonshared}}.a
-    strip $STRIP_SHARED usr/lib/libmvec-*.so
-  fi
-
-  if [[ $CARCH = "i686" ]]; then
-    strip $STRIP_BINARIES usr/bin/lddlibc4
-    strip $STRIP_STATIC usr/lib/libm.a
-  fi
 }

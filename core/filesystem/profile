@@ -1,10 +1,23 @@
 # /etc/profile
 
-#Set our umask
+# Set our umask
 umask 022
 
-# Set our default path
-PATH="/usr/local/sbin:/usr/local/bin:/usr/bin"
+# Append our default paths
+appendpath () {
+    case ":$PATH:" in
+        *:"$1":*)
+            ;;
+        *)
+            PATH="$PATH:$1"
+    esac
+}
+
+appendpath '/usr/local/sbin'
+appendpath '/usr/local/bin'
+appendpath '/usr/bin'
+unset appendpath
+
 export PATH
 
 # Load profiles from /etc/profile.d

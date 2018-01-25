@@ -6,38 +6,36 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - add a link to g++ to compensate for broken cross-compiler decisions
+#  - build v6/v7 with -j2 - RAM constraints
 
 buildarch=28
 highmem=1
 
 pkgname=('rust' 'rust-docs')
 epoch=1
-pkgver=1.20.0
-pkgrel=1
+pkgver=1.23.0
+pkgrel=3
 
 pkgdesc='Systems programming language focused on safety, speed and concurrency'
 url='https://www.rust-lang.org/'
-arch=('x86_64' 'i686')
+arch=('x86_64')
 license=('MIT' 'Apache')
 
-makedepends=('rust' 'libffi' 'perl' 'python2' 'curl' 'llvm' 'cmake')
+makedepends=('rust' 'libffi' 'perl' 'python2' 'curl' 'cmake')
 
 options=('!emptydirs')
 
 source=("https://static.rust-lang.org/dist/rustc-$pkgver-src.tar.gz"{,.asc}
-        0001-librustc_llvm-build-Force-link-against-libffi.patch
         bootstrap-config.toml)
 
-sha256sums=('2aa4875ff4472c6e35262bbb9052cb2623da3dae6084a858cc59d36f33f18214'
+sha256sums=('7464953871dcfdfa8afcc536916a686dd156a83339d8ec4d5cb4eb2fe146cb91'
             'SKIP'
-            '563529da8e02f575ddde7247d5fc5350d74031daa54743b86d075f3c45ae2713'
-            '4252d4873a840216115ee306e4d689819bc791ee05bedd1faa0b00c49ff91c62')
+            '6c25c451d6286efd19e96a552406c8b299345749577cf924699cf4c3831d9ad0')
 validpgpkeys=('108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE') # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
 
 prepare() {
   cd "rustc-$pkgver-src"
 
-  patch -p1 <"$srcdir"/0001-librustc_llvm-build-Force-link-against-libffi.patch
   cp "$srcdir"/bootstrap-config.toml config.toml
 
   if [[ $CARCH == armv7h ]]; then
@@ -45,20 +43,23 @@ prepare() {
     ln -s /usr/bin/g++ path/arm-linux-gnueabihf-g++
     export PATH="$srcdir/path:$PATH"
   fi
+  if [[ $CARCH == armv7h || $CARCH == armv6h ]]; then
+    jobs="-j 2"
+  fi
 }
 
 build() {
   cd "rustc-$pkgver-src"
 
   msg2 "Run build under x.py"
-  python2 ./x.py build
+  python2 ./x.py build $jobs
 }
 
 package_rust() {
-  depends=('gcc-libs' 'llvm-libs')
-  provides=('cargo')
-  conflicts=('cargo')
-  replaces=('cargo')
+  depends=('gcc-libs' 'curl' 'libssh2')
+  provides=('cargo' 'rustfmt')
+  conflicts=('cargo' 'rustfmt')
+  replaces=('cargo' 'rustfmt')
 
 
   cd "rustc-$pkgver-src"
@@ -75,6 +76,9 @@ package_rust() {
 
   # move docs out of the way
   mv "$pkgdir/usr/share/doc" "$srcdir/"
+
+  # The version distributed with rust is old and buggy, and ends up breaking other builds.
+  rm "$pkgdir"/usr/bin/rustfmt
 }
 
 package_rust-docs() {

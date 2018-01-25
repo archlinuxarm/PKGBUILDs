@@ -1,4 +1,4 @@
-# $Id: PKGBUILD 277477 2016-10-01 03:36:40Z foutrelis $
+# $Id$
 # Maintainer: Evangelos Foutras <evangelos@foutrelis.com>
 # Contributor: Pierre Schmitz <pierre@archlinux.de>
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
@@ -7,13 +7,14 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - makeflags to -j4 on v7, RAM constraints
 #  - patch to fix GN ARM toolchain definitions
+#  - remove makedepend on clang, build with gcc
 
 buildarch=12
 highmem=1
 
 pkgname=chromium
-pkgver=61.0.3163.91
-pkgrel=1
+pkgver=63.0.3239.132
+pkgrel=3
 _launcher_ver=5
 pkgdesc="A web browser built for speed, simplicity, and security"
 arch=('i686' 'x86_64' 'armv7h' 'aarch64')
@@ -29,37 +30,39 @@ optdepends=('kdialog: needed for file dialogs in KDE'
 install=chromium.install
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
         chromium-launcher-$_launcher_ver.tar.gz::https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver.tar.gz
-        chromium.desktop
-        breakpad-use-ucontext_t.patch
-        chromium-gcc-r1.patch
-        chromium-gn-bootstrap-r14.patch
-        chromium-atk-r1.patch
-        chromium-blink-gcc7.patch
+        chromium-$pkgver.txt::https://chromium.googlesource.com/chromium/src.git/+/$pkgver?format=TEXT
+        chromium-omnibox-unescape-fragment.patch
+        chromium-disable-SharedArrayBuffer-by-default.patch
+        chromium-skia-harmony.patch
+        chromium-clang-r1.patch
+        chromium-webrtc-r0.patch
+        chromium-exclude_unwind_tables.patch
         chromium-widevine.patch
         0001-ARM-toolchain-fixes.patch)
-sha256sums=('0a2b4423551217d3ada244730fdfe3454f2630c8551b0bb784b727dc8294f2aa'
+sha256sums=('84c46c2c42faaa102abe0647ee1213615a2522627124924c2741ddc2161b3d8d'
             '4dc3428f2c927955d9ae117f2fb24d098cc6dd67adb760ac9c82b522ec8b0587'
-            '028a748a5c275de9b8f776f97909f999a8583a4b77fd1cd600b4fc5c0c3e91e9'
-            '6e9a345f810d36068ee74ebba4708c70ab30421dad3571b6be5e9db635078ea8'
-            '11cffe305dd49027c91638261463871e9ecb0ecc6ecc02bfa37b203c5960ab58'
-            '98784c4a0a793ecf34987bc8f91ae360d78596a4a59dd47651411381f752a080'
-            'fc0e9abb77b6f8e21a7601ff53f267a854736d711b530be5bbd80d976678e98d'
-            'f94310a7ba9b8b777adfb4442bcc0a8f0a3d549b2cf4a156066f8e2e28e2f323'
+            'ab330f30c14ea3b5e77976d674304b91cfb02251fe8771cecb0bb4092c7f6b74'
+            '814eb2cecb10cb697e24036b08aac41e88d0e38971741f9e946200764e2401ae'
+            '1e040caa43ba34c627fe3750fb44c781a74298d010ef40657ab8deb4780db70b'
+            'feca54ab09ac0fc9d0626770a6b899a6ac5a12173c7d0c1005bc3964ec83e7b3'
+            'ab5368a3e3a67fa63b33fefc6788ad5b4a79089ef4db1011a14c3bee9fdf70c6'
+            'bcb2f4588cf5dcf75cde855c7431e94fdcc34bdd68b876a90f65ab9938594562'
+            'e53dc6f259acd39df13874f8a0f440528fae764b859dd71447991a5b1fac7c9c'
             'd6fdcb922e5a7fbe15759d39ccc8ea4225821c44d98054ce0f23f9d1f00c9808'
             '8489d2a85b32e9b08f5c30d47b40ae41911d1915f48b6de3c41fe350dfecfef6')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
-declare -rgA _system_libs=(
+readonly -A _system_libs=(
   [ffmpeg]=ffmpeg
   [flac]=flac
-  #[freetype]=freetype2      # https://crbug.com/pdfium/733
-  [harfbuzz-ng]=harfbuzz-icu
-  #[icu]=icu                 # Enable again when upstream supports ICU 59
+  #[freetype]=freetype2       # Using 'use_system_freetype=true' until M65
+  #[harfbuzz-ng]=harfbuzz     # Using 'use_system_harfbuzz=true' until M65
+  #[icu]=icu                  # https://crbug.com/772655 + need M64 for ICU 60
   [libdrm]=
   [libjpeg]=libjpeg
-  #[libpng]=libpng           # https://crbug.com/752403#c10
-  #[libvpx]=libvpx           # https://bugs.gentoo.org/611394
+  #[libpng]=libpng            # https://crbug.com/752403#c10
+  #[libvpx]=libvpx            # https://bugs.gentoo.org/611394
   [libwebp]=libwebp
   [libxml]=libxml2
   [libxslt]=libxslt
@@ -69,7 +72,13 @@ declare -rgA _system_libs=(
   [yasm]=
   [zlib]=minizip
 )
-depends+=(${_system_libs[@]})
+readonly _unwanted_bundled_libs=(
+  ${!_system_libs[@]}
+  ${_system_libs[libjpeg]+libjpeg_turbo}
+  freetype
+  harfbuzz-ng
+)
+depends+=(${_system_libs[@]} freetype2 harfbuzz)
 
 # Google API keys (see https://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -82,6 +91,15 @@ _google_default_client_secret=0ZChLK6AxeA3Isu96MkwqDR4
 prepare() {
   cd "$srcdir/$pkgname-$pkgver"
 
+  # https://crbug.com/710701
+  local _chrome_build_hash=$(base64 -d ../chromium-$pkgver.txt |
+    grep -Po '^parent \K[0-9a-f]{40}$')
+  if [[ -z $_chrome_build_hash ]]; then
+    error "Unable to find Chrome build hash."
+    return 1
+  fi
+  echo "LASTCHANGE=$_chrome_build_hash-" >build/util/LASTCHANGE
+
   # Arch Linux ARM fixes
   patch -Np1 -i ../0001-ARM-toolchain-fixes.patch
 
@@ -93,16 +111,21 @@ prepare() {
   sed "s/@WIDEVINE_VERSION@/Pinkie Pie/" ../chromium-widevine.patch |
     patch -Np1
 
-  # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=853347
-  patch -Np1 -i ../chromium-blink-gcc7.patch
+  # https://chromium-review.googlesource.com/c/chromium/src/+/712575
+  patch -Np1 -i ../chromium-exclude_unwind_tables.patch
 
-  # Fix build with glibc 2.26
-  patch -Np1 -i ../breakpad-use-ucontext_t.patch
+  # https://crbug.com/789163
+  patch -Np1 -i ../chromium-omnibox-unescape-fragment.patch
+
+  # https://crbug.com/798864
+  patch -Np1 -i ../chromium-disable-SharedArrayBuffer-by-default.patch
+
+  # https://crbug.com/skia/6663#c10
+  patch -Np4 -i ../chromium-skia-harmony.patch
 
   # Fixes from Gentoo
-  patch -Np1 -i ../chromium-gcc-r1.patch
-  patch -Np1 -i ../chromium-gn-bootstrap-r14.patch
-  patch -Np1 -i ../chromium-atk-r1.patch
+  patch -Np1 -i ../chromium-clang-r1.patch
+  patch -Np1 -i ../chromium-webrtc-r0.patch
 
   # Use Python 2
   find . -name '*.py' -exec sed -i -r 's|/usr/bin/python$|&2|g' {} +
@@ -118,12 +141,14 @@ prepare() {
   # *should* do what the remove_bundled_libraries.py script does, with the
   # added benefit of not having to list all the remaining libraries
   local _lib
-  for _lib in ${!_system_libs[@]} ${_system_libs[libjpeg]+libjpeg_turbo}; do
+  for _lib in ${_unwanted_bundled_libs[@]}; do
     find -type f -path "*third_party/$_lib/*" \
       \! -path "*third_party/$_lib/chromium/*" \
       \! -path "*third_party/$_lib/google/*" \
-      \! -path "*base/third_party/icu/*" \
-      \! -regex '.*\.\(gn\|gni\|isolate\|py\)' \
+      \! -path './base/third_party/icu/*' \
+      \! -path './third_party/freetype/src/src/psnames/pstables.h' \
+      \! -path './third_party/yasm/run_yasm.py' \
+      \! -regex '.*\.\(gn\|gni\|isolate\)' \
       -delete
   done
 
@@ -135,6 +160,11 @@ build() {
   make -C chromium-launcher-$_launcher_ver
 
   cd "$srcdir/$pkgname-$pkgver"
+
+  if check_buildoption ccache y; then
+    # Avoid falling back to preprocessor mode when sources contain time macros
+    export CCACHE_SLOPPINESS=time_macros
+  fi
 
   export PATH="$srcdir/python2-path:$PATH"
   export TMPDIR="$srcdir/temp"
@@ -151,6 +181,8 @@ build() {
     'ffmpeg_branding="Chrome"'
     'proprietary_codecs=true'
     'link_pulseaudio=true'
+    'use_system_freetype=true'
+    'use_system_harfbuzz=true'
     'use_gtk3=true'
     'use_gconf=false'
     'use_gnome_keyring=false'
@@ -166,6 +198,10 @@ build() {
     "google_default_client_id=\"${_google_default_client_id}\""
     "google_default_client_secret=\"${_google_default_client_secret}\""
   )
+
+  if check_option strip y; then
+    _flags+=('exclude_unwind_tables=true')
+  fi
 
   python2 tools/gn/bootstrap/bootstrap.py --gn-gen-args "${_flags[*]}"
   out/Release/gn gen out/Release --args="${_flags[*]}" \
@@ -183,24 +219,29 @@ package() {
   cd "$srcdir/$pkgname-$pkgver"
 
   install -D out/Release/chrome "$pkgdir/usr/lib/chromium/chromium"
-  install -Dm644 out/Release/chrome.1 "$pkgdir/usr/share/man/man1/chromium.1"
-  install -Dm644 "$srcdir/chromium.desktop" \
+  install -Dm4755 out/Release/chrome_sandbox "$pkgdir/usr/lib/chromium/chrome-sandbox"
+  ln -s /usr/lib/chromium/chromedriver "$pkgdir/usr/bin/chromedriver"
+
+  install -Dm644 chrome/installer/linux/common/desktop.template \
     "$pkgdir/usr/share/applications/chromium.desktop"
+  install -Dm644 chrome/app/resources/manpage.1.in \
+    "$pkgdir/usr/share/man/man1/chromium.1"
+  sed -i \
+    -e "s/@@MENUNAME@@/Chromium/g" \
+    -e "s/@@PACKAGE@@/chromium/g" \
+    -e "s/@@USR_BIN_SYMLINK_NAME@@/chromium/g" \
+    "$pkgdir/usr/share/applications/chromium.desktop" \
+    "$pkgdir/usr/share/man/man1/chromium.1"
 
-  install -Dm4755 out/Release/chrome_sandbox \
-    "$pkgdir/usr/lib/chromium/chrome-sandbox"
-
-  cp -a \
+  cp \
     out/Release/{chrome_{100,200}_percent,resources}.pak \
     out/Release/{*.bin,chromedriver,libwidevinecdmadapter.so} \
-    out/Release/locales \
     "$pkgdir/usr/lib/chromium/"
+  install -Dm644 -t "$pkgdir/usr/lib/chromium/locales" out/Release/locales/*.pak
 
   if [[ -z ${_system_libs[icu]+set} ]]; then
     cp out/Release/icudtl.dat "$pkgdir/usr/lib/chromium/"
   fi
-
-  ln -s /usr/lib/chromium/chromedriver "$pkgdir/usr/bin/chromedriver"
 
   for size in 22 24 48 64 128 256; do
     install -Dm644 "chrome/app/theme/chromium/product_logo_$size.png" \

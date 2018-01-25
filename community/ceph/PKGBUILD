@@ -1,0 +1,207 @@
+# Maintainer: Thore Bödecker <foxxx0@archlinux.org>
+# Contributor: Sébastien "Seblu" Luttringer <seblu@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to remove neon detection in cmake
+#  - make -j3, RAM constraints
+
+highmem=1
+
+pkgbase='ceph'
+pkgname=('ceph' 'ceph-libs')
+pkgver=12.2.2
+pkgrel=4
+pkgdesc='Distributed, fault-tolerant storage platform delivering object, block, and file system'
+arch=('x86_64')
+url='https://ceph.com/'
+license=('GPL')
+makedepends=('bc' 'boost' 'boost-libs' 'cmake' 'cpio' 'crypto++' 'curl' 'cython'
+  'cython2' 'expat' 'fcgi' 'fuse2' 'gcc-libs' 'git' 'glibc' 'gperf' 'gperftools'
+  'gptfdisk' 'inetutils' 'jq' 'junit' 'keyutils' 'leveldb' 'libaio'
+  'libatomic_ops' 'libedit' 'libsystemd' 'libutil-linux' 'libxml2' 'lsb-release'
+  'lz4' 'ncurses' 'nss' 'parted' 'pcre' 'procps-ng' 'python2-cherrypy'
+  'python2-jinja' 'python2-nose' 'python2-pecan' 'python2-pip'
+  'python2-prettytable' 'python2-pyopenssl' 'python2-setuptools'
+  'python2-sphinx' 'python2-tox' 'python2-virtualenv' 'python2-werkzeug' 'sed'
+  'snappy' 'socat' 'systemd' 'valgrind' 'xfsprogs' 'xmlstarlet' 'yasm'
+  'zlib' 'zstd')
+options=('emptydirs')
+source=("https://download.ceph.com/tarballs/${pkgbase}-${pkgver}.tar.gz"
+        'ceph.sysusers'
+        '0001-no-neon.patch'
+        '0002-librbd-Conditionally-import-TrimRequest.cc.patch'
+        'fix-ceph_disk-python-interpreter.patch'
+        'fix-or-disable-broken-tests.patch'
+        'fix-python2-paths.patch'
+        'remove-distro-version-detection.patch')
+sha512sums=('89b166dc4b58e0110ebe0147eef9f47e1090ccee01702b3f72cfbdca856d02bf03b2663de9e88c84b21a2a61f8f92211e217a05b8bdcf7d5de3158adbe49db88'
+            '4354001c1abd9a0c385ba7bd529e3638fb6660b6a88d4e49706d4ac21c81b8e829303a20fb5445730bdac18c4865efb10bc809c1cd56d743c12aa9a52e160049'
+            'e389a0034d1310d9a2d15c9f8b1d489fa65d2222668566747f1da2e83564f7b78507f3ad2d71887a2b6d56751eebd8d7b3ce43e435e404afb765e4b3ded6821e'
+            '6c410d26a7e510d126dd361e389b470dd6448fcbbb255b1b31b2a1c9a437397e46cd18ba0e17405c47b91cc9c55dcc8d1fc1029527b6d90e6ac990a1b0ac2bc9'
+            '7abd94a333fb0d6c9f7156d69ed6d4bf123f0f3030407f4347209d677b282e5023664d43e74a21a27b7856d3493ae469a17ea8a810331c7266018cc34eee4841'
+            '40446e298ab6b735b149d26ac26d273d6e159c319bb79f112614f1d4933a5a2684007fc9a1d660c5d4a17075d8bac59019c6cc7e66d64d4e240a1a61454800ef'
+            'd5d9e8123833212f6cf0ecef209a5dd9b9a8ec70d780b5140884dc9f87690ec305fb2569c5d1da2b28deb05bd03caecc534acc9dc5ce7ec75e2580df4b5b2063'
+            'e2ed33e2ac37bfdb9597083388e1a87f10051e976033055d440b1a4bc2bd11148c29128fb9841771ca983c12fb36b343bcc04219dea87199321ceea9aa18b3cc')
+
+prepare() {
+  cd "${srcdir}/${pkgbase}-${pkgver}"
+  # apply patch from the source array (should be a pacman feature)
+  local filename
+  for filename in "${source[@]}"; do
+    if [[ "$filename" =~ \.patch$ ]]; then
+      msg2 "Applying patch ${filename##*/}"
+      patch -p1 -N -i "$srcdir/${filename##*/}"
+    fi
+  done
+
+  # remove tests that require root privileges
+  rm src/test/cli/ceph-authtool/cap*.t
+
+  # remove broken tests
+  rm src/test/cli/crushtool/build.t
+  rm -rf qa/btrfs
+  rm src/btrfs_ioc_test.c
+
+  # this test will try to perform btrfs operations when a btrfs mount
+  # is active on the build host, which will fail
+  if mount | grep 'type btrfs' &>/dev/null; then
+    sed -i '/run-tox-ceph-disk/d' src/test/CMakeLists.txt
+  fi
+
+  # fix python interpreter -> python2
+  for file in \
+    src/ceph-create-keys \
+    src/ceph-rest-api \
+    src/mount.fuse.ceph \
+    src/brag/client/ceph-brag \
+    src/ceph-detect-init/ceph_detect_init/main.py
+  do
+    sed -i 's|#!/usr/bin/env python|#!/usr/bin/env python2|' "${file}"
+  done
+}
+
+build() {
+  cd "${srcdir}/${pkgbase}-${pkgver}"
+
+  mkdir -p build
+  cd build
+
+  # experimental in luminous: (and currently broken with boost 1.66)
+  # RADOSGW_BEAST_FRONTEND
+  # -> disabled
+
+  cmake \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+    -DCMAKE_INSTALL_SBINDIR=/usr/bin \
+    -DCMAKE_INSTALL_LIBDIR=/usr/lib \
+    -DCMAKE_INSTALL_LIBEXECDIR=/usr/lib \
+    -DWITH_BABELTRACE=OFF \
+    -DWITH_CEPHFS=ON \
+    -DWITH_FUSE=ON \
+    -DWITH_LTTNG=OFF \
+    -DWITH_LZ4=ON \
+    -DWITH_MGR=ON \
+    -DWITH_NSS=ON \
+    -DPYTHON_INCLUDE_DIR=/usr/include/python2.7 \
+    -DWITH_RADOSGW=ON \
+    -DWITH_RADOSGW_BEAST_FRONTEND=OFF \
+    -DWITH_RDMA=OFF \
+    -DWITH_SSL=ON \
+    -DWITH_SYSTEM_BOOST=ON \
+    -DWITH_SYSTEMD=ON \
+    -DWITH_TESTS=ON \
+    -DWITH_XFS=ON \
+    -DENABLE_SHARED=ON \
+    ..
+
+  make -j3 all
+}
+
+check() {
+  cd "${srcdir}/${pkgbase}-${pkgver}/build"
+
+  export CTEST_PARALLEL_LEVEL="$(nproc)"
+  make check
+
+  # sometimes processes are not properly terminated...
+  for process in ceph-mon ceph-mgr ceph-osd; do
+    pkill -9 "$process" || true
+  done
+}
+
+package_ceph-libs() {
+  depends=('boost-libs' 'curl' 'glibc' 'keyutils' 'leveldb' 'libaio'
+    'libutil-linux' 'lz4' 'nss' 'python2' 'xfsprogs')
+
+  cd "${srcdir}/${pkgbase}-${pkgver}/build"
+
+  # main install
+  make DESTDIR="$pkgdir" install
+
+  # remove stuff that goes into the ceph package
+  rm -rf "${pkgdir}"/usr/lib/{ceph/mgr,systemd,sysusers.d,tmpfiles.d}
+  rm -rf "${pkgdir}/usr/share"
+  rm -rf "${pkgdir}/usr/sbin"
+  rm -rf "${pkgdir}/usr/bin"
+  rm -rf "${pkgdir}/etc"
+  rm -rf "${pkgdir}/var"
+}
+
+package_ceph() {
+  depends=('ceph-libs' 'boost-libs' 'curl' 'fuse2' 'glibc' 'gperftools'
+    'keyutils' 'leveldb' 'libaio' 'libsystemd' 'libutil-linux'
+    'lsb-release' 'ncurses' 'nss' 'python2' 'python2-cherrypy'
+    'python2-jinja' 'python2-mako' 'python2-pecan' 'python2-prettytable'
+    'python2-pyopenssl' 'python2-setuptools' 'python2-singledispatch'
+    'python2-webob' 'python2-werkzeug' 'snappy' 'xfsprogs')
+
+  cd "${srcdir}/${pkgbase}-${pkgver}/build"
+
+  # main install
+  make DESTDIR="$pkgdir" install
+
+  # remove stuff that is in the ceph-libs package
+  find "${pkgdir}/usr/lib" -maxdepth 1 -type f -delete
+  find "${pkgdir}/usr/lib" -maxdepth 1 -type l -delete
+  find "${pkgdir}/usr/lib/ceph" -maxdepth 1 -type f -delete
+  find "${pkgdir}/usr/lib/ceph" -maxdepth 1 -type l -delete
+  rm -rf "${pkgdir}"/usr/lib/{ceph/{compressor,crypto,erasure-code},python2.7,rados-classes}
+  rm -rf "${pkgdir}/usr/include"
+
+  # install tmpfiles.d and sysusers.d stuff
+  install -Dm644 "${srcdir}/${pkgbase}-${pkgver}/systemd/ceph.tmpfiles.d" \
+    "${pkgdir}/usr/lib/tmpfiles.d/${pkgbase}.conf"
+  install -Dm644 "${srcdir}/ceph.sysusers" \
+    "${pkgdir}/usr/lib/sysusers.d/${pkgbase}.conf"
+
+  # remove debian init script
+  rm -rf "${pkgdir}/etc/init.d"
+
+  # fix sbin dir (cmake opt seems to have no effect)
+  mv "${pkgdir}"/usr/sbin/* "${pkgdir}/usr/bin/"
+  rm -rf "${pkgdir}/usr/sbin"
+
+  # remove drop.ceph.com ssh stuff
+  rm -f "${pkgdir}/usr/share/ceph/{{known_hosts,id_rsa}_drop.ceph.com,.pub}"
+
+  # fix bash completions path
+  install -d -m 755 "${pkgdir}/usr/share/bash-completion"
+  mv "$pkgdir"/{etc/bash_completion.d,usr/share/bash-completion/completions}
+
+  # fix EnvironmentFile location in systemd service files
+  sed -i 's|/etc/sysconfig/|/etc/conf.d/|g' "${pkgdir}"/usr/lib/systemd/system/*.service
+
+  # prepare some paths and set correct permissions
+  install -D -d -m750 -o   0 -g 340 "${pkgdir}/etc/ceph"
+  install -D -d -m750 -o 340 -g 340 "${pkgdir}/var/log/ceph"
+  install -D -d -m750 -o 340 -g 340 "${pkgdir}/var/lib/ceph"
+  install -D -d -m750 -o 340 -g 340 "${pkgdir}/var/lib/ceph/bootstrap-mds"
+  install -D -d -m750 -o 340 -g 340 "${pkgdir}/var/lib/ceph/bootstrap-osd"
+  install -D -d -m750 -o 340 -g 340 "${pkgdir}/var/lib/ceph/bootstrap-rgw"
+  install -D -d -m750 -o 340 -g 340 "${pkgdir}/var/lib/ceph/mon"
+  install -D -d -m750 -o 340 -g 340 "${pkgdir}/var/lib/ceph/mgr"
+  install -D -d -m750 -o 340 -g 340 "${pkgdir}/var/lib/ceph/osd"
+}
+
+# vim:set ts=2 sw=2 et:

@@ -1,0 +1,71 @@
+# U-Boot: Dragonboard 410c
+# Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
+
+buildarch=8
+
+pkgname=uboot-dragonboard410c
+pkgver=2017.11
+firmver=r1032.1.1
+pkgrel=1
+pkgdesc="U-Boot for Dragonboard 410c"
+arch=('aarch64')
+url='http://www.denx.de/wiki/U-Boot/WebHome'
+license=('GPL' 'custom')
+install=$pkgname.install
+backup=('boot/boot.txt' 'boot/boot.scr')
+makedepends=('bc' 'dtc' 'git' 'skales')
+replaces=('uboot-dragonboard')
+options=('!strip')
+source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver/rc/-rc}.tar.bz2"
+        "http://builds.96boards.org/releases/dragonboard410c/qualcomm/firmware/linux-board-support-package-${firmver}.zip"
+        'git+https://git.linaro.org/landing-teams/working/qualcomm/signlk.git'
+        'https://archlinuxarm.org/builder/src/dragonboard/gpt_both0.bin'
+        'https://archlinuxarm.org/builder/src/dragonboard/emmc_appsboot.mbn'
+        '0001-arch-linux-arm-modifications.patch'
+        '0002-mmc-sdhci-don-t-clear-SDHCI_INT_STATUS-register-duri.patch'
+        'boot.txt'
+        'mkscr'
+        'flashall')
+md5sums=('7848f6fd197e2c6ef2eb483dd5bd2858'
+         '9dd72a683385079e3012cf1a8a1912df'
+         'SKIP'
+         '5ffd612a1496e7a497480ff3d3b40776'
+         '9a0a5a3defcc4833cbd00fe24526939e'
+         'f9ae23c4939dd249a75747e54714ee81'
+         '0a757c79e81798fbef08cb05908d3572'
+         '2bea1d7a70a5f3043b549d860499866c'
+         '021623a04afd29ac3f368977140cfbfd'
+         '8705acaec674dd15117ec329088a7819')
+
+prepare() {
+  cd u-boot-${pkgver/rc/-rc}
+  git apply ../0001-arch-linux-arm-modifications.patch
+  git apply ../0002-mmc-sdhci-don-t-clear-SDHCI_INT_STATUS-register-duri.patch
+}
+
+build() {
+  cd u-boot-${pkgver/rc/-rc}
+
+  unset CFLAGS CXXFLAGS CPPFLAGS
+
+  make distclean
+  make dragonboard410c_config
+  echo 'CONFIG_IDENT_STRING=" Arch Linux ARM"' >> .config
+  make EXTRAVERSION=-${pkgrel}
+}
+
+package() {
+  install -Dpt "${pkgdir}/boot" linux-board-support-package-${firmver}/bootloaders-linux/{{hyp,rpm,tz,sbl1}.mbn,NON-HLOS.bin} gpt_both0.bin
+  install -D -m644 linux-board-support-package-${firmver}/LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE.firmware"
+  signlk/signlk.sh -i=emmc_appsboot.mbn -o="${pkgdir}/boot/emmc_appsboot.mbn" -d
+
+  cd u-boot-${pkgver/rc/-rc}
+
+  touch rd
+  dtbTool -o dt.img arch/arm/dts
+  mkbootimg --kernel=u-boot-dtb.bin --output=u-boot.img --dt=dt.img  --pagesize 2048 --base 0x80000000 --ramdisk=rd --cmdline=""
+  cp u-boot.img ${pkgdir}/boot
+
+  tools/mkimage -A arm -O linux -T script -C none -n "U-Boot boot script" -d ../boot.txt "${pkgdir}"/boot/boot.scr
+  cp ../{boot.txt,mkscr,flashall} "${pkgdir}"/boot
+}

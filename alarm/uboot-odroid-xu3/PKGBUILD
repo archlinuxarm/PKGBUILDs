@@ -1,12 +1,12 @@
-# U-Boot: ODROID XU3
+# U-Boot: ODROID XU3/XU4/HC1
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
 
 buildarch=4
 
 pkgname=uboot-odroid-xu3
-pkgver=2017.01
+pkgver=2018.01
 pkgrel=1
-pkgdesc="U-Boot for ODROID-XU3"
+pkgdesc="U-Boot for ODROID-XU3/XU4/HC1"
 arch=('armv7h')
 url='http://www.denx.de/wiki/U-Boot/WebHome'
 license=('GPL')
@@ -21,7 +21,7 @@ source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver}.tar.bz2"
         'sd_fusing.sh'
         'boot.txt'
         'mkscr')
-md5sums=('ad2d82d5b4fa548b2b95bbc26c9bad79'
+md5sums=('b42e45813369f4ae84490a481e531768'
          '38fb058aa3bcc568f9547c85517949b9'
          '09c42bed980921cfc914e97e067ba9a3'
          'fd01dda20b999e0b731c7063431a42b3'

@@ -1,3 +1,4 @@
+# $Id$
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 # Contributor  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Thomas Dziedzic < gostrc at gmail >
@@ -6,47 +7,27 @@
 # Contributor: Dongsheng Cai <dongsheng at moodle dot com>
 # Contributor: Masutu Subric <masutu.arch at googlemail dot com>
 # Contributor: TIanyi Cui <tianyicui@gmail.com>
-# Contributor: Jason Plum <jplum@archlinuxarm.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - set config and gyp flags
+
+buildarch=28
 
 pkgname=nodejs
-pkgver=8.5.0
+pkgver=9.4.0
 pkgrel=1
 pkgdesc='Evented I/O for V8 javascript'
-arch=('i686' 'x86_64')
+arch=('x86_64')
 url='http://nodejs.org/'
 license=('MIT')
-provides=('nodejs-node-gyp')
 depends=('openssl-1.0' 'zlib' 'icu' 'libuv' 'http-parser' 'c-ares') # 'v8')
 makedepends=('python2' 'procps-ng')
 optdepends=('npm: nodejs package manager')
-source=("nodejs-$pkgver.tar.gz::https://github.com/nodejs/node/archive/v$pkgver.tar.gz"
-        '0001-arm-fixes.patch')
-sha512sums=('70c5052b644004743a20e02db2de42c527d0b999a158601ccb80644b9d7df9bfb98a19a170c9b35f50baf2958ae5397a78c73c523d79b0a49e9e6d55222b9149'
-            '4811e1d9bc0e03458072cad6af9284e3ceb6c74005ae00e3407c18d0e6eae0bce2edcbdbe547975ade916c1bcdb2bb53101edce2afeca0bcac84d8807934fc8c')
-
-set_flags_for_arm() {
-  if [ "$CARCH" == "arm" ]; then
-    # CXXFLAGS is here to bash it over the head. It has a bad habit.
-    CONFIG="--with-arm-float-abi=soft"
-    CXXFLAGS="$CXXFLAGS -march=armv5t -mno-unaligned-access" ;
-    GYPFLAGS="-Darm_thumb -Darm_float_abi=soft -Darm_version=5 -Darm_fpu= -Darm_test_noprobe=on"
-  fi
-  if [ "$CARCH" == "armv6h" ]; then
-    CONFIG="--with-arm-float-abi=hard"
-    GYPFLAGS="-Darm_thumb -Darm_float_abi=hard -Darm_version=6 -Darm_fpu=vfpv2"
-  fi
-  if [ "$CARCH" == "armv7h" ]; then
-    CONFIG="--with-arm-float-abi=hard --with-arm-fpu=vfpv3-d16"
-    GYPFLAGS="-Darm_thumb -Darm_float_abi=hard -Darm_version=7 -Darm_fpu=vfpv3-d16"
-  fi
-  export CXXFLAGS
-  export GYPFLAGS
-}
+source=("nodejs-$pkgver.tar.gz::https://github.com/nodejs/node/archive/v$pkgver.tar.gz")
+sha512sums=('e0389f66b7a2575363f049c20460beaee2c215ac75ba249ca3c57577214bf8d9adf6ea00f55d81ff0af74ae294bfcc46e114e547de811245143b0769e850660e')
 
 prepare() {
   cd node-$pkgver
-
-  patch -p1 -i ../0001-arm-fixes.patch
 
   msg 'Fixing for python2 name'
   find -type f -exec sed \
@@ -65,37 +46,20 @@ build() {
   export PKG_CONFIG_PATH=/usr/lib/openssl-1.0/pkgconfig
   export PYTHON=python2
 
-  set_flags_for_arm
-
-  # short-cutting python=python2 for GYP, as it will only be used here.
-  export PYTHON=python2
-  if [ ! -f "${srcdir}/python" ]; then
-    ln -s `which python2` ${srcdir}/python ;
-  fi
-  PATH="${srcdir}:$PATH";
-  export PATH ;
-
-# we're going to attept to make use of this example
-# https://github.com/joyent/node/issues/2131#issuecomment-3208846
-# https://gist.github.com/1574158   
+  [[ "$CARCH" == "armv6h" ]] && export CONFIG="--with-arm-float-abi=hard --with-arm-fpu=vfp" && export GYPFLAGS="-Darm_thumb -Darm_float_abi=hard -Darm_version=6 -Darm_fpu=vfpv2"
+  [[ "$CARCH" == "armv7h" ]] && export CONFIG="--with-arm-float-abi=hard --with-arm-fpu=vfpv3-d16" && export GYPFLAGS="-Darm_thumb -Darm_float_abi=hard -Darm_version=7 -Darm_fpu=vfpv3-d16"
 
   ./configure \
     --prefix=/usr \
     --with-intl=system-icu \
     --without-npm \
-    --without-snapshot \
     --shared-openssl \
     --shared-zlib \
     --shared-libuv \
     --shared-http-parser \
     --shared-cares \
     ${CONFIG}
-#    --shared-v8 \
-#    --shared-v8-libpath=/usr/lib \
-#    --shared-v8-includes=/usr/include 
-
-  [ "$CARCH" == "arm" ] && sed -i 's/vfpv3//' config.gypi
-  [ "$CARCH" == "armv6h" ] && sed -i 's/vfpv3/vfp/' config.gypi
+    # --shared-v8
 
   make
 }
@@ -109,13 +73,10 @@ check() {
 package() {
   cd node-$pkgver
 
-  # suppress re-compile(with out customized flags) by 'make install'.
-  set_flags_for_arm
-
-  make DESTDIR=${pkgdir} install
+  make DESTDIR="$pkgdir" install
 
   install -D -m644 LICENSE \
-    ${pkgdir}/usr/share/licenses/nodejs/LICENSE
+    "$pkgdir"/usr/share/licenses/nodejs/LICENSE
 }
 
 # vim:set ts=2 sw=2 et:

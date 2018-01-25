@@ -1,4 +1,4 @@
-# $Id: PKGBUILD 240297 2015-06-03 10:22:03Z fyan $
+# $Id$
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
@@ -9,22 +9,25 @@ buildarch=12
 highmem=1
 
 pkgname=qt5-webengine
-_qtver=5.9.1
+_qtver=5.10.0
 pkgver=${_qtver/-/}
 pkgrel=3
-arch=('i686' 'x86_64')
+arch=('x86_64')
 url='http://qt-project.org/'
 license=('LGPL3' 'LGPL2.1' 'BSD')
 pkgdesc='Provides support for web applications using the Chromium browser project'
-depends=('qt5-webchannel' 'qt5-location' 'libxcomposite' 'libxrandr' 'pciutils' 'libxss' 'libvpx' 
-         'libevent' 'libsrtp' 'snappy' 'nss' 'protobuf' 'libxslt' 'libxdamage' 'minizip' 'ffmpeg')
-         # namcap note: libxdamage is needed for nvidia users
-makedepends=('python2' 'git' 'gperf' 'jsoncpp' 'ninja')
+depends=('qt5-webchannel' 'qt5-location' 'libxcomposite' 'libxrandr' 'pciutils' 'libxss' 
+         'libevent' 'snappy' 'nss' 'protobuf' 'libxslt' 'minizip' 'ffmpeg' 're2') # libvpx - 1.6.1 not supported
+makedepends=('python2' 'git' 'gperf' 'jsoncpp' 'ninja' 'qt5-tools')
 groups=('qt' 'qt5')
-_pkgfqn="${pkgname/5-/}-opensource-src-${_qtver}"
+_pkgfqn="${pkgname/5-/}-everywhere-src-${_qtver}"
 source=("http://download.qt.io/official_releases/qt/${pkgver%.*}/${_qtver}/submodules/${_pkgfqn}.tar.xz"
+         qtwebengine-harmony.patch
+         qtwebengine-no-gpu.patch
         '0001-ARM-toolchain-fixes.patch')
-sha256sums=('f6a37eeb9188474a16d29ede498fce959396ab80329a0a83eaeb925251686401'
+sha256sums=('a8bf5989ef847a249bbc1f391743a36971825b896747d073e30dbcdefc9567f9'
+            'feca54ab09ac0fc9d0626770a6b899a6ac5a12173c7d0c1005bc3964ec83e7b3'
+            '6cd70c37f3b3aea926f1ee20c1f59354f2a02d240dbf344c6dc0a75f8aa8e07b'
             '8202b09a1caa82538a2eacd79b62b61d8661c65cdfb275560d231aa31a362b12')
 
 prepare() {
@@ -34,7 +37,14 @@ prepare() {
   mkdir -p bin
   ln -s /usr/bin/python2 bin/python
 
-  cd ${_pkgfqn}/src/3rdparty
+  cd ${_pkgfqn}
+
+  # FreeType 2.8.1
+  patch -Np1 -i ../qtwebengine-harmony.patch
+  # Disable GPU rendering on nouveau and wayland (openSUSE) https://bugreports.qt.io/browse/QTBUG-65682
+  patch -p1 -i ../qtwebengine-no-gpu.patch
+
+  cd src/3rdparty
   patch -p1 -i ${srcdir}/0001-ARM-toolchain-fixes.patch
 }
 
@@ -42,7 +52,12 @@ build() {
   cd build
 
   export PATH="$srcdir/bin:$PATH"
-  qmake CONFIG+="proprietary-codecs" WEBENGINE_CONFIG+="use_proprietary_codecs use_system_icu" ../${_pkgfqn}
+  qmake ../${_pkgfqn} -- \
+    -proprietary-codecs \
+    -system-ffmpeg \
+    -webp \
+    -spellchecker
+#   -webengine-icu
   make
 }
 

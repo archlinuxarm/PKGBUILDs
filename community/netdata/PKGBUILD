@@ -5,11 +5,11 @@
 #  - disable LTO
 
 pkgname=netdata
-pkgver=1.8.0
+pkgver=1.9.0
 pkgrel=1
 pkgdesc="Real-time performance monitoring, in the greatest possible detail, over the web"
 url="https://github.com/firehol/netdata/wiki"
-arch=('i686' 'x86_64')
+arch=('x86_64')
 license=('GPL')
 depends=('libmnl' 'libnetfilter_acct' 'zlib')
 optdepends=('nodejs: for monitoring named and SNMP devices'
@@ -17,41 +17,49 @@ optdepends=('nodejs: for monitoring named and SNMP devices'
             'iproute2: for monitoring Linux QoS'
             'python: for most of the external plugins'
             'python-psycopg2: for monitoring PostgreSQL databases'
-            'python-mysqldb: for monitoring mysql databases'
             'python-requests: for monitoring elasticsearch'
             'hddtemp: for monitoring hhd temperature'
-            'network-ups-tools: for monitoring UPS'
             'apcupsd: for monitoring APC UPS'
             'iw: for monitoring Linux as access point')
-backup=('etc/netdata/'{apps_groups,charts.d,health_alarm_notify,health_email_recipients,netdata,python.d}.conf
-        'etc/netdata/health.d/'{apache,cpu,disks,entropy,memcached,mysql,named,net,nginx,qos,ram,redis,retroshare,squid,swap}.conf
-        'etc/netdata/python.d/'{apache_cache,apache,cpufreq,dovecot,example,exim,hddtemp,ipfs,memcached,mysql,nginx,nginx_log,phpfpm,postfix,redis,retroshare,sensors,squid,tomcat}.conf)
+backup=('etc/netdata/'{apps_groups,charts.d,health_alarm_notify,health_email_recipients,netdata,python.d,stream}.conf
+        'etc/netdata/health.d/'{apache,beanstalkd,couchdb,cpu,disks,entropy,memcached,mysql,named,net,nginx,qos,ram,redis,retroshare,squid,swap,tcp_conn,tcp_mem,tcp_orphans}.conf
+        'etc/netdata/python.d/'{apache_cache,apache,beanstalk,couchdb,cpufreq,dnsdist,dovecot,example,exim,hddtemp,ipfs,memcached,mysql,nginx,nginx_log,phpfpm,powerdns,postfix,redis,retroshare,sensors,squid,tomcat}.conf)
 install="$pkgname.install"
-source=("https://github.com/firehol/netdata/releases/download/v${pkgver}/netdata-${pkgver}.tar.xz")
-sha512sums=('0fb86b6cea9628556b625d9c5930c36b658d997bc477d468341675dfc2f55fe384344758a6efc50c30d502cf3be35fef21b7e320853c96d0b0eaeaafe24e816b')
+source=("https://github.com/firehol/netdata/releases/download/v${pkgver}/netdata-${pkgver}.tar.xz"
+        "${pkgname}.tmpfiles"
+        "${pkgname}.sysusers")
+sha512sums=('3766c8b86229545dee8fed3a43a5dd73ba36db9114b2418a6ceaaba15488edf792308be922dafed34026fd52166257fc27823ce0f6664696f79b33b93345f2b5'
+            '3f934ddd1f5248f9e11c29050c023d60b76e4098ec9c8d413bb362d43e9242f767fd58310d966076e8400779af8bda2459afcc314b267fcb9f1c84173e14e313'
+            'a910809a823ba58ca7bdaa72e8d68427b48f452c1fbb2343fa182ecb0a091a7640e73af24b8ba2fdd90e00aed8ef53b7fccd25cb8f04ca9b9fa6c8e52223ca66')
 
 build() {
-	cd "$pkgname-$pkgver"
+  cd "$pkgname-$pkgver"
 
-	./autogen.sh
-	./configure \
-		--prefix="/usr" \
-		--sbindir="/usr/bin" \
-		--sysconfdir="/etc" \
-		--libexecdir="/usr/lib" \
-		--localstatedir="/var" \
-		--with-zlib --with-math --with-user=netdata --disable-lto
-	make
+  ./autogen.sh
+  ./configure \
+  	--prefix="/usr" \
+  	--sbindir="/usr/bin" \
+  	--sysconfdir="/etc" \
+  	--libexecdir="/usr/lib" \
+  	--localstatedir="/var" \
+  	--with-zlib --with-math --with-user=netdata --disable-lto
+  make
 }
 
 package() {
-	cd "$pkgname-$pkgver"
+  cd "$pkgname-$pkgver"
 
-	make DESTDIR="$pkgdir" install
+  make DESTDIR="$pkgdir" install
 
-	touch "$pkgdir/etc/netdata/netdata.conf"
+  # Remove /var/*, pacman creates it via tmpfiles hook
+  rm -vrf "${pkgdir}/var"
+  touch "$pkgdir/etc/netdata/netdata.conf"
+  chown -R 134:134 "$pkgdir"/etc/netdata
+  chown -R 134:134 "$pkgdir"/usr/share/netdata/web
 
-	install -Dm0644 "system/netdata.service" "$pkgdir/usr/lib/systemd/system/netdata.service"
-	install -Dm0644 "system/netdata.logrotate" "$pkgdir/etc/logrotate.d/netdata"
+  install -Dm0644 "system/netdata.service" "$pkgdir/usr/lib/systemd/system/netdata.service"
+  install -Dm0644 "system/netdata.logrotate" "$pkgdir/etc/logrotate.d/netdata"
+  install -Dm0644 "${srcdir}/${pkgname}.tmpfiles" "${pkgdir}/usr/lib/tmpfiles.d/${pkgname}.conf"
+  install -Dm0644 "${srcdir}/${pkgname}.sysusers" "${pkgdir}/usr/lib/sysusers.d/${pkgname}.conf"
 }
 
