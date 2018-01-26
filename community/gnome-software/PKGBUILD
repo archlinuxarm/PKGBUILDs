@@ -7,34 +7,57 @@
 #  - remove dependency on fwupd, specify -Denable-fwupd=false
 #  - remove makedepend on valgrind, specify -Denable-valgrind=false
 
-pkgname=gnome-software
+pkgbase=gnome-software
+pkgname=(gnome-software gnome-software-packagekit-plugin)
 pkgver=3.26.5
-pkgrel=1
+pkgrel=2
 pkgdesc="GNOME Software Tools"
 arch=(x86_64)
 license=(GPL2)
 url="https://wiki.gnome.org/Apps/Software/"
-depends=(gtk3 appstream-glib libsoup gsettings-desktop-schemas gnome-desktop flatpak
-         packagekit archlinux-appstream-data gtkspell3 libgudev liboauth)
-makedepends=(python docbook-xsl git meson gobject-introspection gtk-doc)
+makedepends=(appstream-glib gnome-desktop gtkspell3 libpackagekit-glib flatpak ostree
+             docbook-xsl git gobject-introspection gtk-doc meson)
 _commit=7424bad60e8336079eb7db639e0cc96c99d98354  # tags/3.26.5^0
-source=("git+https://git.gnome.org/browse/gnome-software#commit=$_commit")
-sha256sums=('SKIP')
+source=("git+https://git.gnome.org/browse/gnome-software#commit=$_commit"
+        "0001-Fix-build-when-gtkspell-enabled.patch")
+sha256sums=('SKIP'
+            'c1c4e24d69625f444af32162319fd789f93ad761ea973c0035e5ca3ec761c10a')
 
 pkgver() {
-  cd $pkgname
+  cd $pkgbase
   git describe --tags | sed 's/^GNOME_SOFTWARE_//;s/_/./g;s/-/+/g'
 }
 
 prepare() {
-  cd $pkgname
+  cd $pkgbase
+  # Fix build when gtkspell enabled
+  # https://bugzilla.gnome.org/show_bug.cgi?id=792658
+  patch -Np1 -i ../0001-Fix-build-when-gtkspell-enabled.patch
 }
 
 build() {
-  arch-meson $pkgname build -Denable-rpm=false -Denable-fwupd=false -Denable-valgrind=false
+  arch-meson $pkgbase build -Denable-rpm=false -Denable-ubuntuone=false -Denable-ubuntu-reviews=false -Denable-fwupd=false -Denable-valgrind=false
   ninja -C build
 }
 
-package() {
+package_gnome-software() {
+  groups=('gnome')
+  depends=(appstream-glib gnome-desktop gsettings-desktop-schemas gtkspell3 libpackagekit-glib)
+  optdepends=('flatpak: Flatpak support plugin'
+              'fwupd: fwupd support plugin'
+              'ostree: OSTree support plugin')
+
   DESTDIR="$pkgdir" ninja -C build install
+
+  # Split out packagekit plugin
+  mkdir "$srcdir"/packagekit-plugin
+  mv "$pkgdir"/usr/lib/gs-plugins-11/libgs_plugin_{packagekit*,systemd-updates}.so "$srcdir"/packagekit-plugin
+}
+
+package_gnome-software-packagekit-plugin() {
+  pkgdesc="PackageKit support plugin for GNOME Software"
+  depends=(archlinux-appstream-data gnome-software packagekit)
+
+  mkdir -p "$pkgdir"/usr/lib/gs-plugins-11
+  mv "$srcdir"/packagekit-plugin/* "$pkgdir"/usr/lib/gs-plugins-11/
 }
