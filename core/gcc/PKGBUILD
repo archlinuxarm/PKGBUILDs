@@ -15,8 +15,8 @@
 
 noautobuild=1
 
-pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go)
-pkgver=7.2.1+20180116
+pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-ada gcc-go)
+pkgver=7.3.0
 _majorver=${pkgver:0:1}
 _islver=0.18
 pkgrel=1
@@ -24,15 +24,17 @@ pkgdesc='The GNU Compiler Collection'
 arch=(x86_64)
 license=(GPL LGPL FDL custom)
 url='http://gcc.gnu.org'
-makedepends=(binutils libmpc doxygen)
+makedepends=(binutils libmpc gcc-ada doxygen)
 checkdepends=(dejagnu inetutils)
 options=(!emptydirs !distcc)
-source=(https://sources.archlinux.org/other/gcc/gcc-${pkgver/+/-}.tar.xz{,.sig}
+#source=(https://sources.archlinux.org/other/gcc/gcc-${pkgver/+/-}.tar.xz{,.sig}
+source=(https://ftp.gnu.org/gnu/gcc/gcc-$pkgver/gcc-$pkgver.tar.xz{,.sig}
         http://isl.gforge.inria.fr/isl-${_islver}.tar.bz2
         c89 c99
         0001-ARMv5-disable-LDRD-STRD.patch)
-validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9) # bpiotrowski@archlinux.org
-sha256sums=('7757097376a0766bbbeed8c90ee08cab93b33d89f3e72358c8bf984401bf69d9'
+validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.org
+              13975A70E63C361C73AE69EF6EEB81F8981C74C7) # richard.guenther@gmail.com
+sha256sums=('832ca6ae04636adbb430e865a1451adf6979ab44ca1c8374f61fba65645ce15c'
             'SKIP'
             '6b8b0fd7f81d0a957beb3679c81bbb34ccc7568d5682844d8924424a0dadcb1b'
             'de48736f6e4153f03d0a5d38ceb6c6fdb7f054e8f47ddd6af0a3dbf14f27b931'
@@ -61,7 +63,7 @@ snapshot() {
 }
 
 prepare() {
-  mv gcc-${pkgver/+/-} gcc
+  ln -s gcc-${pkgver/+/-} gcc
   cd gcc
 
   # link isl for in-tree build
@@ -71,10 +73,10 @@ prepare() {
   sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
 
   # Arch Linux installs x86_64 libraries /lib
-  [[ $CARCH == "x86_64" ]] && sed -i '/m64=/s/lib64/lib/' gcc/config/i386/t-linux64
+  sed -i '/m64=/s/lib64/lib/' gcc/config/i386/t-linux64
 
   # Arch Linux ARM installs aarch64 libraries /lib
-  [[ $CARCH == "aarch64" ]] && sed -i '/lp64=/s/lib64/lib/' gcc/config/aarch64/t-aarch64-linux
+  sed -i '/lp64=/s/lib64/lib/' gcc/config/aarch64/t-aarch64-linux
 
   # hack! - some configure tests for header files using "$CPP $CPPFLAGS"
   sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" {libiberty,gcc}/configure
@@ -105,7 +107,7 @@ build() {
       --mandir=/usr/share/man \
       --infodir=/usr/share/info \
       --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
-      --enable-languages=c,c++,fortran,go,lto,objc,obj-c++ \
+      --enable-languages=c,c++,ada,fortran,go,lto,objc,obj-c++ \
       --enable-shared \
       --enable-threads=posix \
       --with-system-zlib \
@@ -143,7 +145,6 @@ check() {
   "$srcdir/gcc/contrib/test_summary"
 }
 
-
 package_gcc-libs() {
   pkgdesc='Runtime libraries shipped by GCC'
   groups=(base)
@@ -172,8 +173,6 @@ package_gcc-libs() {
 
   make -C $CHOST/libobjc DESTDIR="$pkgdir" install-libs
   make -C $CHOST/libstdc++-v3/po DESTDIR="$pkgdir" install
-  #make -C $CHOST/libmpx DESTDIR="$pkgdir" install
-  #rm -f "$pkgdir"/usr/lib/libmpx.spec
 
   for lib in libgomp \
              libitm \
@@ -188,7 +187,7 @@ package_gcc-libs() {
 
 package_gcc() {
   pkgdesc="The GNU Compiler Collection - C and C++ frontends"
-  depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.28' 'libmpc')
+  depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.28' libmpc)
   groups=('base-devel')
   options+=(staticlibs)
 
@@ -201,7 +200,7 @@ package_gcc() {
   install -m755 -t "$pkgdir/${_libdir}/" gcc/{cc1,cc1plus,collect2,lto1}
 
   make -C $CHOST/libgcc DESTDIR="$pkgdir" install
-  rm "$pkgdir"/usr/lib/libgcc_s.so*
+  rm -f "$pkgdir"/usr/lib/libgcc_s.so*
 
   make -C $CHOST/libstdc++-v3/src DESTDIR="$pkgdir" install
   make -C $CHOST/libstdc++-v3/include DESTDIR="$pkgdir" install
@@ -233,7 +232,7 @@ package_gcc() {
 
   make -C gcc DESTDIR="$pkgdir" install-man install-info
   rm "$pkgdir"/usr/share/man/man1/{gccgo,gfortran}.1
-  rm "$pkgdir"/usr/share/info/{gccgo,gfortran}.info
+  rm "$pkgdir"/usr/share/info/{gccgo,gfortran,gnat-style,gnat_rm,gnat_ugn}.info
 
   make -C libcpp DESTDIR="$pkgdir" install
   make -C gcc DESTDIR="$pkgdir" install-po
@@ -281,6 +280,29 @@ package_gcc-objc() {
   make DESTDIR="$pkgdir" -C $CHOST/libobjc install-headers
   install -dm755 "$pkgdir/${_libdir}"
   install -m755 gcc/cc1obj{,plus} "$pkgdir/${_libdir}/"
+
+  # Install Runtime Library Exception
+  install -d "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+    "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_gcc-ada() {
+  pkgdesc='Ada front-end for GCC (GNAT)'
+  depends=("gcc=$pkgver-$pkgrel")
+  options+=(staticlibs)
+
+  cd gcc-build/gcc
+  make DESTDIR="$pkgdir" ada.install-{common,info}
+  install -m755 gnat1 "$pkgdir/${_libdir}"
+
+  ln -s gcc "$pkgdir/usr/bin/gnatgcc"
+
+  # insist on dynamic linking, but keep static libraries because gnatmake complains
+  mv "$pkgdir"/${_libdir}/adalib/libgna{rl,t}-${_majorver}.so "$pkgdir/usr/lib"
+  ln -s libgnarl-${_majorver}.so "$pkgdir/usr/lib/libgnarl.so"
+  ln -s libgnat-${_majorver}.so "$pkgdir/usr/lib/libgnat.so"
+  rm -f "$pkgdir"/${_libdir}/adalib/libgna{rl,t}.so
 
   # Install Runtime Library Exception
   install -d "$pkgdir/usr/share/licenses/$pkgname/"
