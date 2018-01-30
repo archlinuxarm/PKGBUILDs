@@ -9,7 +9,7 @@ _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3/XU4/HC1"
 pkgver=4.14.15
-pkgrel=1
+pkgrel=2
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
@@ -20,7 +20,7 @@ source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
         'linux.preset'
         '99-linux.hook')
 md5sums=('af8ce0fba59107d0698e03e1344755ee'
-         '8fdef7a176c973e924b6b1a35e684bb3'
+         '0f9e87683fd9a77d03e1912b02539f31'
          'a84976d500db50cee07177eccfe2f455'
          '79fa396e3f9a09a85156d6d7c2d34b58')
 
