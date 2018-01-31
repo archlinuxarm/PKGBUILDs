@@ -1,0 +1,95 @@
+From: Boyuan Zhang <boyuan.zhang at amd.com>
+
+Create a list in decoder to store all render picture buffer pointers that
+currently being used in reference picture lists.
+
+During get message buffer call, check each pointer in render_pic_list[]
+within given pic->ref[] list, remove pointer that no longer being used by
+pic->ref[]. Then add current render surface pointer to the render_pic_list[]
+and assign the associated index to result.curr_idx.
+
+As a result, result.curr_idx will have the correct index to represent the
+current render picture, instead of the previous increamenting values.
+
+Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=104745
+
+Signed-off-by: Boyuan Zhang <boyuan.zhang at amd.com>
+Reviewed-by: Christian König <christian.koenig at amd.com>
+Cc: mesa-stable at lists.freedesktop.org
+(cherry picked from commit f2bfd1cbb7e72945ca192845a1ad28426c7aea89)
+---
+ src/gallium/drivers/radeon/radeon_vcn_dec.c | 28 ++++++++++++++++++++++++----
+ 1 file changed, 24 insertions(+), 4 deletions(-)
+
+diff --git a/src/gallium/drivers/radeon/radeon_vcn_dec.c b/src/gallium/drivers/radeon/radeon_vcn_dec.c
+index 2ece4a3..8010010 100644
+--- a/src/gallium/drivers/radeon/radeon_vcn_dec.c
++++ b/src/gallium/drivers/radeon/radeon_vcn_dec.c
+@@ -78,6 +78,7 @@ struct radeon_decoder {
+ 
+ 	unsigned			bs_size;
+ 	unsigned			cur_buffer;
++	void				*render_pic_list[16];
+ };
+ 
+ static rvcn_dec_message_avc_t get_h264_msg(struct radeon_decoder *dec,
+@@ -186,7 +187,7 @@ static rvcn_dec_message_hevc_t get_h265_msg(struct radeon_decoder *dec,
+ 					struct pipe_h265_picture_desc *pic)
+ {
+ 	rvcn_dec_message_hevc_t result;
+-	unsigned i;
++	unsigned i, j;
+ 
+ 	memset(&result, 0, sizeof(result));
+ 	result.sps_info_flags = 0;
+@@ -273,11 +274,28 @@ static rvcn_dec_message_hevc_t get_h265_msg(struct radeon_decoder *dec,
+ 		result.row_height_minus1[i] = pic->pps->row_height_minus1[i];
+ 
+ 	result.num_delta_pocs_ref_rps_idx = pic->NumDeltaPocsOfRefRpsIdx;
+-	result.curr_idx = pic->CurrPicOrderCntVal;
+ 	result.curr_poc = pic->CurrPicOrderCntVal;
+ 
++	for (i = 0 ; i < 16 ; i++) {
++		for (j = 0; (pic->ref[j] != NULL) && (j < 16) ; j++) {
++			if (dec->render_pic_list[i] == pic->ref[j])
++				break;
++			if (j == 15)
++				dec->render_pic_list[i] = NULL;
++			else if (pic->ref[j+1] == NULL)
++				dec->render_pic_list[i] = NULL;
++		}
++	}
++	for (i = 0 ; i < 16 ; i++) {
++		if (dec->render_pic_list[i] == NULL) {
++			dec->render_pic_list[i] = target;
++			result.curr_idx = i;
++			break;
++		}
++	}
++
+ 	vl_video_buffer_set_associated_data(target, &dec->base,
+-					    (void *)(uintptr_t)pic->CurrPicOrderCntVal,
++					    (void *)(uintptr_t)result.curr_idx,
+ 					    &radeon_dec_destroy_associated_data);
+ 
+ 	for (i = 0; i < 16; ++i) {
+@@ -320,7 +338,7 @@ static rvcn_dec_message_hevc_t get_h265_msg(struct radeon_decoder *dec,
+ 	memcpy(dec->it + 864, pic->pps->sps->ScalingList32x32, 2 * 64);
+ 
+ 	for (i = 0 ; i < 2 ; i++) {
+-		for (int j = 0 ; j < 15 ; j++)
++		for (j = 0 ; j < 15 ; j++)
+ 			result.direct_reflist[i][j] = pic->RefPicList[i][j];
+ 	}
+ 
+@@ -1236,6 +1254,8 @@ struct pipe_video_codec *radeon_create_decoder(struct pipe_context *context,
+ 		goto error;
+ 	}
+ 
++	for (i = 0; i < 16; i++)
++		dec->render_pic_list[i] = NULL;
+ 	bs_buf_size = width * height * (512 / (16 * 16));
+ 	for (i = 0; i < NUM_BUFFERS; ++i) {
+ 		unsigned msg_fb_it_size = FB_BUFFER_OFFSET + FB_BUFFER_SIZE;
+-- 
+2.7.4
