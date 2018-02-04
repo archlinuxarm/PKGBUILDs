@@ -7,8 +7,8 @@
 pkgbase="cups"
 pkgname=('libcups' 'cups')
 pkgver=2.2.6
-pkgrel=1
-arch=('i686' 'x86_64')
+pkgrel=4
+arch=('x86_64')
 license=('GPL')
 url="https://www.cups.org/"
 makedepends=('libtiff' 'libpng' 'acl' 'pam' 'xdg-utils' 'krb5' 'gnutls'
@@ -16,6 +16,7 @@ makedepends=('libtiff' 'libpng' 'acl' 'pam' 'xdg-utils' 'krb5' 'gnutls'
              'avahi'  'hicolor-icon-theme' 'systemd' 'inetutils' 'libpaper')
 source=(https://github.com/apple/cups/releases/download/v${pkgver}/cups-${pkgver}-source.tar.gz{,.sig}
         cups.logrotate cups.pam
+        cups.sysusers guid.patch
         # improve build and linking
         cups-no-export-ssllibs.patch
         cups-no-gzip-man.patch
@@ -26,6 +27,8 @@ sha256sums=('40385778c2b3bdf55030d1c999734e22774c79e3425d91339ce677825620169b'
             'SKIP'
             'd87fa0f0b5ec677aae34668f260333db17ce303aa1a752cba5f8e72623d9acf9'
             '57dfd072fd7ef0018c6b0a798367aac1abb5979060ff3f9df22d1048bb71c0d5'
+            '06173dfaea37bdd9b39b3e09aba98c34ae7112a2f521db45a688907d8848caa2'
+            'd4537526c1e075866ae22ad263da000fc2a592d36c26b79a459a1cfdade2bb2d'
             'ff3eb0782af0405f5dafe89e04b1b4ea7a49afc5496860d724343bd04f375832'
             'b8fc2e3bc603495f0278410350ea8f0161d9d83719feb64f573b63430cb4800b'
             '23349c96f2f7aeb7d48e3bcd35a969f5d5ac8f55a032b0cfaa0a03d7e37ea9af'
@@ -47,6 +50,9 @@ prepare() {
   # make sure network is up when starting and notify systemd - FC
   patch -Np1 -i ${srcdir}/cups-systemd-socket.patch
 
+  # FS#56818 - https://github.com/apple/cups/issues/5236
+  patch -Np1 -i ${srcdir}/guid.patch
+
   # set MaxLogSize to 0 to prevent using cups internal log rotation
   sed -i -e '5i\ ' conf/cupsd.conf.in
   sed -i -e '6i# Disable cups internal logging - use logrotate instead' conf/cupsd.conf.in
@@ -59,6 +65,8 @@ prepare() {
 
 build() {
   cd ${pkgbase}-${pkgver}
+
+  # use fixed cups user (id 209) since systemd adds "lp" group without a fixed id
   ./configure --prefix=/usr \
      --sysconfdir=/etc \
      --localstatedir=/var \
@@ -67,8 +75,8 @@ build() {
      --with-logdir=/var/log/cups \
      --with-docdir=/usr/share/cups/doc \
      --with-exe-file-perm=0755 \
-     --with-cups-user=daemon \
-     --with-cups-group=lp \
+     --with-cups-user=209 \
+     --with-cups-group=209 \
      --enable-pam=yes \
      --enable-raw-printing \
      --enable-dbus --with-dbusdir=/etc/dbus-1 \
@@ -130,8 +138,13 @@ optdepends=('xdg-utils: xdg .desktop file support'
   chmod 755 ${pkgdir}/var/spool
   chmod 755 ${pkgdir}/etc
 
+  # use cups group FS#36769
+  install -Dm644 "$srcdir"/cups.sysusers "${pkgdir}/usr/lib/sysusers.d/$pkgname.conf"
+  sed -i "s:#User 209:User 209:" ${pkgdir}/etc/cups/cups-files.conf{,.default}
+  sed -i "s:#Group 209:Group 209:" ${pkgdir}/etc/cups/cups-files.conf{,.default}
+
   # install ssl directory where to store the certs, solves some samba issues
-  install -dm700 -g lp ${pkgdir}/etc/cups/ssl
+  install -dm700 -g 209 ${pkgdir}/etc/cups/ssl
   # remove directory from package, it will be recreated at each server start
   rm -rf ${pkgdir}/run
 
@@ -139,7 +152,7 @@ optdepends=('xdg-utils: xdg .desktop file support'
   touch ${pkgdir}/etc/cups/printers.conf
   touch ${pkgdir}/etc/cups/classes.conf
   touch ${pkgdir}/etc/cups/subscriptions.conf 
-  chgrp -R lp ${pkgdir}/etc/cups
+  chgrp -R 209 ${pkgdir}/etc/cups
   
   # fix .desktop file
   sed -i 's|^Exec=htmlview http://localhost:631/|Exec=xdg-open http://localhost:631/|g' ${pkgdir}/usr/share/applications/cups.desktop

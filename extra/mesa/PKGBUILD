@@ -8,7 +8,7 @@
 pkgbase=mesa
 pkgname=('mesa' 'libva-mesa-driver')
 pkgver=17.3.3
-pkgrel=1
+pkgrel=2
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -17,11 +17,17 @@ url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        0002-glvnd-fix-gl-dot-pc.patch)
+        0001-glvnd-fix-gl-dot-pc.patch
+        0001-radeon-vcn-add-and-manage-render-picture-list.patch
+	0002-radeon-uvd-add-and-manage-render-picture-list.patch
+        winsys-radeon-Compute-is_displayable-in-surf_drm_to_winsys.patch)
 sha256sums=('41bac5de0ef6adc1f41a1ec0f80c19e361298ce02fa81b5f9ba4fdca33a9379b'
             'SKIP'
             '7fdc119cf53c8ca65396ea73f6d10af641ba41ea1dd2bd44a824726e01c8b3f2'
-            '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966')
+            '64a77944a28026b066c1682c7258d02289d257b24b6f173a9f7580c48beed966'
+            '96ed41a77b397577c27bee4ecb1faad82aa3eeeb09252ce2256ff9fff6545bd4'
+            '9bd66588f8f0d21ea3207b7c75c491a273db16d12f9fde0c66f69bdf6f66dff1'
+            'a4f56b8812c35bb36600255dab0de8030402860165cadc4f3118a4c12333120f')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
 validpgpkeys+=('946D09B5E4C9845E63075FF1D961C596A7203456') # Andres Gomez <tanty@igalia.com>
 validpgpkeys+=('E3E8F480C52ADD73B278EE78E1ECBE07D7D70895') # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
@@ -31,8 +37,13 @@ prepare() {
 
   # glvnd support patches - from Fedora
   # non-upstreamed ones
-  patch -Np1 -i ../0002-glvnd-fix-gl-dot-pc.patch
+  patch -Np1 -i ../0001-glvnd-fix-gl-dot-pc.patch
   
+  # fix FS#57199 - [mesa-vdpau] [linux-firmware] AMD polaris firmware update breaks VDPAU without Mesa patch
+  patch -Np1 -i ../0001-radeon-vcn-add-and-manage-render-picture-list.patch
+  patch -Np1 -i ../0002-radeon-uvd-add-and-manage-render-picture-list.patch
+  # fix FS#56881 - [xorg-server-xwayland] cannot run firefox/chromium ?
+  patch -Np1 -i ../winsys-radeon-Compute-is_displayable-in-surf_drm_to_winsys.patch 
   autoreconf -fiv
 }
 
