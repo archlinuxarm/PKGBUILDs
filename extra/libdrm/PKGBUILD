@@ -6,22 +6,27 @@
 #  - drop valgrind makdepend for v5 and v6
 
 pkgname=libdrm
-pkgver=2.4.89
-pkgrel=1
+pkgver=2.4.90
+pkgrel=3
 pkgdesc="Userspace interface to kernel DRM services"
+url="https://dri.freedesktop.org/"
 arch=(x86_64)
 license=('custom')
 depends=('libpciaccess')
-makedepends=('xorg-util-macros' 'libxslt' 'docbook-xsl')
+makedepends=('valgrind' 'libxslt' 'docbook-xsl' 'meson')
+makedepends=('libxslt' 'docbook-xsl' 'meson')
 makedepends_armv7h=('valgrind')
 makedepends_aarch64=('valgrind')
 checkdepends=('cairo')
 replaces=('libdrm-new' 'libdrm-nouveau')
-url="http://dri.freedesktop.org/"
 source=(https://dri.freedesktop.org/$pkgname/$pkgname-$pkgver.tar.bz2{,.sig}
+        no-drmdevice-test.diff
+        fix_mistake_in_initial_hole_size_calculation.diff
         COPYING)
-sha512sums=('380e4e46cd3971a73264bd1b482791fab0503268adb65ac81b674df009662cfb8ef5741e362f19670b2a43b1c46f022d857706c9a4bebed2b1cddaa317b7706d'
+sha512sums=('3d32d60c44ffdcb58667d0926e6af8d375332add1f243d8b2d37567aeef4e4b26d786294aeecf46c3dea94fc002fb73756567c457300703acfc21e32ffbd458c'
             'SKIP'
+            'f1dd5d8c2270c092ccb8e4f92a0da9ab27706dfa22dcedd3fb2414b968ced9333c8bf62baf0219b822e43dce0d804d1dd5cc27d09b0afe8c01967c1784d4a4bb'
+            '679ba7ef4f29cc4d511d5fbb7b505d8eade4cd3fc16eceaed2d1aa47947ebf31bac113ead5f2a1db8f5626ba290e9e1ffeab28c2abb924d0c85efe816c1201f8'
             'b0ca349b882a4326b19f81f22804fabdb6fb7aef31cdc7b16b0a7ae191bfbb50c7daddb2fc4e6c33f1136af06d060a273de36f6f3412ea326f16fa4309fda660')
 validpgpkeys=('B97BD6A80CAC4981091AE547FE558C72A67013C3') # Maarten Lankhorst <maarten.lankhorst@canonical.com>
 validpgpkeys+=('215DEE688925CCB965BE5DA97C03D7797B6E1AE2') # Damien Lespiau <damien.lespiau@intel.com>
@@ -36,21 +41,30 @@ validpgpkeys+=('CD47C5341A375F33BEF7BAFAFDD15D5ACEF0F2B1') # Marek Olšák <mara
 validpgpkeys+=('A66D805F7C9329B4C5D82767CCC4F07FAC641EFF') # Daniel Stone <daniels@collabora.com>
 validpgpkeys+=('CFD0E654BCBE5DD2D030D222CFCC297C6D0A120B') # Lucas Stach <l.stach@pengutronix.de>
 
-build() {
+prepare() {
   cd $pkgname-$pkgver
-  [[ "$CARCH" == "armv7h" ]] && CONFIG="--enable-omap-experimental-api --enable-exynos-experimental-api --enable-tegra-experimental-api --enable-etnaviv-experimental-api"
-  ./configure --prefix=/usr --enable-udev $CONFIG
-  make
+
+  # Fix version
+  sed -i 's/2\.4\.89/2.4.90/' meson.build
+
+  # Fails in a container; autotools skipped this one already
+  patch -Np1 -i ../no-drmdevice-test.diff
+  # FS#57576; fix amdgpu cards
+  patch -Np1 -i ../fix_mistake_in_initial_hole_size_calculation.diff
+}
+
+build() {
+  [[ "$CARCH" == "armv7h" ]] && CONFIG="-Domap=true -Dexynos=true -Dtegra=true -Detnaviv=true"
+  arch-meson $pkgname-$pkgver build -Dudev=true $CONFIG
+  ninja -C build
 }
 
 check() {
-  cd $pkgname-$pkgver
-  make -k check
+  cd build
+  meson test
 }
 
 package() {
-  cd $pkgname-$pkgver
-  make DESTDIR="$pkgdir" install
-  install -m755 -d "$pkgdir/usr/share/licenses/$pkgname"
-  install -m644 ../COPYING "$pkgdir/usr/share/licenses/$pkgname/"
+  DESTDIR="$pkgdir" ninja -C build install
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 COPYING
 }
