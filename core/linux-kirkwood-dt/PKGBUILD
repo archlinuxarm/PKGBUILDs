@@ -4,46 +4,52 @@
 buildarch=2
 
 pkgbase=linux-kirkwood-dt
+_srcname=linux-4.15
 _kernelname=${pkgbase#linux}
 _desc="Marvell Kirkwood DT"
-pkgver=4.14.22
-srcver=${pkgver%.0}
+pkgver=4.15.7
 pkgrel=1
 arch=('arm')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'uboot-mkimage' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
-
-source=("https://kernel.org/pub/linux/kernel/v4.x/linux-${srcver}.tar.xz"
+source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
+        "http://www.kernel.org/pub/linux/kernel/v4.x/patch-${pkgver}.xz"
+        '0001-leds-trigger-Introduce-a-SATA-trigger.patch'
+        '0002-ata-sata_mv-Add-SATA-activity-LED-trigger-support.patch'
+        '0003-ARM-dts-kirkwood-pogo_e02-Set-health-LED-to-default-.patch'
+        '0004-Fix-mvsdio-SD-card-detection.patch'
+        '0005-ARM-dts-kirkwood-Initial-support-for-GoFlex-Home.patch'
+        '0006-Revert-vfs-mm-fix-a-dead-loop-in-truncate_inode_page.patch'
         'config'
-        'archlinuxarm.patch'
-        'fix_shortread_on_huge_media.patch'
-        '0001-disable-mv643xx_eth-TSO.patch'
-        'goflexhome_fdt.patch'
-        'linux.preset')
-md5sums=('0c033c0420ae28017c2f15e02d0cf90c'
-         'f369b1b4e1c7949a015879b1ac20d3f6'
-         'a6c6f6d930d43787117d00fc759c115b'
-         '79dd8cd94a574db6b2a024dec7c45a54'
-         '09d44b9f07abfaeaf4f688ee52034786'
-         'f5a554eefbd337e71cca072e2d2cab45'
-         '959e49540dac4c5e689ad9037150a360')
+        'linux.preset'
+        '99-linux.hook')
+md5sums=('0d701ac1e2a67d47ce7127432df2c32b'
+         'be343335405432d9cd83bf98b281436d'
+         '67641ed920ee806963e850c307b40b70'
+         '46f2f897e7f3dd1b3697c89b4a7249eb'
+         '4d51e29b9158a429f1fa735278224a31'
+         '6353ab58a64d14c6ee1516b6e5b6eefd'
+         '315701114e9f116138b3e94b0555d4f6'
+         'bd61cc7dfcb0dbd2c880e5aa58775242'
+         '4fcede430574cef4740fe0880b70c1cd'
+         '959e49540dac4c5e689ad9037150a360'
+         '79fa396e3f9a09a85156d6d7c2d34b58')
 
 prepare() {
-  cd "${srcdir}/linux-${srcver}"
+  cd "${srcdir}/${_srcname}"
  
-  # Effectively reverts commit A3d549dcfbbb0ecdaa571431a27ee5da9f2466716 as it causes
-  # kernel not to be able to read beyond 8TB on a single device.
-  # https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git/commit/?id=3d549dcfbbb0ecdaa571431a27ee5da9f2466716
-  # https://archlinuxarm.org/forum/viewtopic.php?f=15&t=11535&p=55350#p55350
-  patch -Np1 -i "${srcdir}/fix_shortread_on_huge_media.patch"
+  # add upstream patch
+  git apply --whitespace=nowarn "${srcdir}/patch-${pkgver}"
 
-  patch -Np1 -i "${srcdir}/0001-disable-mv643xx_eth-TSO.patch"
-
-  msg2 "Add Arch Linux ARM patch for ARMv5te plug computers"
-  patch -Np1 -i "${srcdir}/archlinuxarm.patch"
-  patch -Np1 -i "${srcdir}/goflexhome_fdt.patch"
+  # ALARM patches
+  git apply ../0001-leds-trigger-Introduce-a-SATA-trigger.patch
+  git apply ../0002-ata-sata_mv-Add-SATA-activity-LED-trigger-support.patch
+  git apply ../0003-ARM-dts-kirkwood-pogo_e02-Set-health-LED-to-default-.patch
+  git apply ../0004-Fix-mvsdio-SD-card-detection.patch
+  git apply ../0005-ARM-dts-kirkwood-Initial-support-for-GoFlex-Home.patch
+  git apply ../0006-Revert-vfs-mm-fix-a-dead-loop-in-truncate_inode_page.patch
 
   cat "${srcdir}/config" > ./.config
 
@@ -55,7 +61,7 @@ prepare() {
 }
 
 build() {
-  cd "${srcdir}/linux-${srcver}"
+  cd "${srcdir}/${_srcname}"
 
   # get kernel version
   make prepare
@@ -81,7 +87,7 @@ build() {
   #yes "" | make config
 
   msg "Building!"
-  make ${MAKEFLAGS} zImage modules dtbs kirkwood-nsa320.dtb kirkwood-nsa325.dtb
+  make ${MAKEFLAGS} zImage modules dtbs
 }
 
 _package() {
@@ -93,7 +99,7 @@ _package() {
   backup=("etc/mkinitcpio.d/${pkgbase}.preset")
   install=${pkgname}.install
 
-  cd "${srcdir}/linux-${srcver}"
+  cd "${srcdir}/${_srcname}"
 
   KARCH=arm
 
@@ -103,10 +109,10 @@ _package() {
   #_basekernel=${_basekernel%.*}
   _basekernel=${pkgver}
 
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot/dtbs}
+  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
+  make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
   cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
-  cp arch/$KARCH/boot/dts/*.dtb "${pkgdir}/boot/dtbs"
 
   # set correct depmod command for install
   sed \
@@ -121,19 +127,19 @@ _package() {
     -e "s|ALL_kver=.*|ALL_kver=\"${_kernver}\"|" \
     -i "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
 
+  # install pacman hook for initramfs regeneration
+  sed "s|%PKGBASE%|${pkgbase}|g" "${srcdir}/99-linux.hook" |
+    install -D -m644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/99-${pkgbase}.hook"
+
   # remove build and source links
   rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
   # remove the firmware
   rm -rf "${pkgdir}/lib/firmware"
-  # gzip -9 all modules to save 100MB of space
-  find "${pkgdir}" -name '*.ko' |xargs -P 2 -n 1 gzip -9
   # make room for external modules
-  ln -s "../extramodules-${_basekernel}-${_kernelname:-ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
+  ln -s "../extramodules-${_basekernel}${_kernelname:--ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
   # add real version for building modules and running depmod from post_install/upgrade
-  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}"
-  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}-${_kernelname:-ARCH}/version"
-
-  cd "${srcdir}/linux-${srcver}"
+  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}${_kernelname:--ARCH}"
+  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}${_kernelname:--ARCH}/version"
 
   # Now we call depmod...
   depmod -b "$pkgdir" -F System.map "$_kernver"
@@ -154,7 +160,7 @@ _package-headers() {
   cd "${pkgdir}/usr/lib/modules/${_kernver}"
   ln -sf ../../../src/linux-${_kernver} build
 
-  cd "${srcdir}/linux-${srcver}"
+  cd "${srcdir}/${_srcname}"
   install -D -m644 Makefile \
     "${pkgdir}/usr/src/linux-${_kernver}/Makefile"
   install -D -m644 kernel/Makefile \
