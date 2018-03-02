@@ -1,0 +1,72 @@
+# $Id$
+# Maintainer: Christian Hesse <mail@eworm.de>
+# Contributor: Jonathan Conder <jonno.conder@gmail.com>
+
+# remove when bumped upstream
+
+pkgbase='packagekit'
+pkgname=('packagekit' 'libpackagekit-glib')
+pkgver=1.1.8
+pkgrel=2.1
+pkgdesc='A system designed to make installation and updates of packages easier'
+arch=('x86_64')
+url='https://www.freedesktop.org/software/PackageKit/'
+license=('GPL')
+makedepends=('polkit' 'sqlite' 'gobject-introspection' 'gtk-doc' 'intltool'
+             'bash-completion' 'vala' 'autoconf-archive')
+options=('!emptydirs')
+validpgpkeys=('163EB50119225DB3DF8F49EA17ACBA8DFA970E17'	# Richard Hughes <richard@hughsie.com>
+              'EC60AABDF42AAE8FB062640480858FA38F62AF74')	# Kalev Lember <klember@redhat.com>
+# tmporary download location due to freedesktop upload being disabled due to pending Meltdown fixes
+source=("https://kalev.fedorapeople.org/PackageKit/releases/PackageKit-${pkgver}.tar.xz"{,.asc})
+#source=("https://www.freedesktop.org/software/PackageKit/releases/PackageKit-${pkgver}.tar.xz"{,.asc})
+sha256sums=('757f902f2fb295790b64c345a561124300d54945cd33c690c2a176cc8dba885d'
+            'SKIP')
+
+build() {
+	cd "${srcdir}/PackageKit-${pkgver}"
+
+	./autogen.sh --prefix=/usr \
+		--sysconfdir=/etc \
+		--localstatedir=/var \
+		--libexecdir=/usr/lib/PackageKit \
+		--with-dbus-sys=/usr/share/dbus-1/system.d \
+		--disable-static \
+		--disable-gtk-doc \
+		--disable-local \
+		--disable-gstreamer-plugin \
+		--disable-gtk-module \
+		--disable-command-not-found \
+		--disable-cron \
+		--disable-dummy \
+		--enable-alpm
+	sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+	make
+}
+
+package_packagekit() {
+	depends=('libpackagekit-glib' 'pacman>=5.0.0' 'polkit' 'sqlite')
+	optdepends=('bash-completion: command completion in bash')
+	backup=('var/lib/PackageKit/transactions.db'
+		'etc/PackageKit/alpm.d/pacman.conf'
+		'etc/PackageKit/alpm.d/repos.list')
+
+	cd "${srcdir}/PackageKit-${pkgver}"
+
+	# install directory with root owner, polkit group and
+	# correct permission
+	install -d -o root -g 102 -m 750 "${pkgdir}/usr/share/polkit-1/rules.d"
+
+	make DESTDIR="${pkgdir}" install
+	make -C lib DESTDIR="${pkgdir}" uninstall
+	make -C docs DESTDIR="${pkgdir}" uninstall
+}
+
+package_libpackagekit-glib() {
+	pkgdesc='GLib library for accessing PackageKit'
+	depends=('glib2')
+
+	cd "${srcdir}/PackageKit-${pkgver}"
+	make -C lib DESTDIR="${pkgdir}" install
+	make -C docs DESTDIR="${pkgdir}" install
+}
