@@ -5,16 +5,17 @@ buildarch=4
 
 pkgname=uboot-odroid-xu3
 pkgver=2018.01
-pkgrel=1
-pkgdesc="U-Boot for ODROID-XU3/XU4/HC1"
+pkgrel=2
+pkgdesc="U-Boot for ODROID-XU3/XU4/HC1/HC2"
 arch=('armv7h')
 url='http://www.denx.de/wiki/U-Boot/WebHome'
 license=('GPL')
 install=$pkgname.install
 backup=('boot/boot.txt' 'boot/boot.scr')
-makedepends=('bc' 'dtc' 'git')
+makedepends=('bc' 'dtc145' 'git')
 _commit=fe2f831fd44a4071f58a42f260164544697aa666
 source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver}.tar.bz2"
+        '0001-ARM-Samsung-Add-Exynos5422-based-Odroid-HC1-support.patch'
         "bl1.bin::https://github.com/hardkernel/u-boot/raw/${_commit}/sd_fuse/hardkernel/bl1.bin.hardkernel"
         'http://archlinuxarm.org/builder/src/xu3/bl2.bin'
         "tzsw.bin::https://github.com/hardkernel/u-boot/raw/${_commit}/sd_fuse/hardkernel/tzsw.bin.hardkernel"
@@ -22,12 +23,19 @@ source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver}.tar.bz2"
         'boot.txt'
         'mkscr')
 md5sums=('b42e45813369f4ae84490a481e531768'
+         '32190849dbeefab68897ce8ee6e2e033'
          '38fb058aa3bcc568f9547c85517949b9'
          '09c42bed980921cfc914e97e067ba9a3'
          'fd01dda20b999e0b731c7063431a42b3'
          '8a31acf5da5722698f54d1fe15c482bb'
          '52306aa4cf2c3499ecfcea026fb2741c'
          '021623a04afd29ac3f368977140cfbfd')
+
+prepare() {
+  cd u-boot-${pkgver}
+
+  patch -p1 -i ../0001-ARM-Samsung-Add-Exynos5422-based-Odroid-HC1-support.patch
+}
 
 build() {
   cd u-boot-${pkgver}

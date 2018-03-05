@@ -1,0 +1,70 @@
+From ca12692bcff940e7be7e7c3d102d6b17418f550f Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Sun, 25 Feb 2018 16:38:04 -0700
+Subject: [PATCH 7/9] Fix mvsdio SD card detection
+
+Helps SD card detection on PPv4.
+
+Signed-off-by: Kevin Mihelich <kevin@archlinuxarm.org>
+---
+ drivers/mmc/core/core.c   | 2 +-
+ drivers/mmc/core/sd.c     | 9 +++++++++
+ drivers/mmc/host/mvsdio.c | 2 ++
+ 3 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+index c0ba6d8823b7..281a2feb2a6a 100644
+--- a/drivers/mmc/core/core.c
++++ b/drivers/mmc/core/core.c
+@@ -717,7 +717,7 @@ void mmc_set_data_timeout(struct mmc_data *data, const struct mmc_card *card)
+ 			 */
+ 			limit_us = 3000000;
+ 		else
+-			limit_us = 100000;
++			limit_us = 200000;
+ 
+ 		/*
+ 		 * SDHC cards always use these fixed values.
+diff --git a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+index 62b84dd8f9fe..7d38988c36df 100644
+--- a/drivers/mmc/core/sd.c
++++ b/drivers/mmc/core/sd.c
+@@ -358,6 +358,15 @@ int mmc_sd_switch_hs(struct mmc_card *card)
+ 	if (!status)
+ 		return -ENOMEM;
+ 
++	/*
++	 * Some SDHC cards, notably those with a Sandisk SD controller
++	 * (also found in Kingston products) need a bit of slack
++	 * before successfully handling the SWITCH command.  So far,
++	 * cards identifying themselves as "SD04G" and "SD08G" are
++	 * affected
++	 */
++	udelay(100);
++
+ 	err = mmc_sd_switch(card, 1, 0, 1, status);
+ 	if (err)
+ 		goto out;
+diff --git a/drivers/mmc/host/mvsdio.c b/drivers/mmc/host/mvsdio.c
+index 210247b3d11a..05029d5bd72a 100644
+--- a/drivers/mmc/host/mvsdio.c
++++ b/drivers/mmc/host/mvsdio.c
+@@ -23,6 +23,7 @@
+ #include <linux/of_irq.h>
+ #include <linux/mmc/host.h>
+ #include <linux/mmc/slot-gpio.h>
++#include <linux/mmc/sd.h>
+ 
+ #include <asm/sizes.h>
+ #include <asm/unaligned.h>
+@@ -149,6 +150,7 @@ static void mvsd_request(struct mmc_host *mmc, struct mmc_request *mrq)
+ 
+ 	dev_dbg(host->dev, "cmd %d (hw state 0x%04x)\n",
+ 		cmd->opcode, mvsd_read(MVSD_HW_STATE));
++	if (cmd->opcode == SD_SWITCH) mdelay(1); /* Voodoo */
+ 
+ 	cmdreg = MVSD_CMD_INDEX(cmd->opcode);
+ 
+-- 
+2.16.1
+
