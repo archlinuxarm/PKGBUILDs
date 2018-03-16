@@ -1,0 +1,76 @@
+From 8678e8d54637f291cf10e68c472d6255c3582682 Mon Sep 17 00:00:00 2001
+From: Jose Dapena Paz <jose.dapena@lge.com>
+Date: Wed, 7 Mar 2018 18:50:50 +0000
+Subject: [PATCH 02/10] GCC build fix: mark is_trivially_copy_constructible for
+ WTF::Vector as false.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Compilation in GCC fails because of https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80654
+if T in WTF::Optional<WTF::Vector<T>> is not trivially copy constructible.
+The problem already happened in std::vector and was workarounded. This
+change implements a similar fix for WTF::Vector.
+
+Bug: 816952
+
+Change-Id: If87f01beb952e03eb49dcaf0c5db6efd745bf05e
+Reviewed-on: https://chromium-review.googlesource.com/944404
+Commit-Queue: José Dapena Paz <jose.dapena@lge.com>
+Reviewed-by: Kentaro Hara <haraken@chromium.org>
+Cr-Commit-Position: refs/heads/master@{#541516}
+---
+ third_party/WebKit/Source/platform/wtf/DEPS     |  1 +
+ third_party/WebKit/Source/platform/wtf/Vector.h | 17 +++++++++++++++++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/third_party/WebKit/Source/platform/wtf/DEPS b/third_party/WebKit/Source/platform/wtf/DEPS
+index 7e80997a5fc9..c780a4de7aba 100644
+--- a/third_party/WebKit/Source/platform/wtf/DEPS
++++ b/third_party/WebKit/Source/platform/wtf/DEPS
+@@ -16,6 +16,7 @@ include_rules = [
+     "+base/process/process_metrics.h",
+     "+base/rand_util.h",
+     "+base/strings",
++    "+base/template_util.h",
+     "+base/threading/thread_checker.h",
+     "+base/time/time.h",
+     "+base/tuple.h",
+diff --git a/third_party/WebKit/Source/platform/wtf/Vector.h b/third_party/WebKit/Source/platform/wtf/Vector.h
+index 8b451bddecef..8955c81712c1 100644
+--- a/third_party/WebKit/Source/platform/wtf/Vector.h
++++ b/third_party/WebKit/Source/platform/wtf/Vector.h
+@@ -28,6 +28,7 @@
+ #include <utility>
+ 
+ #include "base/macros.h"
++#include "base/template_util.h"
+ #include "build/build_config.h"
+ #include "platform/wtf/Alignment.h"
+ #include "platform/wtf/ConditionalDestructor.h"
+@@ -1992,6 +1993,22 @@ Vector<T, inlineCapacity, Allocator>::Trace(VisitorDispatcher visitor) {
+ 
+ }  // namespace WTF
+ 
++namespace base {
++
++#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ <= 7
++// Workaround for g++7 and earlier family.
++// Due to https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80654, without this
++// Optional<WTF::Vector<T>> where T is non-copyable causes a compile error.
++// As we know it is not trivially copy constructible, explicitly declare so.
++//
++// It completes the declaration in base/template_util.h that was provided
++// for std::vector
++template <typename T>
++struct is_trivially_copy_constructible<WTF::Vector<T>> : std::false_type {};
++#endif
++
++}  // namespace base
++
+ using WTF::Vector;
+ 
+ #endif  // WTF_Vector_h
+-- 
+2.16.2
+
