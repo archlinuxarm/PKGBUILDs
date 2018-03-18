@@ -1,0 +1,92 @@
+# $Id$
+# Maintainer: Anatol Pomozov <anatol.pomozov@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - disable backtrace
+
+buildarch=12
+
+pkgname=tarantool
+_commit=330a607af2b2cfbbf4608ec15d46082177804f58
+pkgver=1.9.0.r16
+pkgrel=2
+pkgdesc='Lua application server integrated with a database management system'
+arch=(x86_64)
+url='https://www.tarantool.org'
+license=(BSD)
+depends=(readline ncurses zlib libyaml openssl libunwind curl icu)
+makedepends=(git cmake systemd)
+checkdepends=(python2-daemon python2-gevent python2-tarantool)
+source=(git+https://github.com/tarantool/tarantool.git#commit=$_commit
+        git+https://github.com/tarantool/luajit.git#branch=tarantool-1.7
+        git+https://github.com/tarantool/msgpuck.git
+        git+https://github.com/rtsisyk/luafun.git
+        git+https://github.com/tarantool/libyaml.git
+        git+https://github.com/tarantool/zstd.git
+        git+https://github.com/tarantool/test-run.git
+        git+https://github.com/tarantool/small.git
+	git+https://github.com/tarantool/luarocks.git#branch=tarantool-1.7
+	tarantool.sysusers)
+sha1sums=('SKIP'
+          'SKIP'
+          'SKIP'
+          'SKIP'
+          'SKIP'
+          'SKIP'
+          'SKIP'
+          'SKIP'
+          'SKIP'
+          '9021b3d50e45f719f0304ab529627cac69a7a149')
+
+pkgver() {
+  cd tarantool
+  git describe | sed 's/^v//; s/-/.r/; s/-.*//'
+}
+
+prepare() {
+  cd tarantool
+  git submodule init
+  git config -f .gitmodules 'submodule.third_party/luajit.url' "$srcdir/luajit"
+  git config -f .gitmodules 'submodule.src/lib/msgpuck.url' "$srcdir/msgpuck"
+  git config -f .gitmodules 'submodule.third_party/luafun.url' "$srcdir/luafun"
+  git config -f .gitmodules 'submodule.third_party/libyaml.url' "$srcdir/libyaml"
+  git config -f .gitmodules 'submodule.third_party/zstd.url' "$srcdir/zstd"
+  git config -f .gitmodules 'submodule.test-run.url' "$srcdir/test-run"
+  git config -f .gitmodules 'submodule.src/lib/small.url' "$srcdir/small"
+  git config -f .gitmodules 'submodule.third_party/luarocks.url' "$srcdir/luarocks"
+
+  git submodule sync
+  git submodule update
+  #sed -i -e 's/coros/lock/g' test-run/lib/connpool.py
+}
+
+build() {
+  cd tarantool
+
+  # tarantool uses git submodule, handle this
+  cmake \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_BINDIR=/usr/bin \
+    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+    -DCMAKE_INSTALL_LIBDIR=/usr/lib \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_SKIP_RPATH=ON \
+    -DENABLE_BUNDLED_LIBYAML:BOOL=OFF \
+    -DENABLE_BACKTRACE:BOOL=OFF \
+    -DWITH_SYSTEMD:BOOL=ON \
+    -DENABLE_DIST:BOOL=ON
+  make
+}
+
+check() {
+  cd tarantool/test
+  ./test-run.py --suite box || true
+}
+
+package() {
+  cd tarantool
+  make install DESTDIR="$pkgdir"
+
+  install -D -m644 $srcdir/tarantool.sysusers "$pkgdir/usr/lib/sysusers.d/tarantool.conf"
+  install -D -m644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
