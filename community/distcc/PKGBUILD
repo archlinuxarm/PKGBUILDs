@@ -1,4 +1,3 @@
-# $Id$
 # Maintainer: Alexander F Rødseth <xyproto@archlinux.org>
 # Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
 # Contributor: Judd Vinet <jvinet@zeroflux.org>
@@ -10,58 +9,73 @@
 #  - patch to allow zero timeout (INT_MAX time to complete)
 
 pkgname=distcc
-pkgver=3.2rc1
-pkgrel=4
+pkgver=3.3
+pkgrel=1
 pkgdesc='Distributed C, C++ and Objective-C compiler'
 arch=('x86_64')
 url='https://github.com/distcc/distcc'
 license=('GPL')
 depends=('popt')
-makedepends=('gtk2' 'python2')
-optdepends=('python2')
+makedepends=('git' 'python' 'setconf')
+optdepends=('python')
 backup=('etc/conf.d/distccd'
         'etc/distcc/hosts')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz"
-        distccd.conf.d
-        distccd.service
+source=("git+https://github.com/distcc/distcc#tag=v$pkgver"
+        'distccd.conf.d'
+        'distccd.service'
         allow-zero-timeout.patch)
-sha256sums=('33e85981ff6afd94efc38b23b2d8b9036b3dff2dc6eac6982b9ff0ae1de64caa'
+sha256sums=('SKIP'
             '43e02b461841ca2976816c244a0eca8b24820ca143f73cc0924403d75a8c012f'
             '0f18ffb58647eeba643f28e9029a5d307100df3470eb228097f2b3f4196d8098'
             '73ac95393ee94bcb28f49499e8eec61bfd29a7de38889eaebd237fbbcba6e2c6')
-
 prepare() {
-  cd "$srcdir/$pkgname-$pkgver"
-    patch -p1 -i ../allow-zero-timeout.patch
+  cd "$pkgname"
+
+   patch -p1 -i ../allow-zero-timeout.patch
+
   ./autogen.sh
+
+  setconf gnome/distccmon-gnome.desktop Name 'DistCC Monitor'
+  sed -i 's/ install-gnome-data//g' Makefile.in
 }
 
 build() {
-  cd "$srcdir/$pkgname-$pkgver"
+  cd "$pkgname"
 
-  [ -f Makefile ] || PYTHON=/usr/bin/python2 \
-    ./configure \
+  ./configure \
     --prefix=/usr \
-    --sysconfdir=/etc \
-    --mandir=/usr/share/man \
     --enable-rfc2553 \
+    --mandir=/usr/share/man \
+    --sbindir=/usr/bin \
+    --sysconfdir=/etc \
     --without-avahi
 
-  make WERROR_CFLAGS= INCLUDESERVER_PYTHON=/usr/bin/python2
+  make WERROR_CFLAGS= INCLUDESERVER_PYTHON=/usr/bin/python
 }
 
 package() {
-  cd "$srcdir/$pkgname-$pkgver"
+  make -C "$pkgname" \
+    DESTDIR="$pkgdir" \
+    INCLUDESERVER_PYTHON=/usr/bin/python \
+    install
 
-  make DESTDIR="$pkgdir" INCLUDESERVER_PYTHON=/usr/bin/python2 install
-
-  install -Dm644 "$srcdir/distccd.conf.d" "$pkgdir/etc/conf.d/distccd"
-  install -Dm644 "$srcdir/distccd.service" \
+  # Configuration
+  install -Dm644 distccd.conf.d "$pkgdir/etc/conf.d/distccd"
+  install -Dm644 distccd.service \
     "$pkgdir/usr/lib/systemd/system/distccd.service"
+
+  # Desktop shortcut
+  install -Dm644 "$pkgname/gnome/distccmon-gnome-icon.png" \
+    "$pkgdir/usr/share/pixmaps/distccmon-gnome-icon.png"
+  install -Dm644 "$pkgname/gnome/distccmon-gnome.desktop" \
+    "$pkgdir/usr/share/applications/distccmon-gnome.desktop"
+
+  # Symlinks
   install -d "$pkgdir/usr/lib/$pkgname/bin"
   for bin in c++ cc cpp g++ gcc; do
     ln -sf "/usr/bin/$pkgname" "$pkgdir/usr/lib/$pkgname/bin/$bin"
   done
 }
 
+# getver: -u 3 raw.githubusercontent.com/distcc/distcc/master/configure.ac
 # vim: ts=2 sw=2 et:
