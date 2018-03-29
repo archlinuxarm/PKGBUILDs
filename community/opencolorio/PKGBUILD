@@ -2,37 +2,56 @@
 # Contributor: Dumitru Ursu <dima@ceata.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - turn off using sse, x86 only
-#  - use system lcms2 on AArch64
+#  - turn off using sse
 
 pkgname=opencolorio
-pkgver=1.0.9
-pkgrel=5
+pkgver=1.1.0
+pkgrel=1
 pkgdesc="A color management framework for visual effects and animation"
-arch=('i686' 'x86_64')
+arch=('x86_64')
 url="http://opencolorio.org"
 license=('BSD')
-depends=('python')
-depends_aarch64=('lcms2')
-makedepends=('cmake')
-source=(http://github.com/imageworks/OpenColorIO/tarball/v$pkgver)
-sha1sums=('a015cb51b9b0ea0cdb3989fc23e1c18ad69511e0')
+depends=('python' 'tinyxml' 'yaml-cpp' 'lcms')
+makedepends=('cmake' 'git' 'boost')
+source=($pkgname-$pkgver.tar.gz::https://github.com/imageworks/OpenColorIO/tarball/v$pkgver
+        8d48ee8da42de2d878db7b42586db8b3c67f83e1.patch)
+sha512sums=('33d58efce60054c755978c5325974e93ed2f9cb00225eaf85429abacdd832a3b4979b3834f129d054f8c3c7ed193ac50d211542d7f8ff460496b78d3fbd48148'
+            'fd1c6e134ef898a8715333b1e85a606736685ec0fce07188c0fba68ae048edb61dc4f107eff8de79a53dbbf226a1f84bb0a7d046a15fafb981ce02568350fd49')
 
-build() {
+prepare() {
   mv imageworks-OpenColorIO-* $pkgname-$pkgver
+
   cd $pkgname-$pkgver
-   
-  cmake -DCMAKE_INSTALL_PREFIX=/usr -DOCIO_USE_SSE=off .
-  make 
+  sed -i "s/-Werror//g" src/core/CMakeLists.txt
+  sed -i "s/-Werror//g" src/pyglue/CMakeLists.txt
+  sed -i "s/push(hidden)/push(default)/g" src/core/OCIOYaml.cpp
+
+  patch -Np1 -i "$srcdir"/8d48ee8da42de2d878db7b42586db8b3c67f83e1.patch
 }
 
-package() 
-{
-  cd "$pkgname-$pkgver"
+build() {
+  cd $pkgname-$pkgver
 
-  make DESTDIR="$pkgdir" install 
+  mkdir -p build && cd build
+  cmake .. \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DUSE_EXTERNAL_YAML=ON \
+    -DUSE_EXTERNAL_TINYXML=ON \
+    -DUSE_EXTERNAL_LCMS=ON \
+    -DOCIO_USE_SSE=OFF
+  make
+}
 
-  install -Dm644 LICENSE $pkgdir/usr/share/licenses/$pkgname/LICENSE
+package() {
+  cd "$pkgname-$pkgver"/build
+
+  make DESTDIR="$pkgdir" install
+
+  mv "$pkgdir"/usr/lib/static/libOpenColorIO.a "$pkgdir"/usr/lib/libOpenColorIO.a
+  rmdir "$pkgdir"/usr/lib/static
+
+  install -Dm644 ../LICENSE $pkgdir/usr/share/licenses/$pkgname/LICENSE
 }
 
 # vim:set ts=2 sw=2 et:
