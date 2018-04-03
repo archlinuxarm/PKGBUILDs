@@ -1,0 +1,64 @@
+# U-Boot: MACCHIATObin
+# Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
+
+buildarch=8
+
+pkgname=uboot-macchiatobin
+pkgver=2017.03
+pkgrel=1
+pkgdesc="U-Boot for MACCHIATObin"
+arch=('aarch64')
+url='http://www.denx.de/wiki/U-Boot/WebHome'
+license=('GPL' 'custom')
+install=$pkgname.install
+backup=('boot/boot.txt' 'boot/boot.scr')
+makedepends=('bc' 'dtc145' 'git')
+options=('!strip')
+source=('git+https://github.com/MarvellEmbeddedProcessors/u-boot-marvell#branch=u-boot-2017.03-armada-17.10'
+        'git+https://github.com/MarvellEmbeddedProcessors/binaries-marvell#branch=binaries-marvell-armada-17.10'
+        'git+https://github.com/MarvellEmbeddedProcessors/atf-marvell#branch=atf-v1.3-armada-17.10'
+        'git+https://github.com/MarvellEmbeddedProcessors/mv-ddr-marvell#branch=mv_ddr-armada-17.10'
+        '0001-arch-linux-arm-modifications.patch'
+        '0001-ATF-toolchain-fixes.patch'
+        '0001-DDR-toolchain-fixes.patch'
+        'boot.txt'
+        'mkscr')
+md5sums=('SKIP'
+         'SKIP'
+         'SKIP'
+         'SKIP'
+         '77079375821a6af000ab0ab9c5007539'
+         'd00628523a4fc02898d0115dd9f11d29'
+         '9fd32c9b80e6773f4188c8b95539a281'
+         '7eabc1489d5248f4a7809eb2c0d189be'
+         '021623a04afd29ac3f368977140cfbfd')
+
+prepare() {
+  unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
+  cd u-boot-marvell
+  patch -p1 -i ../0001-arch-linux-arm-modifications.patch
+  cd ../atf-marvell
+  patch -p1 -i ../0001-ATF-toolchain-fixes.patch
+  cd ../mv-ddr-marvell
+  patch -p1 -i ../0001-DDR-toolchain-fixes.patch
+}
+
+build() {
+  cd u-boot-marvell
+  make mvebu_mcbin-88f8040_defconfig
+  echo 'CONFIG_IDENT_STRING=" Arch Linux ARM"' >> .config
+  make
+
+  cd ..
+  export BL33=$(pwd)/u-boot-marvell/u-boot.bin
+  export SCP_BL2=$(pwd)/binaries-marvell/mrvl_scp_bl2_8040.img
+  export DDR_PATH=$(pwd)/mv-ddr-marvell
+
+  cd atf-marvell
+  make USE_COHERENT_MEM=0 LOG_LEVEL=20 MV_DDR_PATH=${DDR_PATH} PLAT=a80x0_mcbin all fip
+}
+
+package() {
+  install -Dpt "${pkgdir}"/boot atf-marvell/build/a80x0_mcbin/release/flash-image.bin mkscr boot.txt
+  u-boot-marvell/tools/mkimage -A arm -O linux -T script -C none -n "U-Boot boot script" -d boot.txt "${pkgdir}"/boot/boot.scr
+}
