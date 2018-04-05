@@ -4,90 +4,131 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
+#  - upstream patch for libatomic
 
 pkgbase=mesa
-pkgname=('mesa' 'libva-mesa-driver')
-pkgver=17.3.7
-pkgrel=1
+pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
+pkgdesc="An open-source implementation of the OpenGL specification"
+pkgver=18.0.0
+pkgrel=2
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
-             'elfutils' 'llvm' 'libomxil-bellagio' 'clang' 'libglvnd' 'lm_sensors')
+             'elfutils' 'llvm' 'libomxil-bellagio' 'clang' 'libglvnd' 'lm_sensors' 'meson')
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
+        "meson_get_version.py::https://cgit.freedesktop.org/mesa/mesa/plain/bin/meson_get_version.py?h=mesa-18.0.0"
         LICENSE
-        0001-glvnd-fix-gl-dot-pc.patch)
-sha512sums=('ec48565556aa4281056cee5dbef140553651fdfbb76ce32397de048db1cf65f5e18787c72b998de7da2de795d27e7040bde84651ade4726fc3a69a23b166ba4e'
+        0001-glvnd-fix-gl-dot-pc.patch
+        fix-install.diff
+        fix-versions.diff
+        "atomic.patch::https://cgit.freedesktop.org/mesa/mesa/patch/?id=498faea103aa7966b435f21d8ff5e36172389b1e")
+sha512sums=('1494bb09357896a2505b3dcfec772268e28c765804f21e144948a314f1d79d99ff9f21062ef5860eb5a5a568b305a9c954585924a7ac8890fe1ebd8df3bcc396'
             'SKIP'
-            '25da77914dded10c1f432ebcbf29941124138824ceecaf1367b3deedafaecabc082d463abcfa3d15abff59f177491472b505bcb5ba0c4a51bb6b93b4721a23c2'
-            '75849eca72ca9d01c648d5ea4f6371f1b8737ca35b14be179e14c73cc51dca0739c333343cdc228a6d464135f4791bcdc21734e2debecd29d57023c8c088b028')
-validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D') # Emil Velikov <emil.l.velikov@gmail.com>
-validpgpkeys+=('946D09B5E4C9845E63075FF1D961C596A7203456') # Andres Gomez <tanty@igalia.com>
-validpgpkeys+=('E3E8F480C52ADD73B278EE78E1ECBE07D7D70895') # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
-
+            'cdc608d7b7de9e6eb6f1b2b4faef4864ac213d379b9dedc7c06e71726c2a1b88a0035d6ec50812a14ba4639e100158c6dff3a1d9456ab36c0a52988287c0d4bd'
+            'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
+            '75849eca72ca9d01c648d5ea4f6371f1b8737ca35b14be179e14c73cc51dca0739c333343cdc228a6d464135f4791bcdc21734e2debecd29d57023c8c088b028'
+            'da32ac3b025282c584bfc962723151b6e11887e59e35086c616a987cb3a471051d60f2b303a91f37106ebb75621cbd9b3f560036f5beb88518cfe9d75c45ee03'
+            '7ab28153780c5fa0f443873a627201e7d434991e5ce18ef2a05f678aa4561e172b2ad9a56fb01b72a8482bba650e26a08df10b4d4d6bb696c523f73196a47e39'
+            '75cd21bccc84a6b6b0de39c6d209c8bee0e5143b486433184ca078e8bc6797d30746be3ce5f7a89eea9bc3c7e2d68880412511fd6b9946252c7c7638523c6caa')
+validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
+              '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
+              'E3E8F480C52ADD73B278EE78E1ECBE07D7D70895') # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
+ 
 prepare() {
-  cd ${srcdir}/mesa-${pkgver}
+  cd mesa-${pkgver}
 
   # glvnd support patches - from Fedora
   # non-upstreamed ones
   patch -Np1 -i ../0001-glvnd-fix-gl-dot-pc.patch
-  
-  autoreconf -fiv
+
+  # fix symlinks created for vdpau drivers to be relative
+  # this is upstreamable
+  patch -Np1 -i ../fix-install.diff
+
+  # fix library versioning
+  # this is upstreamable
+  patch -Np1 -i ../fix-versions.diff
+
+  # file missing from tarball
+  cp ../meson_get_version.py bin/
+
+  # disk cache: Link with -latomic if necessary
+  patch -Np1 -i ../atomic.patch
 }
 
 build() {
-  cd ${srcdir}/mesa-${pkgver}
-
   [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,imx"
-  [[ $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",vc4"
-  [[ $CARCH == arm || $CARCH == armv6h ]] && LIBS="-latomic"
+  [[ $CARCH == "armv6h" || $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",vc4"
 
-  LIBS=$LIBS ./configure --prefix=/usr \
-    --sysconfdir=/etc \
-    --with-gallium-drivers=freedreno,nouveau,swrast,virgl${GALLIUM} \
-    --with-dri-drivers=nouveau,swrast \
-    --with-platforms=x11,drm,wayland \
-    --disable-xvmc \
-    --enable-llvm \
-    --enable-llvm-shared-libs \
-    --enable-shared-glapi \
-    --enable-libglvnd \
-    --enable-lmsensors \
-    --enable-egl \
-    --enable-glx \
-    --enable-glx-tls \
-    --enable-gles1 \
-    --enable-gles2 \
-    --enable-gbm \
-    --enable-dri \
-    --enable-gallium-osmesa \
-    --enable-gallium-extra-hud \
-    --enable-texture-float \
-    --enable-omx-bellagio \
-    --enable-nine \
-    --with-clang-libdir=/usr/lib
+  arch-meson mesa-$pkgver build \
+    -D b_lto=false \
+    -D platforms=x11,wayland,drm,surfaceless \
+    -D dri-drivers=nouveau \
+    -D gallium-drivers=freedreno,nouveau,swrast,virgl${GALLIUM} \
+    -D vulkan-drivers= \
+    -D dri3=true \
+    -D egl=true \
+    -D gallium-extra-hud=true \
+    -D gallium-nine=true \
+    -D gallium-omx=true \
+    -D gallium-va=true \
+    -D gallium-vdpau=true \
+    -D gallium-xa=false \
+    -D gallium-xvmc=false \
+    -D gbm=true \
+    -D gles1=true \
+    -D gles2=true \
+    -D glvnd=true \
+    -D glx=dri \
+    -D libunwind=false \
+    -D llvm=true \
+    -D lmsensors=true \
+    -D osmesa=gallium \
+    -D shared-glapi=true \
+    -D texture-float=true \
+    -D valgrind=false
 
-  make
+  # Print config
+  meson configure build
 
-  # fake installation
-  mkdir $srcdir/fakeinstall
-  make DESTDIR=${srcdir}/fakeinstall install
+  ninja -C build
+
+  # fake installation to be seperated into packages
+  # outside of fakeroot but mesa doesn't need to chown/mod
+  DESTDIR="${srcdir}/fakeinstall" ninja -C build install
+}
+
+_install() {
+  local src f dir
+  for src; do
+    f="${src#fakeinstall/}"
+    dir="${pkgdir}/${f%/*}"
+    install -m755 -d "${dir}"
+    mv -v "${src}" "${dir}/"
+  done
 }
 
 package_libva-mesa-driver() {
   pkgdesc="VA-API implementation for gallium"
-  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence' 'lm_sensors')
+  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence')
 
-  install -m755 -d ${pkgdir}/usr/lib/dri
-  cp -av ${srcdir}/fakeinstall/usr/lib/dri/*_drv_video.so ${pkgdir}/usr/lib/dri
+  _install fakeinstall/usr/lib/dri/*_drv_video.so
    
-  install -m755 -d "${pkgdir}/usr/share/licenses/libva-mesa-driver"
-  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/libva-mesa-driver/"
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
-               
+
+package_mesa-vdpau() {
+  pkgdesc="Mesa VDPAU drivers"
+  depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence')
+
+  _install fakeinstall/usr/lib/vdpau
+   
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+}
+
 package_mesa() {
-  pkgdesc="an open-source implementation of the OpenGL specification"
   depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'libelf' 
            'libomxil-bellagio' 'llvm-libs' 'lm_sensors' 'libglvnd')
   optdepends=('opengl-man-pages: for the OpenGL API man pages'
@@ -98,34 +139,36 @@ package_mesa() {
   replaces=('ati-dri' 'intel-dri' 'nouveau-dri' 'svga-dri' 'mesa-dri' 'mesa-libgl')
   backup=('etc/drirc')
 
-  install -m755 -d ${pkgdir}/etc
-  cp -rv ${srcdir}/fakeinstall/etc/drirc ${pkgdir}/etc
-  
-  install -m755 -d ${pkgdir}/usr/share/glvnd/egl_vendor.d
-  cp -rv ${srcdir}/fakeinstall/usr/share/glvnd/egl_vendor.d/50_mesa.json ${pkgdir}/usr/share/glvnd/egl_vendor.d/
+  _install fakeinstall/etc/drirc
+  _install fakeinstall/usr/share/glvnd/egl_vendor.d/50_mesa.json
 
-  install -m755 -d ${pkgdir}/usr/lib/dri
   # ati-dri, nouveau-dri, intel-dri, svga-dri, swrast
-  cp -av ${srcdir}/fakeinstall/usr/lib/dri/*_dri.so ${pkgdir}/usr/lib/dri
+  _install fakeinstall/usr/lib/dri/*_dri.so
    
-  cp -rv ${srcdir}/fakeinstall/usr/lib/bellagio  ${pkgdir}/usr/lib
-  cp -rv ${srcdir}/fakeinstall/usr/lib/d3d  ${pkgdir}/usr/lib
-  cp -rv ${srcdir}/fakeinstall/usr/lib/lib{gbm,glapi}.so* ${pkgdir}/usr/lib/
-  cp -rv ${srcdir}/fakeinstall/usr/lib/libOSMesa.so* ${pkgdir}/usr/lib/
-  cp -rv ${srcdir}/fakeinstall/usr/lib/libwayland*.so* ${pkgdir}/usr/lib/
+  _install fakeinstall/usr/lib/bellagio
+  _install fakeinstall/usr/lib/d3d
+  _install fakeinstall/usr/lib/lib{gbm,glapi}.so*
+  _install fakeinstall/usr/lib/libOSMesa.so*
+  _install fakeinstall/usr/lib/libwayland*.so*
 
-  cp -rv ${srcdir}/fakeinstall/usr/include ${pkgdir}/usr
-  cp -rv ${srcdir}/fakeinstall/usr/lib/pkgconfig ${pkgdir}/usr/lib/
+  # in libglvnd
+  rm -v fakeinstall/usr/lib/libGLESv{1_CM,2}.so*
   
-  # remove vulkan headers
-  rm -rf ${pkgdir}/usr/include/vulkan
+  # in vulkan-headers
+  rm -rfv fakeinstall/usr/include/vulkan
+
+  _install fakeinstall/usr/include
+  _install fakeinstall/usr/lib/pkgconfig
 
   # libglvnd support
-  cp -rv ${srcdir}/fakeinstall/usr/lib/libGLX_mesa.so* ${pkgdir}/usr/lib/
-  cp -rv ${srcdir}/fakeinstall/usr/lib/libEGL_mesa.so* ${pkgdir}/usr/lib/
-  # indirect rendering
-  ln -s /usr/lib/libGLX_mesa.so.0 ${pkgdir}/usr/lib/libGLX_indirect.so.0
+  _install fakeinstall/usr/lib/libGLX_mesa.so*
+  _install fakeinstall/usr/lib/libEGL_mesa.so*
 
-  install -m755 -d "${pkgdir}/usr/share/licenses/mesa"
-  install -m644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/mesa/"
+  # indirect rendering
+  ln -s /usr/lib/libGLX_mesa.so.0 "${pkgdir}/usr/lib/libGLX_indirect.so.0"
+
+  # make sure there are no files left to install
+  find fakeinstall -depth -print0 | xargs -0 rmdir
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
