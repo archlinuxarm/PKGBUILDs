@@ -9,7 +9,7 @@ appendpath () {
         *:"$1":*)
             ;;
         *)
-            PATH="$PATH:$1"
+            PATH="${PATH:+$PATH:}$1"
     esac
 }
 

@@ -1,0 +1,226 @@
+From 9d9ecb3ba21a6dfe59e6740527dedb09b6caea68 Mon Sep 17 00:00:00 2001
+From: Hidehiko Abe <hidehiko@chromium.org>
+Date: Fri, 26 Jan 2018 18:01:11 +0000
+Subject: [PATCH 08/10] Implement conditional copy/move ctors/assign-operators.
+
+BUG=784732
+TEST=Ran trybot.
+
+Change-Id: Iec5f9eaa7482d4e23f5bf2eea4b34c9cd867f89d
+Reviewed-on: https://chromium-review.googlesource.com/856021
+Commit-Queue: Hidehiko Abe <hidehiko@chromium.org>
+Reviewed-by: danakj <danakj@chromium.org>
+Cr-Commit-Position: refs/heads/master@{#532004}
+---
+ base/optional.h           | 63 +++++++++++++++++++++++++++++++++++--
+ base/optional_unittest.cc | 80 +++++++++++++++++++++++++++++++++++++++++++----
+ 2 files changed, 134 insertions(+), 9 deletions(-)
+
+diff --git a/base/optional.h b/base/optional.h
+index 5a50eb455be6..bb25118ca199 100644
+--- a/base/optional.h
++++ b/base/optional.h
+@@ -266,6 +266,58 @@ class OptionalBase {
+   OptionalStorage<T> storage_;
+ };
+ 
++// The following {Copy,Move}{Constructible,Assignable} structs are helpers to
++// implement constructor/assign-operator overloading. Specifically, if T is
++// is not movable but copyable, Optional<T>'s move constructor should not
++// participate in overload resolution. This inheritance trick implements that.
++template <bool is_copy_constructible>
++struct CopyConstructible {};
++
++template <>
++struct CopyConstructible<false> {
++  constexpr CopyConstructible() = default;
++  constexpr CopyConstructible(const CopyConstructible&) = delete;
++  constexpr CopyConstructible(CopyConstructible&&) = default;
++  CopyConstructible& operator=(const CopyConstructible&) = default;
++  CopyConstructible& operator=(CopyConstructible&&) = default;
++};
++
++template <bool is_move_constructible>
++struct MoveConstructible {};
++
++template <>
++struct MoveConstructible<false> {
++  constexpr MoveConstructible() = default;
++  constexpr MoveConstructible(const MoveConstructible&) = default;
++  constexpr MoveConstructible(MoveConstructible&&) = delete;
++  MoveConstructible& operator=(const MoveConstructible&) = default;
++  MoveConstructible& operator=(MoveConstructible&&) = default;
++};
++
++template <bool is_copy_assignable>
++struct CopyAssignable {};
++
++template <>
++struct CopyAssignable<false> {
++  constexpr CopyAssignable() = default;
++  constexpr CopyAssignable(const CopyAssignable&) = default;
++  constexpr CopyAssignable(CopyAssignable&&) = default;
++  CopyAssignable& operator=(const CopyAssignable&) = delete;
++  CopyAssignable& operator=(CopyAssignable&&) = default;
++};
++
++template <bool is_move_assignable>
++struct MoveAssignable {};
++
++template <>
++struct MoveAssignable<false> {
++  constexpr MoveAssignable() = default;
++  constexpr MoveAssignable(const MoveAssignable&) = default;
++  constexpr MoveAssignable(MoveAssignable&&) = default;
++  MoveAssignable& operator=(const MoveAssignable&) = default;
++  MoveAssignable& operator=(MoveAssignable&&) = delete;
++};
++
+ }  // namespace internal
+ 
+ // base::Optional is a Chromium version of the C++17 optional class:
+@@ -280,12 +332,18 @@ class OptionalBase {
+ // - No exceptions are thrown, because they are banned from Chromium.
+ // - All the non-members are in the 'base' namespace instead of 'std'.
+ template <typename T>
+-class Optional : public internal::OptionalBase<T> {
++class Optional
++    : public internal::OptionalBase<T>,
++      public internal::CopyConstructible<std::is_copy_constructible<T>::value>,
++      public internal::MoveConstructible<std::is_move_constructible<T>::value>,
++      public internal::CopyAssignable<std::is_copy_constructible<T>::value &&
++                                      std::is_copy_assignable<T>::value>,
++      public internal::MoveAssignable<std::is_move_constructible<T>::value &&
++                                      std::is_move_assignable<T>::value> {
+  public:
+   using value_type = T;
+ 
+   // Defer default/copy/move constructor implementation to OptionalBase.
+-  // TODO(hidehiko): Implement conditional enabling.
+   constexpr Optional() = default;
+   constexpr Optional(const Optional& other) = default;
+   constexpr Optional(Optional&& other) = default;
+@@ -316,7 +374,6 @@ class Optional : public internal::OptionalBase<T> {
+   ~Optional() = default;
+ 
+   // Defer copy-/move- assign operator implementation to OptionalBase.
+-  // TOOD(hidehiko): Implement conditional enabling.
+   Optional& operator=(const Optional& other) = default;
+   Optional& operator=(Optional&& other) = default;
+ 
+diff --git a/base/optional_unittest.cc b/base/optional_unittest.cc
+index 7cc05ef2987d..09f3106bfa7f 100644
+--- a/base/optional_unittest.cc
++++ b/base/optional_unittest.cc
+@@ -115,11 +115,29 @@ class DeletedDefaultConstructor {
+   int foo_;
+ };
+ 
+-class DeletedCopyConstructor {
++class DeletedCopy {
+  public:
+-  explicit DeletedCopyConstructor(int foo) : foo_(foo) {}
+-  DeletedCopyConstructor(const DeletedCopyConstructor&) = delete;
+-  DeletedCopyConstructor(DeletedCopyConstructor&&) = default;
++  explicit DeletedCopy(int foo) : foo_(foo) {}
++  DeletedCopy(const DeletedCopy&) = delete;
++  DeletedCopy(DeletedCopy&&) = default;
++
++  DeletedCopy& operator=(const DeletedCopy&) = delete;
++  DeletedCopy& operator=(DeletedCopy&&) = default;
++
++  int foo() const { return foo_; }
++
++ private:
++  int foo_;
++};
++
++class DeletedMove {
++ public:
++  explicit DeletedMove(int foo) : foo_(foo) {}
++  DeletedMove(const DeletedMove&) = default;
++  DeletedMove(DeletedMove&&) = delete;
++
++  DeletedMove& operator=(const DeletedMove&) = default;
++  DeletedMove& operator=(DeletedMove&&) = delete;
+ 
+   int foo() const { return foo_; }
+ 
+@@ -279,8 +297,18 @@ TEST(OptionalTest, MoveConstructor) {
+   // Even if copy constructor is deleted, move constructor needs to work.
+   // Note that it couldn't be constexpr.
+   {
+-    Optional<DeletedCopyConstructor> first(in_place, 42);
+-    Optional<DeletedCopyConstructor> second(std::move(first));
++    Optional<DeletedCopy> first(in_place, 42);
++    Optional<DeletedCopy> second(std::move(first));
++
++    EXPECT_TRUE(second.has_value());
++    EXPECT_EQ(42, second->foo());
++
++    EXPECT_TRUE(first.has_value());
++  }
++
++  {
++    Optional<DeletedMove> first(in_place, 42);
++    Optional<DeletedMove> second(std::move(first));
+ 
+     EXPECT_TRUE(second.has_value());
+     EXPECT_EQ(42, second->foo());
+@@ -465,6 +493,26 @@ TEST(OptionalTest, AssignObject) {
+     EXPECT_TRUE(a.value() == TestObject(3, 0.1));
+     EXPECT_TRUE(a == b);
+   }
++
++  {
++    Optional<DeletedMove> a(in_place, 42);
++    Optional<DeletedMove> b;
++    b = a;
++
++    EXPECT_TRUE(!!a);
++    EXPECT_TRUE(!!b);
++    EXPECT_EQ(a->foo(), b->foo());
++  }
++
++  {
++    Optional<DeletedMove> a(in_place, 42);
++    Optional<DeletedMove> b(in_place, 1);
++    b = a;
++
++    EXPECT_TRUE(!!a);
++    EXPECT_TRUE(!!b);
++    EXPECT_EQ(a->foo(), b->foo());
++  }
+ }
+ 
+ TEST(OptionalTest, AssignObject_rvalue) {
+@@ -513,6 +561,26 @@ TEST(OptionalTest, AssignObject_rvalue) {
+     EXPECT_EQ(TestObject::State::MOVE_ASSIGNED, a->state());
+     EXPECT_EQ(TestObject::State::MOVED_FROM, b->state());
+   }
++
++  {
++    Optional<DeletedMove> a(in_place, 42);
++    Optional<DeletedMove> b;
++    b = std::move(a);
++
++    EXPECT_TRUE(!!a);
++    EXPECT_TRUE(!!b);
++    EXPECT_EQ(42, b->foo());
++  }
++
++  {
++    Optional<DeletedMove> a(in_place, 42);
++    Optional<DeletedMove> b(in_place, 1);
++    b = std::move(a);
++
++    EXPECT_TRUE(!!a);
++    EXPECT_TRUE(!!b);
++    EXPECT_EQ(42, b->foo());
++  }
+ }
+ 
+ TEST(OptionalTest, AssignNull) {
+-- 
+2.16.2
+

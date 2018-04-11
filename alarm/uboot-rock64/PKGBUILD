@@ -1,0 +1,54 @@
+# U-Boot: Rock64
+# Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
+
+buildarch=8
+
+pkgname=uboot-rock64
+pkgver=2018.03
+pkgrel=1
+pkgdesc="U-Boot for Rock64"
+arch=('aarch64')
+url='http://www.denx.de/wiki/U-Boot/WebHome'
+license=('GPL')
+backup=('boot/boot.txt' 'boot/boot.scr')
+makedepends=('bc' 'git' 'rockchip-tools')
+install=${pkgname}.install
+_commit_rkbin=f64ded672836b47db3f6a0d04d8ccb4180fb3d55
+source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver/rc/-rc}.tar.bz2"
+        "git+https://github.com/rockchip-linux/rkbin.git#commit=$_commit_rkbin"
+        'rk3328trust.ini'
+        'boot.txt'
+        'mkscr')
+md5sums=('02922bdf0ee003fe25bfc32749ffdeab'
+         'SKIP'
+         '15d010d12cb4bbaa5488505cc5c14147'
+         'c926f318d8fa7a5c89108331cbd3f8e2'
+         '021623a04afd29ac3f368977140cfbfd')
+
+build() {
+  cd u-boot-${pkgver/rc/-rc}
+
+  unset CLFAGS CXXFLAGS CPPFLAGS LDFLAGS
+
+  make evb-rk3328_defconfig
+  echo 'CONFIG_IDENT_STRING=" Arch Linux ARM"' >> .config
+  make EXTRAVERSION=-${pkgrel}
+}
+
+package() {
+  cd u-boot-${pkgver/rc/-rc}
+
+  mkdir -p "${pkgdir}/boot"
+
+  tools/mkimage -n rk3328 -T rksd -d ../rkbin/rk33/rk3328_ddr_786MHz_v1.06.bin "${pkgdir}/boot/idbloader.img"
+  cat ../rkbin/rk33/rk3328_miniloader_v2.43.bin >> "${pkgdir}/boot/idbloader.img"
+
+  loaderimage --pack --uboot u-boot-dtb.bin "${pkgdir}/boot/uboot.img" 0x200000
+
+  trust_merger ../rk3328trust.ini
+
+  cp u-boot-dtb.bin trust.img "${pkgdir}/boot"
+
+  tools/mkimage -A arm -O linux -T script -C none -n "U-Boot boot script" -d ../boot.txt "${pkgdir}/boot/boot.scr"
+  cp ../{boot.txt,mkscr} "${pkgdir}"/boot
+}

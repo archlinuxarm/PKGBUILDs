@@ -4,28 +4,34 @@
 buildarch=8
 
 pkgbase=linux-aarch64
-_srcname=linux-4.15
+_srcname=linux-4.16
 _kernelname=${pkgbase#linux}
 _desc="AArch64 multi-platform"
-pkgver=4.15.7
+pkgver=4.16.1
 pkgrel=1
 arch=('aarch64')
 url="http://www.kernel.org/"
 license=('GPL2')
-makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
+makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' 'vboot-utils' 'dtc')
 options=('!strip')
 source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
         "http://www.kernel.org/pub/linux/kernel/v4.x/patch-${pkgver}.xz"
         '0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch'
         '0002-arm64-dts-rockchip-disable-pwm0-on-rk3399-firefly.patch'
         'config'
+        'kernel.its'
+        'kernel.keyblock'
+        'kernel_data_key.vbprivk'
         'linux.preset'
         '99-linux.hook')
-md5sums=('0d701ac1e2a67d47ce7127432df2c32b'
-         'be343335405432d9cd83bf98b281436d'
+md5sums=('1357fb4ee7c288fdeac5d4e0048f5c18'
+         'bade764e616e8283b6a620f268337651'
          'c656b4169dd6c87f93dfb49edea3ddbf'
          '79459eaa00aa5de588c73f3076f0907b'
-         '3cba34461ce864e90e1ca37c0641719d'
+         'f0e6403851b62184ade37074e06ab622'
+         '11a4f35c50f0bde59c30182aa7b797b7'
+         '61c5ff73c136ed07a7aadbf58db3d96a'
+         '584777ae88bce2c5659960151b64c7d8'
          'b5ef67d6086e20de7b82265f562f88b1'
          '1d4477026533efaa0358a40855d50a83')
 
@@ -196,10 +202,6 @@ _package-headers() {
 
   # add dvb headers for external modules
   # in reference to:
-  # http://bugs.archlinux.org/task/9912
-  mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-core"
-  cp drivers/media/dvb-core/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/drivers/media/dvb-core/"
-  # and...
   # http://bugs.archlinux.org/task/11194
   mkdir -p "${pkgdir}/usr/lib/modules/${_kernver}/build/include/config/dvb/"
   cp include/config/dvb/*.h "${pkgdir}/usr/lib/modules/${_kernver}/build/include/config/dvb/"
@@ -251,7 +253,34 @@ _package-headers() {
   rm -rf "${pkgdir}"/usr/lib/modules/${_kernver}/build/arch/{alpha,arc,arm,arm26,avr32,blackfin,c6x,cris,frv,h8300,hexagon,ia64,m32r,m68k,m68knommu,metag,mips,microblaze,mn10300,openrisc,parisc,powerpc,ppc,s390,score,sh,sh64,sparc,sparc64,tile,unicore32,um,v850,x86,xtensa}
 }
 
-pkgname=("${pkgbase}" "${pkgbase}-headers")
+_package-chromebook() {
+  pkgdesc="The Linux Kernel - ${_desc} - Chromebooks"
+  depends=('linux-aarch64')
+  conflicts=('linux-aarch64-rc-chromebook')
+  install=${pkgname}.install
+
+  cd "${srcdir}/${_srcname}"
+
+  mkdir -p "${pkgdir}/boot"
+  cp ../kernel.its .
+
+  mkimage -D "-I dts -O dtb -p 2048" -f kernel.its vmlinux.uimg
+  dd if=/dev/zero of=bootloader.bin bs=512 count=1
+  echo "console=tty0 console=ttyS2,115200n8 earlyprintk=ttyS2,115200n8 init=/sbin/init root=PARTUUID=%U/PARTNROFF=1 rootwait rw noinitrd" > cmdline
+  vbutil_kernel \
+    --pack vmlinux.kpart \
+    --version 1 \
+    --vmlinuz vmlinux.uimg \
+    --arch aarch64 \
+    --keyblock ../kernel.keyblock \
+    --signprivate ../kernel_data_key.vbprivk \
+    --config cmdline \
+    --bootloader bootloader.bin
+
+  cp vmlinux.kpart "${pkgdir}/boot"
+}
+
+pkgname=("${pkgbase}" "${pkgbase}-headers" "${pkgbase}-chromebook")
 for _p in ${pkgname[@]}; do
   eval "package_${_p}() {
     _package${_p#${pkgbase}}
