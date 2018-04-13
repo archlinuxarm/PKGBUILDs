@@ -10,7 +10,7 @@ pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=18.0.0
-pkgrel=2
+pkgrel=3
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -30,7 +30,7 @@ sha512sums=('1494bb09357896a2505b3dcfec772268e28c765804f21e144948a314f1d79d99ff9
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
             '75849eca72ca9d01c648d5ea4f6371f1b8737ca35b14be179e14c73cc51dca0739c333343cdc228a6d464135f4791bcdc21734e2debecd29d57023c8c088b028'
             'da32ac3b025282c584bfc962723151b6e11887e59e35086c616a987cb3a471051d60f2b303a91f37106ebb75621cbd9b3f560036f5beb88518cfe9d75c45ee03'
-            '7ab28153780c5fa0f443873a627201e7d434991e5ce18ef2a05f678aa4561e172b2ad9a56fb01b72a8482bba650e26a08df10b4d4d6bb696c523f73196a47e39'
+            '836f06af6feaa79a16bedd7a136d637b7f16e53d98b8b267554d98b5ff8c3fa45955b9e3ce0b8366d86860194e9147baf0257614fff85a471e2b90bbb3b1f5ab'
             '75cd21bccc84a6b6b0de39c6d209c8bee0e5143b486433184ca078e8bc6797d30746be3ce5f7a89eea9bc3c7e2d68880412511fd6b9946252c7c7638523c6caa')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
