@@ -1,5 +1,6 @@
 # $Id$
-# Maintainer: Allan McRae <allan@archlinux.org>
+# Maintainer:  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Allan McRae <allan@archlinux.org>
 
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
 
@@ -11,29 +12,26 @@
 noautobuild=1
 
 pkgname=binutils
-pkgver=2.29.1
+pkgver=2.30
 pkgrel=3
 pkgdesc='A set of programs to assemble and manipulate binary and object files'
 arch=(x86_64)
 url='http://www.gnu.org/software/binutils/'
 license=(GPL)
-groups=('base-devel')
-depends=('glibc>=2.26' zlib)
-makedepends=(git)
+groups=(base-devel)
+depends=(glibc zlib)
 checkdepends=(dejagnu bc)
 options=(staticlibs !distcc !ccache)
-#_commit=d1a6e7195b9bb0255fa77588985b969ad8aaacf5
-#source=(git+https://sourceware.org/git/binutils-gdb.git#commit=${_commit}
 source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz{,.sig}
-        0001-x86-64_Dont_pass_output_bfd_to_info-callbacks-minfo.patch
         0001-PR22741-objcopy-segfault-on-fuzzed-COFF-object.patch
-        0001-PR22829-objcopy-strip-removes-PT_GNU_RELRO-from-lld-.patch)
+        0002-PR22829-objcopy-strip-removes-PT_GNU_RELRO-from-lld-.patch
+        0003-PR22836-r-s-doesnt-work-with-g3-using-GCC-7.patch)
 validpgpkeys=(3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F)
-md5sums=('acc9cd826edb9954ac7cecb81c727793'
+md5sums=('ffc476dd46c96f932875d1b2e27e929f'
          'SKIP'
-         'e4be936139ef46122cb3841881c432b2'
          '469164f3c93a0e92a697537b60c9806c'
-         '0c679b37e90fb23de60a4d28329b956a')
+         '0c679b37e90fb23de60a4d28329b956a'
+         '53b5682e09c0a27e9994c3efdfe01d29')
 
 prepare() {
   mkdir -p binutils-build
@@ -44,14 +42,14 @@ prepare() {
   # hack! - libiberty configure tests for header files using "$CPP $CPPFLAGS"
   sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" libiberty/configure
 
-  # https://bugs.archlinux.org/task/55741
-  git apply ../0001-x86-64_Dont_pass_output_bfd_to_info-callbacks-minfo.patch
-
   # https://sourceware.org/bugzilla/show_bug.cgi?id=22741
-  git apply ../0001-PR22741-objcopy-segfault-on-fuzzed-COFF-object.patch
+  patch -p1 -i "$srcdir/0001-PR22741-objcopy-segfault-on-fuzzed-COFF-object.patch"
 
   # https://sourceware.org/bugzilla/show_bug.cgi?id=22829
-  git apply ../0001-PR22829-objcopy-strip-removes-PT_GNU_RELRO-from-lld-.patch
+  patch -p1 -i "$srcdir/0002-PR22829-objcopy-strip-removes-PT_GNU_RELRO-from-lld-.patch"
+
+  # https://sourceware.org/bugzilla/show_bug.cgi?id=22836
+  patch -p1 -i "$srcdir/0003-PR22836-r-s-doesnt-work-with-g3-using-GCC-7.patch"
 }
 
 build() {
@@ -67,16 +65,17 @@ build() {
     --prefix=/usr \
     --with-lib-path=/usr/lib:/usr/local/lib \
     --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
-    --enable-threads \
-    --enable-shared \
-    --enable-ld=default \
+    --enable-deterministic-archives \
     --enable-gold \
+    --enable-ld=default \
+    --enable-lto \
     --enable-plugins \
     --enable-relro \
-    --enable-deterministic-archives \
-    --with-pic \
-    --disable-werror \
+    --enable-shared \
+    --enable-threads \
     --disable-gdb \
+    --disable-werror \
+    --with-pic \
     --with-system-zlib \
     --disable-sim \
     $CONFIGFLAG
@@ -102,6 +101,6 @@ package() {
 
   # No shared linking to these files outside binutils
   rm -f "$pkgdir"/usr/lib/lib{bfd,opcodes}.so
-  echo "INPUT( /usr/lib/libbfd.a -liberty -lz -ldl )" > "$pkgdir/usr/lib/libbfd.so"
-  echo "INPUT( /usr/lib/libopcodes.a -lbfd )" > "$pkgdir/usr/lib/libopcodes.so"
+  echo 'INPUT( /usr/lib/libbfd.a -liberty -lz -ldl )' > "$pkgdir/usr/lib/libbfd.so"
+  echo 'INPUT( /usr/lib/libopcodes.a -lbfd )' > "$pkgdir/usr/lib/libopcodes.so"
 }
