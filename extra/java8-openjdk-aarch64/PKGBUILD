@@ -11,22 +11,23 @@
 #  - add arm to _JARCH and _DOC_ARCH
 #  - configure with --with-jvm-variants=zero
 #  - adjust doc package to use linux-${_DOC_ARCH}-normal-zero-release instead of normal-server-release
-#  - patch for zero
+#  - prevent downgrading hotspot optimization with CFLAGS
+#  - drop building docs and its package; takes forever to build
 
 buildarch=8
 
 # Package 'openjfx' must be updated when this one is
-pkgname=('jre8-openjdk-headless' 'jre8-openjdk' 'jdk8-openjdk' 'openjdk8-src' 'openjdk8-doc')
+pkgname=('jre8-openjdk-headless' 'jre8-openjdk' 'jdk8-openjdk' 'openjdk8-src')
 pkgbase=java8-openjdk-aarch64
 _java_ver=8
 # Found @ http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html
-_jdk_update=111
+_jdk_update=171
 # Found @ http://hg.openjdk.java.net/aarch64-port/jdk8u/
-_jdk_build=17
+_jdk_build=10
 pkgver=${_java_ver}.u${_jdk_update}
 _repo_ver=aarch64-jdk${_java_ver}u${_jdk_update}-b${_jdk_build}
 pkgrel=1
-arch=('i686' 'x86_64')
+arch=('x86_64')
 url='http://openjdk.java.net/'
 license=('custom')
 options=('!distcc')
@@ -40,19 +41,16 @@ source=(jdk8u-${_repo_ver}.tar.gz::${_url_src}/archive/${_repo_ver}.tar.gz
         jaxws-${_repo_ver}.tar.gz::${_url_src}/jaxws/archive/${_repo_ver}.tar.gz
         jaxp-${_repo_ver}.tar.gz::${_url_src}/jaxp/archive/${_repo_ver}.tar.gz
         langtools-${_repo_ver}.tar.gz::${_url_src}/langtools/archive/${_repo_ver}.tar.gz
-        nashorn-${_repo_ver}.tar.gz::${_url_src}/nashorn/archive/${_repo_ver}.tar.gz
-        build_with_gcc6.patch
-        8154210.patch)
-sha256sums=('5bfc749e26b5964964e4e63781d2116f271b6055611656ad3dbfd60679c1c9db'
-            '39713ebcfa767f6103d28e305873b15520c75d5c6fe6dbe1472dd8b3f3e495c6'
-            '285531fe37c1ee795f9485c5dd3a3409088b9ce95905842b012682d99b11738e'
-            '9210376b14295adf3676d024fbd40ba2d049efc463bf212fa51031910aac0093'
-            '977775f19b82ff236f0475c2f6acd933536efa35309794fdc103175ba9d5c59e'
-            '4d680cac6b299f38bc75d5dd314318af22a28b92d09b6012a8acf6e9b65386a1'
-            'fc310c2bc1604c942f3da8aea024a590efe2617cd1d30f104502934959bd8eb4'
-            'cb97c0083f1289000c209e8a4493ba79e5a3389f4151ddfc8bc2c2df06c71202'
-            'dcf5f495620231068b0c925a33ba7246bbeb85e9ae822b30ab77a66839c2d3b6'
-            '292443358b7b7b570b3b42c3cb3dd6f1ac8bc79ada90b979aec10f52013958ae')
+        nashorn-${_repo_ver}.tar.gz::${_url_src}/nashorn/archive/${_repo_ver}.tar.gz)
+
+sha256sums=('ab7f0135ddcdc357d9794a7b960b303abe895f828f4a3eb5fa6ed03277349aae'
+            'a21919e07fa8047fab6135ce21a54a96b5958591fd520d3c9dfc7440ac264fda'
+            'c5a544fc5743da233cbb5914c95ebec027de98a862144f5ee3707816bdeb3782'
+            'd4aee5d56e4f093d3b438ccb5c4e5ff759b7b2f3e4b2375f6deaae64bd74573b'
+            '0f2fee40e1fb23447deb9912a86f6e419c23a45a928d1851d3d3e4009143b1db'
+            'dfc6f3ef3d60d96cabdb7837d5eea70f8c9f44f5d618a656797b65a43227b6df'
+            '2838beb4aa4d4ec6151fa33191f000e16f1c738669576686b7fa62c9b477421d'
+            '90a9593f0397b55544cf6599db88df9e51ef9897322bc429adadaae250160652')
 
 case "${CARCH}" in
   'x86_64') _JARCH=amd64   ; _DOC_ARCH=x86_64  ;;
@@ -77,11 +75,6 @@ prepare() {
   do
     ln -s ../${subrepo}-${_repo_ver} ${subrepo}
   done
-
-  patch -p1 < ../build_with_gcc6.patch
-
-  cd "${srcdir}/hotspot-${_repo_ver}"
-  patch -p2 -i ../8154210.patch
 }
 
 build() {
@@ -91,7 +84,10 @@ build() {
   # http://icedtea.classpath.org/bugzilla/show_bug.cgi?id=1346
   export MAKEFLAGS=${MAKEFLAGS/-j*}
   # https://hydra.nixos.org/build/41230444/log
-  export CFLAGS+=" -Wno-error=deprecated-declarations"
+  export CFLAGS+=" -Wno-error=deprecated-declarations -fno-lifetime-dse -fno-delete-null-pointer-checks"
+
+  # prevent downgrading hotspot optimization
+  CFLAGS=`echo $CFLAGS | sed -e 's/-O2//'` && CXXFLAGS="$CFLAGS"
 
   install -d -m 755 "${srcdir}/${_prefix}/"
   sh configure \
@@ -113,7 +109,7 @@ build() {
   # These help to debug builds:
   #LOG=trace HOTSPOT_BUILD_JOBS=1
 
-  make docs
+  #make docs
 
   # FIXME sadly 'DESTDIR' is not used here!
   make install
@@ -296,12 +292,4 @@ package_openjdk8-src() {
   pkgdesc='OpenJDK Java 8 sources'
 
   install -D "${srcdir}/${_imgdir}/src.zip" "${pkgdir}${_jvmdir}/src.zip"
-}
-
-package_openjdk8-doc() {
-  pkgdesc='OpenJDK Java 8 documentation'
-
-  install -d -m 755 "${pkgdir}/usr/share/doc/${pkgbase}/"
-  cp -r "${srcdir}"/jdk8u-${_repo_ver}/build/linux-${_DOC_ARCH}-normal-zero-release/docs/* \
-    "${pkgdir}/usr/share/doc/${pkgbase}/"
 }
