@@ -9,7 +9,7 @@
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=18.0.1
+pkgver=18.0.2
 pkgrel=1
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
@@ -18,15 +18,13 @@ makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'd
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
-        "meson_get_version.py::https://cgit.freedesktop.org/mesa/mesa/plain/bin/meson_get_version.py?h=mesa-18.0.0"
         LICENSE
         0001-glvnd-fix-gl-dot-pc.patch
         0004-meson-Add-library-versions-to-swr-drivers.patch
         0005-meson-Version-libMesaOpenCL-like-autotools-does.patch
         "atomic.patch::https://cgit.freedesktop.org/mesa/mesa/patch/?id=498faea103aa7966b435f21d8ff5e36172389b1e")
-sha512sums=('b0d610904b6f179a27b42aee5f479339e341926915cdc6adb08ac999a4a12539abc3776577e86af83e10381d9703ef1bca70bab81b43daf2c000622c9c3612d2'
+sha512sums=('77d24d01c4c22596d28421aeb74932ff232730a4f556ae1a2e8777ece2876e4e352679575385c065505df4a2a83d2c1cf30db92dcf88038417e36a2768332d7e'
             'SKIP'
-            'cdc608d7b7de9e6eb6f1b2b4faef4864ac213d379b9dedc7c06e71726c2a1b88a0035d6ec50812a14ba4639e100158c6dff3a1d9456ab36c0a52988287c0d4bd'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
             '75849eca72ca9d01c648d5ea4f6371f1b8737ca35b14be179e14c73cc51dca0739c333343cdc228a6d464135f4791bcdc21734e2debecd29d57023c8c088b028'
             '0f5da6e48885713c7ddef9e5715e178e0a499bcb622d7f19e15b9e4b4647331d7bf14829218b6ab80f17bae90fd95b8df6a0a81203d8081686805ca5329531ff'
@@ -46,9 +44,6 @@ prepare() {
   # Upstreamed meson fixes
   patch -Np1 -i ../0004-meson-Add-library-versions-to-swr-drivers.patch
   patch -Np1 -i ../0005-meson-Version-libMesaOpenCL-like-autotools-does.patch
-
-  # file missing from tarball
-  cp ../meson_get_version.py bin/
 
   # disk cache: Link with -latomic if necessary
   patch -Np1 -i ../atomic.patch
