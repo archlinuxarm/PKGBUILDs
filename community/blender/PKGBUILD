@@ -1,0 +1,114 @@
+# $Id$
+# Maintainer: Sven-Hendrik Haase <sh@lutzhaase.com>
+# Contributor: John Sowiak <john@archlinux.org>
+# Contributor: tobias <tobias@archlinux.org>
+# Contributor: initrider <lohgovnoed@yandex.ru>
+
+# Sometimes blender.org takes some time to release patch releases and because Arch users
+# are impatient, we sometimes need to build from git directly.
+# Update because I get so many queries on this:
+# Due to our other rolling deps, it's sometimes not possible to build Blender stable releases.
+# More often than not, a new openshadinglanguage breaks it and I could either backport fixes
+# or simply roll with a new version. I usually choose the latter when the former seems
+# unreasonable.
+
+#This package was grabbed from Arch Linux, but has some changes:
+# 1) cuda was removed from makedepends and optdepends
+# 2) gcc6 was removed from makedepends
+# 3) cuda 9.1 fixes removed
+# 4) ffmpeg 4.0 fixes removed
+# 5) -DWITH_CYCLES_CUDA_BINARIES=OFF
+#I've tested that on my armv7 board, powered with ALARM!
+
+ _gittag=v2.79b
+#_gitcommit=3c3d0898b0c1a1d7da70f4a1778d4360b3cfe5c8
+
+pkgname=blender
+pkgver=2.79.b
+#[[ -n $_gitcommit ]] && pkgver=${pkgver}.git1.${_gitcommit}
+pkgrel=8
+epoch=17
+pkgdesc="A fully integrated 3D graphics creation suite"
+arch=('armv7h' 'aarch64')
+license=('GPL')
+url="http://www.blender.org"
+depends=('libpng' 'libtiff' 'openexr' 'python' 'desktop-file-utils' 'python-requests'
+         'shared-mime-info' 'hicolor-icon-theme' 'xdg-utils' 'glew' 'openjpeg' 'python-numpy'
+         'freetype2' 'openal' 'ffmpeg' 'fftw' 'boost-libs' 'opencollada' 'alembic'
+         'openimageio' 'libsndfile' 'jack' 'opencolorio' 'openshadinglanguage'
+         'jemalloc' 'libspnav' 'ptex' 'opensubdiv' 'openvdb' 'log4cplus' 'sdl2')
+makedepends=('cmake' 'boost' 'mesa' 'git' 'llvm')
+options=(!strip)
+source=("git://git.blender.org/blender-addons.git"
+        "git://git.blender.org/blender-addons-contrib.git"
+        "git://git.blender.org/blender-translations.git"
+        "git://git.blender.org/blender-dev-tools.git"
+        "git://git.blender.org/scons.git"
+        )
+if [[ -n $_gittag ]]; then
+    source+=("${pkgname}-${pkgver}::git://git.blender.org/blender.git#tag=${_gittag}")
+elif [[ -n $_gitcommit ]]; then
+    source+=("${pkgname}-${pkgver}::git://git.blender.org/blender.git#commit=${_gitcommit}")
+fi
+md5sums=('SKIP'
+         'SKIP'
+         'SKIP'
+         'SKIP'
+         'SKIP'
+         'da14d7cbdea1ab5499659a066658cdd2'
+         'SKIP')
+
+prepare() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  git submodule init
+  git config submodule."release/scripts/addons".url ${srcdir}/blender-addons
+  git config submodule."release/scripts/addons_contrib".url ${srcdir}/blender-addons-contrib
+  git config submodule."release/datafiles/locale".url ${srcdir}/blender-translations
+  git config submodule."source/tools".url ${srcdir}/blender-dev-tools
+  git config submodule."scons".url ${srcdir}/scons
+  git submodule update
+  
+  # openvdb 5 fix
+  sed -i "s/OPENVDB_LIBRARY_MAJOR_VERSION_NUMBER == 3/OPENVDB_LIBRARY_MAJOR_VERSION_NUMBER >= 3/g" intern/openvdb/intern/openvdb_writer.cc
+}
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  [[ -d build ]] && rm -rf build
+  mkdir build && cd build
+
+  export CFLAGS="${CFLAGS} -DOPENVDB_3_ABI_COMPATIBLE"
+  export CXXFLAGS="${CXXFLAGS} -DOPENVDB_3_ABI_COMPATIBLE"
+  cmake -C../build_files/cmake/config/blender_release.cmake .. \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DWITH_INSTALL_PORTABLE=OFF \
+    -DWITH_PYTHON_INSTALL=OFF \
+    -DOPENIMAGEIO_ROOT_DIR=/usr \
+    -DWITH_LLVM=ON \
+    -DWITH_SYSTEM_OPENJPEG=ON \
+    -DWITH_GL_PROFILE_CORE=OFF \
+    -DWITH_GL_PROFILE_ES20=OFF \
+    -DLLVM_VERSION=3.6 \
+    -DLLVM_STATIC=ON \
+    -DWITH_CYCLES_CUDA_BINARIES=OFF \
+    -DWITH_CYCLES_PTEX=OFF \
+    -DPYTHON_VERSION=3.6 \
+    -DPYTHON_LIBPATH=/usr/lib \
+    -DPYTHON_LIBRARY=python3.6m \
+    -DPYTHON_INCLUDE_DIRS=/usr/include/python3.6m
+  make
+
+  # PTEX is currently broken and experimental in blender anyway
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver/build"
+
+  make DESTDIR="${pkgdir}" install
+  install -Dm755 ../release/bin/blender-softwaregl "${pkgdir}/usr/bin/blender-softwaregl"
+  python -m compileall "${pkgdir}/usr/share/blender"
+  python -O -m compileall "${pkgdir}/usr/share/blender"
+}
