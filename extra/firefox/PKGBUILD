@@ -6,13 +6,16 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - mozconfig changes for ARM
 #  - use tarball source
+#  - patch for skia from chromium
+#  - revert change for clang that breaks gcc build on ARM
 
 buildarch=12
 highmem=1
+noautobuild=1
 
 pkgname=firefox
-pkgver=59.0.2
-pkgrel=2
+pkgver=60.0
+pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
 arch=(x86_64)
 license=(MPL GPL LGPL)
@@ -27,12 +30,20 @@ optdepends=('networkmanager: Location detection via available WiFi networks'
             'speech-dispatcher: Text-to-Speech')
 options=(!emptydirs !makeflags !strip)
 source=("https://hg.mozilla.org/releases/mozilla-release/archive/FIREFOX_${pkgver//./_}_RELEASE.tar.gz"
+        complete-csd-window-offset-mozilla-1457691.patch.xz
+        0001-Bug-1435212-Add-support-for-FFmpeg-4.0.-r-bryce.patch.xz
         $pkgname.desktop firefox-symbolic.svg
-        no-crmf.diff)
-sha256sums=('3b9ef65818056d1b5316bbc4d48b928adc92cc020c176ceb82234009d118e6a7'
+        no-crmf.diff
+        skia_buildfix.patch
+        https://hg.mozilla.org/mozilla-central/raw-rev/537f4d1d837a)
+sha256sums=('fc2660c018af79d028c4418c6798020933ee106e19849ca7014f8403ad759eaa'
+            'a3fb3c3b6fb775c99afdbad507848b77c5e4bbaac2e8ceeb1bfb47699c4b6268'
+            '8422030440032535d918844263fbd92d39bff207acb5fff55ed0afee38bcf582'
             '677e1bde4c6b3cff114345c211805c7c43085038ca0505718a11e96432e9811a'
             '9a1a572dc88014882d54ba2d3079a1cf5b28fa03c5976ed2cb763c93dabbd797'
-            '02000d185e647aa20ca336e595b4004bb29cdae9d8f317f90078bdcc7a36e873')
+            '02000d185e647aa20ca336e595b4004bb29cdae9d8f317f90078bdcc7a36e873'
+            '3da0ab55bf92307fe80ed7c9cce6443f5bebc96ba50e751d24f7302786a0406e'
+            '9fa42f3a4ccd255b56f4157119c08ff19df9f972aa25af4cbb685e3683139c24')
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -52,6 +63,12 @@ prepare() {
   ln -s /usr/bin/python2 path/python
 
   cd mozilla-release-FIREFOX_${pkgver//./_}_RELEASE
+
+  # https://bugzilla.mozilla.org/show_bug.cgi?id=1283299#c158
+  patch -Np1 -i ../complete-csd-window-offset-mozilla-1457691.patch
+
+  # https://bugzilla.mozilla.org/show_bug.cgi?id=1435212
+  patch -Np1 -i ../0001-Bug-1435212-Add-support-for-FFmpeg-4.0.-r-bryce.patch
 
   # https://bugzilla.mozilla.org/show_bug.cgi?id=1371991
   patch -Np1 -i ../no-crmf.diff
@@ -110,7 +127,11 @@ END
     echo "ac_add_options --disable-stylo" >> .mozconfig
   elif [[ $CARCH == "aarch64" ]]; then
     echo 'ac_add_options --enable-optimize="-O2"' >> .mozconfig
+    echo "ac_add_options --disable-stylo" >> .mozconfig
   fi
+
+  patch -p2 -d gfx/skia -i "${srcdir}/skia_buildfix.patch"
+  patch -Rp1 -i ../537f4d1d837a
 }
 
 build() {
