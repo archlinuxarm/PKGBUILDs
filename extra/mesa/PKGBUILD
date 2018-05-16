@@ -10,7 +10,7 @@ pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=18.0.3
-pkgrel=1
+pkgrel=3
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -20,6 +20,7 @@ license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
         0001-glvnd-fix-gl-dot-pc.patch
+        0002-loader_dri3-Wait-for-pending-swaps-to-complete-before-drawable_fini.patch
         0004-meson-Add-library-versions-to-swr-drivers.patch
         0005-meson-Version-libMesaOpenCL-like-autotools-does.patch
         "atomic.patch::https://cgit.freedesktop.org/mesa/mesa/patch/?id=498faea103aa7966b435f21d8ff5e36172389b1e")
@@ -27,6 +28,7 @@ sha512sums=('decd050bab049d17bcde3f832d4da0ffdb80f147c99377a162739bbe72fd6fd32b5
             'SKIP'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
             '75849eca72ca9d01c648d5ea4f6371f1b8737ca35b14be179e14c73cc51dca0739c333343cdc228a6d464135f4791bcdc21734e2debecd29d57023c8c088b028'
+            '19b980db37675732d28978318074ca172ef862de7fdcae2c82ef16dc411c709c8598b044a828e7e260d86d23f644485abcc6a0aaf5e04b9c05dce22d0c7e3716'
             '0f5da6e48885713c7ddef9e5715e178e0a499bcb622d7f19e15b9e4b4647331d7bf14829218b6ab80f17bae90fd95b8df6a0a81203d8081686805ca5329531ff'
             'd3c01f61a0a0cc2f01e66e0126ad8b6386d4a53c1dc1b3b134800e4cd25507e458bac860cbed10cf4b46b04e8d50aba233870587b89c058fffd57436b48289bf'
             '75cd21bccc84a6b6b0de39c6d209c8bee0e5143b486433184ca078e8bc6797d30746be3ce5f7a89eea9bc3c7e2d68880412511fd6b9946252c7c7638523c6caa')
@@ -40,6 +42,11 @@ prepare() {
   # glvnd support patches - from Fedora
   # non-upstreamed ones
   patch -Np1 -i ../0001-glvnd-fix-gl-dot-pc.patch
+
+  # experimental patch, should fix FS#58549
+  # see https://bugs.freedesktop.org/show_bug.cgi?id=106351
+  # and https://patchwork.freedesktop.org/series/42687/
+  patch -Np1 -i ../0002-loader_dri3-Wait-for-pending-swaps-to-complete-before-drawable_fini.patch
 
   # Upstreamed meson fixes
   patch -Np1 -i ../0004-meson-Add-library-versions-to-swr-drivers.patch
@@ -141,13 +148,16 @@ package_mesa() {
   _install fakeinstall/usr/lib/d3d
   _install fakeinstall/usr/lib/lib{gbm,glapi}.so*
   _install fakeinstall/usr/lib/libOSMesa.so*
-  _install fakeinstall/usr/lib/libwayland*.so*
 
   # in libglvnd
   rm -v fakeinstall/usr/lib/libGLESv{1_CM,2}.so*
   
   # in vulkan-headers
   rm -rfv fakeinstall/usr/include/vulkan
+
+  # in wayland
+  rm -v fakeinstall/usr/lib/libwayland-egl.so*
+  rm -v fakeinstall/usr/lib/pkgconfig/wayland-egl.pc
 
   _install fakeinstall/usr/include
   _install fakeinstall/usr/lib/pkgconfig
