@@ -10,7 +10,7 @@ pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=18.0.3
-pkgrel=3
+pkgrel=4
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -19,18 +19,18 @@ url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        0001-glvnd-fix-gl-dot-pc.patch
-        0002-loader_dri3-Wait-for-pending-swaps-to-complete-before-drawable_fini.patch
-        0004-meson-Add-library-versions-to-swr-drivers.patch
-        0005-meson-Version-libMesaOpenCL-like-autotools-does.patch
+        0001-glvnd-fix-gl.pc.patch
+        0002-meson-Add-library-versions-to-swr-drivers.patch
+        0003-meson-Version-libMesaOpenCL-like-autotools-does.patch
+        0004-loader_dri3-Variant-2-Wait-for-pending-swaps-to-comp.patch
         "atomic.patch::https://cgit.freedesktop.org/mesa/mesa/patch/?id=498faea103aa7966b435f21d8ff5e36172389b1e")
 sha512sums=('decd050bab049d17bcde3f832d4da0ffdb80f147c99377a162739bbe72fd6fd32b51e56e6fc66895b8c30fc19a1815bae164b21aa557816c3998ad18c1ffca2d'
             'SKIP'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
-            '75849eca72ca9d01c648d5ea4f6371f1b8737ca35b14be179e14c73cc51dca0739c333343cdc228a6d464135f4791bcdc21734e2debecd29d57023c8c088b028'
-            '19b980db37675732d28978318074ca172ef862de7fdcae2c82ef16dc411c709c8598b044a828e7e260d86d23f644485abcc6a0aaf5e04b9c05dce22d0c7e3716'
-            '0f5da6e48885713c7ddef9e5715e178e0a499bcb622d7f19e15b9e4b4647331d7bf14829218b6ab80f17bae90fd95b8df6a0a81203d8081686805ca5329531ff'
-            'd3c01f61a0a0cc2f01e66e0126ad8b6386d4a53c1dc1b3b134800e4cd25507e458bac860cbed10cf4b46b04e8d50aba233870587b89c058fffd57436b48289bf'
+            '2f40198eff47664c831c56e8a63f60a4d1b815cf697e6bdb0be39e6d9c5df043857f6264b7cd2ccf46c07626186c565144e80f4214b5f7936ef7024c47201437'
+            'c3f3baf8a5f480ce64b321c031e31c0d5819732ca34647ac545d0fd7fafa40ad4dcf1e1ec8d574754e0a44bf0cdc462ed8709c8d9b58a17e01c6ba5b4c5e91c6'
+            'a2062f8a5259aabed1aa20df6a8510f0f3e914cb6bba72751249b3295285596bb7615063a7a7b7870f9f4489d0e6b774f0bced2bdde49a1aa9df6a44976462d1'
+            '572901a1e9cacfacfc8c4cc3cd077a626d4aeda8c8a58f6085bae827cba8a2d4d99af1dafbb5a9296b6ebf3120e2b05a084fe1c96093074befe62597319384a1'
             '75cd21bccc84a6b6b0de39c6d209c8bee0e5143b486433184ca078e8bc6797d30746be3ce5f7a89eea9bc3c7e2d68880412511fd6b9946252c7c7638523c6caa')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -41,16 +41,17 @@ prepare() {
 
   # glvnd support patches - from Fedora
   # non-upstreamed ones
-  patch -Np1 -i ../0001-glvnd-fix-gl-dot-pc.patch
-
-  # experimental patch, should fix FS#58549
-  # see https://bugs.freedesktop.org/show_bug.cgi?id=106351
-  # and https://patchwork.freedesktop.org/series/42687/
-  patch -Np1 -i ../0002-loader_dri3-Wait-for-pending-swaps-to-complete-before-drawable_fini.patch
+  patch -Np1 -i ../0001-glvnd-fix-gl.pc.patch
 
   # Upstreamed meson fixes
-  patch -Np1 -i ../0004-meson-Add-library-versions-to-swr-drivers.patch
-  patch -Np1 -i ../0005-meson-Version-libMesaOpenCL-like-autotools-does.patch
+  patch -Np1 -i ../0002-meson-Add-library-versions-to-swr-drivers.patch
+  patch -Np1 -i ../0003-meson-Version-libMesaOpenCL-like-autotools-does.patch
+
+  # experimental patch, should fix FS#58549
+  # variant 2 patch should fix FS#58605
+  # see https://bugs.freedesktop.org/show_bug.cgi?id=106351
+  # and https://patchwork.freedesktop.org/series/42687/
+  patch -Np1 -i ../0004-loader_dri3-Variant-2-Wait-for-pending-swaps-to-comp.patch
 
   # disk cache: Link with -latomic if necessary
   patch -Np1 -i ../atomic.patch
