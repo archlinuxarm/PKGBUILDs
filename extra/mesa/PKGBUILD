@@ -9,8 +9,8 @@
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=18.0.3
-pkgrel=4
+pkgver=18.0.4
+pkgrel=1
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -24,7 +24,7 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0003-meson-Version-libMesaOpenCL-like-autotools-does.patch
         0004-loader_dri3-Variant-2-Wait-for-pending-swaps-to-comp.patch
         "atomic.patch::https://cgit.freedesktop.org/mesa/mesa/patch/?id=498faea103aa7966b435f21d8ff5e36172389b1e")
-sha512sums=('decd050bab049d17bcde3f832d4da0ffdb80f147c99377a162739bbe72fd6fd32b51e56e6fc66895b8c30fc19a1815bae164b21aa557816c3998ad18c1ffca2d'
+sha512sums=('f9a14be46c209661ceb318add1611481445d13b47e95c7a5d2a5e5ecfdd5d2c3fa9c2b16b30035bbb8d61ccc7cb65bfa6698ac8b040273e5ab045a951a67752c'
             'SKIP'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
             '2f40198eff47664c831c56e8a63f60a4d1b815cf697e6bdb0be39e6d9c5df043857f6264b7cd2ccf46c07626186c565144e80f4214b5f7936ef7024c47201437'
@@ -34,8 +34,9 @@ sha512sums=('decd050bab049d17bcde3f832d4da0ffdb80f147c99377a162739bbe72fd6fd32b5
             '75cd21bccc84a6b6b0de39c6d209c8bee0e5143b486433184ca078e8bc6797d30746be3ce5f7a89eea9bc3c7e2d68880412511fd6b9946252c7c7638523c6caa')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
-              'E3E8F480C52ADD73B278EE78E1ECBE07D7D70895') # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
- 
+              'E3E8F480C52ADD73B278EE78E1ECBE07D7D70895'  # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
+              'A5CC9FEC93F2F837CB044912336909B6B25FADFA') # Juan A. Suarez Romero <jasuarez@igalia.com>
+
 prepare() {
   cd mesa-${pkgver}
 
