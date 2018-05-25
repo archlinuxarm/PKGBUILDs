@@ -9,23 +9,27 @@
 #  - Specify our build host type
 #  - Disabled distcc
 #  - Strip out Arch x86 multilib
+#  - Don't --enable-static-pie, broken on ARM
 
 noautobuild=1
 
 pkgname=glibc
-pkgver=2.26
-pkgrel=11
+pkgver=2.27
+pkgrel=3
 arch=(x86_64)
 url='http://www.gnu.org/software/libc'
 license=(GPL LGPL)
 makedepends=(git gd)
 options=(!strip staticlibs !distcc)
-_commit=de51f431ed6226ec68ca76e578f2cbd55b6262cb
-source=(git://sourceware.org/git/glibc.git#commit=${_commit}
+_commit=23158b08a0908f381459f273a984c6fd328363cb
+#source=(git+https://sourceware.org/git/glibc.git#commit=$_commit
+source=(https://ftp.gnu.org/gnu/glibc/glibc-$pkgver.tar.xz{,.sig}
         locale.gen.txt
         locale-gen
         bz20338.patch)
-md5sums=('SKIP'
+validpgpkeys=(7273542B39962DF7B299931416792B4EA25340F8) # Carlos O'Donell
+md5sums=('898cd5656519ffbc3a03fe811dd89e82'
+         'SKIP'
          '07ac979b6ab5eeb778d55f041529d623'
          '476e9113489f93b348b21e144b6a8fcf'
          'dc0d3ad59aeaaf591b085a77de6e03e9')
@@ -33,6 +37,7 @@ md5sums=('SKIP'
 prepare() {
   mkdir -p glibc-build
 
+  [[ -d glibc-$pkgver ]] && ln -s glibc-$pkgver glibc 
   cd glibc
 
   local i; for i in ${source[@]}; do
@@ -54,8 +59,6 @@ build() {
       --enable-bind-now
       --enable-lock-elision
       --disable-multi-arch
-      --enable-obsolete-nsl
-      --enable-obsolete-rpc
       --enable-stack-protector=strong
       --enable-stackguard-randomization
       --disable-profile
@@ -94,6 +97,7 @@ build() {
   echo "CC += -D_FORTIFY_SOURCE=2" >> configparms
   echo "CXX += -D_FORTIFY_SOURCE=2" >> configparms
   make
+
 }
 
 check() {
@@ -134,7 +138,7 @@ package() {
 
   install -m755 "$srcdir/locale-gen" "$pkgdir/usr/bin"
 
-  # create /etc/locale.gen
+  # Create /etc/locale.gen
   install -m644 "$srcdir/locale.gen.txt" "$pkgdir/etc/locale.gen"
   sed -e '1,3d' -e 's|/| |g' -e 's|\\| |g' -e 's|^|#|g' \
     "$srcdir/glibc/localedata/SUPPORTED" >> "$pkgdir/etc/locale.gen"
@@ -142,26 +146,16 @@ package() {
   # ALARM: symlink ld-linux.so.3 for hard-float
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && ln -s /lib/ld-${pkgver}.so ${pkgdir}/usr/lib/ld-linux.so.3
 
-  # Do not strip the following files for improved debugging support
-  # ("improved" as in not breaking gdb and valgrind...):
-  #   ld-${pkgver}.so
-  #   libc-${pkgver}.so
-  #   libpthread-${pkgver}.so
-  #   libthread_db-1.0.so
+  if check_option 'debug' n; then
+    find "$pkgdir"/usr/bin -type f -executable -exec strip $STRIP_BINARIES {} + 2> /dev/null || true
+    find "$pkgdir"/usr/lib -name '*.a' -type f -exec strip $STRIP_STATIC {} + 2> /dev/null || true
 
-  cd "$pkgdir"
-  strip $STRIP_BINARIES usr/bin/{gencat,getconf,getent,iconv,iconvconfig} \
-                        usr/bin/{ldconfig,locale,localedef,nscd,makedb} \
-                        usr/bin/{pcprofiledump,pldd,rpcgen,sln,sprof} \
-                        usr/lib/getconf/*
-
-  strip $STRIP_STATIC usr/lib/lib{anl,BrokenLocale,c{,_nonshared},crypt}.a \
-                      usr/lib/lib{dl,g,ieee,mcheck,nsl,pthread{,_nonshared}}.a \
-                      usr/lib/lib{resolv,rpcsvc,rt,util}.a
-
-  strip $STRIP_SHARED usr/lib/lib{anl,BrokenLocale,cidn,crypt}-${pkgver}.so \
-                      usr/lib/libnss_{compat,db,dns,files,hesiod,nis,nisplus}-*.so \
-                      usr/lib/lib{dl,m,nsl,resolv,rt,util}-${pkgver}.so \
-                      usr/lib/lib{memusage,pcprofile,SegFault}.so \
-                      usr/lib/{audit,gconv}/*.so || true
+    # Do not strip these for gdb and valgrind functionality, but strip the rest
+    find "$pkgdir"/usr/lib \
+      -not -name 'ld-*.so' \
+      -not -name 'libc-*.so' \
+      -not -name 'libpthread-*.so' \
+      -not -name 'libthread_db-*.so' \
+      -name '*-*.so' -type f -exec strip $STRIP_SHARED {} + 2> /dev/null || true
+  fi
 }

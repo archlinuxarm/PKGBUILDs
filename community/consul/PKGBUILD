@@ -1,0 +1,102 @@
+# $Id$
+# Maintainer: Thore Bödecker <foxxx0@archlinux.org>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to fix ARM build
+#  - use GOARCH in packaging path
+
+pkgname=consul
+pkgver=1.1.0
+pkgrel=2
+pkgdesc="A tool for service discovery, monitoring and configuration."
+arch=('x86_64')
+_gocli_commit='65fcae5817c8600da98ada9d7edf26dd1a84837b' # HEAD
+url="https://www.consul.io"
+license=('MPL2')
+depends=('glibc')
+makedepends=('git' 'go-pie' 'procps-ng' 'syslog-ng' 'zip')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/hashicorp/consul/archive/v$pkgver.tar.gz"
+        "git+https://github.com/mitchellh/cli#commit=${_gocli_commit}"
+        'consul.service'
+        'consul.default'
+        'consul.sysusers'
+        'example.json'
+        'disable-broken-api-test.patch'
+        'force-pie-build.patch'
+        'fix-build-version-info.patch'
+        '0001-fix-ARM-build.patch')
+install=consul.install
+sha512sums=('80c16a42fc58930234cb277bfdd21c3f1d9f7fe1cf2fea6284056a47f602a40a15ddd447779e83fc5b42502ca8a507a819f5ad7d11689c0bcbb0da739b217721'
+            'SKIP'
+            'c70b9d1556f6c7ecb2e915ab685f289cef0e31198bd2e50c74a0483bbfb387beec67334f539a90adbf68b61b07946e98b300ab8a8e26e53b35f4ab4894adeb04'
+            'ec5a800529a297c709fa383c094ecf106351cf0f8ac7b613b972d415d77fe001088902d7ab805e63e78a8e6360323fec1b795db5a4446df1e21b9b4ed31e7079'
+            'ef872aedb2bc022a29292b7972a792b22e684c1ccb904a2b2cfec6d8966c28fb19be1452ce060821c419f1b646b236ba2e783175595e4bb6926d164c27a15c87'
+            'c4292b8f56ee955ed7385a49843fd90d6434029891b3e1e724cb2fc841514c06e2554a26d3937c114371b18c2168c4e64319eb2cbd726ee8b35870df19089348'
+            'ad5b5ea1fd4ec443c98a89da9fb581d32894c4583dec3707ce9096ed45706bc800f8eb20e5a0c68f6de437d228e09a97bad5815b5bba9b18ae339bcf9a42f8f7'
+            '2c7323b889e9a040f8e2732aa192fbef87bb5eb81072a06a48f536cbdd93d7d219ea17b61e89dfebf915e85861cbb60dd889cb03a14e0a8197b081595e2a2783'
+            'e2fa5674343cd26e17bf08d0a4f2bd923870617511aed49fdc98aaa88a7590916b67e886301385988fdea93747f380f6a7322d1eac3ba14cf81b4baff452cb12'
+            'dc85ba1cab2f77dd9b7cf0032866ee7a09df1644f888656ea74d1af2ec03bf487837c2e05a36cd9248712938f398bc31142d9e2dde7e53a4fa117d48d9c5b656')
+
+prepare() {
+  export  GOPATH="${srcdir}"
+  export  PATH="$PATH:$GOPATH/bin"
+  mkdir -p "src/github.com/mitchellh"
+  mkdir -p "src/github.com/hashicorp"
+
+  mv "${pkgname}-${pkgver}" "src/github.com/hashicorp/${pkgname}"
+  mv "cli" "src/github.com/mitchellh/cli"
+
+  cd "src/github.com/hashicorp/${pkgname}"
+
+  # force pie build
+  patch -p1 -N -l -i "${srcdir}/force-pie-build.patch"
+
+  # use proper release build version string (w/o '-dev' suffix)
+  patch -p1 -N -l -i "${srcdir}/fix-build-version-info.patch"
+
+  # fix ARM build
+  patch -p1 -i "${srcdir}/0001-fix-ARM-build.patch"
+}
+
+check() {
+  cd "src/github.com/hashicorp/${pkgname}"
+  # TODO: debug failing tests
+  #       + TestTombstoneGC
+  #rm ./agent/consul/state/tombstone_gc_test.go
+  #       + TestAPI_ClientTLSOptions
+  #patch -p0 ./api/api_test.go < "${srcdir}/disable-broken-api-test.patch"
+  #       + TestSyslogFilter (need to start syslog-ng within the chroot container)
+  #rm ./logger/syslog_test.go
+  #make test
+}
+
+build() {
+  cd "src/github.com/hashicorp/${pkgname}"
+  # build local arch only, from: https://github.com/hashicorp/consul/#developing-consul
+  # note! this will result in a development build! do not use for production
+  # CONSUL_DEV=1 make
+
+  # this will limit the build targets but still result in official "zip" release
+  # XC_OS='linux' XC_ARCH='amd64' make
+
+  # this will build only for linux/amd64
+  export CGO_ENABLED=0
+  make linux
+}
+
+package() {
+  cd "src/github.com/hashicorp/${pkgname}"
+
+  install -D -d -m750 -o 208 -g 208 "${pkgdir}/var/lib/consul"
+  install -D -d -m750 -o   0 -g 208 "${pkgdir}/etc/consul.d"
+
+  install -D -m644 "${srcdir}/consul.default" "${pkgdir}/etc/default/consul"
+  install -D -m640 -o 0 -g 208 "${srcdir}/example.json" "${pkgdir}/etc/consul.d/example.json"
+  install -Dm755 pkg/linux_$(go env GOARCH)/consul "${pkgdir}/usr/bin/consul"
+
+  install -Dm644 "${srcdir}/consul.service" "${pkgdir}/usr/lib/systemd/system/consul.service"
+  install -Dm644 "${srcdir}/consul.sysusers" "${pkgdir}/usr/lib/sysusers.d/consul.conf"
+}
+
+# vim:set ts=2 sw=2 et:

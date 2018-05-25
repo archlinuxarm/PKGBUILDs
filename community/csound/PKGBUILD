@@ -5,46 +5,54 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - disable NEON
+#  - disable java interface
 #  - skip aarch64 - incompatible with beta luajit
 
 buildarch=22
 
 pkgbase=csound
 pkgname=('csound' 'csound-doc')
-pkgver=6.10.0
-pkgrel=10
+pkgver=6.11.0
+pkgrel=2
 pkgdesc="A programming language for sound rendering and signal processing."
 arch=('x86_64')
 url="http://csound.com"
 license=('LGPL')
 # wiiuse needs release before add: https://github.com/rpavlik/wiiuse/issues/92
 # current gmm doesn't work https://github.com/csound/csound/issues/920
-makedepends=('boost' 'cmake' 'dssi' 'eigen' 'faust' 'fltk' 'fluidsynth'
-'java-environment' 'ladspa' 'llvm' 'luajit' 'pd' 'portaudio' 'portmidi'
-'python2' 'swig')
+makedepends=('boost' 'cmake' 'dssi' 'eigen' 'faust' 'fltk' 'fluidsynth' 'git'
+'hdf5' 'java-environment' 'ladspa' 'libwebsockets' 'llvm' 'luajit' 'pd'
+'portmidi' 'portsmf' 'stk' 'swig')
 source=("${pkgname[0]}-${pkgver}.tar.gz::https://github.com/csound/csound/archive/${pkgver}.tar.gz"
         "${pkgname[0]}.sh"
+        "fix-compiler-flag-overrides.patch"
         "https://github.com/${pkgbase}/${pkgbase}/releases/download/${pkgver}/Csound${pkgver}_manual_html.zip"
         "https://github.com/${pkgbase}/${pkgbase}/releases/download/${pkgver}/Csound${pkgver}_manual_pdf.zip")
-sha512sums=('1ccf0a2d5273da016ec585e788e4af0b91f55c3be081a51c53dc39b0fbcfba0cf1308828784a1e5dfc39250dedbd3f4b48afbb5c4140c11fd469ca6753702ed4'
+sha512sums=('5e75c3c2ecbc02f5f190280682d60540d4181bd333592bcecfb34efdd725e6c841379706d30d5666e0deed575c5b8de9f1ae84a78dfb213480b149904313ef65'
             '26e92e7168961686b3d89e9d552f4b086922469f7fc3e8b4b967d32bb7e41fddf014fd52a0aef30f229db57f7eac2980efe7c54b3fc3a7c321ae7e20adbb3995'
-            'f61f46705607eb39897fd3b27353fb233acd9da5e00a2b64d63116f74b889f2daafa72d48ed7c5ec1890e32d81331f91455861f2cb3fad3d13b7d27ec203357a'
-            'cf6ec335782032fb0703a3042c0222316cd215eba2be242e65d4f1ae23d886177620c96cc63c1aace43a72c1d6258a88612c1ffd5ef0e43675729bae39969fa1')
+            '67a67dd7718da8e88f7c92f18ce1136372044d40c3a9ef86bdaed5c8172e225aa03448ec656da22d60fe9edfc0f6b10f337b02b96505f2e8c0815ef1b8b6a084'
+            'c40fe88be3c101d84c473225183ccf02978113e24ad49d67945a1113012c39f590a7d51aeba939c4c43c691763b155a8f203ea993004f9d67d887f7ddce977d5'
+            'c2ed8c9e44c50df7a82c3f10d117007795a38d6d7d5b364240b3def75a5469111d2e1c0ab059825233c765fa7ceb1c876f4439045b6d88bd0060b56343fb7c81')
 
 prepare() {
   cd "${pkgname[0]}-${pkgver}"
+  # problems compiler flags overrides: https://github.com/csound/csound/issues/960
+  patch -Np1 -i "${srcdir}/fix-compiler-flag-overrides.patch"
   # requires out-of-tree build
   mkdir bld
-  # disable NEON
-  sed 's/-W -Wall -mtune=core2/-DPFFFT_SIMD_DISABLE/' Custom.cmake.ex > Custom.cmake
 }
 
 build() {
   cd "${pkgname[0]}-${pkgver}/bld"
-  cmake .. -DCMAKE_INSTALL_PREFIX=/usr \
-           -DJAVA_MODULE_INSTALL_DIR=/usr/lib/csound/java \
+  cmake .. -DCMAKE_BUILD_TYPE=Release \
+           -DCMAKE_INSTALL_PREFIX=/usr \
+           -DCMAKE_CXX_FLAGS="-Wno-error -Wno-missing-field-initializers -DPFFFT_SIMD_DISABLE" \
+           -DCMAKE_C_FLAGS="-Wno-error -Wno-missing-field-initializers -DPFFFT_SIMD_DISABLE" \
+           -DBUILD_JAVA_INTERFACE=0 \
            -DBUILD_FAUST_OPCODES=1 \
            -DFAUST_LIBRARY=/usr/lib/libfaust.a \
+           -DLUAJIT_LIBRARY=/usr/lib/libluajit-5.1.so \
+           -DLUA_H_PATH=/usr/include/luajit-2.0/ \
            -DLUA_MODULE_INSTALL_DIR=/usr/lib/lua/5.1/ \
            -DPYTHON_INCLUDE_DIR=/usr/include/python2.7 \
            -DPYTHON_LIBRARY=/usr/lib/libpython2.7.so \
@@ -53,27 +61,27 @@ build() {
 }
 
 package_csound() {
-  depends=('curl' 'fltk' 'fluidsynth' 'hdf5' 'liblo' 'luajit' 'portaudio' 'portmidi' 'python2' 'stk' 'tk')
+  depends=('fltk' 'fluidsynth' 'git' 'hdf5' 'liblo' 'libwebsockets' 'luajit'
+  'portmidi' 'portsmf' 'stk' 'tk')
   optdepends=('csound-doc: The canonical Csound Reference Manual'
               'csoundqt: Qt frontend'
-              'faust: embed faust'
-              'java-environment: Java Wrapper'
+              'faust: Embed faust'
+              'java-environment: Use csound with Java'
               'vim-csound: Use csound with vim')
   cd "${pkgname}-${pkgver}/bld"
   make DESTDIR="${pkgdir}/" install
 
   # export vars in profile.d
-  install -vDm755 "${srcdir}/${pkgname[0]}.sh" \
-    "${pkgdir}/etc/profile.d/${pkgname[0]}.sh"
+  install -vDm 755 "${srcdir}/${pkgname}.sh" -t "${pkgdir}/etc/profile.d/"
 }
 
 package_csound-doc() {
   license=('LGPL' 'GPL')
-  install -vDm644 Csound${pkgver}_manual.pdf \
-    "${pkgdir}/usr/share/doc/${pkgname[1]}/${pkgbase}-manual.pdf"
+  install -vDm 644 "Csound${pkgver}_manual.pdf" \
+    "${pkgdir}/usr/share/doc/${pkgname}/${pkgbase}-manual.pdf"
 
-  install -dv "${pkgdir}/usr/share/doc/${pkgname[1]}/html"
-  cp -av "${srcdir}"/html/* "${pkgdir}/usr/share/doc/${pkgname[1]}/html"
+  install -dv "${pkgdir}/usr/share/doc/${pkgname}/html"
+  cp -av "${srcdir}"/html/* "${pkgdir}/usr/share/doc/${pkgname}/html"
   # fix file permissions
   find "${pkgdir}" -type f -exec chmod -c 644 {} \;
 }

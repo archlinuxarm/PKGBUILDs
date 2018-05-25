@@ -1,28 +1,29 @@
-# $Id: PKGBUILD 87983 2013-04-09 20:48:46Z arodseth $
+# $Id$
 # Maintainer: Alexander F Rødseth <xyproto@archlinux.org>
 # Contributor: Angel Velasquez <angvp@archlinux.org>
 # Contributor: Douglas Soares de Andrade <douglas@archlinux.org>
 # Contributor: d'Ronin <daronin@2600.com>
 # Contributor: Hexchain Tong <richard0053@gmail.com>
+# Contributor: Jack Lloyd <jack@randombit.net>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - compiler flags adjustment to build correctly
-#  - --cpu in configure set to correct architectures, autodetect fails
 #  - AArch64 patch
+#  - disable neon on !AArch64
 
 pkgname=botan
-pkgver=2.4.0
+pkgver=2.6.0
 pkgrel=1
 pkgdesc='Crypto library written in C++'
 arch=('x86_64')
 url='https://botan.randombit.net/'
 license=('BSD')
-depends=('gcc-libs' 'sh')
+depends=('xz')
 makedepends=('python')
+optdepends=('python: for using botan2.py')
 validpgpkeys=('621DAF6411E1851C4CF9A2E16211EBF1EFBADFBC')
 source=("https://botan.randombit.net/releases/Botan-${pkgver}.tgz"{,.asc}
         '0001-aarch64-support.patch')
-sha256sums=('ed9464e2a5cfee4cd3d9bd7a8f80673b45c8a0718db2181a73f5465a606608a5'
+sha256sums=('c1f261555bba702c73608dde7bd743ef2d6377a41a1c295915b25c5babaf5cc5'
             'SKIP'
             '0e279e3b16e115e26f5dc1edf02a4082f063134513aaf6ad1fbd10a1d2624e37')
 
@@ -35,21 +36,15 @@ prepare() {
 build() {
   cd "${pkgname^}-$pkgver"
 
-  if [[ $CARCH == 'aarch64' ]]; then
-    CPU='aarch64'
-  elif [[ $CARCH == 'armv7h' ]]; then
-    sed -i 's/lang_flags "/lang_flags "-mfpu=vfpv3-d16 -mfloat-abi=hard /' src/build-data/cc/gcc.txt
-    CPU='arm/armv7-a'
-  elif [[ $CARCH == 'armv6h' ]]; then
-    sed -i 's/lang_flags "/lang_flags "-mfpu=vfp -mfloat-abi=hard /' src/build-data/cc/gcc.txt
-    CPU='arm/armv6'
-  elif [[ $CARCH == 'arm' ]]; then
-    CPU='arm/armv5te'
-  fi
-
   [[ $CARCH != "aarch64" ]] && CONFIG="--disable-neon"
 
-  ./configure.py --prefix=/usr --cpu=$CPU $CONFIG
+  # botan benefits from -O3, and upstream devs are running benchmarks with it
+  CXXFLAGS="$CXXFLAGS -O3" ./configure.py \
+    --prefix=/usr \
+    --with-bzip \
+    --with-zlib \
+    --with-lzma \
+    $CONFIG
   make
 }
 
@@ -60,10 +55,9 @@ check() {
 }
 
 package() {
-  cd "${pkgname^}-$pkgver"
-
-  make DESTDIR="$pkgdir" install
-  install -Dm644 license.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  DESTDIR="$pkgdir" make -C "${pkgname^}-$pkgver" install
+  install -Dm644 "${pkgname^}-$pkgver/license.txt" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
 # getver: github.com/randombit/botan

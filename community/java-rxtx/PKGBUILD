@@ -1,0 +1,76 @@
+# $Id$
+# Maintainer: Balló György <ballogyor+arch at gmail dot com>
+# Contributor: Vitaliy Berdinskikh ur6lad[at]i.ua
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - (make)depend on java-runtime and -environmennt >=8 (fails to build with 7)
+#  - patch from debian to fix build on ARM
+
+pkgname=java-rxtx
+_pkgname=rxtx
+pkgver=2.2pre2
+pkgrel=5
+pkgdesc="Java library for serial IO"
+arch=('x86_64')
+url="http://rxtx.qbang.org/"
+license=('LGPL')
+depends=('glibc' 'java-runtime>=8' 'systemd')
+makedepends=('java-environment>=8')
+provides=("$_pkgname=$pkgver")
+replaces=("$_pkgname")
+install=$pkgname.install
+source=(http://rxtx.qbang.org/pub/$_pkgname/$_pkgname-$pkgver.zip
+        utsrelease.patch
+        rxtx-2.2-lock.patch
+        rxtx-2.2-fhs_lock.patch
+        ttyACM_port.patch
+        java10.patch
+        rxtx-sys_io_h_check.patch)
+md5sums=('7eedb18e3f33a427e2b0e9be8ce3f94c'
+         '2f21ec5eb108f871815242698b6150f1'
+         '1f7c43d582bfe9daea22d7f7057436da'
+         'f4d22d263f45cd1d4db6242dd0ac78ae'
+         '903a3fe0067d0682dd5f64483c741df6'
+         'c743b0be1ae32e8e7d1bc3e596a65766'
+         '6fa4482df20625f652ecad818e92614a')
+
+prepare() {
+  cd $_pkgname-$pkgver
+
+  # Fix build
+  patch -Np1 -i ../utsrelease.patch
+
+  # Fix lockdir patch
+  patch -Np1 -i ../rxtx-2.2-lock.patch
+
+  # Fix buffer overflow
+  patch -Np1 -i ../rxtx-2.2-fhs_lock.patch
+
+  # Enable more ports
+  patch -Np1 -i ../ttyACM_port.patch
+
+  # Fix build with openjdk10
+  patch -Np1 -i ../java10.patch
+
+  # Fix ARM build
+  patch -Np1 -i ../rxtx-sys_io_h_check.patch
+
+  rm *.m4
+  autoreconf -fi
+}
+
+build() {
+  cd $_pkgname-$pkgver
+  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var
+  make -j1
+}
+
+package() {
+  cd $_pkgname-$pkgver
+  mkdir -p "$pkgdir"/usr/{lib,share/java/rxtx}
+  make JHOME="$pkgdir/usr/share/java/rxtx" RXTX_PATH="$pkgdir/usr/lib" install
+
+  # Setup lock directory
+  install -dm755 "$pkgdir"/usr/lib/tmpfiles.d
+  echo 'd /run/lock/lockdev 0775 root lock -' > "$pkgdir/usr/lib/tmpfiles.d/$pkgname.conf"
+}
