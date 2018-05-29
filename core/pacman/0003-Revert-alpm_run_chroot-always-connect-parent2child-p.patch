@@ -1,4 +1,4 @@
-From 87612bf6ef06e5fa5d58716f9c18ccb52c27be6c Mon Sep 17 00:00:00 2001
+From dd8d526a39c86c300f158c581e028365efe60a64 Mon Sep 17 00:00:00 2001
 From: Kevin Mihelich <kevin@archlinuxarm.org>
 Date: Fri, 11 Mar 2016 20:11:24 -0700
 Subject: [PATCH 3/3] Revert "alpm_run_chroot: always connect parent2child
@@ -10,51 +10,51 @@ This reverts commit 1d6583a58da0904fb7feafd4a666391087955a7b.
  1 file changed, 7 insertions(+), 6 deletions(-)
 
 diff --git a/lib/libalpm/util.c b/lib/libalpm/util.c
-index 41cca4a7..aba0ee94 100644
+index c9fdd4af..2d57b256 100644
 --- a/lib/libalpm/util.c
 +++ b/lib/libalpm/util.c
-@@ -596,7 +596,7 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
+@@ -592,7 +592,7 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
  		goto cleanup;
  	}
  
--	if(pipe(parent2child_pipefd) == -1) {
-+	if(stdin_cb && pipe(parent2child_pipefd) == -1) {
+-	if(socketpair(AF_UNIX, SOCK_STREAM, 0, parent2child_pipefd) == -1) {
++	if(stdin_cb && socketpair(AF_UNIX, SOCK_STREAM, 0, parent2child_pipefd) == -1) {
  		_alpm_log(handle, ALPM_LOG_ERROR, _("could not create pipe (%s)\n"), strerror(errno));
  		retval = 1;
  		goto cleanup;
-@@ -616,9 +616,11 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
+@@ -612,9 +612,11 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
  		close(2);
- 		while(dup2(child2parent_pipefd[1], 1) == -1 && errno == EINTR);
- 		while(dup2(child2parent_pipefd[1], 2) == -1 && errno == EINTR);
--		while(dup2(parent2child_pipefd[0], 0) == -1 && errno == EINTR);
--		close(parent2child_pipefd[0]);
--		close(parent2child_pipefd[1]);
+ 		while(dup2(child2parent_pipefd[HEAD], 1) == -1 && errno == EINTR);
+ 		while(dup2(child2parent_pipefd[HEAD], 2) == -1 && errno == EINTR);
+-		while(dup2(parent2child_pipefd[TAIL], 0) == -1 && errno == EINTR);
+-		close(parent2child_pipefd[TAIL]);
+-		close(parent2child_pipefd[HEAD]);
 +		if(stdin_cb) {
-+			while(dup2(parent2child_pipefd[0], 0) == -1 && errno == EINTR);
-+			close(parent2child_pipefd[0]);
-+			close(parent2child_pipefd[1]);
++			while(dup2(parent2child_pipefd[TAIL], 0) == -1 && errno == EINTR);
++			close(parent2child_pipefd[TAIL]);
++			close(parent2child_pipefd[HEAD]);
 +		}
- 		close(child2parent_pipefd[0]);
- 		close(child2parent_pipefd[1]);
+ 		close(child2parent_pipefd[TAIL]);
+ 		close(child2parent_pipefd[HEAD]);
  		if(cwdfd >= 0) {
-@@ -653,16 +655,15 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
+@@ -649,16 +651,15 @@ int _alpm_run_chroot(alpm_handle_t *handle, const char *cmd, char *const argv[],
  		child2parent->events = POLLIN;
  		fcntl(child2parent->fd, F_SETFL, O_NONBLOCK);
- 		close(child2parent_pipefd[1]);
--		close(parent2child_pipefd[0]);
+ 		close(child2parent_pipefd[HEAD]);
+-		close(parent2child_pipefd[TAIL]);
  
  		if(stdin_cb) {
- 			parent2child->fd = parent2child_pipefd[1];
+ 			parent2child->fd = parent2child_pipefd[HEAD];
  			parent2child->events = POLLOUT;
  			fcntl(parent2child->fd, F_SETFL, O_NONBLOCK);
-+			close(parent2child_pipefd[0]);
++			close(parent2child_pipefd[TAIL]);
  		} else {
  			parent2child->fd = -1;
  			parent2child->events = 0;
--			close(parent2child_pipefd[1]);
+-			close(parent2child_pipefd[HEAD]);
  		}
  
  #define STOP_POLLING(p) do { close(p->fd); p->fd = -1; } while(0)
 -- 
-2.13.1
+2.17.0
 
