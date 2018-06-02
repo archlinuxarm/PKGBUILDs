@@ -1,0 +1,181 @@
+# $Id$
+# Maintainer: Evangelos Foutras <evangelos@foutrelis.com>
+# Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
+# Contributor: Sebastian Nowicki <sebnow@gmail.com>
+# Contributor: Devin Cofer <ranguvar{AT]archlinux[DOT}us>
+# Contributor: Tobias Kieslich <tobias@justdreams.de>
+# Contributor: Geoffroy Carrier <geoffroy.carrier@aur.archlinux.org>
+# Contributor: Tomas Lindquist Olsen <tomas@famolsen.dk>
+# Contributor: Roberto Alsina <ralsina@kde.org>
+# Contributor: Gerardo Exequiel Pozzi <vmlinuz386@yahoo.com.ar>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - special build for GHC
+
+buildarch=4
+highmem=1
+
+pkgname=('llvm50' 'llvm50-libs' 'clang50')
+pkgver=5.0.2
+pkgrel=1
+_ocaml_ver=4.06.0
+arch=('x86_64')
+url="http://llvm.org/"
+license=('custom:University of Illinois/NCSA Open Source License')
+makedepends=('cmake' 'libffi' 'python2' "ocaml=$_ocaml_ver" 'python-sphinx'
+             'ocaml-ctypes' 'ocaml-findlib' 'libedit' 'swig')
+# Build 32-bit compiler-rt libraries on x86_64 (FS#41911)
+makedepends_x86_64=('lib32-gcc-libs')
+options=('staticlibs')
+source=(https://releases.llvm.org/$pkgver/llvm-$pkgver.src.tar.xz
+        https://releases.llvm.org/$pkgver/cfe-$pkgver.src.tar.xz
+        0001-GCC-compatibility-Ignore-the-fno-plt-flag.patch
+        0002-Enable-SSP-and-PIE-by-default.patch
+        disable-llvm-symbolizer-test.patch
+        0001-Fix-return-type-in-ORC-readMem-client-interface.patch
+        llvm-config.h)
+sha256sums=('d522eda97835a9c75f0b88ddc81437e5edbb87dc2740686cb8647763855c2b3c'
+            'fa9ce9724abdb68f166deea0af1f71ca0dfa9af8f7e1261f2cae63c280282800'
+            'a1ba7fb859ac157c4b4342435cd656e29b1e1d9bddcb8ae0158a91c0a8ba6203'
+            '186f2d10b013395f2dd6e1fd3baf4961a2e40c403f115517c9b253682934f50f'
+            '6fff47ab5ede79d45fe64bb4903b7dfc27212a38e6cd5d01e60ebd24b7557359'
+            '2e707016fef45434f48c06326c968c11e08445eeb37c53cf55ac592c08262577'
+            '597dc5968c695bbdbb0eac9e8eb5117fcd2773bc91edf5ec103ecffffab8bc48')
+
+prepare() {
+  cd "$srcdir/llvm-$pkgver.src"
+  mkdir build
+
+  mv "$srcdir/cfe-$pkgver.src" tools/clang
+  #mv "$srcdir/clang-tools-extra-$pkgver.src" tools/clang/tools/extra
+  #mv "$srcdir/compiler-rt-$pkgver.src" projects/compiler-rt
+  #mv "$srcdir/lld-$pkgver.src" tools/lld
+  #mv "$srcdir/lldb-$pkgver.src" tools/lldb
+
+  # Disable test that fails when compiled as PIE
+  # https://bugs.llvm.org/show_bug.cgi?id=31870
+  patch -Np1 <../disable-llvm-symbolizer-test.patch
+
+  # Enable SSP and PIE by default
+  patch -Np1 -d tools/clang <../0001-GCC-compatibility-Ignore-the-fno-plt-flag.patch
+  patch -Np1 -d tools/clang <../0002-Enable-SSP-and-PIE-by-default.patch
+
+  # Fix build with GCC 8
+  patch -Np1 -i ../0001-Fix-return-type-in-ORC-readMem-client-interface.patch
+}
+
+build() {
+  cd "$srcdir/llvm-$pkgver.src/build"
+
+  cmake \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLLVM_BUILD_LLVM_DYLIB=ON \
+    -DLLVM_LINK_LLVM_DYLIB=ON \
+    -DLLVM_INSTALL_UTILS=ON \
+    -DLLVM_ENABLE_RTTI=ON \
+    -DLLVM_ENABLE_FFI=ON \
+    -DLLVM_BUILD_TESTS=ON \
+    -DLLVM_BUILD_DOCS=ON \
+    -DLLVM_ENABLE_SPHINX=ON \
+    -DLLVM_ENABLE_DOXYGEN=OFF \
+    -DSPHINX_WARNINGS_AS_ERRORS=OFF \
+    -DFFI_INCLUDE_DIR=$(pkg-config --variable=includedir libffi) \
+    -DLLVM_BINUTILS_INCDIR=/usr/include \
+    ..
+
+  make
+  make ocaml_doc
+
+  # Disable automatic installation of components that go into subpackages
+  sed -i '/\(clang\)\/cmake_install.cmake/d' tools/cmake_install.cmake
+  sed -i '/extra\/cmake_install.cmake/d' tools/clang/tools/cmake_install.cmake
+}
+
+check() {
+  cd "$srcdir/llvm-$pkgver.src/build"
+  make check-{llvm,clang}
+}
+
+package_llvm50() {
+  pkgdesc="Low Level Virtual Machine"
+  depends=('llvm50-libs' 'perl')
+  conflicts=('llvm' 'llvm35' 'llvm37' 'llvm39')
+
+  cd "$srcdir/llvm-$pkgver.src"
+
+  make -C build DESTDIR="$pkgdir" install
+
+  # The runtime libraries go into llvm-libs
+  mv -f "$pkgdir"/usr/lib/lib{LLVM,LTO}*.so* "$srcdir"
+  mv -f "$pkgdir"/usr/lib/LLVMgold.so "$srcdir"
+
+  # OCaml bindings go to a separate package
+  rm -rf "$srcdir"/ocaml.{lib,doc}
+  mv "$pkgdir/usr/lib/ocaml" "$srcdir/ocaml.lib"
+
+  if [[ $CARCH == x86_64 ]]; then
+    # Needed for multilib (https://bugs.archlinux.org/task/29951)
+    # Header stub is taken from Fedora
+    mv "$pkgdir/usr/include/llvm/Config/llvm-config"{,-64}.h
+    cp "$srcdir/llvm-config.h" "$pkgdir/usr/include/llvm/Config/llvm-config.h"
+  fi
+
+  install -Dm644 LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_llvm50-libs() {
+  pkgdesc="Low Level Virtual Machine (runtime libraries)"
+  depends=('gcc-libs' 'zlib' 'libffi' 'libedit' 'ncurses')
+
+  install -d "$pkgdir/usr/lib"
+  cp -P \
+    "$srcdir"/lib{LLVM,LTO}*.so* \
+    "$srcdir"/LLVMgold.so \
+    "$pkgdir/usr/lib/"
+
+  # Symlink LLVMgold.so from /usr/lib/bfd-plugins
+  # https://bugs.archlinux.org/task/28479
+  install -d "$pkgdir/usr/lib/bfd-plugins"
+  ln -s ../LLVMgold.so "$pkgdir/usr/lib/bfd-plugins/LLVMgold.so"
+
+  install -Dm644 "$srcdir/llvm-$pkgver.src/LICENSE.TXT" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_clang50() {
+  pkgdesc="C language family frontend for LLVM"
+  url="http://clang.llvm.org/"
+  depends=('llvm50-libs' 'gcc' 'libxml2')
+  optdepends=('openmp: OpenMP support in clang with -fopenmp'
+              'python2: for scan-view and git-clang-format')
+  provides=("clang-analyzer=$pkgver")
+  conflicts=('clang-analyzer' 'clang' 'clang35' 'clang37' 'clang39')
+
+  cd "$srcdir/llvm-$pkgver.src"
+
+  make -C build/tools/clang DESTDIR="$pkgdir" install
+
+  # Move analyzer scripts out of /usr/libexec
+  mv "$pkgdir"/usr/libexec/{ccc,c++}-analyzer "$pkgdir/usr/lib/clang/"
+  rmdir "$pkgdir/usr/libexec"
+  sed -i 's|libexec|lib/clang|' "$pkgdir/usr/bin/scan-build"
+
+  # Install Python bindings
+  install -d "$pkgdir/usr/lib/python2.7/site-packages"
+  cp -a tools/clang/bindings/python/clang "$pkgdir/usr/lib/python2.7/site-packages/"
+
+  # Use Python 2
+  sed -i 's|/usr/bin/env python|&2|' \
+    "$pkgdir/usr/bin/scan-view" \
+    "$pkgdir/usr/bin/git-clang-format"
+
+  # Compile Python scripts
+  python2 -m compileall "$pkgdir"
+  python2 -O -m compileall "$pkgdir"
+
+  install -Dm644 tools/clang/LICENSE.TXT \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+# vim:set ts=2 sw=2 et:
