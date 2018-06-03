@@ -12,9 +12,9 @@
 pkgbase=systemd
 pkgname=('systemd' 'libsystemd' 'systemd-sysvcompat')
 # Can be from either systemd or systemd-stable
-_commit='f398c546c6fc43121131f41acec56b5a851bd35e'
-pkgver=238.76
-pkgrel=1.2
+_commit='f58e62cbbc1c2842881a2a6ab9beda7bcb044a30'
+pkgver=238.133
+pkgrel=1
 arch=('x86_64')
 url="https://www.github.com/systemd/systemd"
 makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
@@ -25,8 +25,9 @@ makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
 options=('strip')
 validpgpkeys=('63CDA1E5D3FC22B998D20DD6327F26951A015CC4'  # Lennart Poettering <lennart@poettering.net>
               '5C251B5FC54EB2F80F407AAAC54CA336CFEB557E') # Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl>
-source=('git+https://github.com/systemd/systemd-stable'
-        'git+https://github.com/systemd/systemd'
+source=(# fragment is latest tag for source verification, final checkout in prepare()
+        "git+https://github.com/systemd/systemd-stable#tag=v${pkgver%.*}?signed"
+        "git+https://github.com/systemd/systemd#tag=v${pkgver%.*}?signed"
         '0001-Use-Arch-Linux-device-access-groups.patch'
         '0001-seccomp-include-ARM-cacheflush-in-default.patch'
         'initcpio-hook-udev'
@@ -78,38 +79,12 @@ _backports=(
 _reverts=(
 )
 
-_validate_tag() (
-  local success fingerprint trusted status tag=v${pkgver%.*}
-
-  cd "$srcdir/$pkgbase-stable"
-  parse_gpg_statusfile /dev/stdin < <(git verify-tag --raw "$tag" 2>&1)
-
-  if (( ! success )); then
-    error 'failed to validate tag %s\n' "$tag"
-    return 1
-  fi
-
-  if ! in_array "$fingerprint" "${validpgpkeys[@]}" && (( ! trusted )); then
-    error 'unknown or untrusted public key: %s\n' "$fingerprint"
-    return 1
-  fi
-
-  case $status in
-    'expired')
-      warning 'the signature has expired'
-      ;;
-    'expiredkey')
-      warning 'the key has expired'
-      ;;
-  esac
-
-  return 0
-)
-
 prepare() {
   cd "$pkgbase-stable"
 
+  # add upstream repository for cherry-picking
   git remote add -f upstream ../systemd
+  # checkout the latest stable commit
   git checkout "$_commit"
 
   local c
@@ -138,8 +113,6 @@ pkgver() {
 }
 
 build() {
-  _validate_tag || return
-
   local timeservers=({0..3}.arch.pool.ntp.org)
 
   LDFLAGS+=" -Wl,-fuse-ld=bfd"
