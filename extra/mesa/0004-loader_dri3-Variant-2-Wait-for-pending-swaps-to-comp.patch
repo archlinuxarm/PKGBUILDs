@@ -1,17 +1,24 @@
-From 5abc129c70cac08104fb7f8c757bc30afe8e8803 Mon Sep 17 00:00:00 2001
-Message-Id: <5abc129c70cac08104fb7f8c757bc30afe8e8803.1526409254.git.jan.steffens@gmail.com>
-In-Reply-To: <a9554de2a6028540fa12a7ebdab4daf2b46010fa.1526409254.git.jan.steffens@gmail.com>
-References: <a9554de2a6028540fa12a7ebdab4daf2b46010fa.1526409254.git.jan.steffens@gmail.com>
-From: =?UTF-8?q?Michel=20D=C3=A4nzer?= <michel@daenzer.net>
+From patchwork Tue May  8 09:42:05 2018
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Subject: [Mesa-dev,
+ 2/2] loader_dri3: Variant 2: Wait for pending swaps to complete
+ before drawable_fini.
+From: =?utf-8?q?Michel_D=C3=A4nzer?= <michel@daenzer.net>
+X-Patchwork-Id: 221466
+Message-Id: <ad7564c6-1e1b-8322-3e5c-d8045e181e10@daenzer.net>
+To: Mario Kleiner <mario.kleiner.de@gmail.com>,
+ Mike Lothian <mike@fireburn.co.uk>
+Cc: ML mesa-dev <mesa-dev@lists.freedesktop.org>,
+ ML xorg-devel <xorg-devel@lists.x.org>
 Date: Tue, 8 May 2018 11:42:05 +0200
-Subject: [PATCH 4/4] loader_dri3: Variant 2: Wait for pending swaps to
- complete before drawable_fini.
 
 On 2018-05-05 06:25 AM, Mario Kleiner wrote:
 > On Sat, May 5, 2018 at 4:08 AM, Mike Lothian <mike@fireburn.co.uk> wrote:
 >> I definately saw the steam bug with patch 1 but not with plasmashell,
 >> I started seeing it with patch 2 but it seemed to fix itself
->
+> 
 > I had two hangs of kwin_x11 within the last 6 hours when alt-tabbing
 > between windows, where it got stuck in the
 > loader_dri3_swapbuffer_barrier() from patch 1/2. Not sure how that is
@@ -32,21 +39,19 @@ Idle notify events shouldn't need special treatment, since the pixmap
 XIDs of the buffers will be different between loader_dri3_drawable
 incarnations, aren't they?
 
+
 This still leaves the issue that the SBC moves backwards, which could
 theoretically result in hangs with apps using glXWaitForSbcOML. Fixing
 that would probably require changing the loader_dri3_drawable lifetime
 cycle, which would probably be very invasive, if feasible at all. Maybe
 we don't need to care about that for the time being, until there's a
 real world app running into it.
----
- src/loader/loader_dri3_helper.c | 15 ++++++++++++---
- 1 file changed, 12 insertions(+), 3 deletions(-)
 
 diff --git a/src/loader/loader_dri3_helper.c b/src/loader/loader_dri3_helper.c
-index 2e3b6c619e..e1eecb70a9 100644
+index 6db8303d26d..f0ff2f07bde 100644
 --- a/src/loader/loader_dri3_helper.c
 +++ b/src/loader/loader_dri3_helper.c
-@@ -365,9 +365,18 @@ dri3_handle_present_event(struct loader_dri3_drawable *draw,
+@@ -370,9 +370,17 @@ dri3_handle_present_event(struct loader_dri3_drawable *draw,
         * checking for wrap.
         */
        if (ce->kind == XCB_PRESENT_COMPLETE_KIND_PIXMAP) {
@@ -64,10 +69,6 @@ index 2e3b6c619e..e1eecb70a9 100644
 +            draw->recv_sbc = recv_sbc;
 +         else if (recv_sbc == (draw->recv_sbc + 0x100000001ULL))
 +            draw->recv_sbc = recv_sbc - 0x100000000ULL;
-+
-          switch (ce->mode) {
-          case XCB_PRESENT_COMPLETE_MODE_FLIP:
-             draw->flipping = true;
--- 
-2.17.0
 
+          /* When moving from flip to copy, we assume that we can allocate in
+           * a more optimal way if we don't need to cater for the display

@@ -9,7 +9,7 @@
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=18.0.4
+pkgver=18.1.1
 pkgrel=1
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
@@ -19,23 +19,16 @@ url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        0001-glvnd-fix-gl.pc.patch
-        0002-meson-Add-library-versions-to-swr-drivers.patch
-        0003-meson-Version-libMesaOpenCL-like-autotools-does.patch
-        0004-loader_dri3-Variant-2-Wait-for-pending-swaps-to-comp.patch
-        "atomic.patch::https://cgit.freedesktop.org/mesa/mesa/patch/?id=498faea103aa7966b435f21d8ff5e36172389b1e")
-sha512sums=('f9a14be46c209661ceb318add1611481445d13b47e95c7a5d2a5e5ecfdd5d2c3fa9c2b16b30035bbb8d61ccc7cb65bfa6698ac8b040273e5ab045a951a67752c'
+        0001-glvnd-fix-gl.pc.patch)
+sha512sums=('7783adc1ec7a1c3d092acfcca6b4ba19450c15a7f0d7f41fbf25e482236615d79ce24afe60959066ea7aa851df4f74fa3c569fa6d847ea79e6bfe046b8c65e90'
             'SKIP'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
-            '2f40198eff47664c831c56e8a63f60a4d1b815cf697e6bdb0be39e6d9c5df043857f6264b7cd2ccf46c07626186c565144e80f4214b5f7936ef7024c47201437'
-            'c3f3baf8a5f480ce64b321c031e31c0d5819732ca34647ac545d0fd7fafa40ad4dcf1e1ec8d574754e0a44bf0cdc462ed8709c8d9b58a17e01c6ba5b4c5e91c6'
-            'a2062f8a5259aabed1aa20df6a8510f0f3e914cb6bba72751249b3295285596bb7615063a7a7b7870f9f4489d0e6b774f0bced2bdde49a1aa9df6a44976462d1'
-            '572901a1e9cacfacfc8c4cc3cd077a626d4aeda8c8a58f6085bae827cba8a2d4d99af1dafbb5a9296b6ebf3120e2b05a084fe1c96093074befe62597319384a1'
-            '75cd21bccc84a6b6b0de39c6d209c8bee0e5143b486433184ca078e8bc6797d30746be3ce5f7a89eea9bc3c7e2d68880412511fd6b9946252c7c7638523c6caa')
+            '2f40198eff47664c831c56e8a63f60a4d1b815cf697e6bdb0be39e6d9c5df043857f6264b7cd2ccf46c07626186c565144e80f4214b5f7936ef7024c47201437')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
               'E3E8F480C52ADD73B278EE78E1ECBE07D7D70895'  # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
-              'A5CC9FEC93F2F837CB044912336909B6B25FADFA') # Juan A. Suarez Romero <jasuarez@igalia.com>
+              'A5CC9FEC93F2F837CB044912336909B6B25FADFA'  # Juan A. Suarez Romero <jasuarez@igalia.com>
+              '71C4B75620BC75708B4BDB254C95FAAB3EB073EC') # Dylan Baker <dylan@pnwbakers.com>
 
 prepare() {
   cd mesa-${pkgver}
@@ -43,19 +36,6 @@ prepare() {
   # glvnd support patches - from Fedora
   # non-upstreamed ones
   patch -Np1 -i ../0001-glvnd-fix-gl.pc.patch
-
-  # Upstreamed meson fixes
-  patch -Np1 -i ../0002-meson-Add-library-versions-to-swr-drivers.patch
-  patch -Np1 -i ../0003-meson-Version-libMesaOpenCL-like-autotools-does.patch
-
-  # experimental patch, should fix FS#58549
-  # variant 2 patch should fix FS#58605
-  # see https://bugs.freedesktop.org/show_bug.cgi?id=106351
-  # and https://patchwork.freedesktop.org/series/42687/
-  patch -Np1 -i ../0004-loader_dri3-Variant-2-Wait-for-pending-swaps-to-comp.patch
-
-  # disk cache: Link with -latomic if necessary
-  patch -Np1 -i ../atomic.patch
 }
 
 build() {
@@ -73,7 +53,7 @@ build() {
     -D egl=true \
     -D gallium-extra-hud=true \
     -D gallium-nine=true \
-    -D gallium-omx=true \
+    -D gallium-omx=bellagio \
     -D gallium-va=true \
     -D gallium-vdpau=true \
     -D gallium-xa=false \
