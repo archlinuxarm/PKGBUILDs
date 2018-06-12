@@ -1,14 +1,14 @@
 # $Id$
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - do not use LLINT assembly for v5/v6
-#  - remove Atomics.cpp from build for v5/v6 - https://bugs.webkit.org/show_bug.cgi?id=161900
 
 highmem=1
 
 pkgname=webkit2gtk
-pkgver=2.20.2
+pkgver=2.20.3
 pkgrel=1
 pkgdesc="GTK+ Web content engine library"
 arch=(x86_64)
@@ -21,24 +21,15 @@ optdepends=('gtk2: Netscape plugin support'
             'gst-plugins-base: free media decoding'
             'gst-plugins-good: media decoding'
             'gst-libav: nonfree media decoding')
-source=(https://webkitgtk.org/releases/webkitgtk-${pkgver}.tar.xz{,.asc}
-        gtk-doc.diff
-        remove_atomics.patch)
-sha256sums=('dffe93a241f03f1c73b369f4e323e4d8f12e39d33d5515948cbf454ca4b526e2'
-            'SKIP'
-            '4f116b4508d4501498d1e1483555bc5d4e3f5504c5a2f3ec6a21c646b874cdb4'
-            'd0a1469fdaa5d6f4ff7e498d26470224916b64a6dbe28ba7ad699c19da9ee9ab')
+source=(https://webkitgtk.org/releases/webkitgtk-${pkgver}.tar.xz{,.asc})
+sha256sums=('579b307d78fa16a73f112790178022166d7ad17d4147492ced9b9fba48f20dd8'
+            'SKIP')
 validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3')
 
 prepare() {
   mkdir build
   cd webkitgtk-$pkgver
-  patch -Np1 -i ../gtk-doc.diff
   sed -i '1s/python$/&2/' Tools/gtk/generate-gtkdoc
-
-  if [[ $CARCH == "arm" || $CARCH == "armv6h" ]]; then
-    patch -p0 -i ../remove_atomics.patch
-  fi
 }
 
 build() {
@@ -47,8 +38,7 @@ build() {
   # do not use LLINT assembly for v5/v6
   [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && CONFIG="-DENABLE_JIT=OFF"
 
-  cmake \
-    -G Ninja \
+  cmake ../webkitgtk-$pkgver -G Ninja \
     -DPORT=GTK \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
@@ -57,18 +47,25 @@ build() {
     -DLIBEXEC_INSTALL_DIR=/usr/lib \
     -DLIB_INSTALL_DIR=/usr/lib \
     -DPYTHON_EXECUTABLE=/usr/bin/python2 \
-    $CONFIG ../webkitgtk-$pkgver
-  ninja
+    $CONFIG
+  cmake --build .
+}
+
+check() {
+  : # cmake --build build --target tests
 }
 
 package() {
-  DESTDIR="$pkgdir" ninja -C build install
+  DESTDIR="$pkgdir" cmake --build build --target install
 
   cd webkitgtk-$pkgver
-  find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | while IFS= read -d $'\0' -r _f
-  do
-    echo "### $_f ###"
-    cat "$_f"
-    echo
-  done | install -Dm644 /dev/stdin "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | sort -z |
+    while IFS= read -d $'\0' -r _f; do
+      echo "### $_f ###"
+      cat "$_f"
+      echo
+    done |
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
+
+# vim:set sw=2 et:
