@@ -4,13 +4,12 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
-#  - upstream patch for libatomic
 
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=18.1.1
-pkgrel=1
+pkgrel=1.1
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -39,7 +38,7 @@ prepare() {
 }
 
 build() {
-  [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,imx"
+  [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,imx,tegra"
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",vc4"
 
   arch-meson mesa-$pkgver build \
