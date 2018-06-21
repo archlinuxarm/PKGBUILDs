@@ -11,34 +11,43 @@ highmem=1
 
 pkgbase=gmic
 pkgname=(gmic zart gimp-plugin-gmic krita-plugin-gmic)
-pkgver=2.2.3
-_commit=34f7e483a819dd2af4f772d0f748928119f22f6d
-pkgrel=1
+pkgver=2.3.0
+pkgrel=2
 arch=(x86_64)
 url="http://gmic.eu/"
 license=(custom:CeCILL)
 makedepends=(gimp qt5-base fftw openexr opencv git)
-source=("https://gmic.eu/files/source/gmic_$pkgver.tar.gz"
-        git://github.com/c-koi/zart.git#commit=$_commit
-	gmic-qt-v.$pkgver.tar.gz::"https://github.com/c-koi/gmic-qt/archive/v.$pkgver.tar.gz")
-sha256sums=('366e348ebfa85354e99b19eecf2e6b10d445901132eb73c84b18fb23af23f0e8'
-            'SKIP'
-            '72a6ad1f1acb15f4d9417c9cd16615160d04f764aaa2b0206fa6c80587fb91af')
+source=(https://gmic.eu/files/source/gmic_$pkgver.tar.gz zart-qt5.11.patch)
+sha256sums=('57fc98ccc4f2720fb54d1aef6c2e5a2125894f8ae46827b0c644ca9ba066653f'
+            '92c7c98ccfd92d824e13d52db6136877a7ff483a411fed0d28f7e96474ab9c1b')
 
 prepare() {
-  mv gmic-$pkgver gmic
-  mv gmic-qt-v.$pkgver gmic-qt
-
-  sed -e 's|/etc/bash_completion.d|/usr/share/bash-completion/completions|g' -i gmic/src/Makefile
-  sed -e 's|-Ofast|-O2 -fno-fast-math|g' -i gmic-qt/gmic_qt.pro
-  sed -e 's/pkg-config opencv --libs ||//' -e 's/-lopencv_highgui/-lopencv_videoio/' -i gmic/src/Makefile # fix overlinking
+  sed -e 's|/etc/bash_completion.d|/usr/share/bash-completion/completions|g' -i gmic-$pkgver/src/Makefile
+  sed -e 's|-Ofast|-O2 -fno-fast-math|g' -i gmic-$pkgver/gmic-qt/gmic_qt.pro
+# fix overlinking
+  sed -e 's/pkg-config opencv --libs ||//' -e 's/-lopencv_highgui/-lopencv_videoio/' -i gmic-$pkgver/src/Makefile 
 
   sed -i "s|-mtune=generic|${CFLAGS}|" gmic/src/Makefile
+
+  cd gmic-$pkgver/zart
+  patch -p1 -i ../../zart-qt5.11.patch # Fix build with Qt 5.11
 }
 
 build() {
-  cd gmic
-  make -C src all WGET=/bin/true -j1
+  cd gmic-$pkgver
+  make -C src cli lib libc WGET=/bin/true
+
+  cd gmic-qt
+  qmake GMIC_PATH=../src GMIC_DYNAMIC_LINKING=on HOST=none
+  make
+  qmake GMIC_PATH=../src GMIC_DYNAMIC_LINKING=on HOST=gimp
+  make
+  qmake GMIC_PATH=../src GMIC_DYNAMIC_LINKING=on HOST=krita
+  make  
+
+  cd ../zart
+  qmake GMIC_PATH=../src GMIC_DYNAMIC_LINKING=on
+  make
 }
 
 package_gmic() {
@@ -46,7 +55,7 @@ package_gmic() {
   depends=(opencv fftw curl)
   optdepends=('qt5-base: for the Qt UI')
 
-  cd gmic/src
+  cd gmic-$pkgver/src
   make DESTDIR="$pkgdir" install
   install -Dm644 ../COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
   rm -r "$pkgdir"/usr/{bin/zart,lib/gimp,bin/gmic_krita_qt}
@@ -54,23 +63,24 @@ package_gmic() {
 
 package_zart() {
   pkgdesc="A GUI for G'MIC real-time manipulations on the output of a webcam"
-  depends=(opencv fftw qt5-base)
+  depends=(gmic qt5-base)
 
-  install -Dm755 gmic/zart/zart -t "$pkgdir"/usr/bin
-  install -Dm644 zart/Licence_CeCILL_V2-en.html -t "$pkgdir"/usr/share/licenses/$pkgname
+  install -Dm755 gmic-$pkgver/zart/zart -t "$pkgdir"/usr/bin
+  install -Dm644 gmic-$pkgver/zart/Licence_CeCILL_V2-en.html -t "$pkgdir"/usr/share/licenses/$pkgname
 }
 
 package_gimp-plugin-gmic() {
   pkgdesc="Gimp plugin for the G'MIC image processing framework"
-  depends=(gimp fftw qt5-base curl)
+  depends=(gimp gmic qt5-base)
 
-  install -Dm755 gmic/gmic-qt/gmic_gimp_qt "$pkgdir"/usr/lib/gimp/2.0/plug-ins/gmic_gimp
-  install -Dm644 gmic-qt/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm755 gmic-$pkgver/gmic-qt/gmic_gimp_qt "$pkgdir"/usr/lib/gimp/2.0/plug-ins/gmic_gimp
+  install -Dm644 gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 package_krita-plugin-gmic() {
   pkgdesc="Krita plugin for the G'MIC image processing framework"
-  depends=(krita)
+  depends=(krita gmic)
 
-  install -Dm755 gmic/gmic-qt/gmic_krita_qt -t "$pkgdir"/usr/bin/
+  install -Dm755 gmic-$pkgver/gmic-qt/gmic_krita_qt -t "$pkgdir"/usr/bin/
+  install -Dm644 gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
