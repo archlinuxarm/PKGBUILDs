@@ -1,0 +1,76 @@
+# $Id$
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Contributor: Mirco Tischler <mt-ml at gmx dot de>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - cherry-pick upstream commit to fix ARM FTBFS
+
+pkgname=ostree
+pkgver=2018.6
+pkgrel=1
+pkgdesc="Operating system and container binary deployment and upgrades"
+url="https://ostree.readthedocs.org/en/latest/"
+arch=(x86_64)
+license=(GPL)
+depends=(glib2 xz zlib libsoup gpgme libarchive fuse2 util-linux mkinitcpio openssl avahi)
+makedepends=(e2fsprogs gobject-introspection gtk-doc libxslt systemd git python2)
+checkdepends=(parallel syslinux gjs cpio elfutils)
+_commit=31a356dca9656fcc62b5af11502e20d2d9aa7e91  # tags/v2018.6^0
+source=("git+https://github.com/ostreedev/ostree#commit=$_commit"
+        "git+https://github.com/mendsley/bsdiff"
+        "git+https://gitlab.gnome.org/GNOME/libglnx.git")
+sha256sums=('SKIP'
+            'SKIP'
+            'SKIP')
+
+prepare() {
+  cd $pkgname
+
+  git submodule init
+  git config --local submodule.bsdiff.url "$srcdir/bsdiff"
+  git config --local submodule.libglnx.url "$srcdir/libglnx"
+  git submodule update
+
+  # fix ARM FTBFS
+  git cherry-pick -n 1174d9f5ba537562c67084caf0214544fbb14ffc
+
+  find . -name '*.py' -exec sed -i '1s/python$/&2/' {} +
+
+  NOCONFIGURE=1 ./autogen.sh
+}
+
+pkgver() {
+  cd $pkgname
+  git describe | sed 's/^v//;s/-/+/g'
+}
+
+build() {
+  cd $pkgname
+
+  ./configure \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --sbindir=/usr/bin \
+    --libexecdir=/usr/lib \
+    --with-mkinitcpio \
+    --with-openssl \
+    --with-builtin-grub2-mkconfig \
+    --enable-experimental-api \
+    --disable-static \
+    --enable-gtk-doc
+
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+
+  make
+}
+
+check() {
+  cd $pkgname
+  make check || :
+}
+
+package() {
+  cd $pkgname
+  make DESTDIR="$pkgdir" install
+}
