@@ -1,0 +1,114 @@
+# $Id$
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Mark Coolen <mark.coolen@gmail.com>
+# Contributor: Tom Newsom <Jeepster@gmx.co.uk>
+# Contributor: Kevin Piche <kevin@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - explicitly link v5/v6 with libatomic
+
+pkgname=squid
+pkgver=4.1
+pkgrel=1
+pkgdesc='Full-featured Web proxy cache server'
+arch=('x86_64')
+url='http://www.squid-cache.org'
+depends=('openssl-1.0' 'pam' 'perl' 'libltdl' 'libcap' 'nettle' 'gnutls' 'libnsl')
+makedepends=('krb5')
+license=('GPL')
+options=('emptydirs')
+backup=('etc/squid/squid.conf'
+	'etc/squid/cachemgr.conf'
+	'etc/squid/errorpage.css'
+	'etc/squid/mime.conf')
+validpgpkeys=('EA31CC5E9488E5168D2DCC5EB268E706FF5CF463'
+	      'B06884EDB779C89B044E64E3CD6DBF8EF3B17D3E')
+source=("http://www.squid-cache.org/Versions/v4/$pkgname-$pkgver.tar.xz"{,.asc}
+        'squid.pam'
+        'squid.service'
+        'squid.tmpfiles'
+        'squid.sysusers'
+        'squid-rotate.service'
+        'squid-rotate.timer')
+sha256sums=('b61e486fe1ba1f5c918a48d5ae3929d3f604e347c3c7dceb1105a9f0e5ee9eb5'
+            'SKIP'
+            '11fb388f8679fd6461e0de006810ea608a3686fffda16904b0ed71f412be499c'
+            'b0cf95652d56c62ae0ceba8912d11ac248bdb3eb91f062bceadd99f80c4b160e'
+            '495f54e51f6ec1e4dce87090d76718aea1eb37559c4439d876dd39598163062a'
+            'c903eb86e6968b9d3bd0a9ad3335e8ce76a718b6217251e9dd7e66d5cf1ac94a'
+            '3a97aa6bf6dcdc427e73bb2f36afdeaaf2bbf7dd2c0bbb7f1a948850198a8b7c'
+            '8bc77fa1f653a17a4956feac042be9577ba30a8a43480b443fbd67640ae711ee')
+
+prepare() {
+  cd "$srcdir/$pkgname-$pkgver"
+}
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && LIBS="-latomic"
+
+  PKG_CONFIG_PATH=/usr/lib/openssl-1.0/pkgconfig \
+  LIBS=$LIBS
+  ./configure \
+    --prefix=/usr \
+    --sbindir=/usr/bin \
+    --datadir=/usr/share/squid \
+    --sysconfdir=/etc/squid \
+    --libexecdir=/usr/lib/squid \
+    --localstatedir=/var \
+    --with-logdir=/var/log/squid \
+    --with-pidfile=/run/squid.pid \
+    --enable-auth \
+    --enable-auth-basic \
+    --enable-auth-ntlm \
+    --enable-auth-digest \
+    --enable-auth-negotiate \
+    --enable-removal-policies="lru,heap" \
+    --enable-storeio="aufs,ufs,diskd,rock" \
+    --enable-delay-pools \
+    --enable-arp-acl \
+    --with-openssl \
+    --enable-snmp \
+    --enable-linux-netfilter \
+    --enable-ident-lookups \
+    --enable-useragent-log \
+    --enable-cache-digests \
+    --enable-referer-log \
+    --enable-arp-acl \
+    --enable-htcp \
+    --enable-carp \
+    --enable-epoll \
+    --with-large-files \
+    --enable-arp-acl \
+    --with-default-user=proxy \
+    --enable-async-io \
+    --enable-truncate \
+    --enable-icap-client \
+    --enable-ssl-crtd \
+    --disable-arch-native \
+    --disable-strict-error-checking \
+    --enable-wccpv2
+  make
+}
+
+package() {
+  cd "$srcdir"
+
+  make -C "$pkgname-$pkgver" DESTDIR="$pkgdir" install
+  install -Dm644 "$srcdir/squid.pam" "$pkgdir/etc/pam.d/squid"
+  install -Dm644 "$srcdir/squid.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/squid.conf"
+  install -Dm644 "$srcdir/squid.sysusers" "$pkgdir/usr/lib/sysusers.d/squid.conf"
+  install -Dm644 "$srcdir/squid.service" \
+    "$pkgdir/usr/lib/systemd/system/squid.service"
+  install -Dm644 "$srcdir/squid-rotate.service" \
+    "$pkgdir/usr/lib/systemd/system/squid-rotate.service"
+  install -Dm644 "$srcdir/squid-rotate.timer" \
+    "$pkgdir/usr/lib/systemd/system/squid-rotate.timer"
+#  install -dm755 "$pkgdir/usr/lib/systemd/system/timers.target.wants"
+#  ln -s ../squid-rotate.timer \
+#    "$pkgdir/usr/lib/systemd/system/timers.target.wants/squid-rotate.timer"
+  rm -rf "$pkgdir/run" "$pkgdir"/var/{cache,log,run}
+}
+
+# vim: ts=2 sw=2 et ft=sh
