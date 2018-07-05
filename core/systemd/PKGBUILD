@@ -7,16 +7,15 @@
 #  - disable gold/LTO
 #  - removed makedepend on gnu-efi-libs, set -Dgnuefi=false
 #  - patch to whitelist cacheflush syscall
-#  - backport timesyncd fix
 
 pkgbase=systemd
-pkgname=('systemd' 'libsystemd' 'systemd-sysvcompat')
+pkgname=('systemd' 'libsystemd' 'systemd-resolvconf' 'systemd-sysvcompat')
 # Can be from either systemd or systemd-stable
-_commit='f58e62cbbc1c2842881a2a6ab9beda7bcb044a30'
-pkgver=238.133
-pkgrel=4
+_commit='de7436b02badc82200dc127ff190b8155769b8e7'
+pkgver=239.0
+pkgrel=2
 arch=('x86_64')
-url="https://www.github.com/systemd/systemd"
+url='https://www.github.com/systemd/systemd'
 makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
              'intltool' 'iptables' 'kmod' 'libcap' 'libidn' 'libgcrypt'
              'libmicrohttpd' 'libxslt' 'util-linux' 'linux-api-headers'
@@ -52,7 +51,7 @@ sha512sums=('SKIP'
             '9348683829190628e25b7b3300fd880c426d555bde330d5fc5150a9a54b3ad9d4d1f2e69ea1dc6d6f086693dacc53c5af30f1fa7ad9b479791fd77bcdafa430e'
             'df7ec8f840a54b404d1f3ab2708ae2a618820cb411b826128cf10b20ccdab057306446295c6b1c98a05ca0adb1b30d390dfb0156b52ea772978e1f1bf5135e09'
             'f0d933e8c6064ed830dec54049b0a01e27be87203208f6ae982f10fb4eddc7258cb2919d594cbfb9a33e74c3510cfd682f3416ba8e804387ab87d1a217eb4b73'
-            '3214b80fb5e3a9eed026dc1d6f23a3785c34b03dd09cba536ad4413322fc0d83936ec3d140ad11ffbf527b4bb8b83887044209c453bd1a25d22d6b9cbcd88288'
+            '01de24951a05d38eca6b615a7645beb3677ca0e0f87638d133649f6dc14dcd2ea82594a60b793c31b14493a286d1d11a0d25617f54dbfa02be237652c8faa691'
             'a25b28af2e8c516c3a2eec4e64b8c7f70c21f974af4a955a4a9d45fd3e3ff0d2a98b4419fe425d47152d5acae77d64e69d8d014a7209524b75a81b0edb10bf3a'
             '61032d29241b74a0f28446f8cf1be0e8ec46d0847a61dadb2a4f096e8686d5f57fe5c72bcf386003f6520bc4b5856c32d63bf3efe7eb0bc0deefc9f68159e648'
             'c416e2121df83067376bcaacb58c05b01990f4614ad9de657d74b6da3efa441af251d13bf21e3f0f71ddcb4c9ea658b81da3d915667dc5c309c87ec32a1cb5a5'
@@ -70,25 +69,6 @@ sha512sums=('SKIP'
             '209b01b044877cc986757fa4009a92ea98f480306c2530075d153203c3cd2b3afccab6aacc1453dee8857991e04270572f1700310705d7a0f4d5bed27fab8c67')
 
 _backports=(
-  # nspawn: wait for network namespace creation before interface setup (#8633)
-  '7511655807e90aa33ea7b71991401a79ec36bb41'
-
-  # sd-shutdown improvements #8429
-  # umount: Add more asserts and remove some unused arguments
-  '0494cae03d762eaf2fb7217ee7d70f615dcb5183'
-  # umount: Decide whether to remount read-only earlier
-  '1d62d22d9432d5c4a637002c9a29b20d52f25d9a'
-  # umount: Provide the same mount flags too when remounting read-only
-  '3bc341bee9fc7dfb41a131246b6fb0afd6ff4407'
-  # umount: Try unmounting even if remounting read-only failed
-  '8645ffd12b3cc7b0292acd9e1d691c4fab4cf409'
-  # shutdown: Reduce log level of unmounts
-  '456b2199f6ef0378da007e71347657bcf83ae465'
-  # umount: Don't bother remounting api and ro filesystems read-only
-  'e783b4902f387640bba12496936d01e967545c3c'
-
-  # timesync: establish connection when network become online and the manager is not connected yet
-  '0630eb1bcc6a4c2d05e57f58bea77da36697530a'
 )
 
 _reverts=(
@@ -164,7 +144,7 @@ check() {
 }
 
 package_systemd() {
-  pkgdesc="system and service manager"
+  pkgdesc='system and service manager'
   license=('GPL2' 'LGPL2.1')
   groups=('base-devel')
   depends=('acl' 'bash' 'cryptsetup' 'dbus' 'iptables' 'kbd' 'kmod' 'hwids' 'libcap'
@@ -200,7 +180,7 @@ package_systemd() {
   rmdir "$pkgdir"/var/log/journal/remote
 
   # runtime libraries shipped with libsystemd
-  install -dm755 libsystemd
+  install -d -m0755 libsystemd
   mv "$pkgdir"/usr/lib/lib{nss,systemd,udev}*.so* libsystemd
 
   # manpages shipped with systemd-sysvcompat
@@ -209,20 +189,23 @@ package_systemd() {
   # executable (symlinks) shipped with systemd-sysvcompat
   rm "$pkgdir"/usr/bin/{halt,init,poweroff,reboot,runlevel,shutdown,telinit}
 
+  # files shipped with systemd-resolvconf
+  rm "$pkgdir"/usr/{bin/resolvconf,share/man/man1/resolvconf.1}
+
   # avoid a potential conflict with [core]/filesystem
   rm "$pkgdir"/usr/share/factory/etc/nsswitch.conf
   sed -i '/^C \/etc\/nsswitch\.conf/d' "$pkgdir"/usr/lib/tmpfiles.d/etc.conf
 
   # add back tmpfiles.d/legacy.conf, normally omitted without sysv-compat
-  install -m644 $pkgbase-stable/tmpfiles.d/legacy.conf "$pkgdir"/usr/lib/tmpfiles.d
+  install -m0644 $pkgbase-stable/tmpfiles.d/legacy.conf "$pkgdir"/usr/lib/tmpfiles.d
 
   # ship default policy to leave services disabled
   echo 'disable *' >"$pkgdir"/usr/lib/systemd/system-preset/99-default.preset
 
   # add mkinitcpio hooks
-  install -Dm644 initcpio-install-systemd "$pkgdir"/usr/lib/initcpio/install/systemd
-  install -Dm644 initcpio-install-udev "$pkgdir"/usr/lib/initcpio/install/udev
-  install -Dm644 initcpio-hook-udev "$pkgdir"/usr/lib/initcpio/hooks/udev
+  install -D -m0644 initcpio-install-systemd "$pkgdir"/usr/lib/initcpio/install/systemd
+  install -D -m0644 initcpio-install-udev "$pkgdir"/usr/lib/initcpio/install/udev
+  install -D -m0644 initcpio-hook-udev "$pkgdir"/usr/lib/initcpio/hooks/udev
 
   # ensure proper permissions for /var/log/journal
   # The permissions are stored with named group by tar, so this works with
@@ -231,42 +214,56 @@ package_systemd() {
   install -d -o root -g systemd-journal -m 2755 "$pkgdir"/var/log/journal
 
   # match directory owner/group and mode from [extra]/polkit
-  install -d -o root -g 102 -m 750 "$pkgdir"/usr/share/polkit-1/rules.d
+  install -d -o root -g 102 -m 0750 "$pkgdir"/usr/share/polkit-1/rules.d
 
   # add example bootctl configuration
-  install -Dm644 arch.conf "$pkgdir"/usr/share/systemd/bootctl/arch.conf
-  install -Dm644 loader.conf "$pkgdir"/usr/share/systemd/bootctl/loader.conf
-  install -Dm644 splash-arch.bmp "$pkgdir"/usr/share/systemd/bootctl/splash-arch.bmp
+  install -D -m0644 arch.conf "$pkgdir"/usr/share/systemd/bootctl/arch.conf
+  install -D -m0644 loader.conf "$pkgdir"/usr/share/systemd/bootctl/loader.conf
+  install -D -m0644 splash-arch.bmp "$pkgdir"/usr/share/systemd/bootctl/splash-arch.bmp
 
   # pacman hooks
-  install -Dm755 systemd-hook "$pkgdir"/usr/share/libalpm/scripts/systemd-hook
-  install -Dm644 -t "$pkgdir"/usr/share/libalpm/hooks *.hook
+  install -D -m0755 systemd-hook "$pkgdir"/usr/share/libalpm/scripts/systemd-hook
+  install -D -m0644 -t "$pkgdir"/usr/share/libalpm/hooks *.hook
 
   # overwrite the systemd-user PAM configuration with our own
-  install -Dm644 systemd-user.pam "$pkgdir"/etc/pam.d/systemd-user
+  install -D -m0644 systemd-user.pam "$pkgdir"/etc/pam.d/systemd-user
 }
 
 package_libsystemd() {
-  pkgdesc="systemd client libraries"
+  pkgdesc='systemd client libraries'
   depends=('glibc' 'libcap' 'libgcrypt' 'lz4' 'xz')
   license=('GPL2')
   provides=('libsystemd.so' 'libudev.so')
 
-  install -dm755 "$pkgdir"/usr
+  install -d -m0755 "$pkgdir"/usr
   mv libsystemd "$pkgdir"/usr/lib
 }
 
+package_systemd-resolvconf() {
+  pkgdesc='systemd resolvconf replacement'
+  license=('GPL2')
+  depends=('systemd')
+  provides=('openresolv' 'resolvconf')
+  conflicts=('openresolv')
+
+  install -d -m0755 "$pkgdir"/usr/bin
+  ln -s resolvectl "$pkgdir"/usr/bin/resolvconf
+
+  install -d -m0755 "$pkgdir"/usr/share/man/man1
+  ln -s resolvectl.1.gz "$pkgdir"/usr/share/man/man1/resolvconf.1.gz
+}
+
 package_systemd-sysvcompat() {
-  pkgdesc="sysvinit compat for systemd"
+  pkgdesc='sysvinit compat for systemd'
   license=('GPL2')
   groups=('base')
   conflicts=('sysvinit')
   depends=('systemd')
 
-  install -Dm644 -t "$pkgdir"/usr/share/man/man8 \
+  install -D -m0644 -t "$pkgdir"/usr/share/man/man8 \
     build/man/{telinit,halt,reboot,poweroff,runlevel,shutdown}.8
 
-  install -dm755 "$pkgdir"/usr/bin
+  install -d -m0755 "$pkgdir"/usr/bin
   ln -s ../lib/systemd/systemd "$pkgdir"/usr/bin/init
   for tool in runlevel reboot shutdown poweroff halt telinit; do
     ln -s systemctl "$pkgdir"/usr/bin/$tool
