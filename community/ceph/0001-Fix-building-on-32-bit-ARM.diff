@@ -1,0 +1,158 @@
+From d04bf15ce582037c8b256711c697238bbdb4c031 Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Thu, 5 Jul 2018 09:54:41 -0600
+Subject: [PATCH] Fix building on 32-bit ARM
+
+---
+ src/common/ceph_context.h             | 2 +-
+ src/mon/OSDMonitor.cc                 | 4 ++--
+ src/os/bluestore/BlueStore.cc         | 2 +-
+ src/osd/PrimaryLogPG.cc               | 4 ++--
+ src/rgw/rgw_op.h                      | 4 ++--
+ src/rgw/rgw_rest_swift.cc             | 6 +++---
+ src/rgw/rgw_sync_log_trim.cc          | 4 ++--
+ src/test/rbd_mirror/test_ImageSync.cc | 2 +-
+ 8 files changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/src/common/ceph_context.h b/src/common/ceph_context.h
+index 6af282225c..cda1b002a2 100644
+--- a/src/common/ceph_context.h
++++ b/src/common/ceph_context.h
+@@ -144,7 +144,7 @@ public:
+   void do_command(std::string_view command, const cmdmap_t& cmdmap,
+ 		  std::string_view format, ceph::bufferlist *out);
+ 
+-  static constexpr std::size_t largest_singleton = sizeof(void*) * 72;
++  static constexpr std::size_t largest_singleton = sizeof(void*) * 128;
+ 
+   template<typename T, typename... Args>
+   T& lookup_or_create_singleton_object(std::string_view name,
+diff --git a/src/mon/OSDMonitor.cc b/src/mon/OSDMonitor.cc
+index 244c8dbf1b..3e96017289 100644
+--- a/src/mon/OSDMonitor.cc
++++ b/src/mon/OSDMonitor.cc
+@@ -738,8 +738,8 @@ OSDMonitor::update_pending_pgs(const OSDMap::Incremental& inc,
+ 	     << " modified " << p->second.modified
+ 	     << " [" << p->second.start << "-" << p->second.end << ")"
+ 	     << dendl;
+-    int n = std::min(max - pending_creatings.pgs.size(),
+-		p->second.end - p->second.start);
++    int n = std::min((long)(max - pending_creatings.pgs.size()),
++		(long)(p->second.end - p->second.start));
+     ps_t first = p->second.start;
+     ps_t end = first + n;
+     for (ps_t ps = first; ps < end; ++ps) {
+diff --git a/src/os/bluestore/BlueStore.cc b/src/os/bluestore/BlueStore.cc
+index 17e485a131..2903881156 100644
+--- a/src/os/bluestore/BlueStore.cc
++++ b/src/os/bluestore/BlueStore.cc
+@@ -12225,7 +12225,7 @@ size_t BlueStoreRepairer::StoreSpaceTracker::filter_out(
+     if (e.second == 0) {
+       continue;
+     }
+-    size_t pos = max(e.first / granularity, prev_pos);
++    size_t pos = max((long)(e.first / granularity), (long)prev_pos);
+     size_t end_pos = 1 + (e.first + e.second - 1) / granularity;
+     while (pos != npos && pos < end_pos)  {
+         assert( collections_bfs[pos].element_count() ==
+diff --git a/src/osd/PrimaryLogPG.cc b/src/osd/PrimaryLogPG.cc
+index 848b2dd12b..65e75ef8d6 100644
+--- a/src/osd/PrimaryLogPG.cc
++++ b/src/osd/PrimaryLogPG.cc
+@@ -1628,8 +1628,8 @@ void PrimaryLogPG::calc_trim_to()
+   if (limit != eversion_t() &&
+       limit != pg_trim_to &&
+       pg_log.get_log().approx_size() > target) {
+-    size_t num_to_trim = std::min(pg_log.get_log().approx_size() - target,
+-				  cct->_conf->osd_pg_log_trim_max);
++    size_t num_to_trim = std::min((long)(pg_log.get_log().approx_size() - target),
++				  (long)(cct->_conf->osd_pg_log_trim_max));
+     if (num_to_trim < cct->_conf->osd_pg_log_trim_min &&
+ 	cct->_conf->osd_pg_log_trim_max >= cct->_conf->osd_pg_log_trim_min) {
+       return;
+diff --git a/src/rgw/rgw_op.h b/src/rgw/rgw_op.h
+index da638eb4c0..07ab0a119d 100644
+--- a/src/rgw/rgw_op.h
++++ b/src/rgw/rgw_op.h
+@@ -1974,7 +1974,7 @@ static inline int rgw_get_request_metadata(CephContext* const cct,
+        * as ObjectStore::get_max_attr_name_length() can set the limit even
+        * lower than the "osd_max_attr_name_len" configurable.  */
+       const size_t max_attr_name_len = \
+-        cct->_conf->get_val<size_t>("rgw_max_attr_name_len");
++        cct->_conf->get_val<Option::size_t>("rgw_max_attr_name_len");
+       if (max_attr_name_len && attr_name.length() > max_attr_name_len) {
+         return -ENAMETOOLONG;
+       }
+@@ -1990,7 +1990,7 @@ static inline int rgw_get_request_metadata(CephContext* const cct,
+       /* Swift allows administrators to limit the number of metadats items
+        * send _in a single request_. */
+       const auto rgw_max_attrs_num_in_req = \
+-        cct->_conf->get_val<size_t>("rgw_max_attrs_num_in_req");
++        cct->_conf->get_val<Option::size_t>("rgw_max_attrs_num_in_req");
+       if (rgw_max_attrs_num_in_req &&
+           ++valid_meta_count > rgw_max_attrs_num_in_req) {
+         return -E2BIG;
+diff --git a/src/rgw/rgw_rest_swift.cc b/src/rgw/rgw_rest_swift.cc
+index ebf2803b62..70cef69f5c 100644
+--- a/src/rgw/rgw_rest_swift.cc
++++ b/src/rgw/rgw_rest_swift.cc
+@@ -724,7 +724,7 @@ static inline int handle_metadata_errors(req_state* const s, const int op_ret)
+   } else if (op_ret == -E2BIG) {
+     const auto error_message = boost::str(
+       boost::format("Too many metadata items; max %lld")
+-        % s->cct->_conf->get_val<size_t>("rgw_max_attrs_num_in_req"));
++        % s->cct->_conf->get_val<Option::size_t>("rgw_max_attrs_num_in_req"));
+     set_req_state_err(s, EINVAL, error_message);
+     return -EINVAL;
+   }
+@@ -1779,7 +1779,7 @@ void RGWInfo_ObjStore_SWIFT::list_swift_data(Formatter& formatter,
+   formatter.dump_string("version", ceph_version);
+ 
+   const size_t max_attr_name_len = \
+-    g_conf->get_val<size_t>("rgw_max_attr_name_len");
++    g_conf->get_val<Option::size_t>("rgw_max_attr_name_len");
+   if (max_attr_name_len) {
+     const size_t meta_name_limit = \
+       max_attr_name_len - strlen(RGW_ATTR_PREFIX RGW_AMZ_META_PREFIX);
+@@ -1792,7 +1792,7 @@ void RGWInfo_ObjStore_SWIFT::list_swift_data(Formatter& formatter,
+   }
+ 
+   const size_t meta_num_limit = \
+-    g_conf->get_val<size_t>("rgw_max_attrs_num_in_req");
++    g_conf->get_val<Option::size_t>("rgw_max_attrs_num_in_req");
+   if (meta_num_limit) {
+     formatter.dump_int("max_meta_count", meta_num_limit);
+   }
+diff --git a/src/rgw/rgw_sync_log_trim.cc b/src/rgw/rgw_sync_log_trim.cc
+index e1002253b8..b5dc6aa899 100644
+--- a/src/rgw/rgw_sync_log_trim.cc
++++ b/src/rgw/rgw_sync_log_trim.cc
+@@ -351,10 +351,10 @@ int take_min_status(CephContext *cct, Iter first, Iter last,
+   status->clear();
+   // The initialisation below is required to silence a false positive
+   // -Wmaybe-uninitialized warning
+-  boost::optional<size_t> num_shards = boost::make_optional(false, 0UL);
++  boost::optional<size_t> num_shards = boost::none;
+   for (auto peer = first; peer != last; ++peer) {
+     const size_t peer_shards = peer->size();
+-    if (!num_shards) {
++    if (num_shards == boost::none) {
+       num_shards = peer_shards;
+       status->resize(*num_shards);
+     } else if (*num_shards != peer_shards) {
+diff --git a/src/test/rbd_mirror/test_ImageSync.cc b/src/test/rbd_mirror/test_ImageSync.cc
+index 5ef2cbe77a..814c73b8ca 100644
+--- a/src/test/rbd_mirror/test_ImageSync.cc
++++ b/src/test/rbd_mirror/test_ImageSync.cc
+@@ -41,7 +41,7 @@ int flush(librbd::ImageCtx *image_ctx) {
+ 
+ void scribble(librbd::ImageCtx *image_ctx, int num_ops, size_t max_size)
+ {
+-  max_size = std::min(image_ctx->size, max_size);
++  max_size = std::min((long)image_ctx->size, (long)max_size);
+   for (int i=0; i<num_ops; i++) {
+     uint64_t off = rand() % (image_ctx->size - max_size + 1);
+     uint64_t len = 1 + rand() % max_size;
+-- 
+2.18.0
+
