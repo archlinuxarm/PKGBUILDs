@@ -1,0 +1,90 @@
+# $Id$
+# Maintainer: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: Lukas Fleischer <lfleischer@archlinux.org>
+# Contributor: Vesa Kaihlavirta <vesa@archlinux.org>
+# Contributor: Sarah Hay <sarahhay@mb.sympatico.ca>
+# Contributor: Tom Burdick <thomas.burdick@wrightwoodtech.com>
+# Contributor: Ricardo Catalinas Jiménez <jimenezrick@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - configure with --disable-pgo to fix ARM FTBFS
+
+pkgbase=erlang
+pkgname=('erlang' 'erlang-unixodbc')
+pkgver=21.0.2
+pkgrel=1
+_docver=21.0
+arch=('x86_64')
+url='https://www.erlang.org/'
+license=('Apache')
+makedepends=('fop' 'git' 'glu' 'java-environment' 'libxslt' 'lksctp-tools'
+             'mesa' 'perl' 'unixodbc' 'wxgtk')
+options=('staticlibs')
+source=("git+https://github.com/erlang/otp.git#tag=OTP-$pkgver"
+        "http://www.erlang.org/download/otp_doc_man_$_docver.tar.gz"
+        'epmd.service' 'epmd.socket' 'epmd.conf')
+sha256sums=('SKIP'
+            '10bf0e44b97ee8320c4868d5a4259c49d4d2a74e9c48583735ae0401f010fb31'
+            'b121ec9053fb37abca5f910a81c526f93ec30fe13b574a12209223b346886a9e'
+            '998a759e4cea4527f9d9b241bf9f32527d7378d63ea40afa38443c6c3ceaea34'
+            '78ce5e67b21758c767d727e56b20502f75dc4385ff9b6c6db312d8e8506f2df2')
+
+prepare() {
+  cd otp
+
+  ./otp_build autoconf
+}
+
+build() {
+  cd otp
+
+  ./configure \
+    --prefix=/usr \
+    --enable-builtin-zlib \
+    --with-odbc \
+    --enable-smp-support \
+    --disable-pgo
+  make
+}
+
+package_erlang() {
+  pkgdesc='General-purpose concurrent functional programming language developed by Ericsson'
+  depends=('ncurses' 'glu' 'wxgtk' 'openssl')
+  optdepends=('erlang-unixodbc: database support'
+              'java-environment: for Java support'
+              'lksctp-tools: for SCTP support')
+  provides=('erlang-nox')
+  conflicts=('erlang-nox')
+
+  make -C otp DESTDIR="$pkgdir" install
+
+  # move files that belong to the erlang-unixodbc package
+  mkdir -p unixodbc
+  mv "$pkgdir/usr/lib/erlang/lib/odbc"* "$srcdir/unixodbc/"
+
+  # services and configuration
+  install -Dm644 epmd.service "$pkgdir/usr/lib/systemd/system/epmd.service"
+  install -Dm644 epmd.socket "$pkgdir/usr/lib/systemd/system/epmd.socket"
+  install -Dm644 epmd.conf "$pkgdir/etc/conf.d/epmd"
+
+  # readme and licenses
+  install -Dm644 otp/README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 COPYRIGHT "$pkgdir/usr/share/licenses/$pkgname/COPYRIGHT"
+  install -Dm644 otp/LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  # man pages
+  cp -r man "$pkgdir/usr/lib/erlang/"
+}
+
+package_erlang-unixodbc() {
+  pkgdesc='Unixodbc support for Erlang'
+  depends=('unixodbc' 'erlang-nox')
+
+  install -d "$pkgdir/usr/lib/erlang/lib"
+  mv unixodbc/* "$pkgdir/usr/lib/erlang/lib/"
+  install -Dm644 otp/LICENSE.txt \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENCE.txt"
+}
+
+# getver: raw.githubusercontent.com/erlang/otp/maint/OTP_VERSION
+# vim: ts=2 sw=2 et:
