@@ -1,0 +1,51 @@
+# After modifying, run ./mkscr
+#
+# This script is based on boot.txt.default and modified
+# with the commands explained in this thread [1].
+#
+# [1] https://archlinuxarm.org/forum/viewtopic.php?f=23&t=12635
+
+if test -n ${distro_bootpart}; then setenv bootpart ${distro_bootpart}; else setenv bootpart 1; fi
+part uuid ${devtype} ${devnum}:${bootpart} uuid
+
+setenv bootargs "console=tty0 console=${console} root=PARTUUID=${uuid} rw rootwait"
+
+if load ${devtype} ${devnum}:${bootpart} ${kernel_addr_r} /boot/zImage; then
+  gpio set 54
+  echo fdt: ${fdtfile}
+  if load ${devtype} ${devnum}:${bootpart} ${fdt_addr_r} /boot/dtbs/${fdtfile}; then
+    gpio set 55
+
+    fdt addr ${fdt_addr_r}
+
+    # take out the framer
+    fdt rm /ocp/i2c@44e0b000/tda19988
+
+    # disable the lcdc and remove its pins
+    fdt set /ocp/lcdc@4830e000 status "disabled"
+    fdt rm /ocp/l4_wkup@44c00000/scm@210000/pinmux@800/nxp_hdmi_bonelt_pins
+    fdt rm /ocp/l4_wkup@44c00000/scm@210000/pinmux@800/nxp_hdmi_bonelt_off_pins
+
+    # disable the sound and remove pins
+    fdt set /ocp/mcasp@48038000 status "disabled"
+    fdt rm /ocp/l4_wkup@44c00000/scm@210000/pinmux@800/mcasp0_pins
+
+    if load ${devtype} ${devnum}:${bootpart} 0x88060000 /lib/firmware/BB-SPIDEV0-00A0.dtbo; then
+      fdt resize ${filesize}
+      fdt apply 0x88060000
+    fi;
+
+    if load ${devtype} ${devnum}:${bootpart} 0x88060000 /lib/firmware/BB-SPIDEV1-00A0.dtbo; then
+      fdt resize ${filesize}
+      fdt apply 0x88060000
+    fi;
+
+    if load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr_r} /boot/initramfs-linux.img; then
+      gpio set 56
+      bootz ${kernel_addr_r} ${ramdisk_addr_r}:${filesize} ${fdt_addr_r};
+    else
+      gpio set 56
+      bootz ${kernel_addr_r} - ${fdt_addr_r};
+    fi;
+  fi;
+fi
