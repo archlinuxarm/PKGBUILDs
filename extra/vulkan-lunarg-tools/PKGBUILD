@@ -1,0 +1,101 @@
+# $Id$
+# Maintainer: Laurent Carlier <lordheavym@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - use suffix=32 in packaging for 32-bit ARM architectures
+#  - strip -m32 from CMakeLists
+
+pkgbase=vulkan-lunarg-tools
+pkgname=(vulkan-trace vulkan-extra-layers)
+pkgver=1.1.79+10184+7ae1b7c06
+pkgrel=1
+arch=(x86_64)
+url="http://lunarg.com/"
+license=('custom')
+depends=()
+makedepends=(git cmake python vulkan-headers vulkan-icd-loader glslang spirv-tools libx11 libxrandr wayland qt5-svg)
+source=("VulkanLunargTools::git+https://github.com/LunarG/VulkanTools.git#commit=7ae1b7c066137e5730e941de572b2edef17c27df")
+sha256sums=('SKIP')
+
+_install() {
+  local src f dir
+  for src; do
+    f="${src#fakeinstall/}"
+    dir="${pkgdir}/${f%/*}"
+    install -m755 -d "${dir}"
+    mv -v "${src}" "${dir}/"
+  done
+}
+
+pkgver() {
+  cd "${srcdir}/VulkanLunargTools"
+
+  echo 1.1.79+$(git rev-list --count HEAD)+$(git rev-parse --short HEAD)
+}
+
+prepare() {
+  cd "${srcdir}/VulkanLunargTools"
+  sed -i 's/-m32//g' vktrace/CMakeLists.txt
+}
+
+build() {
+  cd "${srcdir}/VulkanLunargTools"
+
+  ./update_external_sources.sh
+
+  rm -rf build ; mkdir build ; cd build
+  cmake \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+    -DCMAKE_INSTALL_DATADIR=/usr/share \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DCMAKE_SKIP_RPATH=True \
+    -DGLSLANG_INSTALL_DIR=/usr \
+    -DBUILD_WSI_XCB_SUPPORT=On \
+    -DBUILD_WSI_XLIB_SUPPORT=On \
+    -DBUILD_WSI_WAYLAND_SUPPORT=On \
+    -DBUILD_WSI_MIR_SUPPORT=Off \
+    -DBUILD_TESTS=OFF \
+    -DBUILD_VIA=OFF \
+    -DCMAKE_BUILD_TYPE=Release \
+    ..
+  make
+  make DESTDIR="${srcdir}/fakeinstall" install
+}
+
+package_vulkan-trace() {
+  pkgdesc="Vulkan tracing and replaying tools"
+  depends=(vulkan-validation-layers qt5-svg)
+  groups=('vulkan-devel')
+
+  [[ $CARCH == i686 || $CARCH == arm || $CARCH == armv6h || $CARCH == armv7h ]] && suffix=32
+
+  _install fakeinstall/usr/bin/*
+  _install fakeinstall/usr/lib/libVkLayer_vktrace_layer${suffix}.so
+  _install fakeinstall/etc/vulkan/explicit_layer.d/VkLayer_vktrace_layer.json
+
+  install -dm755 ${pkgdir}/usr/share/{doc,licenses}/${pkgname}
+  install -m644 VulkanLunargTools/vktrace/LICENSE "${pkgdir}"/usr/share/licenses/${pkgname}/
+  install -m644 VulkanLunargTools/vktrace/vktrace.md "${pkgdir}"/usr/share/doc/${pkgname}/
+}
+
+package_vulkan-extra-layers() {
+  pkgdesc="Extra layers for Vulkan development"
+  depends=(vulkan-validation-layers)
+  groups=('vulkan-devel')
+  
+  _install fakeinstall/usr/lib/libVkLayer_api_dump.so
+  _install fakeinstall/usr/lib/libVkLayer_monitor.so
+  _install fakeinstall/usr/lib/libVkLayer_screenshot.so
+  _install fakeinstall/usr/lib/libVkLayer_device_simulation.so
+
+  _install fakeinstall/etc/vulkan/explicit_layer.d/VkLayer_api_dump.json
+  _install fakeinstall/etc/vulkan/explicit_layer.d/VkLayer_monitor.json
+  _install fakeinstall/etc/vulkan/explicit_layer.d/VkLayer_screenshot.json
+  _install fakeinstall/etc/vulkan/explicit_layer.d/VkLayer_device_simulation.json
+
+  install -dm755 ${pkgdir}/usr/share/{doc,licenses}/${pkgname}
+  install -m644 VulkanLunargTools/LICENSE.txt "${pkgdir}"/usr/share/licenses/${pkgname}/
+  install -m644 VulkanLunargTools/layersvt/README.md "${pkgdir}"/usr/share/doc/${pkgname}/
+}
+
