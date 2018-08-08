@@ -11,10 +11,11 @@
 
 buildarch=12
 highmem=1
+noautobuild=1
 
 pkgname=thunderbird
-pkgver=52.9.1
-pkgrel=1
+pkgver=60.0
+pkgrel=2
 pkgdesc="Standalone mail and news reader from mozilla.org"
 arch=(x86_64)
 license=(MPL GPL LGPL)
@@ -22,21 +23,13 @@ url="https://www.mozilla.org/thunderbird/"
 depends=(gtk3 gtk2 mozilla-common libxt startup-notification mime-types dbus-glib alsa-lib
          nss hunspell sqlite ttf-font libvpx icu)
 makedepends=(unzip zip diffutils python2 yasm mesa imake gconf libpulse inetutils xorg-server-xvfb
-             autoconf2.13)
+             autoconf2.13 rust clang llvm)
 optdepends=('libcanberra: sound support')
 options=(!emptydirs !makeflags)
 source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz
-        $pkgname.desktop
-        0001-Bug-1338655-Don-t-try-to-build-mp4parse-bindings.-r-.patch
-        rust-i686.patch fix-wifi-scanner.diff
-        thunderbird-install-dir.patch no-crmf.diff)
-sha256sums=('286fa71504e7184f3a41bcbdebf591bebe8e04dccbad1c93a47c6e72a7125c4d'
-            'e44c55501f650a4e80b9c353b81f33e07ca65808db831eff6ca616aded233827'
-            '413cd6d366d78f325d80ebebccfd0afa0d266b40b2e54b66ba2fa03c15f3ea67'
-            'f61ea706ce6905f568b9bdafd1b044b58f20737426f0aa5019ddb9b64031a269'
-            '9765bca5d63fb5525bbd0520b7ab1d27cabaed697e2fc7791400abc3fa4f13b8'
-            '24599eab8862476744fe1619a9a53a5b8cdcab30b3fc5767512f31d3529bd05d'
-            'a7317caba56e89932bd9e3b9352d94701dd9a419685057f238b1ded8dc0adcd7')
+        $pkgname.desktop)
+sha256sums=('bd7da88dcc03c448a4e975b5a1d3e9bf466ec9151b1059392bcdb50955a22056'
+            'e44c55501f650a4e80b9c353b81f33e07ca65808db831eff6ca616aded233827')
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -51,36 +44,21 @@ _google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
 _mozilla_api_key=16674381-f021-49de-8622-3021c5942aff
 
 prepare() {
-  mkdir path
-  ln -s /usr/bin/python2 path/python
-
   cd $pkgname-$pkgver
-  patch -Np1 -i ../thunderbird-install-dir.patch
-
-  # https://bugzilla.mozilla.org/show_bug.cgi?id=1314968
-  patch -d mozilla -Np1 < ../fix-wifi-scanner.diff
-
-  # https://bugzilla.mozilla.org/show_bug.cgi?id=1371991
-  patch -Np1 -i ../no-crmf.diff
-
-  # Build with the rust targets we actually ship
-  patch -d mozilla -Np1 < ../rust-i686.patch
-
-  # https://bugs.archlinux.org/task/53890
-  patch -d mozilla -Np1 < ../0001-Bug-1338655-Don-t-try-to-build-mp4parse-bindings.-r-.patch
 
   echo -n "$_google_api_key" >google-api-key
   echo -n "$_mozilla_api_key" >mozilla-api-key
 
   cat >.mozconfig <<END
-ac_add_options --enable-application=mail
+ac_add_options --enable-application=comm/mail
 ac_add_options --enable-calendar
 
 ac_add_options --prefix=/usr
 ac_add_options --enable-release
-#ac_add_options --enable-gold
-#ac_add_options --enable-pie
-#ac_add_options --enable-optimize="-O2"
+ac_add_options --enable-linker=gold
+ac_add_options --enable-hardening
+ac_add_options --enable-optimize
+ac_add_options --enable-rust-simd
 
 # Branding
 ac_add_options --enable-official-branding
@@ -109,35 +87,19 @@ ac_add_options --disable-jack
 ac_add_options --enable-startup-notification
 ac_add_options --disable-crashreporter
 ac_add_options --disable-updater
-
-ac_add_options --disable-elf-hack
-ac_add_options --disable-webrtc
 END
-
-  if [[ $CARCH == "armv7h" ]]; then
-    echo 'ac_add_options --enable-optimize="-g -O2 -fno-schedule-insns"' >> .mozconfig
-  else
-    echo 'ac_add_options --enable-optimize="-O2"' >> .mozconfig
-  fi
 }
 
 build() {
   cd $pkgname-$pkgver
-
-  # _FORTIFY_SOURCE causes configure failures
-  CPPFLAGS+=" -O2"
-
-  export PATH="$srcdir/path:$PATH"
-
-  # Do PGO
-  #xvfb-run -a -n 95 -s "-extension GLX -screen 0 1280x1024x24" \
-  #  make -f client.mk build MOZ_PGO=1
-  make -f client.mk build
+  ./mach configure
+  ./mach build
+  ./mach buildsymbols
 }
 
 package() {
   cd $pkgname-$pkgver
-  make -f client.mk DESTDIR="$pkgdir" INSTALL_SDK= install
+  DESTDIR="$pkgdir" ./mach install
 
   _vendorjs="$pkgdir/usr/lib/$pkgname/defaults/preferences/vendor.js"
   install -Dm644 /dev/stdin "$_vendorjs" <<END
@@ -166,7 +128,7 @@ app.partner.archlinux=archlinux
 END
 
   for i in 16 22 24 32 48 256; do
-    install -Dm644 other-licenses/branding/thunderbird/mailicon$i.png \
+    install -Dm644 comm/mail/branding/thunderbird/default${i}.png \
       "$pkgdir/usr/share/icons/hicolor/${i}x${i}/apps/$pkgname.png"
   done
 
