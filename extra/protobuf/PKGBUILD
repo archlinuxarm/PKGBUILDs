@@ -1,0 +1,101 @@
+# Maintainer: Lukas Fleischer <lfleischer@archlinux.org>
+# Contributor: Aleksey Filippov <sarum9in@gmail.com>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Sven-Hendrik Haase <sh@lutzhaase.com>
+# Contributor: Thomas S Hatch <thatch45@gmail.com>
+# Contributor: Geoffroy Carrier <geoffroy@archlinux.org>
+# Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - explicitly link v5 with libatomic
+
+pkgbase='protobuf'
+pkgname=('protobuf' 'python2-protobuf' 'python-protobuf')
+pkgver=3.6.0.1
+_gtestver=1.8.0
+pkgrel=1
+pkgdesc="Protocol Buffers - Google's data interchange format"
+arch=('x86_64')
+url='https://developers.google.com/protocol-buffers/'
+license=('BSD')
+depends=('gcc-libs' 'zlib')
+makedepends=('unzip' 'python-setuptools' 'python2-setuptools' 'clang')
+source=("$pkgbase-$pkgver.tgz::https://github.com/google/${pkgbase}/archive/v${pkgver}.tar.gz"
+        "gtest-${_gtestver}.tar.gz::https://github.com/google/googletest/archive/release-${_gtestver}.tar.gz")
+md5sums=('64827a068c449b5793ac4af886ea10a2'
+         '16877098823401d1bf2ed7891d7dce36')
+
+prepare() {
+  cd "$pkgbase-$pkgver"
+
+  cp -r "$srcdir/googletest-release-${_gtestver}/googletest" third_party/googletest/googletest
+  cp -r "$srcdir/googletest-release-${_gtestver}/googlemock" third_party/googletest/googlemock
+
+  sed -r 's|/usr/bin/env python|/usr/bin/env python2|' -i third_party/googletest/googletest/scripts/*.py
+}
+
+build() {
+  # GCC is stuck on src/google/protobuf/util/internal/protostream_objectsource_test.cc
+  # and src/google/protobuf/util/internal/protostream_objectwriter_test.cc.
+  export CC=/usr/bin/clang CXX=/usr/bin/clang++
+
+  cd "$srcdir/$pkgbase-$pkgver"
+  ./autogen.sh
+
+  cd "$srcdir/$pkgbase-$pkgver/third_party/googletest/googletest"
+  autoreconf -fiv
+  ./configure
+  make
+
+  cd "$srcdir/$pkgbase-$pkgver/third_party/googletest/googlemock"
+  autoreconf -fiv
+  ./configure
+  make
+
+  cd "$srcdir/$pkgbase-$pkgver"
+  [[ $CARCH == "arm" ]] && LIBS="-latomic"
+  LIBS=$LIBS ./configure --prefix=/usr
+  make
+}
+
+check() {
+  make -C "$srcdir/$pkgbase-$pkgver" check
+}
+
+package_protobuf() {
+  conflicts=('protobuf' 'protobuf-cpp')
+  provides=('protobuf' 'protobuf-cpp')
+  replaces=('protobuf-cpp')
+
+  cd "$srcdir/$pkgbase-$pkgver"
+  make DESTDIR="$pkgdir" install
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 editors/protobuf-mode.el "$pkgdir"/usr/share/emacs/site-lisp/protobuf-mode.el
+}
+
+package_python2-protobuf() {
+  pkgdesc='Python 2 bindings for Google Protocol Buffers'
+  depends=('python2' 'python2-six' "protobuf=$pkgver")
+  conflicts=('python2-protobuf')
+  provides=('python2-protobuf')
+
+  cd "$srcdir/$pkgbase-$pkgver/python"
+  python2 setup.py install --root="$pkgdir"
+
+  install -d "$pkgdir/usr/share/licenses/$pkgname"
+  ln -s "/usr/share/licenses/$pkgbase/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_python-protobuf() {
+  pkgdesc='Python 3 bindings for Google Protocol Buffers'
+  depends=('python' 'python-six' "protobuf=$pkgver")
+  conflicts=('python-protobuf')
+  provides=('python-protobuf')
+
+  cd "$srcdir/$pkgbase-$pkgver/python"
+  python3 setup.py install --root="$pkgdir"
+
+  install -d "$pkgdir/usr/share/licenses/$pkgname"
+  ln -s "/usr/share/licenses/$pkgbase/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/"
+}
