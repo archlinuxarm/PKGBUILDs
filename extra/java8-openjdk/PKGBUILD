@@ -1,3 +1,4 @@
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Maintainer: Guillaume ALAUX <guillaume@archlinux.org>
 # Contributor: Boyan Ding <stu_dby@126.com>
 
@@ -10,8 +11,6 @@
 #  - disable distcc
 #  - add arm to _JARCH and _DOC_ARCH
 #  - configure with --with-jvm-variants=zero
-#  - adjust doc package to use linux-${_DOC_ARCH}-normal-zero-release instead of normal-server-release
-#  - prevent downgrading hotspot optimization with CFLAGS
 #  - drop building docs and its package; takes forever to build
 
 buildarch=22
@@ -21,11 +20,11 @@ pkgname=('jre8-openjdk-headless' 'jre8-openjdk' 'jdk8-openjdk' 'openjdk8-src')
 pkgbase=java8-openjdk
 _java_ver=8
 # Found @ http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html
-_jdk_update=172
-_jdk_build=11
+_jdk_update=181
+_jdk_build=13
 pkgver=${_java_ver}.u${_jdk_update}
 _repo_ver=jdk${_java_ver}u${_jdk_update}-b${_jdk_build}
-pkgrel=2
+pkgrel=1
 arch=('x86_64')
 url='http://openjdk.java.net/'
 license=('custom')
@@ -42,14 +41,14 @@ source=(jdk8u-${_repo_ver}.tar.gz::${_url_src}/archive/${_repo_ver}.tar.gz
         langtools-${_repo_ver}.tar.gz::${_url_src}/langtools/archive/${_repo_ver}.tar.gz
         nashorn-${_repo_ver}.tar.gz::${_url_src}/nashorn/archive/${_repo_ver}.tar.gz)
 
-sha256sums=('f1ca31605360594cb57b21aa5888f253e9775125957f96afb1a9dbb71676af22'
-            'a89b558a4bb1d0368486a58d248a16b1760f8536fdc94ff70bf09e5c1bfcea24'
-            'f7a2652021b50d43c076df8f94cec13b82e2704c0d1535289074cb5e0eec31a0'
-            '756b6855c9bdb7ae1ac4b7a4d2bafcbdad4ab6dd33ccc64efb94f9d4f21273d3'
-            '8ad3b70c468cce6104f023ca5f4354462a47a38d9dc25994a6d04b2c18598432'
-            '0193ff13167f6ff7d667cd32dd2d05e4591975a4404b433c9ff59d2d4ce54603'
-            'ef0f2042143cf6ddc508d81978fdb7cd900d38e5b166f40112d1967ceb09f036'
-            '2a3bff4dfca022cb603cd46a6766fd1b7212adb473af5809b48504576bce6029')
+sha256sums=('2a613bc3eb3ecdb12946447e44e6c80ce80d1a7c5cbdf8127585b452f6708b66'
+            '3fc4793e39d2e8e9aa19707f43d61a81bef2c9de22ff47c99105e1b4a51b19ac'
+            '04b173f2af287c1b80aeb20b2e31563905e1e772cf5e01a25f3a985e392c7d5f'
+            'c4da8f58c97c0a4d37907b099385961029482aa268331e19903c1d4738a9afa8'
+            'f51a6827fd50bf29d4abb69e3a73ab13735dec45157f750b7cbfe375ebd022b9'
+            '2d0475ae6a925fef1f21f3fd96436ed5d11d3cb9dca5a96f96defb3040c68d3b'
+            '4ef19aaf1444d1d23c0f76fc6d8f55092c0b8b8e953b7c136448f6660b7165ea'
+            'f2220793aa8fea31c8945566b639ea85e2d00ac68220827ba8861ca32e4aae48')
 
 case "${CARCH}" in
   'x86_64') _JARCH=amd64 ; _DOC_ARCH=x86_64 ;;
@@ -67,25 +66,22 @@ _nonheadless=(bin/policytool
               lib/${_JARCH}/libsplashscreen.so)
 
 prepare() {
-  cd "${srcdir}/jdk8u-${_repo_ver}"
-
-  for subrepo in corba hotspot jdk jaxws jaxp langtools nashorn
-  do
+  cd jdk8u-${_repo_ver}
+  for subrepo in corba hotspot jdk jaxws jaxp langtools nashorn; do
     ln -s ../${subrepo}-${_repo_ver} ${subrepo}
   done
 }
 
 build() {
-  cd "${srcdir}/jdk8u-${_repo_ver}"
+  cd jdk8u-${_repo_ver}
 
   unset JAVA_HOME
   # http://icedtea.classpath.org/bugzilla/show_bug.cgi?id=1346
   export MAKEFLAGS=${MAKEFLAGS/-j*}
-  # https://hydra.nixos.org/build/41230444/log
-  export CFLAGS+=" -Wno-error=deprecated-declarations -fno-lifetime-dse -fno-delete-null-pointer-checks"
 
-  # prevent downgrading hotspot optimization
-  CFLAGS=`echo $CFLAGS | sed -e 's/-O2//'` && CXXFLAGS="$CFLAGS"
+  # We filter out -O flags so that the optimization of HotSpot is not lowered from O3 to O2
+  export CFLAGS="${CFLAGS//-O2/-O3} ${CPPFLAGS} -Wno-error=deprecated-declarations -Wno-error=stringop-overflow= -Wno-error=return-type -Wno-error=cpp -fno-lifetime-dse -fno-delete-null-pointer-checks"
+  export CXXFLAGS="${CXXFLAGS} ${CPPFLAGS}"
 
   install -d -m 755 "${srcdir}/${_prefix}/"
   sh configure \
@@ -95,24 +91,23 @@ build() {
     --with-milestone="fcs" \
     --enable-unlimited-crypto \
     --with-zlib=system \
-    --with-jvm-variants=zero
+    --with-jvm-variants=zero \
+    --with-extra-cflags="${CFLAGS}" \
+    --with-extra-cxxflags="${CXXFLAGS}" \
+    --with-extra-ldflags="${LDFLAGS}"
 
-    # TODO OpenJDK does not want last version of giflib (add 'giflib' as dependency once fixed)
-    #--with-giflib=system \
+  # TODO OpenJDK does not want last version of giflib (add 'giflib' as dependency once fixed)
+  #--with-giflib=system \
 
-  # Without 'DEBUG_BINARIES', i686 won't build
-  # http://mail.openjdk.java.net/pipermail/core-libs-dev/2013-July/019203.html
-  make \
-    DEBUG_BINARIES=true
-  # These help to debug builds:
-  #LOG=trace HOTSPOT_BUILD_JOBS=1
-
+  # These help to debug builds: LOG=trace HOTSPOT_BUILD_JOBS=1
+  # Without 'DEBUG_BINARIES', i686 won't build: http://mail.openjdk.java.net/pipermail/core-libs-dev/2013-July/019203.html
+  make
   #make docs
 
   # FIXME sadly 'DESTDIR' is not used here!
   make install
 
-  cd "${srcdir}/${_imgdir}"
+  cd ../${_imgdir}
 
   # A lot of build stuff were directly taken from
   # http://pkgs.fedoraproject.org/cgit/java-1.8.0-openjdk.git/tree/java-1.8.0-openjdk.spec
@@ -126,10 +121,10 @@ build() {
   find . -iname '*.debuginfo' -exec rm {} \;
 }
 
-#check() {
-#  cd "${srcdir}/${pkgname}-${pkgver}"
-#  make -k check
-#}
+check() {
+  cd jdk8u-${_repo_ver}
+  make -k test
+}
 
 package_jre8-openjdk-headless() {
   pkgdesc='OpenJDK Java 8 headless runtime environment'
@@ -157,7 +152,7 @@ package_jre8-openjdk-headless() {
   backup=(${_backup_etc[@]})
   install=install_jre8-openjdk-headless.sh
 
-  cd "${srcdir}/${_imgdir}/jre"
+  cd ${_imgdir}/jre
 
   install -d -m 755 "${pkgdir}${_jvmdir}/jre/"
   cp -a bin lib "${pkgdir}${_jvmdir}/jre"
@@ -213,9 +208,8 @@ package_jre8-openjdk() {
   install=install_jre8-openjdk.sh
   replaces=('jre8-openjdk-wm')
 
-  cd "${srcdir}/${_imgdir}/jre"
+  cd ${_imgdir}/jre
 
-  # TODO? Should /usr/lib/jvm/java-8-openjdk/jre/lib/sound.properties belong to jre?
   for f in ${_nonheadless[@]}; do
     install -D ${f} "${pkgdir}${_jvmdir}/jre/${f}"
   done
@@ -248,7 +242,7 @@ package_jdk8-openjdk() {
   replaces=('jdk8-openjdk-wm')
   install=install_jdk8-openjdk.sh
 
-  cd "${srcdir}/${_imgdir}"
+  cd ${_imgdir}
 
   # Main files
   install -d -m 755 "${pkgdir}${_jvmdir}"
@@ -291,3 +285,5 @@ package_openjdk8-src() {
 
   install -D "${srcdir}/${_imgdir}/src.zip" "${pkgdir}${_jvmdir}/src.zip"
 }
+
+# vim: ts=2 sw=2 et:
