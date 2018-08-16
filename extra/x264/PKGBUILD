@@ -9,95 +9,57 @@
 #  - configure needs --disable-asm to build on non-AArch64
 #  - --disable-lto
 
-pkgname=('x264' 'libx264' 'libx264-10bit' 'libx264-all')
-pkgver=152.20171224
+pkgname=x264
+pkgver=155.r0a84d986
 pkgrel=2
 epoch=2
+pkgdesc='Open Source H264/AVC video encoder'
 arch=('x86_64')
 url='https://www.videolan.org/developers/x264.html'
 license=('GPL')
-depends=('glibc')
+depends=(
+  'libavcodec.so' 'libavformat.so' 'libavutil.so' 'liblsmash.so'
+  'libswscale.so'
+)
 makedepends=('git' 'ffmpeg' 'l-smash' 'nasm')
-_commit='e9a5903edf8ca59ef20e6f4894c196f135af735e'
+provides=('libx264' 'libx264.so')
+conflicts=('libx264' 'libx264-10bit' 'libx264-all')
+replaces=('libx264' 'libx264-10bit' 'libx264-all')
+_commit='0a84d986e7020f8344f00752e3600b9769cc1e85'
 source=("git+https://git.videolan.org/git/x264.git#commit=${_commit}")
 sha256sums=('SKIP')
 
 pkgver() {
-  cd ${pkgbase}
+  cd x264
 
   local _ver=$(grep '#define X264_BUILD' x264.h | cut -d' ' -f3)
-  local _date=$(git log -1 --format="%cd" --date=short | tr -d -)
+  local _rev=$(git rev-parse --short HEAD)
 
-  echo ${_ver}.${_date}
+  echo ${_ver}.r${_rev}
 }
 
 prepare() {
-  mkdir build-{8,10}bit
+  if [[ -d build ]]; then
+    rm -rf build
+  fi
+  mkdir build
 }
 
 build() {
+  cd build
+
   [[ $CARCH != "aarch64" ]] && CONFIG="--disable-asm"
 
-  for _b in 8 10; do (
-    cd build-${_b}bit
-    ../${pkgbase}/configure \
-      --prefix='/usr' \
-      --enable-shared \
-      --enable-pic \
-      --disable-lto \
-      --bit-depth="${_b}"  $CONFIG
-    make
-  ) done
+  ../x264/configure \
+    --prefix='/usr' \
+    --enable-shared \
+    --enable-pic \
+    --disable-lto $CONFIG
+  make
 }
 
-package_x264() {
-  pkgdesc='CLI tools for encoding H264/AVC video streams'
-  depends+=('libavcodec.so' 'libavformat.so' 'libavutil.so' 'liblsmash.so'
-            'libswscale.so')
-
-  for _b in {8,10}bit; do
-    provides+=("x264-${_b}")
-
-    make -C build-${_b} DESTDIR="${pkgdir}" install-cli
-    mv "${pkgdir}"/usr/bin/x264{,-${_b}}
-  done
-
-  ln -s x264-8bit "${pkgdir}"/usr/bin/x264
-}
-
-package_libx264() {
-  pkgdesc='Library for encoding H264/AVC video streams (8bit depth)'
-  provides=('libx264-8bit' 'libx264.so')
-  conflicts=('libx264')
-
-  make -C build-8bit DESTDIR=${pkgdir} install-lib-shared
-}
-
-package_libx264-10bit() {
-  pkgdesc='Library for encoding H264/AVC video streams (10bit depth)'
-  provides=('libx264' 'libx264.so')
-  conflicts=('libx264')
-
-  make -C build-10bit DESTDIR=${pkgdir} install-lib-shared
-}
-
-package_libx264-all() {
-  pkgdesc="Library for encoding H264/AVC video streams (all depths)"
-
-  local _ver=$(grep '#define X264_BUILD' "${pkgbase}"/x264.h | cut -d' ' -f3)
-
-  install -d "${pkgdir}"/usr/lib/x264
-
-  for _b in {8,10}bit; do
-    provides+=("libx264-${_b}.so")
-
-    make -C build-${_b} DESTDIR="${pkgdir}" install-lib-shared
-
-    mv "${pkgdir}"/usr/lib/libx264.so.${_ver} "${pkgdir}"/usr/lib/x264/libx264-${_b}.so.${_ver}
-    rm -r "${pkgdir}"/usr/{include,lib/libx264.so,lib/pkgconfig}
-
-    ln -sr "${pkgdir}"/usr/lib/x264/libx264-${_b}.so{.${_ver},}
-  done
+package() {
+  make -C build DESTDIR="${pkgdir}" install-cli install-lib-shared
 }
 
 # vim: ts=2 sw=2 et:
