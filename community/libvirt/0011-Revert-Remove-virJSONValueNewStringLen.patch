@@ -1,0 +1,83 @@
+From 53b6e8439a8d93244eb5c14a75a3e5e9ad420f52 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 13 Aug 2018 13:39:56 +0200
+Subject: [PATCH 11/16] Revert "Remove virJSONValueNewStringLen"
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This reverts commit 8f802c6d8659beb9eb3cab96ba2553e251728337.
+
+Jansson cannot parse QEMU's quirky JSON.
+Revert back to yajl.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1614569
+
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+---
+ src/libvirt_private.syms |  1 +
+ src/util/virjson.c       | 22 ++++++++++++++++++++++
+ src/util/virjson.h       |  1 +
+ 3 files changed, 24 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index fc386e1699..a5e88a9018 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -2098,6 +2098,7 @@ virJSONValueNewNumberUint;
+ virJSONValueNewNumberUlong;
+ virJSONValueNewObject;
+ virJSONValueNewString;
++virJSONValueNewStringLen;
+ virJSONValueObjectAdd;
+ virJSONValueObjectAddVArgs;
+ virJSONValueObjectAppend;
+diff --git a/src/util/virjson.c b/src/util/virjson.c
+index 01a387b2f7..80274bc6c5 100644
+--- a/src/util/virjson.c
++++ b/src/util/virjson.c
+@@ -420,6 +420,28 @@ virJSONValueNewString(const char *data)
+ }
+ 
+ 
++virJSONValuePtr
++virJSONValueNewStringLen(const char *data,
++                         size_t length)
++{
++    virJSONValuePtr val;
++
++    if (!data)
++        return virJSONValueNewNull();
++
++    if (VIR_ALLOC(val) < 0)
++        return NULL;
++
++    val->type = VIR_JSON_TYPE_STRING;
++    if (VIR_STRNDUP(val->data.string, data, length) < 0) {
++        VIR_FREE(val);
++        return NULL;
++    }
++
++    return val;
++}
++
++
+ static virJSONValuePtr
+ virJSONValueNewNumber(const char *data)
+ {
+diff --git a/src/util/virjson.h b/src/util/virjson.h
+index 0d5a7ef753..75f7f17b44 100644
+--- a/src/util/virjson.h
++++ b/src/util/virjson.h
+@@ -59,6 +59,7 @@ int virJSONValueObjectAddVArgs(virJSONValuePtr obj, va_list args)
+ 
+ 
+ virJSONValuePtr virJSONValueNewString(const char *data);
++virJSONValuePtr virJSONValueNewStringLen(const char *data, size_t length);
+ virJSONValuePtr virJSONValueNewNumberInt(int data);
+ virJSONValuePtr virJSONValueNewNumberUint(unsigned int data);
+ virJSONValuePtr virJSONValueNewNumberLong(long long data);
+-- 
+2.18.0
+

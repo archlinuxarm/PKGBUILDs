@@ -1,0 +1,514 @@
+From e4fbf4535267b5fbf62048c9f241a5bf52fbba1b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 13 Aug 2018 13:39:16 +0200
+Subject: [PATCH 06/16] Revert "util: avoid symbol clash between json
+ libraries"
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This reverts commit ce3c6ef6843f98d81be5423ece11fad79eaab920.
+
+Jansson cannot parse QEMU's quirky JSON.
+Revert back to yajl.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1614569
+
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+---
+ libvirt.spec.in          |   2 -
+ src/Makefile.am          |   8 +-
+ src/util/Makefile.inc.am |   3 +-
+ src/util/virjson.c       |   9 +-
+ src/util/virjsoncompat.c | 274 ---------------------------------------
+ src/util/virjsoncompat.h |  88 -------------
+ 6 files changed, 7 insertions(+), 377 deletions(-)
+ delete mode 100644 src/util/virjsoncompat.c
+ delete mode 100644 src/util/virjsoncompat.h
+
+diff --git a/libvirt.spec.in b/libvirt.spec.in
+index 19ae55cdaf..4113579e47 100644
+--- a/libvirt.spec.in
++++ b/libvirt.spec.in
+@@ -898,8 +898,6 @@ Requires: ncurses
+ Requires: gettext
+ # Needed by virt-pki-validate script.
+ Requires: gnutls-utils
+-# We dlopen(libjansson.so.4), so need an explicit dep
+-Requires: jansson
+ %if %{with_bash_completion}
+ Requires: %{name}-bash-completion = %{version}-%{release}
+ %endif
+diff --git a/src/Makefile.am b/src/Makefile.am
+index a4f213480e..83263e69e5 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -552,6 +552,7 @@ libvirt_admin_la_CFLAGS += \
+ 
+ libvirt_admin_la_LIBADD += \
+ 		$(CAPNG_LIBS) \
++		$(JANSSON_LIBS) \
+ 		$(DEVMAPPER_LIBS) \
+ 		$(LIBXML_LIBS) \
+ 		$(SSH2_LIBS) \
+@@ -689,7 +690,6 @@ libvirt_setuid_rpc_client_la_SOURCES = \
+ 		util/virhashcode.c \
+ 		util/virhostcpu.c \
+ 		util/virjson.c \
+-		util/virjsoncompat.c \
+ 		util/virlog.c \
+ 		util/virobject.c \
+ 		util/virpidfile.c \
+@@ -961,8 +961,6 @@ libvirt_nss_la_SOURCES = \
+ 		util/virhashcode.h \
+ 		util/virjson.c \
+ 		util/virjson.h \
+-		util/virjsoncompat.c \
+-		util/virjsoncompat.h \
+ 		util/virkmod.c \
+ 		util/virkmod.h \
+ 		util/virlease.c \
+@@ -1001,6 +999,10 @@ libvirt_nss_la_CFLAGS = \
+ libvirt_nss_la_LDFLAGS = \
+ 		$(AM_LDFLAGS) \
+ 		$(NULL)
++
++libvirt_nss_la_LIBADD = \
++		$(JANSSON_LIBS) \
++		$(NULL)
+ endif WITH_NSS
+ 
+ 
+diff --git a/src/util/Makefile.inc.am b/src/util/Makefile.inc.am
+index 8ef9ee1dfa..71b2b93c2d 100644
+--- a/src/util/Makefile.inc.am
++++ b/src/util/Makefile.inc.am
+@@ -86,8 +86,6 @@ UTIL_SOURCES = \
+ 	util/viriscsi.h \
+ 	util/virjson.c \
+ 	util/virjson.h \
+-	util/virjsoncompat.c \
+-	util/virjsoncompat.h \
+ 	util/virkeycode.c \
+ 	util/virkeycode.h \
+ 	util/virkeyfile.c \
+@@ -266,6 +264,7 @@ libvirt_util_la_CFLAGS = \
+ 	$(NULL)
+ libvirt_util_la_LIBADD = \
+ 	$(CAPNG_LIBS) \
++	$(JANSSON_LIBS) \
+ 	$(LIBNL_LIBS) \
+ 	$(THREAD_LIBS) \
+ 	$(AUDIT_LIBS) \
+diff --git a/src/util/virjson.c b/src/util/virjson.c
+index 5bab662cd3..01a387b2f7 100644
+--- a/src/util/virjson.c
++++ b/src/util/virjson.c
+@@ -1437,8 +1437,7 @@ virJSONValueCopy(const virJSONValue *in)
+ 
+ 
+ #if WITH_JANSSON
+-
+-# include "virjsoncompat.h"
++# include <jansson.h>
+ 
+ static virJSONValuePtr
+ virJSONValueFromJansson(json_t *json)
+@@ -1525,9 +1524,6 @@ virJSONValueFromString(const char *jsonstring)
+     size_t flags = JSON_REJECT_DUPLICATES |
+                    JSON_DECODE_ANY;
+ 
+-    if (virJSONInitialize() < 0)
+-        return NULL;
+-
+     if (!(json = json_loads(jsonstring, flags, &error))) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("failed to parse JSON %d:%d: %s"),
+@@ -1634,9 +1630,6 @@ virJSONValueToString(virJSONValuePtr object,
+     json_t *json;
+     char *str = NULL;
+ 
+-    if (virJSONInitialize() < 0)
+-        return NULL;
+-
+     if (pretty)
+         flags |= JSON_INDENT(2);
+     else
+diff --git a/src/util/virjsoncompat.c b/src/util/virjsoncompat.c
+deleted file mode 100644
+index 6c853e9bb5..0000000000
+--- a/src/util/virjsoncompat.c
++++ /dev/null
+@@ -1,274 +0,0 @@
+-/*
+- * virjsoncompat.c: JSON object parsing/formatting
+- *
+- * Copyright (C) 2018 Red Hat, Inc.
+- *
+- * This library is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU Lesser General Public
+- * License as published by the Free Software Foundation; either
+- * version 2.1 of the License, or (at your option) any later version.
+- *
+- * This library is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * Lesser General Public License for more details.
+- *
+- * You should have received a copy of the GNU Lesser General Public
+- * License along with this library.  If not, see
+- * <http://www.gnu.org/licenses/>.
+- *
+- */
+-
+-#include <config.h>
+-
+-#include "virthread.h"
+-#include "virerror.h"
+-#define VIR_JSON_COMPAT_IMPL
+-#include "virjsoncompat.h"
+-
+-#define VIR_FROM_THIS VIR_FROM_NONE
+-
+-#if WITH_JANSSON
+-
+-# include <dlfcn.h>
+-
+-json_t *(*json_array_ptr)(void);
+-int (*json_array_append_new_ptr)(json_t *array, json_t *value);
+-json_t *(*json_array_get_ptr)(const json_t *array, size_t index);
+-size_t (*json_array_size_ptr)(const json_t *array);
+-void (*json_delete_ptr)(json_t *json);
+-char *(*json_dumps_ptr)(const json_t *json, size_t flags);
+-json_t *(*json_false_ptr)(void);
+-json_t *(*json_integer_ptr)(json_int_t value);
+-json_int_t (*json_integer_value_ptr)(const json_t *integer);
+-json_t *(*json_loads_ptr)(const char *input, size_t flags, json_error_t *error);
+-json_t *(*json_null_ptr)(void);
+-json_t *(*json_object_ptr)(void);
+-void *(*json_object_iter_ptr)(json_t *object);
+-const char *(*json_object_iter_key_ptr)(void *iter);
+-void *(*json_object_iter_next_ptr)(json_t *object, void *iter);
+-json_t *(*json_object_iter_value_ptr)(void *iter);
+-void *(*json_object_key_to_iter_ptr)(const char *key);
+-int (*json_object_set_new_ptr)(json_t *object, const char *key, json_t *value);
+-json_t *(*json_real_ptr)(double value);
+-double (*json_real_value_ptr)(const json_t *real);
+-json_t *(*json_string_ptr)(const char *value);
+-const char *(*json_string_value_ptr)(const json_t *string);
+-json_t *(*json_true_ptr)(void);
+-
+-
+-static int
+-virJSONJanssonOnceInit(void)
+-{
+-    void *handle = dlopen("libjansson.so.4", RTLD_LAZY|RTLD_LOCAL|RTLD_NODELETE);
+-    if (!handle) {
+-        virReportError(VIR_ERR_NO_SUPPORT,
+-                       _("libjansson.so.4 JSON library not available: %s"), dlerror());
+-        return -1;
+-    }
+-
+-# define LOAD(name) \
+-    do { \
+-        if (!(name ## _ptr = dlsym(handle, #name))) { \
+-            virReportError(VIR_ERR_NO_SUPPORT, \
+-                           _("missing symbol '%s' in libjansson.so.4: %s"), #name, dlerror()); \
+-            return -1; \
+-        } \
+-    } while (0)
+-
+-    LOAD(json_array);
+-    LOAD(json_array_append_new);
+-    LOAD(json_array_get);
+-    LOAD(json_array_size);
+-    LOAD(json_delete);
+-    LOAD(json_dumps);
+-    LOAD(json_false);
+-    LOAD(json_integer);
+-    LOAD(json_integer_value);
+-    LOAD(json_loads);
+-    LOAD(json_null);
+-    LOAD(json_object);
+-    LOAD(json_object_iter);
+-    LOAD(json_object_iter_key);
+-    LOAD(json_object_iter_next);
+-    LOAD(json_object_iter_value);
+-    LOAD(json_object_key_to_iter);
+-    LOAD(json_object_set_new);
+-    LOAD(json_real);
+-    LOAD(json_real_value);
+-    LOAD(json_string);
+-    LOAD(json_string_value);
+-    LOAD(json_true);
+-
+-    return 0;
+-}
+-
+-VIR_ONCE_GLOBAL_INIT(virJSONJansson);
+-
+-int
+-virJSONInitialize(void)
+-{
+-    return virJSONJanssonInitialize();
+-}
+-
+-json_t *
+-json_array_impl(void)
+-{
+-    return json_array_ptr();
+-}
+-
+-
+-int
+-json_array_append_new_impl(json_t *array, json_t *value)
+-{
+-    return json_array_append_new_ptr(array, value);
+-}
+-
+-
+-json_t *
+-json_array_get_impl(const json_t *array, size_t index)
+-{
+-    return json_array_get_ptr(array, index);
+-}
+-
+-
+-size_t
+-json_array_size_impl(const json_t *array)
+-{
+-    return json_array_size_ptr(array);
+-}
+-
+-
+-void
+-json_delete_impl(json_t *json)
+-{
+-    return json_delete_ptr(json);
+-}
+-
+-
+-char *
+-json_dumps_impl(const json_t *json, size_t flags)
+-{
+-    return json_dumps_ptr(json, flags);
+-}
+-
+-
+-json_t *
+-json_false_impl(void)
+-{
+-    return json_false_ptr();
+-}
+-
+-
+-json_t *
+-json_integer_impl(json_int_t value)
+-{
+-    return json_integer_ptr(value);
+-}
+-
+-
+-json_int_t
+-json_integer_value_impl(const json_t *integer)
+-{
+-    return json_integer_value_ptr(integer);
+-}
+-
+-
+-json_t *
+-json_loads_impl(const char *input, size_t flags, json_error_t *error)
+-{
+-    return json_loads_ptr(input, flags, error);
+-}
+-
+-
+-json_t *
+-json_null_impl(void)
+-{
+-    return json_null_ptr();
+-}
+-
+-
+-json_t *
+-json_object_impl(void)
+-{
+-    return json_object_ptr();
+-}
+-
+-
+-void *
+-json_object_iter_impl(json_t *object)
+-{
+-    return json_object_iter_ptr(object);
+-}
+-
+-
+-const char *
+-json_object_iter_key_impl(void *iter)
+-{
+-    return json_object_iter_key_ptr(iter);
+-}
+-
+-
+-void *
+-json_object_iter_next_impl(json_t *object, void *iter)
+-{
+-    return json_object_iter_next_ptr(object, iter);
+-}
+-
+-
+-json_t *
+-json_object_iter_value_impl(void *iter)
+-{
+-    return json_object_iter_value_ptr(iter);
+-}
+-
+-
+-void *
+-json_object_key_to_iter_impl(const char *key)
+-{
+-    return json_object_key_to_iter_ptr(key);
+-}
+-
+-
+-int
+-json_object_set_new_impl(json_t *object, const char *key, json_t *value)
+-{
+-    return json_object_set_new_ptr(object, key, value);
+-}
+-
+-
+-json_t *
+-json_real_impl(double value)
+-{
+-    return json_real_ptr(value);
+-}
+-
+-
+-double
+-json_real_value_impl(const json_t *real)
+-{
+-    return json_real_value_ptr(real);
+-}
+-
+-
+-json_t *
+-json_string_impl(const char *value)
+-{
+-    return json_string_ptr(value);
+-}
+-
+-
+-const char *
+-json_string_value_impl(const json_t *string)
+-{
+-    return json_string_value_ptr(string);
+-}
+-
+-
+-json_t *
+-json_true_impl(void)
+-{
+-    return json_true_ptr();
+-}
+-
+-#endif /* WITH_JANSSON */
+diff --git a/src/util/virjsoncompat.h b/src/util/virjsoncompat.h
+deleted file mode 100644
+index d9b7765a37..0000000000
+--- a/src/util/virjsoncompat.h
++++ /dev/null
+@@ -1,88 +0,0 @@
+-/*
+- * virjsoncompat.h: JSON object parsing/formatting
+- *
+- * Copyright (C) 2018 Red Hat, Inc.
+- *
+- * This library is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU Lesser General Public
+- * License as published by the Free Software Foundation; either
+- * version 2.1 of the License, or (at your option) any later version.
+- *
+- * This library is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * Lesser General Public License for more details.
+- *
+- * You should have received a copy of the GNU Lesser General Public
+- * License along with this library.  If not, see
+- * <http://www.gnu.org/licenses/>.
+- *
+- */
+-
+-
+-#ifndef __VIR_JSON_COMPAT_H_
+-# define __VIR_JSON_COMPAT_H_
+-
+-# if WITH_JANSSON
+-#  ifndef VIR_JSON_COMPAT_IMPL
+-
+-#   define json_array json_array_impl
+-#   define json_array_append_new json_array_append_new_impl
+-#   define json_array_get json_array_get_impl
+-#   define json_array_size json_array_size_impl
+-#   define json_delete json_delete_impl
+-#   define json_dumps json_dumps_impl
+-#   define json_false json_false_impl
+-#   define json_integer json_integer_impl
+-#   define json_integer_value json_integer_value_impl
+-#   define json_loads json_loads_impl
+-#   define json_null json_null_impl
+-#   define json_object json_object_impl
+-#   define json_object_iter json_object_iter_impl
+-#   define json_object_iter_key json_object_iter_key_impl
+-#   define json_object_iter_next json_object_iter_next_impl
+-#   define json_object_iter_value json_object_iter_value_impl
+-#   define json_object_key_to_iter json_object_key_to_iter_impl
+-#   define json_object_set_new json_object_set_new_impl
+-#   define json_real json_real_impl
+-#   define json_real_value json_real_value_impl
+-#   define json_string json_string_impl
+-#   define json_string_value json_string_value_impl
+-#   define json_true json_true_impl
+-
+-#  endif /* ! VIR_JSON_COMPAT_IMPL */
+-
+-#  include <jansson.h>
+-
+-#  ifdef VIR_JSON_COMPAT_IMPL
+-
+-json_t *json_array_impl(void);
+-int json_array_append_new_impl(json_t *array, json_t *value);
+-json_t *json_array_get_impl(const json_t *array, size_t index);
+-size_t json_array_size_impl(const json_t *array);
+-void json_delete_impl(json_t *json);
+-char *json_dumps_impl(const json_t *json, size_t flags);
+-json_t *json_false_impl(void);
+-json_t *json_integer_impl(json_int_t value);
+-json_int_t json_integer_value_impl(const json_t *integer);
+-json_t *json_loads_impl(const char *input, size_t flags, json_error_t *error);
+-json_t *json_null_impl(void);
+-json_t *json_object_impl(void);
+-void *json_object_iter_impl(json_t *object);
+-const char *json_object_iter_key_impl(void *iter);
+-void *json_object_iter_next_impl(json_t *object, void *iter);
+-json_t *json_object_iter_value_impl(void *iter);
+-void *json_object_key_to_iter_impl(const char *key);
+-int json_object_set_new_impl(json_t *object, const char *key, json_t *value);
+-json_t *json_real_impl(double value);
+-double json_real_value_impl(const json_t *real);
+-json_t *json_string_impl(const char *value);
+-const char *json_string_value_impl(const json_t *string);
+-json_t *json_true_impl(void);
+-
+-#  endif /* VIR_JSON_COMPAT_IMPL */
+-# endif /* WITH_JANSSON */
+-
+-int virJSONInitialize(void);
+-
+-#endif /* __VIR_JSON_COMPAT_H_ */
+-- 
+2.18.0
+
