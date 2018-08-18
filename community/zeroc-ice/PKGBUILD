@@ -1,0 +1,104 @@
+# Maintainer: Sven-Hendrik Haase <sh@lutzhaase.com>
+# Contributor: Joe George <joe at externl dot com>
+# Contributor: Daniel Spies <ds20150201aur at pskx dot net>
+# Contributor: Otto Allmendinger <otto.allmendinger@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - upstream patches for gcc8, drop gcc7 makedepend
+#  - switch to java10, java8 fails to build
+
+pkgname=(zeroc-ice zeroc-ice-java)
+pkgbase=(zeroc-ice)
+pkgver=3.7.1
+pkgrel=1
+pkgdesc="An object-oriented middleware that provides RPC functionality"
+arch=(x86_64)
+url="https://zeroc.com"
+license=(GPL custom:ice)
+makedepends=(bzip2 gradle 'java-environment=10')
+depends=(mcpp lmdb)
+source=(
+    "ice-${pkgver}.tar.gz::https://github.com/zeroc-ice/ice/archive/v${pkgver}.tar.gz"
+    "ice-packaging-${pkgver}.tar.gz::https://github.com/zeroc-ice/ice-packaging/archive/v${pkgver}.tar.gz"
+    https://github.com/zeroc-ice/ice/commit/8b221cc5a17ba64836a687e17cbbf46d9ac8b359.patch
+    https://github.com/zeroc-ice/ice/commit/a6a4981616b669432ff7b588179d6e93694d9e3f.patch
+    zeroc-ice.sysusers
+)
+sha256sums=('b1526ab9ba80a3d5f314dacf22674dff005efb9866774903d0efca5a0fab326d'
+            '92530c87b12471df0cae98a7329039fa42902a9d7909eb32915fdc866b419e8a'
+            'a348e3123e7bbd25b390d1b0c1f3109ecbab9a64f4e586218e035d02e56c30eb'
+            '897f0fe82a75aa33c85f271e7fb56bf1873d38f8fad754f2933028b8e86a077d'
+            '5fdbb1ed753e84e6b49c529e171af848e74a8890fe485dfe1d2bbec3c198dd90')
+
+_make_args=(
+    "OPTIMIZE=yes"
+    "USR_DIR_INSTALL=yes"
+    "prefix=/usr"
+    "CONFIGS=shared cpp11-shared"
+    "SKIP=slice2py"
+)
+
+prepare() {
+  cd ${srcdir}/ice-${pkgver}
+  patch -p1 -i ../8b221cc5a17ba64836a687e17cbbf46d9ac8b359.patch
+  patch -p1 -i ../a6a4981616b669432ff7b588179d6e93694d9e3f.patch
+}
+
+build() {
+  cd ${srcdir}/ice-${pkgver}
+  GRADLE=gradle make srcs -j$(nproc) "${_make_args[@]}" "LANGUAGES=cpp java"
+}
+
+package_zeroc-ice() {
+  backup=("etc/glacier2router.conf"
+          "etc/icegridnode.conf"
+          "etc/icegridregistry.conf"
+  )
+
+  cd ${srcdir}/ice-${pkgver}
+
+  make install "${_make_args[@]}" DESTDIR="${pkgdir}" "LANGUAGES=cpp"
+  install -Dm644 ${srcdir}/ice-${pkgver}/ICE_LICENSE ${pkgdir}/usr/share/licenses/${pkgname}/LICENSE
+
+  rm -f ${pkgdir}/usr/share/Ice-${pkgver}/LICENSE
+  rm -f ${pkgdir}/usr/share/Ice-${pkgver}/ICE_LICENSE
+
+  if [ $CARCH = "x86_64" ]; then
+      rm -df ${pkgdir}/usr/lib/
+      mv ${pkgdir}/usr/lib64/ ${pkgdir}/usr/lib/
+  fi
+
+  install -Dm644 ${srcdir}/ice-packaging-${pkgver}/ice/rpm/glacier2router.conf ${pkgdir}/etc/glacier2router.conf
+  install -Dm644 ${srcdir}/ice-packaging-${pkgver}/ice/rpm/icegridnode.conf ${pkgdir}/etc/icegridnode.conf
+  install -Dm644 ${srcdir}/ice-packaging-${pkgver}/ice/rpm/icegridregistry.conf ${pkgdir}/etc/icegridregistry.conf
+
+  install -Dm644 ${srcdir}/ice-packaging-${pkgver}/ice/rpm/glacier2router.service \
+                 ${pkgdir}/usr/lib/systemd/system/glacier2router.service
+  install -Dm644 ${srcdir}/ice-packaging-${pkgver}/ice/rpm/icegridnode.service \
+                 ${pkgdir}/usr/lib/systemd/system/icegridnode.service
+  install -Dm644 ${srcdir}/ice-packaging-${pkgver}/ice/rpm/icegridregistry.service \
+                 ${pkgdir}/usr/lib/systemd/system/icegridregistry.service
+
+  mkdir -p ${pkgdir}/var/lib/ice/icegrid/{node1,registry}
+  chown -R 101:101 ${pkgdir}/var/lib/ice
+
+  install -Dm644 ${srcdir}/zeroc-ice.sysusers ${pkgdir}/usr/lib/sysusers.d/$pkgname.conf
+}
+
+package_zeroc-ice-java() {
+  makedepends=(gradle 'java-environment=8')
+  depends=(zeroc-ice java-environment)
+
+  for d in ${srcdir}/ice-${pkgver}/java ${srcdir}/ice-${pkgver}/java-compat; do
+      cd $d
+      gradle \
+          --gradle-user-home=/tmp/zeroc-ice-java \
+          --no-daemon \
+          -PdbHome=/usr/share/java/berkeleydb \
+          -Pprefix=${pkgdir}/usr/share/java/zeroc-ice install
+
+  done
+
+  mv ${pkgdir}/usr/share/java/zeroc-ice/lib/* ${pkgdir}/usr/share/java/zeroc-ice/
+  rmdir ${pkgdir}/usr/share/java/zeroc-ice/lib
+}
