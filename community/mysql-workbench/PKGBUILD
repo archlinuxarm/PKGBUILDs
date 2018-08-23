@@ -14,35 +14,30 @@ buildarch=28
 
 pkgname=mysql-workbench
 pkgver=8.0.12
-pkgrel=3
+pkgrel=4
 _mysql_version=8.0.12
 _connector_version=8.0.12
 _gdal_version=2.3.1
 _boost_version=1.67.0
-_libssh_version=0.7.5
 pkgdesc='A cross-platform, visual database design tool developed by MySQL'
 arch=('x86_64')
 url='https://www.mysql.com/products/workbench/'
 license=('GPL2')
 depends=('cairo' 'ctemplate' 'desktop-file-utils' 'freetype2' 'gtkmm3'
 	'hicolor-icon-theme' 'libgl' 'libsecret' 'libiodbc' 'libxml2'
-	'libzip' 'mysql-python' 'pcre' 'python2' 'python2-cairo'
+	'libzip' 'mysql-python' 'pcre' 'python2' 'python2-cairo' 'libssh'
 	'python2-pexpect' 'tinyxml' 'unixodbc' 'vsqlite++' 'proj' 'json-c'
 	'antlr4-runtime')
 optdepends=('python2-pyodbc: database migration')
 makedepends=('cmake' 'boost' 'mesa' 'swig' 'java-runtime' 'imagemagick' 'antlr4')
-validpgpkeys=('A4A9406876FCBD3C456770C88C718D3B5072E1F5'  # MySQL Release Engineering <mysql-build@oss.oracle.com>
-              '8DFF53E18F2ABC8D8F3C92237EE0FC4DCC014E3D') # Andreas Schneider <asn@cryptomilk.org> (for libssh)
+validpgpkeys=('A4A9406876FCBD3C456770C88C718D3B5072E1F5') # MySQL Release Engineering <mysql-build@oss.oracle.com>
 source=("https://cdn.mysql.com/Downloads/MySQLGUITools/mysql-workbench-community-${pkgver}-src.tar.gz"{,.asc}
 	"https://cdn.mysql.com/Downloads/MySQL-${_mysql_version%.*}/mysql-${_mysql_version}.tar.gz"{,.asc}
 	"https://cdn.mysql.com/Downloads/Connector-C++/mysql-connector-c++-${_connector_version}-src.tar.gz"{,.asc}
 	"http://download.osgeo.org/gdal/${_gdal_version}/gdal-${_gdal_version}.tar.xz"
 	"https://downloads.sourceforge.net/project/boost/boost/${_boost_version}/boost_${_boost_version//./_}.tar.bz2"
-	"https://www.libssh.org/files/${_libssh_version%.*}/libssh-${_libssh_version}.tar."{xz,asc}
 	'0001-mysql-workbench-no-check-for-updates.patch'
 	'0002-disable-unsupported-operating-system-warning.patch'
-	'0003-Fix-segfault-in-getIssueBanner-add-missing-wrappers.patch'
-	'0004-libssh-fix-read-config.patch'
 	'0004-fix-build-for-i686.patch'
 	'atomic.patch'
 	'arch_linux_profile.xml')
@@ -54,25 +49,13 @@ sha256sums=('0241586c95026a7d4d1b552ba2e33d8e66f6826e8f7e1a692b78c405f80cd334'
             'SKIP'
             '9c4625c45a3ee7e49a604ef221778983dd9fd8104922a87f20b99d9bedb7725a'
             '2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba'
-            '54e86dd5dc20e5367e58f3caab337ce37675f863f80df85b6b1614966a337095'
-            'SKIP'
-            'c39bed86f34a377015fb6d6552700a3838c5cae1a4a83b3e859539785aeabdba'
             'cdf687f23bc6e8d52dbee9fa02b23d755e80f88476f0fc2e7c4c71cdfed3792f'
             '2d0f6dcf38f22e49ef7ab9de0230484f1ffac41b7ac40feaf5ef4538ae2f7a18'
-            'f15d8c8b3cc74d2d0b792316834648620fc2299ce103c6419f4c562f759ad755'
             '763925b336d9a398c15fdd757b6567a2f374a822090d32ffdefca018231128a4'
             '17294a67637ab7ffff5c39262208e63d21acac72cc2492f616ef1d8e0ae9ac02'
             '2ade582ca25f6d6d748bc84a913de39b34dcaa6e621a77740fe143007f2833af')
 
 prepare() {
-	cd "${srcdir}/libssh-${_libssh_version}"
-
-	# from libssh package
-	patch -Np1 < "${srcdir}"/0004-libssh-fix-read-config.patch
-	# required for mysql-workbench
-	# TODO: drop bundled libssh when this is merged upstream and hits our package
-	patch -Np1 < "${srcdir}"/0003-Fix-segfault-in-getIssueBanner-add-missing-wrappers.patch
-
 	cd "${srcdir}/mysql-workbench-community-${pkgver}-src/"
 
 	# Disable 'Help' -> 'Check for Updates'
@@ -153,20 +136,6 @@ build() {
 	msg "Install gdal"
 	make LD_LIBRARY_PATH="${srcdir}/install-bundle/usr/lib/" DESTDIR="${srcdir}/install-bundle/" install
 
-	# Build libssh
-	mkdir "${srcdir}/libssh-${_libssh_version}-build"
-	cd "${srcdir}/libssh-${_libssh_version}-build"
-	msg "Configure libssh"
-	cmake "${srcdir}/libssh-${_libssh_version}" \
-		-DCMAKE_INSTALL_PREFIX=/usr \
-		-DWITH_GSSAPI=OFF \
-		-DWITH_GCRYPT=ON \
-		-DWITH_TESTING=OFF
-	msg "Build libssh"
-	make
-	msg "Install libssh"
-	make DESTDIR="${srcdir}/install-bundle/" install
-
 	# Build MySQL Workbench itself with bundled libs
 	mkdir "${srcdir}/mysql-workbench-community-${pkgver}-src-build"
 	cd "${srcdir}/mysql-workbench-community-${pkgver}-src-build"
@@ -181,8 +150,6 @@ build() {
 		-DMySQLCppConn_INCLUDE_DIR="${srcdir}/install-bundle/usr/include/jdbc" \
 		-DGDAL_INCLUDE_DIR="${srcdir}/install-bundle/usr/include" \
 		-DGDAL_LIBRARY="${srcdir}/install-bundle/usr/lib/libgdal.so" \
-		-DLibSSH_INCLUDE_DIR="${srcdir}/install-bundle/usr/include" \
-		-DLibSSH_LIBRARY="${srcdir}/install-bundle/usr/lib/libssh.so" \
 		-DWITH_ANTLR_JAR='/usr/share/java/antlr-complete.jar' \
 		-DUSE_BUNDLED_MYSQLDUMP=1
 	msg "Build mysql-workbench"
@@ -190,13 +157,15 @@ build() {
 }
 
 package() {
-	# install bundled libraries files and files
-	for LIBRARY in $(find "${srcdir}/install-bundle/usr/lib/" -type f -regex '.*/lib\(gdal\|mysql\(client\|cppconn\)\|ssh\)\.so\..*'); do
-		install -D -m0755 "${LIBRARY}" "${pkgdir}"/usr/lib/mysql-workbench/"$(basename "${LIBRARY}")"
+	# install bundled libraries
+	for LIBRARY in $(find "${srcdir}/install-bundle/usr/lib/" -type f -regex '.*/lib\(gdal\|mysql\(client\|cppconn\)\)\.so\..*'); do
+		BASENAME="$(basename "${LIBRARY}")"
+		SONAME="$(readelf -d "${LIBRARY}" | grep -Po '(?<=(Library soname: \[)).*(?=\])')"
+		install -D -m0755 "${LIBRARY}" "${pkgdir}"/usr/lib/mysql-workbench/"${BASENAME}"
+		ln -s "${BASENAME}" "${pkgdir}"/usr/lib/mysql-workbench/"${SONAME}"
 	done
-	for SYMLINK in $(find "${srcdir}/install-bundle/usr/lib/" -type l -regex '.*/lib\(gdal\|mysql\(client\|cppconn\)\|ssh\)\.so\..*'); do
-		ln -s "$(readlink "${SYMLINK}")" "${pkgdir}"/usr/lib/mysql-workbench/"$(basename "${SYMLINK}")"
-	done
+
+	# install bundled mysql and mysqldump
 	install -m0755 "${srcdir}/install-bundle/usr/bin/mysql"{,dump} "${pkgdir}"/usr/lib/mysql-workbench/
 
 	# install MySQL Workbench itself
