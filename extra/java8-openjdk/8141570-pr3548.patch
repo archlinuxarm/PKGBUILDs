@@ -1,0 +1,55 @@
+# HG changeset patch
+# User coleenp
+# Date 1525713256 -3600
+#      Mon May 07 18:14:16 2018 +0100
+# Node ID bcbc64dfb629c5f188bbf59b8f986ad95963ed60
+# Parent  07a1135a327362f157955d470fad5df07cc35164
+8141570, PR3548: Fix Zero interpreter build for --disable-precompiled-headers
+Summary: change to include atomic.inline.hpp and allocation.inline.hpp only in .cpp files and some build fixes from Kim to build on ubuntu without devkits
+Reviewed-by: kbarrett, sgehwolf, erikj
+
+diff --git openjdk.orig/hotspot/make/linux/makefiles/zeroshark.make openjdk/hotspot/make/linux/makefiles/zeroshark.make
+--- openjdk.orig/hotspot/make/linux/makefiles/zeroshark.make
++++ openjdk/hotspot/make/linux/makefiles/zeroshark.make
+@@ -1,5 +1,5 @@
+ #
+-# Copyright (c) 2003, 2005, Oracle and/or its affiliates. All rights reserved.
++# Copyright (c) 2003, 2015, Oracle and/or its affiliates. All rights reserved.
+ # Copyright 2007, 2008 Red Hat, Inc.
+ # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ #
+@@ -25,8 +25,15 @@
+ 
+ # Setup common to Zero (non-Shark) and Shark versions of VM
+ 
+-# override this from the main file because some version of llvm do not like -Wundef
+-WARNING_FLAGS = -Wpointer-arith -Wsign-compare -Wunused-function -Wunused-value
++# Some versions of llvm do not like -Wundef
++ifeq ($(USE_CLANG), true)
++  WARNING_FLAGS += -Wno-undef
++endif
++# Suppress some warning flags that are normally turned on for hotspot,
++# because some of the zero code has not been updated accordingly.
++WARNING_FLAGS += -Wno-return-type \
++  -Wno-format-nonliteral -Wno-format-security \
++  -Wno-maybe-uninitialized
+ 
+ # The copied fdlibm routines in sharedRuntimeTrig.o must not be optimized
+ OPT_CFLAGS/sharedRuntimeTrig.o = $(OPT_CFLAGS/NOOPT)
+@@ -42,5 +49,3 @@
+ ifeq ($(ARCH_DATA_MODEL), 64)
+   CFLAGS += -D_LP64=1
+ endif
+-
+-OPT_CFLAGS/compactingPermGenGen.o = -O1
+diff --git openjdk.orig/hotspot/src/share/vm/runtime/java.cpp openjdk/hotspot/src/share/vm/runtime/java.cpp
+--- openjdk.orig/hotspot/src/share/vm/runtime/java.cpp
++++ openjdk/hotspot/src/share/vm/runtime/java.cpp
+@@ -45,6 +45,7 @@
+ #include "runtime/arguments.hpp"
+ #include "runtime/biasedLocking.hpp"
+ #include "runtime/compilationPolicy.hpp"
++#include "runtime/deoptimization.hpp"
+ #include "runtime/fprofiler.hpp"
+ #include "runtime/init.hpp"
+ #include "runtime/interfaceSupport.hpp"
