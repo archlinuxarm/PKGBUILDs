@@ -1,0 +1,64 @@
+From 596747f36cc455e99f5e6d1b87177e4b208c0c2b Mon Sep 17 00:00:00 2001
+From: AKASHI Takahiro <takahiro.akashi@linaro.org>
+Date: Thu, 21 Aug 2014 17:56:40 +0900
+Subject: [PATCH 11/16] arm64: ptrace: add PTRACE_SET_SYSCALL
+
+To allow tracer to be able to change/skip a system call by re-writing
+a syscall number, there are several approaches:
+
+(1) modify x8 register with ptrace(PTRACE_SETREGSET), and handle this case
+    later on in syscall_trace_enter(), or
+(2) support ptrace(PTRACE_SET_SYSCALL) as on arm
+
+Thinking of the fact that user_pt_regs doesn't expose 'syscallno' to
+tracer as well as that secure_computing() expects a changed syscall number
+to be visible, especially case of -1, before this function returns in
+syscall_trace_enter(), we'd better take (2).
+
+Signed-off-by: AKASHI Takahiro <takahiro.akashi@linaro.org>
+Reviewed-by: Kees Cook <keescook@chromium.org>
+---
+ arch/arm64/include/uapi/asm/ptrace.h |  1 +
+ arch/arm64/kernel/ptrace.c           | 14 +++++++++++++-
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/include/uapi/asm/ptrace.h b/arch/arm64/include/uapi/asm/ptrace.h
+index c136fd53c847..164e2bbe9afd 100644
+--- a/arch/arm64/include/uapi/asm/ptrace.h
++++ b/arch/arm64/include/uapi/asm/ptrace.h
+@@ -23,6 +23,7 @@
+ 
+ #include <asm/hwcap.h>
+ 
++#define PTRACE_SET_SYSCALL	23
+ 
+ /*
+  * PSR bits
+diff --git a/arch/arm64/kernel/ptrace.c b/arch/arm64/kernel/ptrace.c
+index 53bdc598d1c1..6ef1e17d9c5b 100644
+--- a/arch/arm64/kernel/ptrace.c
++++ b/arch/arm64/kernel/ptrace.c
+@@ -1093,7 +1093,19 @@ const struct user_regset_view *task_user_regset_view(struct task_struct *task)
+ long arch_ptrace(struct task_struct *child, long request,
+ 		 unsigned long addr, unsigned long data)
+ {
+-	return ptrace_request(child, request, addr, data);
++	int ret;
++
++	switch (request) {
++		case PTRACE_SET_SYSCALL:
++			task_pt_regs(child)->syscallno = data;
++			ret = 0;
++			break;
++		default:
++			ret = ptrace_request(child, request, addr, data);
++			break;
++	}
++
++	return ret;
+ }
+ 
+ enum ptrace_syscall_dir {
+-- 
+2.18.0
+
