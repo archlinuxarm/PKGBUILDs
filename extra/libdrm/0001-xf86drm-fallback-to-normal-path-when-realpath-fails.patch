@@ -1,0 +1,81 @@
+From bcb9d976cd91c018aa4eef13563813288984601f Mon Sep 17 00:00:00 2001
+From: Emil Velikov <emil.velikov@collabora.com>
+Date: Thu, 23 Aug 2018 10:49:54 +0100
+Subject: [PATCH 1/3] xf86drm: fallback to normal path when realpath fails
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Earlier commit reworked our sysfs handling to use realpath.
+Sadly that backfired since the Firefox sandboxing mechanism rejects
+that. Despite the files/folders being in the allowed list, of the
+sandboxing mechanism.
+
+Oddly enough, the Chromium sandboxing doesn't complain about any of
+this.
+
+Since there are no Firefox releases with the fix, add a temporary
+solution which falls back to the original handling.
+
+Sadly, this won't work for virgl.
+
+v2: drop return type - function cannot return NULL (Eric)
+
+Bugzilla: https://bugs.freedesktop.org/show_bug.cgi?id=107516
+Fixes: a02900133b3 ("xf86drm: introduce a get_real_pci_path() helper")
+Signed-off-by: Emil Velikov <emil.velikov@collabora.com>
+Reviewed-by: Michel Dänzer <michel.daenzer@amd.com>
+Tested-by: Michel Dänzer <michel.daenzer@amd.com>
+Reviewed-by: Eric Engestrom <eric.engestrom@intel.com>
+Signed-off-by: Laurent Carlier <lordheavym@gmail.com>
+---
+ xf86drm.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/xf86drm.c b/xf86drm.c
+index 336d64de..7807dce9 100644
+--- a/xf86drm.c
++++ b/xf86drm.c
+@@ -3014,6 +3014,12 @@ get_real_pci_path(int maj, int min, char *real_path)
+     return real_path;
+ }
+ 
++static void
++get_normal_pci_path(int maj, int min, char *normal_path)
++{
++    snprintf(normal_path, PATH_MAX, "/sys/dev/char/%d:%d/device", maj, min);
++}
++
+ static int drmParsePciBusInfo(int maj, int min, drmPciBusInfoPtr info)
+ {
+ #ifdef __linux__
+@@ -3022,7 +3028,7 @@ static int drmParsePciBusInfo(int maj, int min, drmPciBusInfoPtr info)
+     int num;
+ 
+     if (get_real_pci_path(maj, min, real_path) == NULL)
+-        return -ENOENT;
++        get_normal_pci_path(maj, min, real_path);
+ 
+     value = sysfs_uevent_get(real_path, "PCI_SLOT_NAME");
+     if (!value)
+@@ -3143,7 +3149,7 @@ static int parse_separate_sysfs_files(int maj, int min,
+     int ret;
+ 
+     if (get_real_pci_path(maj, min, real_path) == NULL)
+-        return -ENOENT;
++        get_normal_pci_path(maj, min, real_path);
+ 
+     for (unsigned i = ignore_revision ? 1 : 0; i < ARRAY_SIZE(attrs); i++) {
+         snprintf(path, PATH_MAX, "%s/%s", real_path, attrs[i]);
+@@ -3175,7 +3181,7 @@ static int parse_config_sysfs_file(int maj, int min,
+     int fd, ret;
+ 
+     if (get_real_pci_path(maj, min, real_path) == NULL)
+-        return -ENOENT;
++        get_normal_pci_path(maj, min, real_path);
+ 
+     snprintf(path, PATH_MAX, "%s/config", real_path);
+     fd = open(path, O_RDONLY);
+-- 
+2.18.0
+
