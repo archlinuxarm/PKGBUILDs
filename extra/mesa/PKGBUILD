@@ -18,11 +18,13 @@ url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        0001-glvnd-fix-gl.pc.patch)
+        0001-glvnd-fix-gl.pc.patch
+        0001-fix-finding-libsensors.patch)
 sha512sums=('ab89c6d27b765d3efdf61b24dc56d863ae590d83003d2eae4bfe25ecfbeda5bee0227f21d057523bb4eceeaf3d9955df48087ffb472c41b123c100e593056cb9'
             'SKIP'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
-            '2f40198eff47664c831c56e8a63f60a4d1b815cf697e6bdb0be39e6d9c5df043857f6264b7cd2ccf46c07626186c565144e80f4214b5f7936ef7024c47201437')
+            '2f40198eff47664c831c56e8a63f60a4d1b815cf697e6bdb0be39e6d9c5df043857f6264b7cd2ccf46c07626186c565144e80f4214b5f7936ef7024c47201437'
+            'd081c46ebfd14fa58f902f1035b4b0659993eaaa64f701e7d06b1e90ad199103a6d9042d0b16c1bc4900b1f3a772c1b47f9ed6b0e37ddba26ac455f0ea983220')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
               'E3E8F480C52ADD73B278EE78E1ECBE07D7D70895'  # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>"
@@ -35,6 +37,8 @@ prepare() {
   # glvnd support patches - from Fedora
   # non-upstreamed ones
 #  patch -Np1 -i ../0001-glvnd-fix-gl.pc.patch
+
+  patch -Np1 -i ../0001-fix-finding-libsensors.patch
 }
 
 build() {
