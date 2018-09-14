@@ -8,22 +8,21 @@
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=18.1.8
+pkgver=18.2.0
 pkgrel=1
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
-             'elfutils' 'llvm' 'libomxil-bellagio' 'clang' 'libglvnd' 'lm_sensors' 'meson')
+             'elfutils' 'llvm' 'libomxil-bellagio' 'clang' 'libglvnd' 'lm_sensors'
+             'libxrandr' 'meson')
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
-        0001-glvnd-fix-gl.pc.patch
         0001-fix-finding-libsensors.patch)
-sha512sums=('ab89c6d27b765d3efdf61b24dc56d863ae590d83003d2eae4bfe25ecfbeda5bee0227f21d057523bb4eceeaf3d9955df48087ffb472c41b123c100e593056cb9'
+sha512sums=('e6e997e166845009f6b97da204384758c797c870b56332652c0a2636734638f9180b7e4dbad144495645308ae4d77981a2493a22d57973723338b658e0655557'
             'SKIP'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
-            '2f40198eff47664c831c56e8a63f60a4d1b815cf697e6bdb0be39e6d9c5df043857f6264b7cd2ccf46c07626186c565144e80f4214b5f7936ef7024c47201437'
             'd081c46ebfd14fa58f902f1035b4b0659993eaaa64f701e7d06b1e90ad199103a6d9042d0b16c1bc4900b1f3a772c1b47f9ed6b0e37ddba26ac455f0ea983220')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -139,10 +138,6 @@ package_mesa() {
   
   # in vulkan-headers
   rm -rfv fakeinstall/usr/include/vulkan
-
-  # in wayland
-  rm -v fakeinstall/usr/lib/libwayland-egl.so*
-  rm -v fakeinstall/usr/lib/pkgconfig/wayland-egl.pc
 
   _install fakeinstall/usr/include
   _install fakeinstall/usr/lib/pkgconfig
