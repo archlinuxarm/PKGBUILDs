@@ -1,0 +1,91 @@
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - use tarball source
+#  - remove --enable-linker=gold
+
+pkgname=js60
+pkgver=60.2.0
+pkgrel=1
+_ffver=${pkgver%%.*}
+pkgdesc="JavaScript interpreter and libraries - Version $_ffver"
+arch=(x86_64)
+url="https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey"
+license=(MPL)
+depends=(gcc-libs readline zlib sh)
+makedepends=(python2 zip autoconf2.13 mercurial)
+_repo=https://hg.mozilla.org/mozilla-unified
+source=("https://hg.mozilla.org/mozilla-unified/archive/FIREFOX_${pkgver//./_}esr_RELEASE.tar.gz"
+        bug1415202.patch
+        mozjs60-fix-soname.patch
+        mozjs52-include-configure-script.patch)
+sha256sums=('2e4e6bbdaa2503587cfdbc66b8c3223201795dff7d7abbe985571da70a9959df'
+            '9f316ab46d1c45b0051b43579e80d0d622c58d74230877a53b170c56e6aa0193'
+            'c792837930defe27355941080e9b80ec1d45003c097e4707860acc13d43bc519'
+            'd91a89acd88bfc747a255050757a0c17139bf5c3508c2e1c3c6bb2056786a344')
+
+prepare() {
+  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE
+  mkdir obj
+
+  # https://bugzilla.mozilla.org/show_bug.cgi?id=1479687
+  patch -Np1 -i ../bug1415202.patch
+
+  # https://salsa.debian.org/gnome-team/mozjs52/tree/debian/master/debian/patches
+  patch -Np1 -i ../mozjs60-fix-soname.patch
+  patch -Np1 -i ../mozjs52-include-configure-script.patch
+}
+
+build() {
+  local configure_args=(
+    --prefix=/usr
+    --disable-debug
+    --disable-debug-symbols
+    --disable-jemalloc
+    --disable-strip
+    --enable-hardening
+    --enable-optimize
+    --enable-posix-nspr-emulation
+    --enable-readline
+    --enable-release
+    --enable-shared-js
+    --enable-tests
+    --with-intl-api
+    --with-system-zlib
+    --without-system-icu
+  )
+
+  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/obj
+
+  export PYTHON=/usr/bin/python2
+
+  sh ../js/src/configure "${configure_args[@]}"
+  make
+}
+
+check() {
+  local jstests_extra_args=(
+    --format=none
+    --exclude-random
+  ) jittest_extra_args=(
+    --format=none
+    --timeout 300
+  ) jittest_test_args=(
+    basic
+  )
+
+  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/obj
+  make -C js/src check-jstests check-jit-test \
+    JSTESTS_EXTRA_ARGS="${jstests_extra_args[*]}" \
+    JITTEST_EXTRA_ARGS="${jittest_extra_args[*]}" \
+    JITTEST_TEST_ARGS="${jittest_test_args[*]}"
+}
+
+package() {
+  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/obj
+  make DESTDIR="$pkgdir" install
+  rm "$pkgdir"/usr/lib/*.ajs
+  find "$pkgdir"/usr/{lib/pkgconfig,include} -type f -exec chmod -c a-x {} +
+}
+
+# vim:set ts=2 sw=2 et:
