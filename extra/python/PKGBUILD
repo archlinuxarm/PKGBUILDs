@@ -12,7 +12,7 @@
 
 pkgname=python
 pkgver=3.7.0
-pkgrel=3
+pkgrel=4
 _pybasever=${pkgver%.*}
 pkgdesc="Next generation of the python high-level scripting language"
 arch=('x86_64')
@@ -30,11 +30,13 @@ provides=('python3')
 replaces=('python3')
 source=("https://www.python.org/ftp/python/${pkgver%rc*}/Python-${pkgver}.tar.xz"{,.asc}
         bpo34056-always-return-bytes-from-_HackedGetData.get_data.patch
-        dont-make-libpython-readonly.patch)
+        dont-make-libpython-readonly.patch
+        0001-compileall-Fix-ddir-when-recursing.patch)
 sha512sums=('8bb11233fb67ee9ab8ed1b72f8fdc62f66e26a6beaaeb92448bce681cf065269833b1658d3ed2459127f25ba43adb0eab73cf27c59834a2a803fb529b4216739'
             'SKIP'
             '0ec544fa95ba30be03e866d02848f9fa4921304055368609136ac39626df9835bad75506f6d81ef9fdc0ebcc29a9749f84b5b5f4dd75958c9699ade522d51b68'
-            '2ef96708d5b13ae2a3d2cc62c87b4780e60ecfce914e190564492def3a11d5e56977659f41c7f9d12266e58050c766bce4e2b5d50b708eb792794fa8357920c4')
+            '2ef96708d5b13ae2a3d2cc62c87b4780e60ecfce914e190564492def3a11d5e56977659f41c7f9d12266e58050c766bce4e2b5d50b708eb792794fa8357920c4'
+            'ebd04c3b6d41321b1f0d439d356e0ce463760db55dc64109854c70d017cf56608aa19de9fc4a21bf840795ff202b4703444f9af8074b661780798c17e03089ff')
 validpgpkeys=('0D96DF4D4110E5C43FBFB17F2D347EA6AA65421D')  # Ned Deily (Python release signing key) <nad@python.org>
 
 prepare() {
@@ -46,8 +48,17 @@ prepare() {
   # FS#45809
   patch -p1 -i ../dont-make-libpython-readonly.patch
 
+  # FS#59997
+  patch -p1 -i ../0001-compileall-Fix-ddir-when-recursing.patch
+
+  # https://bugs.python.org/issue34587
+  sed -i -e "s|testCongestion|disabled_&|" Lib/test/test_socket.py
+
   # FS#23997
   sed -i -e "s|^#.* /usr/local/bin/python|#!/usr/bin/python|" Lib/cgi.py
+
+  # Speed up LTO
+  sed -i -e "s|-flto |-flto=4 |g" configure configure.ac
 
   # Ensure that we are using the system copy of various libraries (expat, libffi, and libmpdec),
   # rather than copies shipped in the tarball
@@ -58,6 +69,9 @@ prepare() {
 
 build() {
   cd Python-${pkgver}
+
+  # PGO should be done with -O3
+  CFLAGS="${CFLAGS/-O2/-O3}"
 
   # Disable bundled pip & setuptools
   ./configure --prefix=/usr \
@@ -105,6 +119,9 @@ package() {
 
   # Hack to avoid building again
   sed -i 's/^all:.*$/all: build_all/' Makefile
+
+  # PGO should be done with -O3
+  CFLAGS="${CFLAGS/-O2/-O3}"
 
   make DESTDIR="${pkgdir}" EXTRA_CFLAGS="$CFLAGS" install
 
