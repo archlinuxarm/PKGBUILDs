@@ -1,4 +1,3 @@
-# $Id$
 # Maintainer: Jan de Groot <jgc@archlinux.org>
 # Maintainer: Andreas Radke <andyrtr@archlinux.org>
 
@@ -8,7 +7,7 @@
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=18.2.0
+pkgver=18.2.1
 pkgrel=1
 arch=('x86_64')
 makedepends=('python2-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
@@ -20,7 +19,7 @@ license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE
         0001-fix-finding-libsensors.patch)
-sha512sums=('e6e997e166845009f6b97da204384758c797c870b56332652c0a2636734638f9180b7e4dbad144495645308ae4d77981a2493a22d57973723338b658e0655557'
+sha512sums=('d249bdf79aad36db9a8d291b3a1a100d283893ac741f58f85ae7e5c90ca25c37f80a5fa6fc57945ffeb0b67b788e7ea146543ec790b22f144578fc4c1525b84d'
             'SKIP'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
             'd081c46ebfd14fa58f902f1035b4b0659993eaaa64f701e7d06b1e90ad199103a6d9042d0b16c1bc4900b1f3a772c1b47f9ed6b0e37ddba26ac455f0ea983220')
@@ -33,9 +32,6 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 prepare() {
   cd mesa-${pkgver}
 
-  # glvnd support patches - from Fedora
-  # non-upstreamed ones
-#  patch -Np1 -i ../0001-glvnd-fix-gl.pc.patch
 
   patch -Np1 -i ../0001-fix-finding-libsensors.patch
 }
