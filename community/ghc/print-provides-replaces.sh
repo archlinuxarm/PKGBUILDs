@@ -22,7 +22,7 @@ cd src/ghc-${pkgver}/libraries
 # $1 is the name of the variable
 # $2 is the string for the test, either '=' or '<'
 print_var() {
-  printf "$1=("
+  printf "  $1=("
   for path in $(ls ./*/*.cabal); do
     dirname=$(echo $path | awk -F '/' '{ print $2 }')
     cabalfile=$(echo $path | awk -F '/' '{ print $3 }')
@@ -31,14 +31,13 @@ print_var() {
     version=$(awk 'tolower($0) ~ /^version:/ {print $2 }' $path)
     printf "'haskell-$cabalname"
     [[ -n "$2" ]] && printf "$2$version"
-    printf "'\n          "
+    printf "'\n            "
   done
   # also add cabal
   version=$(awk 'tolower($0) ~ /^version:/ { print $2 }' Cabal/Cabal/Cabal.cabal)
   printf "'haskell-cabal"
   [[ -n "$2" ]] && printf "$2$version"
-  printf "'\n          "
-  echo -e '\b)'
+  printf "')\n"
 }
 
 print_var 'provides' '='
