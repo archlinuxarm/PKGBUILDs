@@ -1,0 +1,129 @@
+diff --git a/lib/irs/getaddrinfo.c b/lib/irs/getaddrinfo.c
+index 1b2df6d71c9a3df0e75c1f336833a136e0d6a06c..d5481c7afa605880b7c9e5ca17815d5f80e6ea5a 100644
+--- a/lib/irs/getaddrinfo.c
++++ b/lib/irs/getaddrinfo.c
+@@ -181,6 +181,47 @@ static void _freeaddrinfo(struct addrinfo *ai);
+ #define FOUND_IPV6	0x2
+ #define FOUND_MAX	2
+ 
++/*%
++ * Try converting the scope identifier in 'src' to a network interface index.
++ * Upon success, return true and store the resulting index in 'dst'.  Upon
++ * failure, return false.
++ */
++static bool
++parse_scopeid(const char *src, uint32_t *dst) {
++	uint32_t scopeid = 0;
++
++	REQUIRE(src != NULL);
++	REQUIRE(dst != NULL);
++
++#ifdef HAVE_IF_NAMETOINDEX
++	/*
++	 * Try using if_nametoindex() first if it is available.  As it does not
++	 * handle numeric scopes, we do not simply return if it fails.
++	 */
++	scopeid = (uint32_t)if_nametoindex(src);
++#endif
++
++	/*
++	 * Fall back to numeric scope processing if if_nametoindex() either
++	 * fails or is unavailable.
++	 */
++	if (scopeid == 0) {
++		char *endptr = NULL;
++		scopeid = (uint32_t)strtoul(src, &endptr, 10);
++		/*
++		 * The scope identifier must not be empty and no trailing
++		 * characters are allowed after it.
++		 */
++		if (src == endptr || endptr == NULL || *endptr != '\0') {
++			return (false);
++		}
++	}
++
++	*dst = scopeid;
++
++	return (true);
++}
++
+ #define ISC_AI_MASK (AI_PASSIVE|AI_CANONNAME|AI_NUMERICHOST)
+ /*%
+  * Get a list of IP addresses and port numbers for host hostname and
+@@ -365,39 +406,24 @@ getaddrinfo(const char *hostname, const char *servname,
+ 		char abuf[sizeof(struct in6_addr)];
+ 		char nbuf[NI_MAXHOST];
+ 		int addrsize, addroff;
+-#ifdef IRS_HAVE_SIN6_SCOPE_ID
+-		char *p, *ep;
+ 		char ntmp[NI_MAXHOST];
+-		uint32_t scopeid;
+-#endif
++		uint32_t scopeid = 0;
+ 
+-#ifdef IRS_HAVE_SIN6_SCOPE_ID
+ 		/*
+ 		 * Scope identifier portion.
+ 		 */
+ 		ntmp[0] = '\0';
+ 		if (strchr(hostname, '%') != NULL) {
++			char *p;
+ 			strlcpy(ntmp, hostname, sizeof(ntmp));
+ 			p = strchr(ntmp, '%');
+-			ep = NULL;
+-
+-			/*
+-			 * Vendors may want to support non-numeric
+-			 * scopeid around here.
+-			 */
+ 
+-			if (p != NULL)
+-				scopeid = (uint32_t)strtoul(p + 1,
+-								&ep, 10);
+-			if (p != NULL && ep != NULL && ep[0] == '\0')
++			if (p != NULL && parse_scopeid(p + 1, &scopeid)) {
+ 				*p = '\0';
+-			else {
++			} else {
+ 				ntmp[0] = '\0';
+-				scopeid = 0;
+ 			}
+-		} else
+-			scopeid = 0;
+-#endif
++		}
+ 
+ 		if (inet_pton(AF_INET, hostname, (struct in_addr *)abuf)
+ 		    == 1) {
+@@ -415,7 +441,6 @@ getaddrinfo(const char *hostname, const char *servname,
+ 			addroff = offsetof(struct sockaddr_in, sin_addr);
+ 			family = AF_INET;
+ 			goto common;
+-#ifdef IRS_HAVE_SIN6_SCOPE_ID
+ 		} else if (ntmp[0] != '\0' &&
+ 			   inet_pton(AF_INET6, ntmp, abuf) == 1) {
+ 			if (family && family != AF_INET6)
+@@ -424,7 +449,6 @@ getaddrinfo(const char *hostname, const char *servname,
+ 			addroff = offsetof(struct sockaddr_in6, sin6_addr);
+ 			family = AF_INET6;
+ 			goto common;
+-#endif
+ 		} else if (inet_pton(AF_INET6, hostname, abuf) == 1) {
+ 			if (family != 0 && family != AF_INET6)
+ 				return (EAI_NONAME);
+@@ -444,12 +468,10 @@ getaddrinfo(const char *hostname, const char *servname,
+ 			ai->ai_socktype = socktype;
+ 			SIN(ai->ai_addr)->sin_port = port;
+ 			memmove((char *)ai->ai_addr + addroff, abuf, addrsize);
++			if (ai->ai_family == AF_INET6) {
++				SIN6(ai->ai_addr)->sin6_scope_id = scopeid;
++			}
+ 			if ((flags & AI_CANONNAME) != 0) {
+-#ifdef IRS_HAVE_SIN6_SCOPE_ID
+-				if (ai->ai_family == AF_INET6)
+-					SIN6(ai->ai_addr)->sin6_scope_id =
+-						scopeid;
+-#endif
+ 				if (getnameinfo(ai->ai_addr,
+ 						(socklen_t)ai->ai_addrlen,
+ 						nbuf, sizeof(nbuf), NULL, 0,
