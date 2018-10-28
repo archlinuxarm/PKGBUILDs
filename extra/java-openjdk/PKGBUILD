@@ -1,0 +1,287 @@
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Guillaume ALAUX <guillaume@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - drop pandoc makedepend
+#  - specify ARM _JARCH's
+#  - use zero on ARMv5, adjusted _imgdir
+#  - don't build docs, removed docs package; takes a day to build
+#  - replace --with-num-cores with --with-jobs
+
+# TODO add test, see about packaging jtreg and using it here
+# TODO see about building with OpenJDK10
+# TODO add javazi
+# TODO when IcedTea provides it, package icedtea-web and add it as optdepends
+# TODO package OpenJFX for OpenJDK10 and add it as optdepends
+
+## EXPLORATIONS
+# TODO extract a jmods package from jdk10-openjdk?
+# TODO extract a jdk-headless package?
+
+pkgbase=java-openjdk
+pkgname=('jre-openjdk-headless' 'jre-openjdk' 'jdk-openjdk' 'openjdk-src')
+_majorver=11
+_minorver=0
+_securityver=1
+_updatever=13
+pkgrel=2
+pkgver=${_majorver}.${_minorver}.${_securityver}.u${_updatever}
+_hg_tag=jdk-${_majorver}.${_minorver}.${_securityver}+${_updatever}
+arch=('x86_64')
+url='http://openjdk.java.net/'
+license=('custom')
+makedepends=('java-environment>=10' 'cpio' 'unzip' 'zip' 'libelf' 'libcups' 'libx11'
+             'libxrender' 'libxtst' 'libxt' 'libxext' 'alsa-lib'
+             'graphviz' 'freetype2' 'libjpeg-turbo' 'giflib' 'libpng' 'lcms2'
+             'libnet' 'bash')
+source=(http://hg.openjdk.java.net/jdk-updates/jdk${_majorver}u/archive/${_hg_tag}.tar.gz
+        freedesktop-java.desktop
+        freedesktop-jconsole.desktop
+        freedesktop-policytool.desktop
+        freedesktop-jshell.desktop)
+sha256sums=('55fb9759f11d942431377c39c5efd36d7598efa2d3fac160ef49ef7ccc7623e6'
+            '575587ad58dfa9908f046d307b9afc7b0b2eb20a1eb454f8fdbbd539ea7b3d01'
+            '2f57b7c7dd671eabe9fa10c4f1283573e99d7f7c36eccd82c95b705979a2e8cb'
+            'd8907cefaf87f9afcbf1a2079868c03e0209cc1e7b99fbd4022641802c8cf30c'
+            'f271618a8c2a892b554caf26857af41efdf0d8bcb95d57ce7ba535d6979e96da')
+
+case "${CARCH}" in
+  x86_64) _JARCH='x86_64';;
+  i686)   _JARCH='x86';;
+  arm*)    _JARCH='arm';;
+  aarch64) _JARCH='aarch64';;
+esac
+
+_jvmdir=/usr/lib/jvm/java-${_majorver}-openjdk
+_jdkdir=jdk${_majorver}u-${_hg_tag}
+if [[ $CARCH == "arm" ]]; then
+  _imgdir=${_jdkdir}/build/linux-${_JARCH}-normal-zero-release/images
+else
+  _imgdir=${_jdkdir}/build/linux-${_JARCH}-normal-server-release/images
+fi
+
+_nonheadless=(lib/libawt_xawt.{so,debuginfo}
+              lib/libjawt.{so,debuginfo}
+              lib/libjsound.{so,debuginfo}
+              lib/libsplashscreen.{so,debuginfo})
+
+build() {
+  cd ${_jdkdir}
+
+  export MAKEFLAGS="-j5"
+
+  NUM_PROC_OPT=''
+  MAKEFLAG_J=$(echo ${MAKEFLAGS} | sed -En 's/.*-j([0-9]+).*/\1/p')
+  if [ -n "${MAKEFLAG_J}" ]; then
+    # http://hg.openjdk.java.net/jdk10/jdk10/file/85e6cb013b98/make/InitSupport.gmk#l105
+    echo "Removing '-j${MAKEFLAG_J}' from MAKEFLAGS to prevent build fail. Passing it directly to ./configure."
+    export MAKEFLAGS=${MAKEFLAGS/-j${MAKEFLAG_J}/}
+    NUM_PROC_OPT="--with-jobs=${MAKEFLAG_J}"
+  fi
+
+  # We filter out -O flags so that the optimization of HotSpot is not lowered from O3 to O2
+  local _CFLAGS="${CFLAGS//-O2} ${CPPFLAGS}"
+  local _CXXFLAGS="${CXXFLAGS//-O2} ${CPPFLAGS}"
+  local _LDFLAGS=${LDFLAGS}
+  if [[ ${CARCH} = i686 ]]; then
+    echo "Removing '-fno-plt' from CFLAGS and CXXFLAGS to prevent build fail with this architecture"
+    _CFLAGS=${CFLAGS/-fno-plt/}
+    _CXXFLAGS=${CXXFLAGS/-fno-plt/}
+  fi
+
+  # CFLAGS, CXXFLAGS and LDFLAGS are ignored as shown by a warning
+  # in the output of ./configure unless used like such:
+  #  --with-extra-cflags="${CFLAGS}"
+  #  --with-extra-cxxflags="${CXXFLAGS}"
+  #  --with-extra-ldflags="${LDFLAGS}"
+  # See also paragraph "Configure Control Variables from "jdk${_majorver}-${_hg_tag}/common/doc/building.md
+  unset CFLAGS
+  unset CXXFLAGS
+  unset LDFLAGS
+
+  if [[ $CARCH == "arm" ]]; then
+    _variants='zero'
+  else
+    _variants='server'
+  fi
+
+  bash configure \
+    --with-version-build="${_updatever}" \
+    --with-version-pre="" \
+    --with-version-opt="" \
+    --with-stdc++lib=dynamic \
+    --with-extra-cflags="${_CFLAGS}" \
+    --with-extra-cxxflags="${_CXXFLAGS}" \
+    --with-extra-ldflags="${_LDFLAGS}" \
+    --with-libjpeg=system \
+    --with-giflib=system \
+    --with-libpng=system \
+    --with-lcms=system \
+    --with-zlib=system \
+    --with-jvm-features=zgc \
+    --enable-unlimited-crypto \
+    --disable-warnings-as-errors \
+    --with-jvm-variants=$_variants \
+    ${NUM_PROC_OPT}
+    #--disable-javac-server
+
+  make images legacy-jre-image
+
+  # https://bugs.openjdk.java.net/browse/JDK-8173610
+  find "../${_imgdir}" -iname '*.so' -exec chmod +x {} \;
+}
+
+check() {
+  cd jdk${_majorver}u-${_hg_tag}
+  # TODO package jtreg
+  # make -k check
+}
+
+package_jre-openjdk-headless() {
+  pkgdesc="OpenJDK Java ${_majorver} headless runtime environment"
+  depends=('java-runtime-common>=3' 'ca-certificates-utils' 'nss' 'libjpeg-turbo' 'lcms2' 'libnet' 'freetype2')
+  optdepends=('java-rhino: for some JavaScript support')
+  provides=("java-runtime-headless=${_majorver}" "java-runtime-headless-openjdk=${_majorver}" "jre${_majorver}-openjdk-headless=${pkgver}-${pkgrel}")
+  backup=(etc/${pkgbase}/logging.properties
+          etc/${pkgbase}/management/jmxremote.access
+          etc/${pkgbase}/management/jmxremote.password.template
+          etc/${pkgbase}/management/management.properties
+          etc/${pkgbase}/net.properties
+          etc/${pkgbase}/security/java.policy
+          etc/${pkgbase}/security/java.security
+          etc/${pkgbase}/security/policy/README.txt
+          etc/${pkgbase}/security/policy/limited/default_US_export.policy
+          etc/${pkgbase}/security/policy/limited/default_local.policy
+          etc/${pkgbase}/security/policy/limited/exempt_local.policy
+          etc/${pkgbase}/security/policy/unlimited/default_US_export.policy
+          etc/${pkgbase}/security/policy/unlimited/default_local.policy
+          etc/${pkgbase}/sound.properties)
+  install=install_jre-openjdk-headless.sh
+
+  cd ${_imgdir}/jre
+
+  install -dm 755 "${pkgdir}${_jvmdir}"
+
+  cp -a bin lib \
+    "${pkgdir}${_jvmdir}"
+
+  for f in ${_nonheadless[@]}; do
+    rm "${pkgdir}${_jvmdir}/${f}"
+  done
+
+  cp ../jdk/release "${pkgdir}${_jvmdir}"
+  cp ../jdk/lib/modules "${pkgdir}${_jvmdir}/lib"
+
+  # Conf
+  install -dm 755 "${pkgdir}/etc"
+  cp -r conf "${pkgdir}/etc/${pkgbase}"
+  ln -s /etc/${pkgbase} "${pkgdir}/${_jvmdir}/conf"
+
+  # Legal
+  install -dm 755 "${pkgdir}/usr/share/licenses"
+  cp -r legal "${pkgdir}/usr/share/licenses/${pkgbase}"
+  ln -s ${pkgbase} "${pkgdir}/usr/share/licenses/${pkgname}"
+  ln -s /usr/share/licenses/${pkgbase} "${pkgdir}/${_jvmdir}/legal"
+
+  # Man pages
+  for f in man/man1/* man/ja/man1/*; do
+    install -Dm 644 "${f}" "${pkgdir}/usr/share/${f/\.1/-openjdk${_majorver}.1}"
+  done
+  ln -s /usr/share/man "${pkgdir}/${_jvmdir}/man"
+
+  # Link JKS keystore from ca-certificates-utils
+  rm -f "${pkgdir}${_jvmdir}/lib/security/cacerts"
+  ln -sf /etc/ssl/certs/java/cacerts "${pkgdir}${_jvmdir}/lib/security/cacerts"
+}
+
+package_jre-openjdk() {
+  pkgdesc="OpenJDK Java ${_majorver} full runtime environment"
+  depends=("jre${_majorver}-openjdk-headless=${pkgver}-${pkgrel}" 'giflib')
+  optdepends=('alsa-lib: for basic sound support'
+              'gtk2: for the Gtk+ 2 look and feel - desktop usage'
+              'gtk3: for the Gtk+ 3 look and feel - desktop usage')
+  provides=("java-runtime=${_majorver}" "java-runtime-openjdk=${_majorver}" "jre${_majorver}-openjdk=${pkgver}-${pkgrel}")
+  install=install_jre-openjdk.sh
+
+  cd ${_imgdir}/jre
+
+  install -dm 755 "${pkgdir}${_jvmdir}"
+
+  for f in ${_nonheadless[@]}; do
+    install -Dm 644 ${f} "${pkgdir}${_jvmdir}/${f}"
+  done
+
+  # Licenses
+  install -dm 755 "${pkgdir}/usr/share/licenses"
+  ln -s ${pkgbase} "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+package_jdk-openjdk() {
+  pkgdesc="OpenJDK Java ${_majorver} development kit"
+  depends=("jre${_majorver}-openjdk=${pkgver}-${pkgrel}" 'java-environment-common=3' 'hicolor-icon-theme' 'libelf')
+  provides=("java-environment=${_majorver}" "java-environment-openjdk=${_majorver}" "jdk${_majorver}-openjdk=${pkgver}-${pkgrel}")
+  install=install_jdk-openjdk.sh
+
+  cd ${_imgdir}/jdk
+
+  install -dm 755 "${pkgdir}${_jvmdir}"
+
+  cp -a bin demo include jmods lib \
+    "${pkgdir}${_jvmdir}"
+
+  rm "${pkgdir}${_jvmdir}/lib/src.zip"
+
+  # Remove files held by JRE
+  pushd ../jre
+  for d in bin lib; do
+    find ${d} ! -type d -exec rm "${pkgdir}${_jvmdir}/{}" \;
+  done
+  popd
+  find "${pkgdir}${_jvmdir}/lib" -type d -empty -delete
+
+  # Conf files all belong to JRE
+
+  # Legal
+  install -dm 755 "${pkgdir}/usr/share/licenses"
+  cp -r legal "${pkgdir}/usr/share/licenses/${pkgbase}"
+  pushd ../jre/legal
+  find . ! -type d -exec rm "${pkgdir}/usr/share/licenses/${pkgbase}/{}" \;
+  popd
+  find "${pkgdir}/usr/share/licenses" -type d -empty -delete
+  ln -s ${pkgbase} "${pkgdir}/usr/share/licenses/${pkgname}"
+
+  # Man pages
+  for f in man/man1/* man/ja/man1/*; do
+    if [ ! -e "../jre/${f}" ]; then
+      install -Dm 644 "${f}" "${pkgdir}/usr/share/${f/\.1/-openjdk${_majorver}.1}"
+    fi
+  done
+
+  # Icons
+  for s in 16 24 32 48; do
+    install -Dm 644 \
+      "${srcdir}/jdk${_majorver}u-${_hg_tag}/src/java.desktop/unix/classes/sun/awt/X11/java-icon${s}.png" \
+      "${pkgdir}/usr/share/icons/hicolor/${s}x${s}/apps/${pkgbase}.png"
+  done
+
+  # Desktop files
+  for f in jconsole policytool java jshell; do
+    install -Dm 644 \
+      "${srcdir}/freedesktop-${f}.desktop" \
+      "${pkgdir}/usr/share/applications/${f}-${pkgbase}.desktop"
+  done
+}
+
+package_openjdk-src() {
+  pkgdesc="OpenJDK Java ${_majorver} sources"
+  # Depends on JDK to get license files
+  depends=("jdk${_majorver}-openjdk=${pkgver}-${pkgrel}")
+  provides=("openjdk${_majorver}-src=${pkgver}-${pkgrel}")
+
+  install -Dm 644 -t "${pkgdir}${_jvmdir}/lib" ${_imgdir}/jdk/lib/src.zip
+
+  install -dm 755 "${pkgdir}/usr/share/licenses"
+  ln -s ${pkgbase} "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+# vim: ts=2 sw=2 et:
