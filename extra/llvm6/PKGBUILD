@@ -1,0 +1,101 @@
+# Maintainer: Evangelos Foutras <evangelos@foutrelis.com>
+# Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - add conflicts to llvm50
+
+# ************************************************************************** #
+# This package is meant to be used for compiling packages that have not been #
+# ported to LLVM 7 yet. Such packages may depend on llvm6-libs but not llvm6 #
+# which is not co-installable with the main llvm package (currently LLVM 7). #
+# ************************************************************************** #
+
+pkgname=('llvm6' 'llvm6-libs')
+pkgver=6.0.1
+pkgrel=2.1
+arch=('x86_64')
+url="https://llvm.org/"
+license=('custom:University of Illinois/NCSA Open Source License')
+makedepends=('cmake' 'ninja' 'libffi' 'libedit' 'ncurses' 'libxml2'
+             'python-setuptools')
+options=('staticlibs')
+source=(https://releases.llvm.org/$pkgver/llvm-$pkgver.src.tar.xz{,.sig}
+        D44391-export-LLVM_DYLIB_COMPONENTS-in-LLVMConfig.cmake.patch
+        D44420-cmake-fix-a-typo-in-llvm_config-macro.patch)
+sha256sums=('b6d6c324f9c71494c0ccaf3dac1f16236d970002b42bb24a6c9e1634f7d0f4e2'
+            'SKIP'
+            '96e2f3ca8b7d1bdbe2606a1eebb12c57b39838d1bcc15e40388e8d59649a9f4a'
+            '5cc114fd711e6ea836a6270b2f713e2e751c49e8b5ffa6c6812127ca801acef3')
+validpgpkeys+=('B6C8F98282B944E3B0D5C2530FC3042E345AD05D') # Hans Wennborg <hans@chromium.org>
+validpgpkeys+=('474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
+
+prepare() {
+  cd "$srcdir/llvm-$pkgver.src"
+  mkdir build
+
+  # https://reviews.llvm.org/D44391
+  patch -Np1 -i ../D44391-export-LLVM_DYLIB_COMPONENTS-in-LLVMConfig.cmake.patch
+
+  # https://reviews.llvm.org/D44420
+  patch -Np0 -i ../D44420-cmake-fix-a-typo-in-llvm_config-macro.patch
+}
+
+build() {
+  cd "$srcdir/llvm-$pkgver.src/build"
+
+  cmake .. -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLLVM_HOST_TRIPLE=$CHOST \
+    -DLLVM_BUILD_LLVM_DYLIB=ON \
+    -DLLVM_LINK_LLVM_DYLIB=ON \
+    -DLLVM_INSTALL_UTILS=ON \
+    -DLLVM_ENABLE_RTTI=ON \
+    -DLLVM_ENABLE_FFI=ON \
+    -DLLVM_BUILD_TESTS=ON \
+    -DFFI_INCLUDE_DIR=$(pkg-config --variable=includedir libffi) \
+    -DLLVM_BINUTILS_INCDIR=/usr/include
+  ninja
+}
+
+check() {
+  cd "$srcdir/llvm-$pkgver.src/build"
+  ninja check
+}
+
+package_llvm6() {
+  pkgdesc="Collection of modular and reusable compiler and toolchain technologies"
+  depends=('llvm6-libs' 'perl')
+  optdepends=('python-setuptools: for using lit (LLVM Integrated Tester)')
+  conflicts=('llvm' 'llvm50')
+
+  cd "$srcdir/llvm-$pkgver.src/build"
+
+  DESTDIR="$pkgdir" ninja install
+
+  # Include lit for running lit-based tests in other projects
+  pushd ../utils/lit
+  python3 setup.py install --root="$pkgdir" -O1
+  popd
+
+  # The runtime libraries go into llvm6-libs
+  mv -f "$pkgdir"/usr/lib/lib{LLVM-*.so,LTO.so.*} "$srcdir"
+
+  # Remove files which conflict with llvm-libs
+  rm "$pkgdir"/usr/lib/{LLVMgold,lib{LLVM,LTO}}.so
+
+  install -Dm644 ../LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_llvm6-libs() {
+  pkgdesc="LLVM 6 runtime libraries"
+  depends=('gcc-libs' 'zlib' 'libffi' 'libedit' 'ncurses' 'libxml2')
+
+  install -d "$pkgdir/usr/lib"
+  cp -P "$srcdir"/lib{LLVM-*.so,LTO.so.*} "$pkgdir/usr/lib/"
+
+  install -Dm644 "$srcdir/llvm-$pkgver.src/LICENSE.TXT" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+# vim:set ts=2 sw=2 et:
