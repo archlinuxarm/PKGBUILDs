@@ -1,0 +1,93 @@
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor:  TDY <tdy@archlinux.info>
+# Contributor: Rémy Oudompheng <oudomphe@clipper.ens.fr>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - fix semigroups.so rpath fix for aarch64
+
+pkgbase=gap
+pkgname=(gap gap-doc gap-packages)
+pkgver=4.10.0
+pkgrel=3
+pkgdesc="Groups, Algorithms, Programming: a system for computational discrete algebra"
+arch=(x86_64)
+url="https://www.gap-system.org/"
+license=(GPL)
+source=("https://www.gap-system.org/pub/gap/gap-${pkgver%.*}/tar.gz/gap-$pkgver.tar.gz" gap-no-packages-by-default.patch)
+sha256sums=('314b8d949c0bb01ef8bee199b29571d42714df660aba0d76ded254f58295904f'
+            'e8f19968d998172b7c289d0499b8b8a05bc31119a1ce073181d3842ece6fe3a2')
+makedepends=(libxaw givaro mpfi normaliz boost c-xsc zeromq fplll polymake wget chrpath)
+
+prepare() {
+  cd gap-$pkgver
+
+# Use system normaliz
+  sed -e '/build-normaliz.sh/d' -i bin/BuildPackages.sh
+# Don't load any packages by default
+  patch -p1 -i ../gap-no-packages-by-default.patch
+# Disable anupq package, it's i686 only
+  rm -r pkg/anupq-*
+}
+
+build() {
+  cd gap-$pkgver
+  ./configure --prefix=/usr --with-gmp=system
+  make
+
+  cd pkg
+  export MAKEFLAGS='-j1' # Fix build of carat package
+  ../bin/BuildPackages.sh
+}
+
+package_gap() {
+  depends=(gmp)
+  optdepends=('gap-packages: extra packages' 'gap-doc: documentation')
+# conflicts=(libgap)
+  replaces=(gap-data)
+  cd gap-$pkgver
+
+# make DESTDIR="$pkgdir" install
+
+  mkdir -p "$pkgdir"/usr/{bin,lib/gap/pkg}
+  cp -r grp lib "$pkgdir"/usr/lib/gap
+  cp -r pkg/{GAPDoc-*,primgrp-*,SmallGrp-*,transgrp} "$pkgdir"/usr/lib/gap/pkg
+  install -m755 gap -t "$pkgdir"/usr/lib/gap
+  sed -e "s|/build/gap/src/gap-$pkgver|/usr/lib/gap|g" bin/gap.sh > "$pkgdir"/usr/bin/gap
+  chmod 755 "$pkgdir"/usr/bin/gap
+
+# install missing header
+# cp gen/config.h "$pkgdir"/usr/include/gap
+}
+
+package_gap-doc() {
+  depends=(gap)
+  pkgdesc="Documentation for GAP"
+  cd gap-$pkgver
+
+  mkdir -p "$pkgdir"/usr/lib/gap
+  cp -r doc "$pkgdir"/usr/lib/gap
+}
+
+package_gap-packages() {
+  depends=(gap)
+  optdepends=('normaliz: Normaliz interface package' 'libxaw: xgap package' 'c-xsc: float package' 'mpfi: float package'
+              'libmpc: float package' 'fplll: float package' 'zeromq: ZeroMQ interface package'
+              'polymake: Polymake interface package' 'curl: curl interface package')
+  pkgdesc="Extra packages for GAP"
+  cd gap-$pkgver
+
+  mkdir -p "$pkgdir"/usr/lib/gap
+  cp -r pkg "$pkgdir"/usr/lib/gap
+
+# provided by main gap package
+  rm -r "$pkgdir"/usr/lib/gap/pkg/{GAPDoc-*,primgrp-*,SmallGrp-*,transgrp}
+
+# fix RPATH
+  if [[ $CARCH == "aarch64" ]]; then
+    chrpath -r \$ORIGIN/../lib/ "$pkgdir"/usr/lib/gap/pkg/semigroups-*/bin/aarch64-unknown-linux-gnu-default64/semigroups.so
+    chrpath -d "$pkgdir"/usr/lib/gap/pkg/NormalizInterface-*/bin/aarch64-unknown-linux-gnu-default64/NormalizInterface.so
+  fi
+
+# remove leftover binaries
+  find "$pkgdir"/usr/lib/gap/pkg -name .libs | xargs rm -r
+}
