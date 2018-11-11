@@ -1,56 +1,51 @@
 #!/bin/sh
+mame=/usr/lib/mame/mame
 
-# Create a variable equal to $HOME that will be used later in the ini creation
-home=('$HOME')
+mame_first_run() {
+  echo "Creating an ini file for MAME at $HOME/.mame/mame.ini"
+  echo "Modify this file for permanent changes to your MAME"
+  echo "options and paths before running MAME again."
 
-if [ "$1" != "" ] && [ "$1" = "--newini" ]; then
-  echo "Rebuilding the ini file at $HOME/.mame/mame.ini"
-  echo "Modify this file for permanent changes to your SDLMAME"
-  echo "options and paths before running SDLMAME again."
-  cd $HOME/.mame
+  cd -- ~/.mame || exit
+
   if [ -e mame.ini ]; then
+    mv mame.ini mameini.bak || exit
     echo "Your old ini file has been renamed to mameini.bak"
-    mv mame.ini mameini.bak
   fi
-  /usr/lib/mame/mame \
-    -artpath "$home/.mame/artwork;artwork" \
-    -ctrlrpath "$home/.mame/ctrlr;ctrlr" \
-    -inipath $home/.mame/ini \
-    -rompath $home/.mame/roms \
-    -samplepath $home/.mame/samples \
-    -cfg_directory $home/.mame/cfg \
-    -comment_directory $home/.mame/comments \
-    -diff_directory $home/.mame/diff \
-    -input_directory $home/.mame/inp \
-    -nvram_directory $home/.mame/nvram \
-    -snapshot_directory $home/.mame/snap \
-    -state_directory $home/.mame/sta \
+
+  # Note: the single quotes here are not a mistake; MAME will save these
+  # strings verbatim into its configuration file, and expand the variables when
+  # it is run in future.
+  "$mame" \
+    -artpath '$HOME/.mame/artwork;artwork' \
+    -ctrlrpath '$HOME/.mame/ctrlr;ctrlr' \
+    -inipath '$HOME/.mame/ini' \
+    -rompath '$HOME/.mame/roms' \
+    -samplepath '$HOME/.mame/samples' \
+    -cfg_directory '$HOME/.mame/cfg' \
+    -comment_directory '$HOME/.mame/comments' \
+    -diff_directory '$HOME/.mame/diff' \
+    -input_directory '$HOME/.mame/inp' \
+    -nvram_directory '$HOME/.mame/nvram' \
+    -snapshot_directory '$HOME/.mame/snap' \
+    -state_directory '$HOME/.mame/sta' \
     -video opengl \
     -createconfig
-elif [ ! -e $HOME/.mame ]; then
-  echo "Running SDLMAME for the first time..."
-  echo "Creating an ini file for SDLMAME at $HOME/.mame/mame.ini"
-  echo "Modify this file for permanent changes to your SDLMAME"
-  echo "options and paths before running SDLMAME again."
-  mkdir $HOME/.mame
-  mkdir $HOME/.mame/{artwork,cfg,comments,ctrlr,diff,ini,inp,nvram,samples,snap,sta,roms}
-  cd $HOME/.mame
-  /usr/lib/mame/mame \
-    -artpath "$home/.mame/artwork;artwork" \
-    -ctrlrpath "$home/.mame/ctrlr;ctrlr" \
-    -inipath $home/.mame/ini \
-    -rompath $home/.mame/roms \
-    -samplepath $home/.mame/samples \
-    -cfg_directory $home/.mame/cfg \
-    -comment_directory $home/.mame/comments \
-    -diff_directory $home/.mame/diff \
-    -input_directory $home/.mame/inp \
-    -nvram_directory $home/.mame/nvram \
-    -snapshot_directory $home/.mame/snap \
-    -state_directory $home/.mame/sta \
-    -video opengl \
-    -createconfig
-else
-  cd /usr/lib/mame
-  ./mame "$@"
+}
+
+if [ "$1" = "--newini" ]; then
+  mame_first_run
+  exit
+elif ! [ -e ~/.mame ]; then
+  echo "Running MAME for the first time..."
+
+  mkdir -- ~/.mame
+  (
+    cd -- ~/.mame || exit
+    mkdir artwork cfg comments ctrlr diff ini inp nvram samples snap sta roms
+
+    mame_first_run
+  ) || exit
 fi
+
+exec "$mame" "$@"
