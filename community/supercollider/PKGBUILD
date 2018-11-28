@@ -7,55 +7,62 @@
 
 _name=SuperCollider
 pkgname=supercollider
-pkgver=3.9.3
-pkgrel=5
+pkgver=3.10.0
+pkgrel=1
 pkgdesc="Environment and programming language for real time audio synthesis and algorithmic composition"
 arch=('x86_64')
 url="https://supercollider.github.io"
 license=('GPL3')
 groups=('pro-audio')
-depends=('boost-libs' 'desktop-file-utils' 'fftw' 'jack' 'qt5-webkit' 'yaml-cpp')
+depends=('boost-libs' 'desktop-file-utils' 'fftw' 'jack' 'qt5-svg' 'qt5-webengine' 'qt5-webkit' 'qt5-websockets' 'yaml-cpp')
 makedepends=('boost' 'cmake' 'emacs' 'qt5-tools')
 optdepends=('emacs: emacs interface'
             'gedit: gedit interface'
             'sc3-plugins: additional extension plugins for scsynth')
 source=("https://github.com/${pkgname}/${pkgname}/releases/download/Version-${pkgver}/${_name}-${pkgver}-Source-linux.tar.bz2"
-        'boost-1.67.patch')
+        'boost-1.67.patch'
+        'use-system-boost.patch'
+)
 install="${pkgname}.install"
-sha512sums=('5b0c29941907d5ca45c1676e34184664c03891051bba0ee50d9e8311400824054de7b6daba6d29fd875ff38f42ee9654504ea2f0b5bf0a36ae9605e6a79a0841'
-            '9980d77802f18fd56d2a13f24f070e81768d9111b2cc63e479a0e9b405a04aec28bc523e5d36aab0462af6a3831d64598470cdc6c3266431e2ca64aa427a6bf2')
+sha512sums=('5670f0264329f0e90ed9c1b5bf63853fd67cd83ad48e2d96979ca548ed42265105d766e7fbb51839cb7b917a687929080e7c42f1c0baf3eb36a5365dee4b12bb'
+            '9980d77802f18fd56d2a13f24f070e81768d9111b2cc63e479a0e9b405a04aec28bc523e5d36aab0462af6a3831d64598470cdc6c3266431e2ca64aa427a6bf2'
+            '5e42f64e5e08ca9e03870e662b6694a0c41f4ab2e6522c8d2aade617a68b4455dc1932a18de18176a9ed9fc89e36f1f1ec76d3e3ff8322d0d1e8ae6fb85cbce9')
 
 prepare() {
   mv -v "${_name}-Source" "${pkgname}-${pkgver}"
   cd "${pkgname}-${pkgver}"
+  # supernova build:
+  # https://github.com/supercollider/supercollider/issues/3981
   patch -Np1 -i ../boost-1.67.patch
-  # make sure the system boost headers are used
+  # make sure system boost is used
   # https://github.com/supercollider/supercollider/issues/4096
-  rm -r external_libraries/boost
-  # fixing fundamental mathmatical problems:
-  # https://github.com/supercollider/supercollider/issues/4116
-  sed -e 's/-ffast-math/-fno-math-errno -fno-signaling-nans/' \
-      -i CMakeLists.txt
-  # requires out-of-tree build
-  mkdir -v bld
+  patch -Np1 -i ../use-system-boost.patch
+  mkdir -v build
 }
 
 build() {
-  cd "${pkgname}-${pkgver}/bld"
+  cd "${pkgname}-${pkgver}/build"
   cmake .. -DCMAKE_INSTALL_PREFIX=/usr \
            -DCMAKE_BUILD_TYPE=Release \
            -DLIBSCSYNTH=ON \
            -DFORTIFY=ON \
-           -DSYSTEM_BOOST=ON \
            -DSYSTEM_YAMLCPP=ON \
+           -DSYSTEM_BOOST=ON \
            -DSC_VIM=OFF \
            -DSSE=OFF -DSSE2=OFF -DSUPERNOVA=OFF -DNOVA_SIMD=ON -DNATIVE=OFF \
            -DCMAKE_C_FLAGS="${CFLAGS}"
-  make
+  make VERBOSE=1
 }
 
+## too many tests dependent on X11:
+## https://github.com/supercollider/supercollider/issues/3555
+#check() {
+#  cd "${pkgname}-${pkgver}/build"
+#  make test ARGS="-V"
+#}
+
 package() {
-  cd "${pkgname}-${pkgver}/bld"
+  cd "${pkgname}-${pkgver}/build"
   make DESTDIR="${pkgdir}" install
   install -t "${pkgdir}/usr/share/doc/${pkgname}/" \
     -vDm 644 ../{AUTHORS,{CHANGELOG,README,README_LINUX}.md}
