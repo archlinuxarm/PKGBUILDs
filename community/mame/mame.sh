@@ -1,5 +1,5 @@
 #!/bin/sh
-mame=/usr/lib/mame/mame
+mamelib=/usr/lib/mame/
 
 mame_first_run() {
   echo "Creating an ini file for MAME at $HOME/.mame/mame.ini"
@@ -48,4 +48,5 @@ elif ! [ -e ~/.mame ]; then
   ) || exit
 fi
 
-exec "$mame" "$@"
+cd "$mamelib"
+exec ./mame "$@"
