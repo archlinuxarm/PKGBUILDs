@@ -8,14 +8,18 @@
 pkgbase=gap
 pkgname=(gap gap-doc gap-packages)
 pkgver=4.10.0
-pkgrel=3
+pkgrel=4
 pkgdesc="Groups, Algorithms, Programming: a system for computational discrete algebra"
 arch=(x86_64)
 url="https://www.gap-system.org/"
 license=(GPL)
-source=("https://www.gap-system.org/pub/gap/gap-${pkgver%.*}/tar.gz/gap-$pkgver.tar.gz" gap-no-packages-by-default.patch)
+source=("https://www.gap-system.org/pub/gap/gap-${pkgver%.*}/tar.gz/gap-$pkgver.tar.gz" gap.sh
+        gap-sagemath-1.patch gap-sagemath-2.patch gap-sagemath-3.patch)
 sha256sums=('314b8d949c0bb01ef8bee199b29571d42714df660aba0d76ded254f58295904f'
-            'e8f19968d998172b7c289d0499b8b8a05bc31119a1ce073181d3842ece6fe3a2')
+            '143fb8a79a52c007903cce13407850df309ef803a9b00398d05169355917de46'
+            'e5f0a71ae5cdcc6596330834ef9fb0a0183890a9cf874a7eb88b819b0030a33b'
+            '3b66e6b320f56119b1d8eb804a94ee3a7ea71af10bd4f99a61bae32840e62c87'
+            '511414a8d085a9ef9de5f921fdd45e4bbb3f33c2d88b821da06dfc267c182ddc')
 makedepends=(libxaw givaro mpfi normaliz boost c-xsc zeromq fplll polymake wget chrpath)
 
 prepare() {
@@ -23,10 +27,13 @@ prepare() {
 
 # Use system normaliz
   sed -e '/build-normaliz.sh/d' -i bin/BuildPackages.sh
-# Don't load any packages by default
-  patch -p1 -i ../gap-no-packages-by-default.patch
 # Disable anupq package, it's i686 only
   rm -r pkg/anupq-*
+
+# Patches to make sagemath work with GAP's libgap
+  patch -p1 -i ../gap-sagemath-1.patch
+  patch -p1 -i ../gap-sagemath-2.patch
+  patch -p1 -i ../gap-sagemath-3.patch
 }
 
 build() {
@@ -39,28 +46,33 @@ build() {
   ../bin/BuildPackages.sh
 }
 
+_standardpkgs=(GAPDoc-* primgrp-* SmallGrp-* transgrp atlasrep autpgrp-* alnuth-* crisp-* ctbllib FactInt-* fga irredsol-* laguna-*
+               polenta-* polycyclic-* resclasses-* sophus-* tomlib-*)
+
 package_gap() {
-  depends=(gmp)
+  depends=(gmp zlib)
   optdepends=('gap-packages: extra packages' 'gap-doc: documentation')
-# conflicts=(libgap)
-  replaces=(gap-data)
+  conflicts=(libgap)
+  replaces=(gap-data libgap gap-4.8 gap-4.8-data)
   cd gap-$pkgver
 
-# make DESTDIR="$pkgdir" install
+  make DESTDIR="$pkgdir" install-headers install-libgap
+# Install missing header
+  install -Dm644 gen/config.h -t "$pkgdir"/usr/include/gap
 
   mkdir -p "$pkgdir"/usr/{bin,lib/gap/pkg}
   cp -r grp lib "$pkgdir"/usr/lib/gap
-  cp -r pkg/{GAPDoc-*,primgrp-*,SmallGrp-*,transgrp} "$pkgdir"/usr/lib/gap/pkg
-  install -m755 gap -t "$pkgdir"/usr/lib/gap
-  sed -e "s|/build/gap/src/gap-$pkgver|/usr/lib/gap|g" bin/gap.sh > "$pkgdir"/usr/bin/gap
-  chmod 755 "$pkgdir"/usr/bin/gap
-
-# install missing header
-# cp gen/config.h "$pkgdir"/usr/include/gap
+  for _pkg in ${_standardpkgs[@]}; do
+    cp -r pkg/$_pkg "$pkgdir"/usr/lib/gap/pkg
+  done
+  install -Dm755 gap -t "$pkgdir"/usr/lib/gap
+# Install launcher script
+  install -Dm755 "$srcdir"/gap.sh "$pkgdir"/usr/bin/gap
 }
 
 package_gap-doc() {
   depends=(gap)
+  replaces=(gap-4.8-doc)
   pkgdesc="Documentation for GAP"
   cd gap-$pkgver
 
@@ -70,6 +82,7 @@ package_gap-doc() {
 
 package_gap-packages() {
   depends=(gap)
+  replaces=(gap-4.8-packages)
   optdepends=('normaliz: Normaliz interface package' 'libxaw: xgap package' 'c-xsc: float package' 'mpfi: float package'
               'libmpc: float package' 'fplll: float package' 'zeromq: ZeroMQ interface package'
               'polymake: Polymake interface package' 'curl: curl interface package')
@@ -80,7 +93,9 @@ package_gap-packages() {
   cp -r pkg "$pkgdir"/usr/lib/gap
 
 # provided by main gap package
-  rm -r "$pkgdir"/usr/lib/gap/pkg/{GAPDoc-*,primgrp-*,SmallGrp-*,transgrp}
+  for _pkg in ${_standardpkgs[@]}; do
+    rm -r "$pkgdir"/usr/lib/gap/pkg/$_pkg
+  done
 
 # fix RPATH
   if [[ $CARCH == "aarch64" ]]; then
