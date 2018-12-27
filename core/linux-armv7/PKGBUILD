@@ -4,19 +4,19 @@
 buildarch=4
 
 pkgbase=linux-armv7
-_srcname=linux-4.19
+_srcname=linux-4.20
 _kernelname=${pkgbase#linux}
 _desc="ARMv7 multi-platform"
-pkgver=4.19.12
+pkgver=4.20.0
 pkgrel=1
-rcnrel=armv7-x16
+rcnrel=armv7-x0
 arch=('armv7h')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' 'vboot-utils' 'dtc')
 options=('!strip')
 source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
-        "http://www.kernel.org/pub/linux/kernel/v4.x/patch-${pkgver}.xz"
+        #"http://www.kernel.org/pub/linux/kernel/v4.x/patch-${pkgver}.xz"
         "http://rcn-ee.com/deb/sid-armhf/v${pkgver}-${rcnrel}/patch-${pkgver%.0}-${rcnrel}.diff.gz"
         '0001-ARM-atags-add-support-for-Marvell-s-u-boot.patch'
         '0002-ARM-atags-fdt-retrieve-MAC-addresses-from-Marvell-bo.patch'
@@ -26,37 +26,36 @@ source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
         '0006-set-default-cubietruck-led-triggers.patch'
         '0007-exynos4412-odroid-set-higher-minimum-buck2-regulator.patch'
         '0008-ARM-dove-enable-ethernet-on-D3Plug.patch'
-        '0009-usb-dwc2-disable-power_down-on-rockchip-devices.patch'
         'config'
         'kernel.its'
         'kernel.keyblock'
         'kernel_data_key.vbprivk'
         'linux.preset'
-        '99-linux.hook')
-md5sums=('740a90cf810c2105df8ee12e5d0bb900'
-         '1e33e1e7f80f8dbe4a0274ba274626b4'
-         'ac1ae9711ef41f96109d5b723163c60d'
-         'acbef669729b6d1714eae635e3fc5cb0'
-         '592521ffbad728eb5b6bd6cbfb2f7483'
-         'b75039abcd5c8d040ff16b3f95586827'
-         'bc31bbe488f53e9978b21a5f7ac728cd'
-         '939c308aacf213b333c8dd10595d488c'
-         '4c71d7af72e76823cc983ded54312edb'
-         '08dc5f1eda02cffa65842b5610ba8cb8'
-         '07232ec1318aab8d53a16e3a99af50a7'
-         '579a311a4be75313e778c9b04fa95f52'
-         '776e7ed34e4ff12b1aa92769962b4b33'
+        '60-linux.hook'
+        '90-linux.hook')
+md5sums=('d39dd4ba2d5861c54b90d49be19eaf31'
+         '293661c8d22db9bff84b7a72791e6700'
+         '0e7aaf27edd95d74cebd059c66b51db2'
+         '939760cd495c15a2fe3a2039bc328306'
+         '869394fae9703e6ea8838381923b9e4e'
+         '8a3e3a3d5248dc3067d7a4068f28d442'
+         '290e413b7da4367efe25b203c4704e69'
+         'eb4c624fee628384bb89136dfe1e5242'
+         '87113c3a1f0df84ebbcfeb0b03529a36'
+         '5ffeacda419ee62c668c333a2d3a4c4d'
+         'b11e788548513fe3ca222f6e5d75b996'
          '4f2379ed84258050edb858ee8d281678'
          '61c5ff73c136ed07a7aadbf58db3d96a'
          '584777ae88bce2c5659960151b64c7d8'
-         'fb034fe5f2e28a4cce30ae2d8cf6be3c'
-         '79fa396e3f9a09a85156d6d7c2d34b58')
+         '86d4a35722b5410e3b29fc92dae15d4b'
+         'ce6c81ad1ad1f8b333fd6077d47abdaf'
+         '3e2a512f8da5db5fe9f17875405e56a3')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
   # add upstream patch
-  git apply --whitespace=nowarn ../patch-${pkgver}
+  #git apply --whitespace=nowarn ../patch-${pkgver}
 
   # RCN patch
   git apply ../patch-${pkgver%.0}-${rcnrel}.diff
@@ -70,7 +69,6 @@ prepare() {
   git apply ../0006-set-default-cubietruck-led-triggers.patch
   git apply ../0007-exynos4412-odroid-set-higher-minimum-buck2-regulator.patch
   git apply ../0008-ARM-dove-enable-ethernet-on-D3Plug.patch
-  git apply ../0009-usb-dwc2-disable-power_down-on-rockchip-devices.patch
 
   cat "${srcdir}/config" > ./.config
 
@@ -130,44 +128,41 @@ _package() {
   _basekernel=${_kernver%%-*}
   _basekernel=${_basekernel%.*}
 
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware}
-  make INSTALL_MOD_PATH="${pkgdir}" modules_install
+  mkdir -p "${pkgdir}"/{boot,usr/lib/modules}
+  make INSTALL_MOD_PATH="${pkgdir}/usr" modules_install
   make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
   cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
 
-  # set correct depmod command for install
-  sed \
-    -e  "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
-    -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
-    -i "${startdir}/${pkgname}.install"
+  # make room for external modules
+  local _extramodules="extramodules-${_basekernel}${_kernelname}"
+  ln -s "../${_extramodules}" "${pkgdir}/usr/lib/modules/${_kernver}/extramodules"
 
-  # install mkinitcpio preset file for kernel
-  install -D -m644 "${srcdir}/linux.preset" "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
-  sed \
-    -e "1s|'linux.*'|'${pkgbase}'|" \
-    -e "s|ALL_kver=.*|ALL_kver=\"${_kernver}\"|" \
-    -i "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
-
-  # install pacman hook for initramfs regeneration
-  sed "s|%PKGBASE%|${pkgbase}|g" "${srcdir}/99-linux.hook" |
-    install -D -m644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/99-${pkgbase}.hook"
+  # add real version for building modules and running depmod from hook
+  echo "${_kernver}" |
+    install -Dm644 /dev/stdin "${pkgdir}/usr/lib/modules/${_extramodules}/version"
 
   # remove build and source links
-  rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
-  # remove the firmware
-  rm -rf "${pkgdir}/lib/firmware"
-  # make room for external modules
-  ln -s "../extramodules-${_basekernel}${_kernelname:--ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
-  # add real version for building modules and running depmod from post_install/upgrade
-  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}${_kernelname:--ARCH}"
-  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}${_kernelname:--ARCH}/version"
+  rm "${pkgdir}"/usr/lib/modules/${_kernver}/{source,build}
 
-  # Now we call depmod...
-  depmod -b "$pkgdir" -F System.map "$_kernver"
+  # now we call depmod...
+  depmod -b "${pkgdir}/usr" -F System.map "${_kernver}"
 
-  # move module tree /lib -> /usr/lib
-  mkdir -p "${pkgdir}/usr"
-  mv "$pkgdir/lib" "$pkgdir/usr"
+  # sed expression for following substitutions
+  local _subst="
+    s|%PKGBASE%|${pkgbase}|g
+    s|%KERNVER%|${_kernver}|g
+    s|%EXTRAMODULES%|${_extramodules}|g
+  "
+
+  # install mkinitcpio preset file
+  sed "${_subst}" ../linux.preset |
+    install -Dm644 /dev/stdin "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
+
+  # install pacman hooks
+  sed "${_subst}" ../60-linux.hook |
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/60-${pkgbase}.hook"
+  sed "${_subst}" ../90-linux.hook |
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
 }
 
 _package-headers() {
