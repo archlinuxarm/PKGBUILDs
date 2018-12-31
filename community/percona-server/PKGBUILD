@@ -6,8 +6,8 @@
 
 pkgbase=percona-server
 pkgname=('libperconaserverclient' 'percona-server-clients' 'percona-server')
-pkgver=5.7.24_27
-_boost_ver=1.59.0
+pkgver=8.0.13_3
+_boost_ver=1.67.0
 _pkgver=${pkgver/_/-}
 _myver=${pkgver/_rel*}
 pkgrel=1
@@ -19,23 +19,24 @@ source=("https://www.percona.com/downloads/Percona-Server-${pkgver%.*_*}/Percona
         "http://jenkins.percona.com/downloads/boost/boost_${_boost_ver//./_}.tar.gz"
         'my.cnf'
         'mysql-user.conf'
+        'build-hostname.patch'
+        'no-werror.patch'
         'rocksdb-systemlibs.patch')
-sha256sums=('999593afa241660bc7860264b46a826faf97d80d411966fade24084f47b249a0'
-            '47f11c8844e579d02691a607fbd32540104a9ac7a2534a8ddaef50daf502baac'
-            'ae451839c368f0db25a63bb0a6a890194897a8e74818bd4245140933c29e5f83'
+sha256sums=('ab00626775b85ea506c1d992d66acee50f0bfbde54b830731f61652e87ff93da'
+            '8aa4e330c870ef50a896634c931adf468b21f8a69b77007e45c444151229f665'
+            'b467b04d6d06152b2abc33f2a6de63fef0fc922dd5119d2ee1d07d3c1a489731'
             'e638a2657085f15b6728f43c1fd6aa551b27608fbf6b435e33afd3606a0cfb0e'
-            'fcc3bea0982cda6cc35637d448a46924eccdfeb4c4da0634a26c9d190cf50fe4')
+            '1537fdbb92dd1c135c1eb9f4d10c44fd02e652db66c933d731990a1196f1397c'
+            'fe1cb2b079c56ff0f827c7dfb25d004b2190410406820c490dc6152cfe392b70'
+            '38f1acce8d8eff8167f1defcd4ce7063e67beeb7ab67bbf15ba5630290d00b71')
 
 prepare() {
 	cd $pkgbase-$_pkgver
 	rm -v sql/sql_yacc.{cc,h}
 
-	sed 's/${fullhostname}/"archbuild"/' -i storage/tokudb/PerconaFT/cmake_modules/TokuSetupCTest.cmake
-	sed 's/-Werror//g' -i \
-	    storage/tokudb/PerconaFT/cmake_modules/TokuSetupCompiler.cmake \
-	    plugin/tokudb-backup-plugin/Percona-TokuBackup/backup/CMakeLists.txt
-
-	patch -p1 -i "$srcdir"/rocksdb-systemlibs.patch
+	patch -p1 -i "$srcdir"/build-hostname.patch
+	patch -p1 -i "$srcdir"/no-werror.patch
+	# patch -p1 -i "$srcdir"/rocksdb-systemlibs.patch
 }
 
 build() {
@@ -47,6 +48,7 @@ build() {
 
 	cmake ../$pkgbase-$_pkgver \
 		-DBUILD_CONFIG=mysql_release \
+		-DREPRODUCIBLE_BUILD=ON \
 		-DCMAKE_INSTALL_PREFIX=/usr \
 		-DSYSCONFDIR=/etc/mysql \
 		-DMYSQL_DATADIR=/var/lib/mysql \
@@ -106,7 +108,7 @@ package_libperconaserverclient() {
 	depends=('zlib' 'openssl')
 
 	cd build
-	for dir in include libmysql libmysqld libservices; do
+	for dir in include libmysql libservices; do
 		make -C $dir DESTDIR="$pkgdir" install
 	done
 
@@ -131,16 +133,16 @@ package_percona-server-clients() {
 
 	# install man pages
 	install -d "$pkgdir"/usr/share/man/man1
-	for man in mysql{,admin,check,dump,import,show,slap,pump,binlog,_plugin,_upgrade}; do
+	for man in mysql{,admin,check,dump,import,show,slap,pump,binlog,_upgrade}; do
 		install -m644 "$srcdir"/$pkgbase-$_pkgver/man/$man.1 "$pkgdir"/usr/share/man/man1/$man.1
 	done
 
 	# provided by percona-server
-	rm "$pkgdir"/usr/bin/mysql{_config_editor,_install_db,_secure_installation,_ssl_rsa_setup}
+	rm "$pkgdir"/usr/bin/mysql{_config_editor,_secure_installation,_ssl_rsa_setup}
 }
 
 package_percona-server() {
-	pkgdesc='Drop-in replacement for MySQL that provides improved performance, diagnostics, instrumentation and TokuDB storage engine'
+	pkgdesc='Drop-in replacement for MySQL that provides improved performance, diagnostics, instrumentation and MyRocks storage engine'
 	backup=('etc/mysql/my.cnf')
 	depends=('libaio' 'systemd-tools' 'pam' 'jemalloc' 'lz4' 'zstd' 'openssl' 'libtirpc')
 	optdepends=('perl-dbd-mysql')
@@ -172,12 +174,8 @@ package_percona-server() {
 	rm -r usr/share/aclocal usr/lib/pkgconfig
 
 	# provided by percona-server-clients
-	rm usr/bin/mysql{,admin,check,dump,import,show,slap,pump,binlog,_plugin,test,_upgrade}
-	rm usr/share/man/man1/mysql{,admin,check,dump,import,show,slap,pump,binlog,_plugin,_upgrade}.1
-
-	# deprecated/unused
-	rm usr/bin/replace
-	rm usr/share/man/man1/replace.1
+	rm usr/bin/mysql{,admin,check,dump,import,show,slap,pump,binlog,test,_upgrade}
+	rm usr/share/man/man1/mysql{,admin,check,dump,import,show,slap,pump,binlog,_upgrade}.1
 
 	# not needed
 	rm -r usr/mysql-test
