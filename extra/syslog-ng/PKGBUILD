@@ -1,0 +1,72 @@
+# Maintainer: Eric Bélanger <eric@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch for bundled ivykis to fix AArch64 segfault
+#    https://github.com/buytenh/ivykis/issues/15
+
+pkgname=syslog-ng
+pkgver=3.18.1
+pkgrel=1
+pkgdesc="Next-generation syslogd with advanced networking and filtering capabilities"
+arch=('x86_64')
+url="https://www.syslog-ng.com/products/open-source-log-management/"
+license=('GPL2' 'LGPL2.1')
+depends=('awk' 'libsystemd' 'glib2' 'libdbi' 'libnsl')
+makedepends=('libxslt' 'json-c' 'mongo-c-driver' 'librabbitmq-c' 'python' 'libesmtp' 'hiredis')
+checkdepends=('python-nose' 'python-ply' 'python2')
+optdepends=('logrotate: for rotating log files'
+	    'json-c: for json-plugin'
+            'curl: for the HTTP module'
+            'librabbitmq-c: for the AMQP plugin'            
+            'mongo-c-driver: for the MongoDB plugin'
+            'python: for the Python plugin'
+            'libesmtp: for the SMTP plugin'
+            'hiredis: fir the redis plugin')
+conflicts=('eventlog')
+replaces=('eventlog')
+backup=('etc/syslog-ng/scl.conf'
+        'etc/syslog-ng/syslog-ng.conf'
+        'etc/logrotate.d/syslog-ng'
+        'etc/default/syslog-ng@default')
+source=(https://github.com/balabit/syslog-ng/releases/download/syslog-ng-$pkgver/$pkgname-$pkgver.tar.gz
+        syslog-ng.conf syslog-ng.logrotate
+        https://patch-diff.githubusercontent.com/raw/buytenh/ivykis/pull/16.patch)
+sha256sums=('d63753fa81108715798ee3d361683390d2d1d0c59f7d4e36063047bfb7093bf8'
+            '31cee11ae3c897c51ea01982e1ea838aa8ac730d56661a17e66bd9de5bede1c7'
+            '93c935eca56854011ea9e353b7a1da662ad40b2e8452954c5b4b5a1d5b2d5317'
+            '9d020b5e0e92dc60267ef21d6a30cd2b4cfde8e55a622f894610758551e5b7ef')
+
+prepare() {
+  cd $pkgname-$pkgver
+  sed -i -e 's,/bin/,/usr/bin/,' -e 's,/sbin/,/bin/,' contrib/systemd/syslog-ng@.service
+  sed -i -e 's|etc|etc/syslog-ng|g' -e 's|/var/run|/run|g' contrib/systemd/syslog-ng@default
+  cd lib/ivykis
+  patch -p1 -i "$srcdir/16.patch"
+  autoreconf -fi
+}
+
+build() {
+  cd $pkgname-$pkgver
+  ./configure --prefix=/usr --sysconfdir=/etc/syslog-ng --libexecdir=/usr/lib \
+    --sbindir=/usr/bin --localstatedir=/var/lib/syslog-ng --datadir=/usr/share \
+    --with-pidfile-dir=/run --disable-spoof-source --enable-ipv6 --enable-sql --enable-smtp \
+    --enable-systemd --with-systemdsystemunitdir=/usr/lib/systemd/system \
+    --enable-manpages --with-jsonc=system --with-mongoc=system --with-librabbitmq-client=system
+  make
+}
+
+check() {
+  cd $pkgname-$pkgver
+  make check || /bin/true # python test requires pep8
+}
+
+package() {
+  make -C $pkgname-$pkgver DESTDIR="$pkgdir" install
+  install -dm755 "$pkgdir/var/lib/syslog-ng" "$pkgdir/etc/syslog-ng/patterndb.d"
+  install -Dm644 "$srcdir/syslog-ng.conf" "$pkgdir/etc/syslog-ng/syslog-ng.conf"
+  install -Dm644 "$srcdir/syslog-ng.logrotate" "$pkgdir/etc/logrotate.d/syslog-ng"
+  install -Dm644 "$srcdir"/$pkgname-$pkgver/contrib/systemd/syslog-ng@default -t "$pkgdir"/etc/default
+
+  # See http://lists.balabit.hu/pipermail/syslog-ng/2016-February/022667.html
+  rm -r "$pkgdir"/usr/share/syslog-ng/include/scl/cim
+}
