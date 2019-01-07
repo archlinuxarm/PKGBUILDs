@@ -1,0 +1,45 @@
+From 0e5dd25fc5c70d656666f6d537e93cf346e7f419 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Witold=20Kr=C4=99cicki?= <wpk@isc.org>
+Date: Thu, 3 Jan 2019 13:06:39 +0100
+Subject: [PATCH] When a forwarder fails and we're not in a forward-only mode
+ we go back to regular resolution. When this happens the fetch timer is
+ already running, and we might end up in a situation where we we create a
+ fetch for qname-minimized query and after that the timer is triggered and the
+ query is retried (fctx_try) - which causes relaunching of qname-minimization
+ fetch - and since we already have a qmin fetch for this fctx - assertion
+ failure.
+
+
+diff --git a/lib/dns/resolver.c b/lib/dns/resolver.c
+index 8beecbcb07..ea122bd30c 100644
+--- a/lib/dns/resolver.c
++++ b/lib/dns/resolver.c
+@@ -4012,6 +4012,7 @@ fctx_try(fetchctx_t *fctx, bool retrying, bool badcache) {
+ 		options &= ~DNS_FETCHOPT_QMINIMIZE;
+ 		fctx_increference(fctx);
+ 		task = res->buckets[bucketnum].task;
++		fctx_stoptimer(fctx);
+ 		result = dns_resolver_createfetch(fctx->res, &fctx->qminname,
+ 						  fctx->qmintype, &fctx->domain,
+ 						  &fctx->nameservers, NULL, NULL, 0,
+@@ -4343,13 +4344,12 @@ fctx_timeout(isc_task_t *task, isc_event_t *event) {
+ 		 * timer.
+ 		 */
+ 		result = fctx_starttimer(fctx);
+-		if (result != ISC_R_SUCCESS)
++		if (result != ISC_R_SUCCESS) {
+ 			fctx_done(fctx, result, __LINE__);
+-		else
+-			/*
+-			 * Keep trying.
+-			 */
++		} else {
++			/* Keep trying */
+ 			fctx_try(fctx, true, false);
++		}
+ 	}
+ 
+ 	isc_event_free(&event);
+-- 
+2.18.1
+
