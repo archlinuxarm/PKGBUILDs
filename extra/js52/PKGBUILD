@@ -1,5 +1,4 @@
-# $Id$
-# Contributor: Ionut Biru <ibiru@archlinux.org>
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - use tarball source
@@ -8,7 +7,7 @@
 
 pkgname=js52
 pkgver=52.9.0
-pkgrel=1
+pkgrel=2
 _ffver=${pkgver%%.*}
 pkgdesc="JavaScript interpreter and libraries - Version $_ffver"
 arch=(x86_64)
@@ -30,8 +29,9 @@ sha256sums=('9603829c4ca04ec1c6eae74071b92f7ff61be842e5b554246a725d8a2ac1db32'
 
 prepare() {
   cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE
+  mkdir obj
 
-  # https://anonscm.debian.org/git/pkg-gnome/mozjs52.git/tree/debian/patches
+  # https://salsa.debian.org/gnome-team/mozjs52/tree/debian/master/debian/patches
   patch -Np1 -i ../mozjs52-fix-soname.patch
   patch -Np1 -i ../mozjs52-copy-headers.patch
   patch -Np1 -i ../mozjs52-disable-mozglue.patch
@@ -39,38 +39,54 @@ prepare() {
 }
 
 build() {
+  local configure_args=(
+    --prefix=/usr
+    --disable-debug
+    --disable-debug-symbols
+    --disable-strip
+    --enable-optimize="-O2"
+    --enable-pie
+    --enable-posix-nspr-emulation
+    --enable-readline
+    --enable-release
+    --enable-shared-js
+    --enable-tests
+    --with-intl-api
+    --with-system-zlib
+    --without-system-icu
+  )
+
+  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/obj
+
   unset CPPFLAGS
   CFLAGS+=' -fno-delete-null-pointer-checks -fno-strict-aliasing -fno-tree-vrp'
   CXXFLAGS+=' -fno-delete-null-pointer-checks -fno-strict-aliasing -fno-tree-vrp'
   export CC=gcc CXX=g++ PYTHON=/usr/bin/python2
 
-  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/js/src
-  sh configure \
-    --prefix=/usr \
-    --disable-debug \
-    --disable-debug-symbols \
-    --disable-strip \
-    --enable-optimize="-O2" \
-    --enable-pie \
-    --enable-posix-nspr-emulation \
-    --enable-readline \
-    --enable-release \
-    --enable-shared-js \
-    --enable-tests \
-    --with-intl-api \
-    --with-system-zlib \
-    --without-system-icu
+  sh ../js/src/configure "${configure_args[@]}"
   make
 }
 
 check() {
-  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/js/src
-  python2 tests/jstests.py -d -s -t 300 --no-progress ../../js/src/js/src/shell/js
-  python2 jit-test/jit_test.py -s -t 300 --no-progress ../../js/src/js/src/shell/js basic
+  local jstests_extra_args=(
+    --format=none
+    --exclude-random
+  ) jittest_extra_args=(
+    --format=none
+    --timeout 300
+  ) jittest_test_args=(
+    basic
+  )
+
+  cd mozilla-unified/obj
+  make -C js/src check-jstests check-jit-test \
+    JSTESTS_EXTRA_ARGS="${jstests_extra_args[*]}" \
+    JITTEST_EXTRA_ARGS="${jittest_extra_args[*]}" \
+    JITTEST_TEST_ARGS="${jittest_test_args[*]}"
 }
 
 package() {
-  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/js/src
+  cd mozilla-unified-FIREFOX_${pkgver//./_}esr_RELEASE/obj
   make DESTDIR="$pkgdir" install
   rm "$pkgdir"/usr/lib/*.ajs
   find "$pkgdir"/usr/{lib/pkgconfig,include} -type f -exec chmod -c a-x {} +
