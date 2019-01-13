@@ -1,0 +1,46 @@
+From 02da15f7109b8bb7921eb97a751607b9dd2885b2 Mon Sep 17 00:00:00 2001
+From: Vladimir Davydov <vdavydov.dev@gmail.com>
+Date: Thu, 1 Nov 2018 13:35:24 +0300
+Subject: [PATCH] httpc: fix compilation with libcurl >= 7.62.0
+
+Starting from libcurl 7.62.0, CURL_SSL_CACERT is defined as a macro
+alias to CURLE_PEER_FAILED_VERIFICATION, see
+
+  https://github.com/curl/curl/commit/3f3b26d6feb0667714902e836af608094235fca2
+
+This breaks compilation:
+
+  httpc.c:337:7: error: duplicate case value 'CURLE_PEER_FAILED_VERIFICATION'
+          case CURLE_PEER_FAILED_VERIFICATION:
+               ^
+  httpc.c:336:7: note: previous case defined here
+          case CURLE_SSL_CACERT:
+               ^
+  curl.h:589:26: note: expanded from macro 'CURLE_SSL_CACERT'
+  #define CURLE_SSL_CACERT CURLE_PEER_FAILED_VERIFICATION
+                           ^
+
+Fix this by using CURLE_SSL_CACERT only if libcurl version is less
+than 7.62.0.
+
+Note, we can't use CURL_AT_LEAST_VERSION to check libcurl version,
+because it isn't available in libcurl shipped with CentOS 6.
+---
+ src/httpc.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/httpc.c b/src/httpc.c
+index 4d48a313d8..950f8b32f6 100644
+--- a/src/httpc.c
++++ b/src/httpc.c
+@@ -333,7 +333,9 @@ httpc_execute(struct httpc_request *req, double timeout)
+ 			++env->stat.http_other_responses;
+ 		}
+ 		break;
+-	case CURLE_SSL_CACERT:
++#if LIBCURL_VERSION_NUM < 0x073e00
++	case CURLE_SSL_CACERT: /* deprecated in libcurl 7.62.0 */
++#endif
+ 	case CURLE_PEER_FAILED_VERIFICATION:
+ 		/* 495 SSL Certificate Error (nginx non-standard) */
+ 		req->status = 495;
