@@ -1,0 +1,109 @@
+# Contributor: tobias <tobias@archlinux.org>
+# Contributor: Tobias Kieslich <tobias@justdreams.de>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - export java library path
+
+pkgname=(libgda libgda-{firebird,jdbc,mysql,postgres})
+pkgver=5.2.8+7+ga5355eb42
+pkgrel=1
+pkgdesc="Database access library"
+url="http://www.gnome-db.org/"
+arch=(x86_64)
+license=(GPL)
+depends=(gtksourceview3 libxslt python2 libsecret graphviz goocanvas iso-codes libgee openssl)
+makedepends=(glade libmariadbclient postgresql-libs libfbclient jdk8-openjdk intltool
+             gobject-introspection gtk-doc vala itstool gnome-common git)
+_commit=a5355eb42addc49a4dd63a8cc7d0367a09a5e60b  # LIBGDA_5.2
+source=("git+https://gitlab.gnome.org/GNOME/libgda.git#commit=$_commit"
+        fix-crash.diff)
+sha256sums=('SKIP'
+            '7eab1c7f5c11a87ce7a3e47c5c9058595f14c0b601daa6e0a32d797b708d97ba')
+
+_apiver=5.0
+
+pkgver() {
+  cd $pkgname
+  git describe --tags | sed 's/^LIBGDA_//;s/_/./g;s/-/+/g'
+}
+
+prepare() {
+  mkdir providers
+
+  [[ $CARCH == "aarch64" ]] && export LD_LIBRARY_PATH=/usr/lib/jvm/java-8-openjdk/jre/lib/aarch64/server:$LD_LIBRARY_PATH
+  [[ $CARCH != "aarch64" ]] && export LD_LIBRARY_PATH=/usr/lib/jvm/java-8-openjdk/jre/lib/arm/server:$LD_LIBRARY_PATH
+
+  cd $pkgname
+  patch -Np1 -i ../fix-crash.diff
+  find -name '*.py' -exec sed -i '1s/python$/&2/' {} +
+  NOCONFIGURE=1 ./autogen.sh
+}
+
+build() {
+  cd $pkgname
+  ./configure --prefix=/usr --sysconfdir=/etc --disable-static \
+      --with-bdb=/usr --with-bdb-libdir-name=lib \
+      --enable-json --enable-system-sqlite --enable-binreloc \
+      --enable-vala --enable-gtk-doc
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+  make
+}
+
+package_libgda() {
+  optdepends=('libgda-firebird: provider for Firebird'
+              'libgda-jdbc: provider for JDBC'
+              'libgda-mysql: provider for MySQL'
+              'libgda-postgres: provider for PostgreSQL')
+  options+=(emptydirs)
+
+  cd $pkgname
+  make DESTDIR="$pkgdir" install
+
+  mkdir -p providers
+  local provider
+  for provider in firebird jdbc mysql postgres; do
+    mv "$pkgdir"/usr/lib/libgda-$_apiver/providers/libgda-$provider[-.]*so \
+       "$pkgdir"/usr/lib/pkgconfig/libgda-$provider-$_apiver.pc \
+       "$pkgdir"/usr/share/libgda-$_apiver/${provider}_specs_*.xml \
+       "$srcdir/providers"
+  done
+
+  mv "$pkgdir"/usr/lib/libgda-$_apiver/providers/gdaprovider-${_apiver}.jar \
+     "$pkgdir"/usr/bin/gda-list-jdbc-providers-${_apiver} \
+     "$srcdir/providers"
+}
+
+_packageprovider() {
+  install -d "$pkgdir"/usr/lib/{pkgconfig,libgda-$_apiver/providers} \
+             "$pkgdir"/usr/share/libgda-$_apiver
+  mv providers/libgda-${1}[-.]*so "$pkgdir/usr/lib/libgda-$_apiver/providers"
+  mv providers/libgda-${1}-$_apiver.pc "$pkgdir/usr/lib/pkgconfig"
+  mv providers/${1}_specs_*.xml "$pkgdir/usr/share/libgda-$_apiver"
+}
+
+package_libgda-firebird() {
+  pkgdesc="libgda provider for Firebird"
+  depends=(libgda libfbclient)
+  _packageprovider firebird
+}
+
+package_libgda-jdbc() {
+  pkgdesc="libgda provider for JDBC"
+  depends=(libgda java-environment)
+  _packageprovider jdbc
+  install -d "$pkgdir/usr/bin"
+  mv providers/gda-list-jdbc-providers-$_apiver "$pkgdir/usr/bin"
+  mv providers/gdaprovider-$_apiver.jar "$pkgdir/usr/lib/libgda-$_apiver/providers"
+}
+
+package_libgda-mysql() {
+  pkgdesc="libgda provider for MySQL"
+  depends=(libgda libmariadbclient)
+  _packageprovider mysql
+}
+
+package_libgda-postgres() {
+  pkgdesc="libgda provider for PostgreSQL"
+  depends=(libgda postgresql-libs)
+  _packageprovider postgres
+}
