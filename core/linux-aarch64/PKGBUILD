@@ -7,7 +7,7 @@ pkgbase=linux-aarch64
 _srcname=linux-4.20
 _kernelname=${pkgbase#linux}
 _desc="AArch64 multi-platform"
-pkgver=4.20.1
+pkgver=4.20.2
 pkgrel=1
 arch=('aarch64')
 url="http://www.kernel.org/"
@@ -28,7 +28,7 @@ source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
         'linux.preset'
         '99-linux.hook')
 md5sums=('d39dd4ba2d5861c54b90d49be19eaf31'
-         '7e40323befd2f78e5332ee19db6ec7b0'
+         '17eb4912f0e4141e8a0dc02dd4432bb6'
          '6280bbce4412b246197daa4c910488c2'
          '6e806f8ea1545422539f3c8c20558a82'
          'a43dbc3cc8f52b5329accf1694bd1de9'
