@@ -11,7 +11,7 @@ pkgver=8.0.13_3
 _boost_ver=1.67.0
 _pkgver=${pkgver/_/-}
 _myver=${pkgver/_rel*}
-pkgrel=2
+pkgrel=3
 arch=('x86_64')
 makedepends=('cmake' 'zlib' 'lz4' 'zstd' 'libaio' 'systemd-tools' 'pam' 'jemalloc' 'openssl' 'rpcsvc-proto')
 license=('GPL')
@@ -51,6 +51,7 @@ build() {
 	[[ $CARCH == "aarch64" ]] && CONFIG="-DHAVE_SYS_EPOLL_H=0"
 
 	cmake ../$pkgbase-$_pkgver \
+		-Wno-dev \
 		-DBUILD_CONFIG=mysql_release \
 		-DREPRODUCIBLE_BUILD=ON \
 		-DCMAKE_INSTALL_PREFIX=/usr \
@@ -75,7 +76,6 @@ build() {
 		-DWITH_LIBWRAP=OFF \
 		-DWITH_MECAB=OFF \
 		-DWITH_PAM=ON \
-		-DWITH_EXTRA_CHARSETS=complex \
 		-DWITH_EMBEDDED_SERVER=ON \
 		-DWITH_EMBEDDED_SHARED_LIBRARY=ON \
 		-DWITH_INNODB_MEMCACHED=ON \
@@ -97,9 +97,6 @@ build() {
 		-DWITH_SYSTEMD=1 \
 		-DWITH_SCALABILITY_METRICS=ON \
 		-DCMAKE_EXE_LINKER_FLAGS='-ljemalloc' \
-		-DCMAKE_C_FLAGS="-fPIC $CFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -fomit-frame-pointer -fno-delete-null-pointer-checks -Wno-dev" \
-		-DCMAKE_CXX_FLAGS="-fPIC $CXXFLAGS -fno-strict-aliasing -DBIG_JOINS=1 -felide-constructors -fno-delete-null-pointer-checks -Wno-dev -Wno-error=nonnull-compare -Wno-deprecated-declarations -Wno-misleading-indentation -Wno-maybe-uninitialized" \
-		-DWITH_MYSQLD_LDFLAGS="-pie ${LDFLAGS},-z,now" \
 		-DWITH_BOOST="../boost_${_boost_ver//./_}" \
 		-DWITH_NUMA=OFF \
 		$CONFIG
@@ -117,7 +114,7 @@ package_libperconaserverclient() {
 	done
 
 	# Conflicting files with libmariadbclient
-	rm -rf "$pkgdir"/usr/lib/{libmysql*,mysql}
+	rm -rf "$pkgdir"/usr/lib/{libmysqld.so*,libmysqlclient{,_r}.so*,mysql}
 
 	install -Dm755 scripts/mysql_config "$pkgdir"/usr/bin/perconaserver_config
 	install -Dm644 "$srcdir"/$pkgbase-$_pkgver/man/mysql_config.1 "$pkgdir"/usr/share/man/man1/perconaserver_config.1
@@ -148,7 +145,7 @@ package_percona-server-clients() {
 package_percona-server() {
 	pkgdesc='Drop-in replacement for MySQL that provides improved performance, diagnostics, instrumentation and MyRocks storage engine'
 	backup=('etc/mysql/my.cnf')
-	depends=('libaio' 'systemd-tools' 'pam' 'jemalloc' 'lz4' 'zstd' 'openssl' 'libtirpc')
+	depends=('libaio' 'systemd-tools' 'pam' 'jemalloc' 'lz4' 'zstd' 'openssl' 'libtirpc' 'curl')
 	optdepends=('perl-dbd-mysql')
 	conflicts=('mysql')
 	provides=("mysql=$_myver" "mariadb=$_myver")
@@ -161,13 +158,14 @@ package_percona-server() {
 	install -Dm644 ../mysql-user.conf "$pkgdir"/usr/lib/sysusers.d/mysql.conf
 
 	cd "$pkgdir"
+	chmod 755 usr
 	mv usr/usr/lib/* usr/lib
-	rm -rf usr/usr
+	rm -rf usr/{usr,data,run,lib/mysql/plugin/debug}
 
 	# Move documentation
 	if [ -f usr/PATENTS ]; then
 		mv usr/{PATENTS,README.md} usr/share/doc/$pkgname/
-		rm usr/COPYING.*
+		rm usr/COPYING.* usr/{LICENSE,README}.router
 	fi
 
 	# provided by libperconaserverclient
