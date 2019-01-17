@@ -1,0 +1,93 @@
+diff --git a/lib/matplotlib/testing/conftest.py b/lib/matplotlib/testing/conftest.py
+index 9dc180c9600..fb306594780 100644
+--- a/lib/matplotlib/testing/conftest.py
++++ b/lib/matplotlib/testing/conftest.py
+@@ -24,19 +24,19 @@ def mpl_test_settings(request):
+     original_settings = matplotlib.rcParams.copy()
+ 
+     backend = None
+-    backend_marker = request.keywords.get('backend')
++    backend_marker = request.node.get_closest_marker('backend')
+     if backend_marker is not None:
+         assert len(backend_marker.args) == 1, \
+             "Marker 'backend' must specify 1 backend."
+-        backend = backend_marker.args[0]
++        backend, = backend_marker.args
+         prev_backend = matplotlib.get_backend()
+ 
+     style = '_classic_test'  # Default of cleanup and image_comparison too.
+-    style_marker = request.keywords.get('style')
++    style_marker = request.node.get_closest_marker('style')
+     if style_marker is not None:
+         assert len(style_marker.args) == 1, \
+             "Marker 'style' must specify 1 style."
+-        style = style_marker.args[0]
++        style, = style_marker.args
+ 
+     matplotlib.testing.setup()
+     if backend is not None:
+@@ -64,7 +64,7 @@ def mpl_image_comparison_parameters(request, extension):
+     # pytest won't get confused.
+     # We annotate the decorated function with any parameters captured by this
+     # fixture so that they can be used by the wrapper in image_comparison.
+-    baseline_images = request.keywords['baseline_images'].args[0]
++    baseline_images, = request.node.get_closest_marker('baseline_images').args
+     if baseline_images is None:
+         # Allow baseline image list to be produced on the fly based on current
+         # parametrization.
+diff --git a/lib/matplotlib/tests/test_backend_ps.py b/lib/matplotlib/tests/test_backend_ps.py
+index 8bf6e7dde38..10d8033d4ca 100644
+--- a/lib/matplotlib/tests/test_backend_ps.py
++++ b/lib/matplotlib/tests/test_backend_ps.py
+@@ -31,13 +31,16 @@
+ @pytest.mark.flaky(reruns=3)
+ @pytest.mark.parametrize('format, use_log, rcParams', [
+     ('ps', False, {}),
+-    needs_ghostscript(('ps', False, {'ps.usedistiller': 'ghostscript'})),
+-    needs_usetex(needs_ghostscript(('ps', False, {'text.latex.unicode': True,
+-                                                  'text.usetex': True}))),
++    pytest.param('ps', False, {'ps.usedistiller': 'ghostscript'},
++                 marks=needs_ghostscript),
++    pytest.param('ps', False, {'text.latex.unicode': True,
++                               'text.usetex': True},
++                 marks=[needs_ghostscript, needs_usetex]),
+     ('eps', False, {}),
+     ('eps', True, {'ps.useafm': True}),
+-    needs_usetex(needs_ghostscript(('eps', False, {'text.latex.unicode': True,
+-                                                   'text.usetex': True}))),
++    pytest.param('eps', False, {'text.latex.unicode': True,
++                                'text.usetex': True},
++                 marks=[needs_ghostscript, needs_usetex]),
+ ], ids=[
+     'ps',
+     'ps with distiller',
+diff --git a/lib/matplotlib/tests/test_backend_svg.py b/lib/matplotlib/tests/test_backend_svg.py
+index e0cbdfa8bce..1f6bf7cc3a6 100644
+--- a/lib/matplotlib/tests/test_backend_svg.py
++++ b/lib/matplotlib/tests/test_backend_svg.py
+@@ -130,7 +130,7 @@ def _test_determinism_save(filename, usetex):
+     "filename, usetex",
+     # unique filenames to allow for parallel testing
+     [("determinism_notex.svg", False),
+-     needs_usetex(("determinism_tex.svg", True))])
++     pytest.param("determinism_tex.svg", True, marks=needs_usetex)])
+ def test_determinism(filename, usetex):
+     import sys
+     from subprocess import check_output, STDOUT, CalledProcessError
+diff --git a/lib/matplotlib/tests/test_backends_interactive.py b/lib/matplotlib/tests/test_backends_interactive.py
+index df7a5d08a10..8cd4585bffc 100644
+--- a/lib/matplotlib/tests/test_backends_interactive.py
++++ b/lib/matplotlib/tests/test_backends_interactive.py
+@@ -31,8 +31,10 @@ def _get_testable_interactive_backends():
+             reason = "No $DISPLAY"
+         elif any(importlib.util.find_spec(dep) is None for dep in deps):
+             reason = "Missing dependency"
+-        backends.append(pytest.mark.skip(reason=reason)(backend) if reason
+-                        else backend)
++        if reason:
++            backend = pytest.param(
++                backend, marks=pytest.mark.skip(reason=reason))
++        backends.append(backend)
+     return backends
+ 
+ 
