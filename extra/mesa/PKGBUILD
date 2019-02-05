@@ -3,6 +3,7 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
+#  - disable assembly and rip out VC4 forced NEON for v6/v7
 
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
@@ -17,9 +18,11 @@ makedepends=('python-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dr
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
+        0001-Rip-out-VC4-forced-NEON.patch
         LICENSE)
 sha512sums=('cd6214b8bbeb3e3d187139ae1e949684f32f90152e1d7ba8d81222bd088770e28cff7ff165f2ccc41c068950561fe952420c6e54472f7204532a8d8700ff18bb'
             'SKIP'
+            'df13eaff1f3a95821221637c56d482945c42faca789e8bc71c36d0526750863aac891afab9d51ce0a912d7eede5b2af7c14a1c36ebd17c1bde945c3e057b773b'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -30,11 +33,12 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 prepare() {
   cd mesa-${pkgver}
 
+  [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i ../0001-Rip-out-VC4-forced-NEON.patch || true
 }
 
 build() {
   [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,imx,tegra"
-  [[ $CARCH == "armv6h" || $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",vc4"
+  [[ $CARCH == "armv6h" || $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",vc4" && MESON_OPT="-D asm=false"
 
   arch-meson mesa-$pkgver build \
     -D b_lto=false \
@@ -63,7 +67,7 @@ build() {
     -D osmesa=gallium \
     -D shared-glapi=true \
     -D texture-float=true \
-    -D valgrind=false
+    -D valgrind=false $MESON_OPT
 
   # Print config
   meson configure build
