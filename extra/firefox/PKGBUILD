@@ -9,7 +9,6 @@
 
 buildarch=12
 highmem=1
-noautobuild=1
 
 pkgname=firefox
 pkgver=65.0
@@ -22,7 +21,7 @@ depends=(gtk3 mozilla-common libxt startup-notification mime-types dbus-glib
          ffmpeg nss ttf-font libpulse sqlite libvpx icu)
 makedepends=(unzip zip diffutils python2-setuptools yasm mesa imake inetutils
              xorg-server-xvfb autoconf2.13 rust mercurial clang llvm jack gtk2
-             python nodejs python2-psutil cbindgen nasm)
+             python nodejs python2-psutil cbindgen nasm distcc-clang)
 optdepends=('networkmanager: Location detection via available WiFi networks'
             'libnotify: Notification integration'
             'pulseaudio: Audio support'
@@ -30,12 +29,10 @@ optdepends=('networkmanager: Location detection via available WiFi networks'
             'hunspell-en_US: Spell checking, American English')
 options=(!emptydirs !makeflags)
 source=("https://hg.mozilla.org/releases/mozilla-release/archive/FIREFOX_${pkgver//./_}_RELEASE.tar.gz"
-        $pkgname.desktop firefox-symbolic.svg
-        https://hg.mozilla.org/mozilla-central/raw-rev/537f4d1d837a)
-sha256sums=('47ff34ff0ec51cdf7f5c453d91054543e123500b65593891e50144189adc04b8'
+        $pkgname.desktop firefox-symbolic.svg)
+sha256sums=('1ccec6bfed18fdeca373ecf856e0e87a6425c8805ca720ff3f7df0e2e426ea90'
             '677e1bde4c6b3cff114345c211805c7c43085038ca0505718a11e96432e9811a'
-            '9a1a572dc88014882d54ba2d3079a1cf5b28fa03c5976ed2cb763c93dabbd797'
-            '9fa42f3a4ccd255b56f4157119c08ff19df9f972aa25af4cbb685e3683139c24')
+            '9a1a572dc88014882d54ba2d3079a1cf5b28fa03c5976ed2cb763c93dabbd797')
 
 # Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
 # Note: These are for Arch Linux use ONLY. For your own distribution, please
@@ -63,8 +60,10 @@ ac_add_options --enable-application=browser
 ac_add_options --prefix=/usr
 ac_add_options --enable-release
 #ac_add_options --enable-hardening
-ac_add_options --enable-lto
-export MOZ_PGO=1
+ac_add_options --enable-optimize="-O2"
+#ac_add_options --enable-rust-simd
+#ac_add_options --enable-lto
+#export MOZ_PGO=1
 export CC=clang
 export CXX=clang++
 export AR=llvm-ar
@@ -108,16 +107,13 @@ END
 
   if [[ $CARCH == "armv7h" ]]; then
     echo "ac_add_options --disable-elf-hack" >> .mozconfig
-    echo 'ac_add_options --enable-optimize="-O2 -fno-schedule-insns"' >> .mozconfig
     # https://bugzilla.redhat.com/show_bug.cgi?id=1641623
     echo "ac_add_options --disable-av1" >> .mozconfig
     export RUSTFLAGS="-Cdebuginfo=0"
   elif [[ $CARCH == "aarch64" ]]; then
-    echo 'ac_add_options --enable-optimize="-O2"' >> .mozconfig
     echo 'ac_add_options --enable-rust-simd' >> .mozconfig
   fi
 
-  patch -Rp1 -i ../537f4d1d837a
   LDFLAGS+=" -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
 }
 
@@ -131,7 +127,7 @@ build() {
   # LTO needs more open files
   ulimit -n 4096
 
-  xvfb-run -a -n 97 -s "-screen 0 1600x1200x24" ./mach build
+  ./mach build
   ./mach buildsymbols
 }
 
