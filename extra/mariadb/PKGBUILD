@@ -8,54 +8,50 @@
 pkgbase=mariadb
 pkgname=('mariadb-libs' 'mariadb-clients' 'mariadb' 'mytop')
 pkgdesc='Fast SQL database server, derived from MySQL'
-pkgver=10.3.12
-pkgrel=5
+pkgver=10.3.13
+pkgrel=1
 arch=('x86_64')
 license=('GPL')
 url='https://mariadb.org/'
 makedepends=('boost' 'bzip2' 'cmake' 'jemalloc' 'libaio' 'libxml2' 'lz4' 'lzo'
              'openssl' 'systemd' 'zlib' 'zstd')
 validpgpkeys=('199369E5404BD5FC7D2FE43BCBCB082A1BB943DB') # MariaDB Package Signing Key <package-signing-key@mariadb.org>
-source=("https://ftp.heanet.ie/mirrors/mariadb/mariadb-$pkgver/source/mariadb-$pkgver.tar.gz"{,.asc}
-        '0001-MDEV-18360-Prevent-set_max_open_files-from-allocating-too-many-files.patch'
-        '0002-fix-galera_recovery-with-fs.protected_regular-enabled.patch'
+source=("https://mirrors.n-ix.net/mariadb/mariadb-$pkgver/source/mariadb-$pkgver.tar.gz"{,.asc}
+        '0001-arch-specific.patch'
+        '0002-systemd-sysusers-tmpfiles.patch'
+        '0004-do-not-break-main-configuration-with-instantiated-one.patch'
+        '0005-fix-galera_recovery-with-fs.protected_regular-enabled.patch'
         'atomic.patch')
-sha256sums=('f7449a34c25e0455928d7983dae83fd2069fe1f16c4c5f4aeed9ed9d3f081ff6'
+sha256sums=('b2aa857ef5b84f85a7ea60a1eac7b34c0ca5151c71a0d44ce2d7fb028d71459a'
             'SKIP'
-            'f2a93769bfd9a5421871846b091ff752dfceea1791beab2ee55ac93d24df02c7'
+            '5a443a403821931ce35759e9583d23cd809b3b5a5df5b8293ac8e33b9c0cbc0f'
+            '1cd009b473d5965c7cbe6d48fff272030a2ccdd9c7e67b4f837d03252786a09a'
+            'd12806e4f90cc0fc081205dd4c0a5e0e7c455844f04276811b61b57fd24f5545'
             '66e0acac7436fd8925710ef5cc66ba1a8f63a385ce374f01ae83096cc33d97a0'
             '7769fd8eb2bb3a6644a2200d01918ff887be25638d79dbec25897fe0d87badc4')
 
 prepare() {
   cd $pkgbase-$pkgver/
 
-  # Changes to the upstream unit files:
-  #  * remove the alias from unit files, we install symlinks in package function
+  # Arch Linux specific patches:
   #  * enable PrivateTmp for a little bit more security
   #  * force preloading jemalloc for memory management
-  sed -i -e '/^Alias/d' \
-    -e '/^PrivateTmp/c PrivateTmp=true' \
-    -e '/# Environment="LD_/a Environment="LD_PRELOAD=/usr/lib/libjemalloc.so"' \
-    support-files/mariadb{,@}.service.in
+  #  * fix path to our config
+  patch -Np1 < ../0001-arch-specific.patch
 
-  # let's create the datadir from tmpfiles
-  echo 'd @MYSQL_DATADIR@ 0700 @MYSQLD_USER@ @MYSQLD_USER@ -' >> support-files/tmpfiles.conf.in
+  # MDEV-17028 Fix glitches with systemd sysusers and tmpfiles:
+  #  * Use descriptive file names for sysusers and tmpfiles configuration
+  #  * Make systemd-tmpfiles create MYSQL_DATADIR
+  # https://github.com/MariaDB/server/pull/530
+  patch -Np1 < ../0002-systemd-sysusers-tmpfiles.patch
 
-  # instantiated configs are not subject to be included from main config
-  sed -i 's|@sysconf2dir@|@sysconfdir@|' support-files/mariadb@.service.in
-
-  # fix path to our config
-  sed -i 's|my.cnf.d|mysql/my.cnf.d|' support-files/rpm/{my.cnf,enable_encryption.preset}
-
-  # MDEV-18360 Prevent set_max_open_files from allocating too many files
-  # https://bugs.archlinux.org/task/61433
-  # https://github.com/systemd/systemd/issues/11510
-  # https://jira.mariadb.org/browse/MDEV-18360
-  patch -Np1 < ../0001-MDEV-18360-Prevent-set_max_open_files-from-allocating-too-many-files.patch
+  # do not break main configuration with instantiated one
+  # https://github.com/MariaDB/server/pull/1095
+  patch -Np1 < ../0004-do-not-break-main-configuration-with-instantiated-one.patch
 
   # fix galera_recovery with fs.protected_regular enabled
   # https://github.com/MariaDB/server/pull/1137
-  patch -Np1 < ../0002-fix-galera_recovery-with-fs.protected_regular-enabled.patch
+  patch -Np1 < ../0005-fix-galera_recovery-with-fs.protected_regular-enabled.patch
 
   if [[ $CARCH == arm || $CARCH == armv6h ]]; then
     patch -p0 -i ../atomic.patch
@@ -180,7 +176,7 @@ package_mariadb() {
           'etc/mysql/my.cnf.d/mysql-clients.cnf'
           'etc/mysql/my.cnf.d/server.cnf')
   install=mariadb.install
-  depends=("mariadb-clients=${pkgver}" 'inetutils' 'libsystemd' 'libxml2' 'zstd')
+  depends=("mariadb-clients=${pkgver}" 'inetutils' 'systemd-libs' 'libxml2' 'zstd')
   optdepends=('galera: for MariaDB cluster with Galera WSREP'
               'perl-dbd-mysql: for mysqlhotcopy, mysql_convert_table_format and mysql_setpermission')
   conflicts=('mysql')
@@ -198,11 +194,7 @@ package_mariadb() {
   rm usr/bin/rcmysql
   rm usr/share/mysql/{binary-configure,mysql{,d_multi}.server}
 
-  # these should have useful names
-  mv usr/lib/sysusers.d/{sysusers,mariadb}.conf
-  mv usr/lib/tmpfiles.d/{tmpfiles,mariadb}.conf
-
-  # links service files with old name for compatibility
+  # link service files with old name for compatibility
   ln -s mariadb.service usr/lib/systemd/system/mysqld.service
   ln -s mariadb@.service usr/lib/systemd/system/mysqld@.service
 
@@ -211,8 +203,7 @@ package_mariadb() {
   mv usr/share/doc/mariadb/COPYING* usr/share/licenses/mariadb/
 
   # move it where one might look for it
-  #mv usr/share/{groonga,doc/mariadb/}
-  #mv usr/share/{groonga-normalizer-mysql,doc/mariadb/}
+  mv usr/share/{groonga{,-normalizer-mysql},doc/mariadb/}
 
   # already installed to real systemd unit directory or useless
   rm -r usr/share/mysql/systemd/
