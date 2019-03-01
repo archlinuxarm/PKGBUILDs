@@ -3,9 +3,10 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - patch to fix ARM build
+#  - remove export GOARCH='amd64'
 
 pkgname=consul
-pkgver=1.2.3
+pkgver=1.4.2
 pkgrel=1
 pkgdesc="A tool for service discovery, monitoring and configuration."
 arch=('x86_64')
@@ -20,17 +21,23 @@ source=("${pkgname}-${pkgver}.tar.gz::https://github.com/hashicorp/consul/archiv
         'consul.default'
         'consul.sysusers'
         'example.json'
+        'consul-ldflags.patch'
         'fix-build-version-info.patch'
+        'disable-syslog-test.patch'
+        'unparallelize-or-disable-flaky-tests.patch'
         '0001-fix-ARM-build.patch')
 install=consul.install
 backup=('etc/default/consul')
-sha512sums=('71a7dbfc031df4a96faf2ddd829f289e96adefd0e0087208bbdd26e742a24e3da05fceea4181eb915703ad3323ed5b02bf74eb3fdfbed1e9a1afa2f74acb2a34'
+sha512sums=('7890626903ae167bddd31eac92da8da56df46c913e4a5e166cec910b749bdf24df4eaa5f9f13f2d0b6ff8f4133a81d85a5b2c90ef52275a4caa752c737b8210f'
             'SKIP'
             'c70b9d1556f6c7ecb2e915ab685f289cef0e31198bd2e50c74a0483bbfb387beec67334f539a90adbf68b61b07946e98b300ab8a8e26e53b35f4ab4894adeb04'
             'ec5a800529a297c709fa383c094ecf106351cf0f8ac7b613b972d415d77fe001088902d7ab805e63e78a8e6360323fec1b795db5a4446df1e21b9b4ed31e7079'
             'ef872aedb2bc022a29292b7972a792b22e684c1ccb904a2b2cfec6d8966c28fb19be1452ce060821c419f1b646b236ba2e783175595e4bb6926d164c27a15c87'
             'c4292b8f56ee955ed7385a49843fd90d6434029891b3e1e724cb2fc841514c06e2554a26d3937c114371b18c2168c4e64319eb2cbd726ee8b35870df19089348'
-            '6709e51ff57fbe8118e7c9b38c99ef096a62d0c88ac2694e8c86065052cd2600f65dd9ac7f4a7e60712c26d15355f938cd9d98684955f4a02b2d5adfe1c2c04e'
+            '1d261cc36c3fe617db55d1bfa31354637cdd707bfc803582181e86f64fb8166905b46ba91b326d205392e142ba53deeb6dc1ed8f0f0fefe5201c10773e904b1c'
+            '64a73277468929c65f7aa3ef1523a5e170b18333129629d5070492e773f63cfdf56ff9a670798d140ef301bece1579bdc881343499b5ea7a0d807c7c95154a2e'
+            '2a2e31469708f66877885c9e38f2044da13067c4111fc081ffea6187ff39acea6b17c0d33b2d0ada614315c3e5759a7592fbf7b0e9e9094ba2c31003bf1dbd4c'
+            'b59b2733d598ae6648c198f26f23961d4c1ea8c693a1a5b1c16a0951400c3bb9a9d2d5efe4f0a5cca9ae3b1f225a8eb4133c9011c4125589e936c7dcdc4b2495'
             'b9be57fc21ffccd5083ceccd96937d8d1e83b9e411b0ad1c4b79daad74aa11746afa360b937724cd6d559a9d679774e0abbaefe519bca6ad0b94462c57159f58')
 
 prepare() {
@@ -44,26 +51,29 @@ prepare() {
 
   cd "${srcdir}/src/github.com/hashicorp/${pkgname}"
 
-  # use proper release build version string (w/o '-dev' suffix)
-  patch -p1 -N -l -i "${srcdir}/fix-build-version-info.patch"
-
-  # disable syslog test (requires running syslog service)
-  rm ./logger/syslog_test.go
-
-  # fix ARM build
-  patch -p1 -i "${srcdir}/0001-fix-ARM-build.patch"
+  local filename
+  for filename in "${source[@]}"; do
+    if [[ "$filename" =~ \.patch$ ]]; then
+      msg2 "Applying patch ${filename##*/}"
+      patch -p1 -N -l -i "$srcdir/${filename##*/}"
+    fi
+  done
 }
 
 build() {
   cd "${srcdir}/src/github.com/hashicorp/${pkgname}"
-  # weird race conditions when being run with more than 1 thread...
-  taskset --cpu-list 0 make linux
+  export GOOS='linux'
+  make linux
 }
 
 check() {
   cd "${srcdir}/src/github.com/hashicorp/${pkgname}"
-  # weird race conditions when being run with more than 1 thread...
-  taskset --cpu-list 0 make test
+  # weird race conditions when being run overparallelized
+  export GOMAXPROCS="2"
+  export GOOS='linux'
+  export GOTEST_FLAGS="-p 2 -parallel 2"
+  export CONSUL_TEST_SKIP_SYSLOG='true'
+  make -j1 test
 }
 
 package() {
