@@ -8,7 +8,7 @@
 pkgbase=gap
 pkgname=(gap gap-doc gap-packages)
 pkgver=4.10.0
-pkgrel=6
+pkgrel=7
 pkgdesc="Groups, Algorithms, Programming: a system for computational discrete algebra"
 arch=(x86_64)
 url="https://www.gap-system.org/"
@@ -31,6 +31,9 @@ prepare() {
   sed -e '/build-normaliz.sh/d' -i bin/BuildPackages.sh
 # Disable anupq package, it's i686 only
   rm -r pkg/anupq-*
+# Fix https://bugs.archlinux.org/task/55174
+  sed -e '/xgap/d' -i pkg/sonata-*/PackageInfo.g
+  sed -e '/XGAP/d' -i pkg/cryst/PackageInfo.g
 
 # Patches to make sagemath work with GAP's libgap
   patch -p1 -i ../gap-sagemath-1.patch
@@ -44,10 +47,20 @@ prepare() {
 build() {
   cd gap-$pkgver
   ./configure --prefix=/usr --with-gmp=system
+
+  # https://bugzilla.gnome.org/show_bug.cgi?id=655517
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+
   make
+
+  # Install libgap so we can link packages against it
+  mkdir -p tmp-install
+  make DESTDIR="$srcdir"/gap-$pkgver/tmp-install install-libgap
 
   cd pkg
   export MAKEFLAGS='-j1' # Fix build of carat package
+  export LDFLAGS+=" -L$srcdir/gap-$pkgver/tmp-install/usr/lib -lgap" # See https://trac.sagemath.org/ticket/27372
+  export LD_LIBRARY_PATH="$srcdir"/gap-$pkgver/tmp-install/usr/lib
   ../bin/BuildPackages.sh
 }
 
@@ -108,6 +121,7 @@ package_gap-packages() {
     chrpath -d "$pkgdir"/usr/lib/gap/pkg/NormalizInterface-*/bin/aarch64-unknown-linux-gnu-default64/NormalizInterface.so
   fi
 
-# remove leftover binaries
-  find "$pkgdir"/usr/lib/gap/pkg -name .libs | xargs rm -r
+# remove leftover binaries and source files
+  find "$pkgdir"/usr/lib/gap/pkg -name .libs -o -name '*.o' | xargs rm -fr
+  find "$pkgdir"/usr/lib/gap/pkg -type d -name src | xargs rm -fr
 }
