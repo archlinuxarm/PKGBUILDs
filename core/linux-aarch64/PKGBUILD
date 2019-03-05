@@ -4,18 +4,18 @@
 buildarch=8
 
 pkgbase=linux-aarch64
-_srcname=linux-4.20
+_srcname=linux-5.0
 _kernelname=${pkgbase#linux}
 _desc="AArch64 multi-platform"
-pkgver=4.20.13
+pkgver=5.0.0
 pkgrel=1
 arch=('aarch64')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' 'vboot-utils' 'dtc')
 options=('!strip')
-source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
-        "http://www.kernel.org/pub/linux/kernel/v4.x/patch-${pkgver}.xz"
+source=("http://www.kernel.org/pub/linux/kernel/v5.x/${_srcname}.tar.xz"
+        #"http://www.kernel.org/pub/linux/kernel/v5.x/patch-${pkgver}.xz"
         '0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch'
         '0002-arm64-dts-rockchip-disable-pwm0-on-rk3399-firefly.patch'
         '0003-arm64-dts-rockchip-add-usb3-controller-node-for-RK33.patch'
@@ -25,25 +25,26 @@ source=("http://www.kernel.org/pub/linux/kernel/v4.x/${_srcname}.tar.xz"
         'kernel.keyblock'
         'kernel_data_key.vbprivk'
         'linux.preset'
-        '99-linux.hook')
-md5sums=('d39dd4ba2d5861c54b90d49be19eaf31'
-         '78dfc42ffc09125aac594827977953ab'
-         'bca1ec27cc134ad3072dc7aa3ba97e10'
-         'f23af9d37f3d6ac18f95be65a798145d'
-         'b898b0199c7ded6d93e5f0f97568d3bc'
-         '5d31dd54a7e038e12bbeefa124907233'
-         'c67b2cf137e5feab15c9c3452cf68872'
+        '60-linux.hook'
+        '90-linux.hook')
+md5sums=('7381ce8aac80a01448e065ce795c19c0'
+         'ba4daec24d71b25d6db1e29bf95ba22f'
+         'dd09eca8f8c516667e995fc3db1d2236'
+         'a8f434da98e1b192f0486b6ba6458616'
+         'a36f126cb864d14294a6735124c795c5'
+         'a6f792a3813d2ae1f69a342eaf46dfd4'
          '7f1a96e24f5150f790df94398e9525a3'
          '61c5ff73c136ed07a7aadbf58db3d96a'
          '584777ae88bce2c5659960151b64c7d8'
-         'b5ef67d6086e20de7b82265f562f88b1'
-         '1d4477026533efaa0358a40855d50a83')
+         '41cb5fef62715ead2dd109dbea8413d6'
+         'ce6c81ad1ad1f8b333fd6077d47abdaf'
+         '3dc88030a8f2f5a5f97266d99b149f77')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
   # add upstream patch
-  git apply --whitespace=nowarn ../patch-${pkgver}
+  #git apply --whitespace=nowarn ../patch-${pkgver}
 
   # ALARM patches
   git apply ../0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch
@@ -112,47 +113,44 @@ _package() {
   _basekernel=${_kernver%%-*}
   _basekernel=${_basekernel%.*}
 
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware}
-  make INSTALL_MOD_PATH="${pkgdir}" modules_install
+  mkdir -p "${pkgdir}"/{boot,usr/lib/modules}
+  make INSTALL_MOD_PATH="${pkgdir}/usr" modules_install
   make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
   cp arch/$KARCH/boot/Image{,.gz} "${pkgdir}/boot"
 
-  # set correct depmod command for install
-  sed \
-    -e  "s/KERNEL_NAME=.*/KERNEL_NAME=${_kernelname}/g" \
-    -e  "s/KERNEL_VERSION=.*/KERNEL_VERSION=${_kernver}/g" \
-    -i "${startdir}/${pkgname}.install"
+  # make room for external modules
+  local _extramodules="extramodules-${_basekernel}${_kernelname}"
+  ln -s "../${_extramodules}" "${pkgdir}/usr/lib/modules/${_kernver}/extramodules"
 
-  # install mkinitcpio preset file for kernel
-  install -D -m644 "${srcdir}/linux.preset" "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
-  sed \
-    -e "1s|'linux.*'|'${pkgbase}'|" \
-    -e "s|ALL_kver=.*|ALL_kver=\"${_kernver}\"|" \
-    -i "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
-
-  # install pacman hook for initramfs regeneration
-  sed "s|%PKGBASE%|${pkgbase}|g" "${srcdir}/99-linux.hook" |
-    install -D -m644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/99-${pkgbase}.hook"
+  # add real version for building modules and running depmod from hook
+  echo "${_kernver}" |
+    install -Dm644 /dev/stdin "${pkgdir}/usr/lib/modules/${_extramodules}/version"
 
   # remove build and source links
-  rm -f "${pkgdir}"/lib/modules/${_kernver}/{source,build}
-  # remove the firmware
-  rm -rf "${pkgdir}/lib/firmware"
-  # make room for external modules
-  ln -s "../extramodules-${_basekernel}${_kernelname:--ARCH}" "${pkgdir}/lib/modules/${_kernver}/extramodules"
-  # add real version for building modules and running depmod from post_install/upgrade
-  mkdir -p "${pkgdir}/lib/modules/extramodules-${_basekernel}${_kernelname:--ARCH}"
-  echo "${_kernver}" > "${pkgdir}/lib/modules/extramodules-${_basekernel}${_kernelname:--ARCH}/version"
+  rm "${pkgdir}"/usr/lib/modules/${_kernver}/{source,build}
 
-  # Now we call depmod...
-  depmod -b "$pkgdir" -F System.map "$_kernver"
-
-  # move module tree /lib -> /usr/lib
-  mkdir -p "${pkgdir}/usr"
-  mv "$pkgdir/lib" "$pkgdir/usr"
+  # now we call depmod...
+  depmod -b "${pkgdir}/usr" -F System.map "${_kernver}"
 
   # add vmlinux
-  install -D -m644 vmlinux "${pkgdir}/usr/lib/modules/${_kernver}/build/vmlinux"
+  install -Dt "${pkgdir}/usr/lib/modules/${_kernver}/build" -m644 vmlinux
+
+  # sed expression for following substitutions
+  local _subst="
+    s|%PKGBASE%|${pkgbase}|g
+    s|%KERNVER%|${_kernver}|g
+    s|%EXTRAMODULES%|${_extramodules}|g
+  "
+
+  # install mkinitcpio preset file
+  sed "${_subst}" ../linux.preset |
+    install -Dm644 /dev/stdin "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
+
+  # install pacman hooks
+  sed "${_subst}" ../60-linux.hook |
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/60-${pkgbase}.hook"
+  sed "${_subst}" ../90-linux.hook |
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
 }
 
 _package-headers() {
