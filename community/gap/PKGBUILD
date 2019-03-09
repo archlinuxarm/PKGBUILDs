@@ -7,20 +7,16 @@
 
 pkgbase=gap
 pkgname=(gap gap-doc gap-packages)
-pkgver=4.10.0
-pkgrel=7
+pkgver=4.10.1
+pkgrel=1
 pkgdesc="Groups, Algorithms, Programming: a system for computational discrete algebra"
 arch=(x86_64)
 url="https://www.gap-system.org/"
 license=(GPL)
 source=("https://www.gap-system.org/pub/gap/gap-${pkgver%.*}/tar.gz/gap-$pkgver.tar.gz" gap.sh
-        gap-sagemath-1.patch gap-sagemath-2.patch gap-sagemath-3.patch
         gap-polymake-3.3.patch)
-sha256sums=('314b8d949c0bb01ef8bee199b29571d42714df660aba0d76ded254f58295904f'
+sha256sums=('b2d8800e338a6a9afdf92b06368c2e1a16b8adebffcd4c10319c1b3a4e827e45'
             '143fb8a79a52c007903cce13407850df309ef803a9b00398d05169355917de46'
-            'e5f0a71ae5cdcc6596330834ef9fb0a0183890a9cf874a7eb88b819b0030a33b'
-            '3b66e6b320f56119b1d8eb804a94ee3a7ea71af10bd4f99a61bae32840e62c87'
-            '511414a8d085a9ef9de5f921fdd45e4bbb3f33c2d88b821da06dfc267c182ddc'
             'c92849b2643e0e21ffdcfa230fb23fe4a276ec15402f178d5d69ddb0e537fbbe')
 makedepends=(libxaw givaro mpfi normaliz boost c-xsc zeromq fplll polymake wget chrpath)
 
@@ -35,11 +31,6 @@ prepare() {
   sed -e '/xgap/d' -i pkg/sonata-*/PackageInfo.g
   sed -e '/XGAP/d' -i pkg/cryst/PackageInfo.g
 
-# Patches to make sagemath work with GAP's libgap
-  patch -p1 -i ../gap-sagemath-1.patch
-  patch -p1 -i ../gap-sagemath-2.patch
-  patch -p1 -i ../gap-sagemath-3.patch
-
   cd pkg/PolymakeInterface*
   patch -p2 -i "$srcdir"/gap-polymake-3.3.patch # Fix build of PolymakeInterface with polymake 3.3
 }
@@ -52,15 +43,16 @@ build() {
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
 
   make
+  make libgap.la
 
   # Install libgap so we can link packages against it
   mkdir -p tmp-install
-  make DESTDIR="$srcdir"/gap-$pkgver/tmp-install install-libgap
+  libtool --mode=install install libgap.la "$srcdir"/gap-$pkgver/tmp-install
 
   cd pkg
   export MAKEFLAGS='-j1' # Fix build of carat package
-  export LDFLAGS+=" -L$srcdir/gap-$pkgver/tmp-install/usr/lib -lgap" # See https://trac.sagemath.org/ticket/27372
-  export LD_LIBRARY_PATH="$srcdir"/gap-$pkgver/tmp-install/usr/lib
+  export LDFLAGS+=" -L$srcdir/gap-$pkgver/tmp-install -lgap" # See https://trac.sagemath.org/ticket/27372
+  export LD_LIBRARY_PATH="$srcdir"/gap-$pkgver/tmp-install
   ../bin/BuildPackages.sh
 }
 
@@ -74,9 +66,12 @@ package_gap() {
   replaces=(gap-data libgap gap-4.8 gap-4.8-data)
   cd gap-$pkgver
 
-  make DESTDIR="$pkgdir" install-headers install-libgap
-# Install missing header
+  install -Dm644 src/*.h -t "$pkgdir"/usr/include/gap
   install -Dm644 gen/config.h -t "$pkgdir"/usr/include/gap
+  install -Dm644 src/hpc/*.h -t "$pkgdir"/usr/include/gap/hpc
+
+  install -d "$pkgdir"/usr/lib
+  libtool --mode=install install libgap.la "$pkgdir"/usr/lib
 
   mkdir -p "$pkgdir"/usr/{bin,lib/gap/pkg}
   cp -r grp lib "$pkgdir"/usr/lib/gap
@@ -117,8 +112,8 @@ package_gap-packages() {
 
 # fix RPATH
   if [[ $CARCH == "aarch64" ]]; then
-    chrpath -r \$ORIGIN/../lib/ "$pkgdir"/usr/lib/gap/pkg/semigroups-*/bin/aarch64-unknown-linux-gnu-default64/semigroups.so
-    chrpath -d "$pkgdir"/usr/lib/gap/pkg/NormalizInterface-*/bin/aarch64-unknown-linux-gnu-default64/NormalizInterface.so
+    chrpath -r \$ORIGIN/../lib/ "$pkgdir"/usr/lib/gap/pkg/semigroups-*/bin/aarch64-*/semigroups.so
+    chrpath -d "$pkgdir"/usr/lib/gap/pkg/NormalizInterface-*/bin/aarch64-*/NormalizInterface.so
   fi
 
 # remove leftover binaries and source files
