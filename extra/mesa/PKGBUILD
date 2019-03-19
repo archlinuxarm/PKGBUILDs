@@ -8,7 +8,7 @@
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=18.3.4
+pkgver=19.0.0
 pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
@@ -19,12 +19,10 @@ url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-Rip-out-VC4-forced-NEON.patch
-        get-program-name-based-on-path.patch
         LICENSE)
-sha512sums=('e4ead944ba053aa05425e9e199d633f576dfa424976253fc32438e8db6da5e8d381122e4c4b7fb18f94177421f208bab5567cfec8d2692d104e266483ca02a99'
+sha512sums=('5759b85275bcd145513cf14a9ef7505595766fb33b82c53738f74ede462e5850580d48ab4af326b41209e7f4b05aab75539f2bfebf67c3098a4680ea95c37591'
             'SKIP'
             'df13eaff1f3a95821221637c56d482945c42faca789e8bc71c36d0526750863aac891afab9d51ce0a912d7eede5b2af7c14a1c36ebd17c1bde945c3e057b773b'
-            '3c851ec0f1d8c1d918756c5b5315901d2a9c1de22624378bb2ba49ae8d7abc0b6c015a91c455f1d40d50532939f60db81cab0d7c9f832d41162c684582783fa6'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -35,14 +33,11 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 prepare() {
   cd mesa-${pkgver}
 
-  # Needed in order to target Chromium in drirc (included upstream in Mesa 19)
-  patch -Np1 -i ../get-program-name-based-on-path.patch
-
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i ../0001-Rip-out-VC4-forced-NEON.patch || true
 }
 
 build() {
-  [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,imx,tegra"
+  [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,kmsro,tegra"
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",vc4" && MESON_OPT="-D asm=false"
 
   arch-meson mesa-$pkgver build \
@@ -71,7 +66,6 @@ build() {
     -D lmsensors=true \
     -D osmesa=gallium \
     -D shared-glapi=true \
-    -D texture-float=true \
     -D valgrind=false $MESON_OPT
 
   # Print config
