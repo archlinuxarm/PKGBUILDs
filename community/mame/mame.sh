@@ -1,5 +1,5 @@
 #!/bin/sh
-mamelib=/usr/lib/mame/
+mame=/usr/lib/mame/mame
 
 mame_first_run() {
   echo "Creating an ini file for MAME at $HOME/.mame/mame.ini"
@@ -17,8 +17,12 @@ mame_first_run() {
   # strings verbatim into its configuration file, and expand the variables when
   # it is run in future.
   "$mame" \
-    -artpath '$HOME/.mame/artwork;artwork' \
-    -ctrlrpath '$HOME/.mame/ctrlr;ctrlr' \
+    -artpath '$HOME/.mame/artwork;/usr/lib/mame/artwork' \
+    -bgfx_path '$HOME/.mame/bgfx;/usr/lib/mame/bgfx' \
+    -ctrlrpath '$HOME/.mame/ctrlr;/usr/lib/mame/ctrlr' \
+    -hashpath '$HOME/.mame/hash;/usr/lib/mame/hash' \
+    -languagepath '$HOME/.mame/language;/usr/lib/mame/language' \
+    -pluginspath '/usr/lib/mame/plugins' \
     -inipath '$HOME/.mame/ini' \
     -rompath '$HOME/.mame/roms' \
     -samplepath '$HOME/.mame/samples' \
@@ -42,11 +46,10 @@ elif ! [ -e ~/.mame ]; then
   mkdir -- ~/.mame
   (
     cd -- ~/.mame || exit
-    mkdir artwork cfg comments ctrlr diff ini inp nvram samples snap sta roms
+    mkdir artwork bgfx cfg comments ctrlr diff hash ini inp language nvram samples snap sta roms
 
     mame_first_run
   ) || exit
 fi
 
-cd "$mamelib"
-exec ./mame "$@"
+exec "$mame" "$@"
