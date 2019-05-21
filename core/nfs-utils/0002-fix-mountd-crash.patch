@@ -1,0 +1,90 @@
+
+    Subject: [PATCH v2] Fix mountd segfault
+    From: Chuck Lever <chuck.lever@xxxxxxxxxx>
+    Date: Tue, 14 May 2019 11:10:15 -0400
+    User-agent: StGit/0.17.1-dirty
+
+After commit 8f459a072f93 ("Remove abuse of ai_canonname") the
+ai_canonname field in addrinfo structs returned from
+host_reliable_addrinfo() is always NULL. This results in mountd
+segfaults when there are netgroups or hostname wildcards in
+/etc/exports.
+
+Add an extra DNS query in check_wildcard() and check_netgroup() to
+obtain the client's canonical hostname instead of dereferencing
+the NULL pointer.
+
+Reported-by: Mark Wagner <mark@xxxxxxxxxxx>
+Fixes: 8f459a072f93 ("Remove abuse of ai_canonname")
+Signed-off-by: Chuck Lever <chuck.lever@xxxxxxxxxx>
+---
+
+Changes since v1:
+- Added similar fix for check_netgroup
+- Restructured exit/error paths in check_wildcard
+
+ support/export/client.c |   32 +++++++++++++++++++++-----------
+ 1 file changed, 21 insertions(+), 11 deletions(-)
+
+diff --git a/support/export/client.c b/support/export/client.c
+index a1fba01..ea4f89d 100644
+--- a/support/export/client.c
++++ b/support/export/client.c
+@@ -608,24 +608,36 @@ check_subnetwork(const nfs_client *clp, const struct addrinfo *ai)
+ static int
+ check_wildcard(const nfs_client *clp, const struct addrinfo *ai)
+ {
+-	char *cname = clp->m_hostname;
+-	char *hname = ai->ai_canonname;
++	char *hname, *cname = clp->m_hostname;
+ 	struct hostent *hp;
+ 	char **ap;
++	int match;
+ 
+-	if (wildmat(hname, cname))
+-		return 1;
++	match = 0;
++
++	hname = host_canonname(ai->ai_addr);
++	if (hname == NULL)
++		goto out;
++
++	if (wildmat(hname, cname)) {
++		match = 1;
++		goto out;
++	}
+ 
+ 	/* See if hname aliases listed in /etc/hosts or nis[+]
+ 	 * match the requested wildcard */
+ 	hp = gethostbyname(hname);
+ 	if (hp != NULL) {
+ 		for (ap = hp->h_aliases; *ap; ap++)
+-			if (wildmat(*ap, cname))
+-				return 1;
++			if (wildmat(*ap, cname)) {
++				match = 1;
++				goto out;
++			}
+ 	}
+ 
+-	return 0;
++out:
++	free(hname);
++	return match;
+ }
+ 
+ /*
+@@ -645,11 +657,9 @@ check_netgroup(const nfs_client *clp, const struct addrinfo *ai)
+ 
+ 	match = 0;
+ 
+-	hname = strdup(ai->ai_canonname);
+-	if (hname == NULL) {
+-		xlog(D_GENERAL, "%s: no memory for strdup", __func__);
++	hname = host_canonname(ai->ai_addr);
++	if (hname == NULL)
+ 		goto out;
+-	}
+ 
+ 	/* First, try to match the hostname without
+ 	 * splitting off the domain */
