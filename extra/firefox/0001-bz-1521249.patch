@@ -1,21 +1,57 @@
-From b68f15b7a57f7df52d955f7f75f9df3b78041764 Mon Sep 17 00:00:00 2001
-Message-Id: <b68f15b7a57f7df52d955f7f75f9df3b78041764.1553026141.git.jan.steffens@gmail.com>
+From 3b9c2a82009be75797a67293fc70cec81a2ea179 Mon Sep 17 00:00:00 2001
+Message-Id: <3b9c2a82009be75797a67293fc70cec81a2ea179.1558465095.git.jan.steffens@gmail.com>
 From: "Jan Alexander Steffens (heftig)" <jan.steffens@gmail.com>
-Date: Tue, 19 Mar 2019 20:45:22 +0100
-Subject: [PATCH] bz 1468911
+Date: Tue, 21 May 2019 20:57:25 +0200
+Subject: [PATCH] bz 1521249
 
 https://bugzilla.mozilla.org/show_bug.cgi?id=1521249
+
+Squashed commit of the following:
+
+commit e5b0d808797892e60766beb225a2440162fedbb3
+Author: Henri Sivonen <hsivonen@hsivonen.fi>
+Date:   Sat Mar 23 14:17:35 2019 +0000
+
+    Bug 1521249 part 2 - Make packed_simd compile with Rust 1.32 and later. r=glandium
+
+    This adds the Firefox-required build.rs hack and reverts the commit
+    that added bitmasks in a way that depends on Rust 1.34 compiler
+    internals.
+
+    Depends on D20288
+
+    Differential Revision: https://phabricator.services.mozilla.com/D20289
+
+commit 5ec872f24d15a671d36d4bce186fcaebcd27776c
+Author: Henri Sivonen <hsivonen@hsivonen.fi>
+Date:   Sat Mar 23 14:17:35 2019 +0000
+
+    Bug 1521249 part 1 - Update encoding_rs to 0.8.16. r=glandium
+
+    This changeset requires nightly Rust (to be changed in the next part).
+
+    Depends on D21891
+
+    Differential Revision: https://phabricator.services.mozilla.com/D20288
+
+commit d4181e4196f1f971b73a46e7ef814adbe7fa338a
+Author: Henri Sivonen <hsivonen@hsivonen.fi>
+Date:   Sat Mar 23 14:17:35 2019 +0000
+
+    Bug 1521249 part 0 - Remove Rust version cap from --enable-rust-simd. r=glandium
+
+    Differential Revision: https://phabricator.services.mozilla.com/D21891
 ---
  .cargo/config.in                              |    5 +
- Cargo.lock                                    |   53 +-
+ Cargo.lock                                    |   55 +-
  Cargo.toml                                    |    1 +
  third_party/rust/cfg-if/.cargo-checksum.json  |    2 +-
- third_party/rust/cfg-if/Cargo.toml            |   28 +-
+ third_party/rust/cfg-if/Cargo.toml            |   30 +-
  third_party/rust/cfg-if/README.md             |   18 +-
  third_party/rust/cfg-if/src/lib.rs            |   53 +-
  .../rust/encoding_rs/.cargo-checksum.json     |    2 +-
  third_party/rust/encoding_rs/Cargo.toml       |   12 +-
- third_party/rust/encoding_rs/README.md        |   52 +-
+ third_party/rust/encoding_rs/README.md        |   50 +-
  third_party/rust/encoding_rs/build.rs         |    8 +
  third_party/rust/encoding_rs/src/handles.rs   |    2 +-
  third_party/rust/encoding_rs/src/lib.rs       |    7 +-
@@ -268,7 +304,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1521249
  third_party/rust/simd/src/x86/sse4_2.rs       |   19 -
  third_party/rust/simd/src/x86/ssse3.rs        |  172 --
  toolkit/moz.configure                         |   11 +-
- 262 files changed, 17410 insertions(+), 6733 deletions(-)
+ 262 files changed, 17411 insertions(+), 6734 deletions(-)
  create mode 100644 third_party/rust/packed_simd/.appveyor.yml
  create mode 100644 third_party/rust/packed_simd/.cargo-checksum.json
  create mode 100644 third_party/rust/packed_simd/.travis.yml
@@ -516,11 +552,11 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1521249
  delete mode 100644 third_party/rust/simd/src/x86/ssse3.rs
 
 diff --git a/.cargo/config.in b/.cargo/config.in
-index 94f5732891fb..57ae36311e52 100644
+index 4808857b5b5f..0773d70cf83a 100644
 --- a/.cargo/config.in
 +++ b/.cargo/config.in
-@@ -17,6 +17,11 @@ git = "https://github.com/froydnj/winapi-rs"
- branch = "aarch64"
+@@ -22,6 +22,11 @@ git = "https://github.com/glandium/cc-rs"
+ branch = "1.0.23-clang-cl-aarch64"
  replace-with = "vendored-sources"
  
 +[source."https://github.com/rust-lang-nursery/packed_simd"]
@@ -532,10 +568,10 @@ index 94f5732891fb..57ae36311e52 100644
  directory = '@top_srcdir@/third_party/rust'
  
 diff --git a/Cargo.lock b/Cargo.lock
-index 8896cfeddb28..a048a5522ab0 100644
+index b2e2891dd828..bbbd00fbb5e4 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -141,7 +141,7 @@ version = "0.3.9"
+@@ -146,7 +146,7 @@ version = "0.3.9"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  dependencies = [
   "backtrace-sys 0.1.24 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -544,7 +580,7 @@ index 8896cfeddb28..a048a5522ab0 100644
   "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
   "rustc-demangle 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
   "winapi 0.3.6 (git+https://github.com/froydnj/winapi-rs?branch=aarch64)",
-@@ -218,7 +218,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -232,7 +232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
  dependencies = [
   "bitflags 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
   "cexpr 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -552,8 +588,8 @@ index 8896cfeddb28..a048a5522ab0 100644
 + "cfg-if 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
   "clang-sys 0.26.1 (registry+https://github.com/rust-lang/crates.io-index)",
   "clap 2.31.2 (registry+https://github.com/rust-lang/crates.io-index)",
-  "lazy_static 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
-@@ -372,7 +372,7 @@ dependencies = [
+  "lazy_static 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+@@ -386,7 +386,7 @@ dependencies = [
  
  [[package]]
  name = "cfg-if"
@@ -562,14 +598,14 @@ index 8896cfeddb28..a048a5522ab0 100644
  source = "registry+https://github.com/rust-lang/crates.io-index"
  
  [[package]]
-@@ -575,41 +575,41 @@ version = "0.3.1"
+@@ -589,49 +589,49 @@ version = "0.3.1"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  dependencies = [
   "arrayvec 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
 - "cfg-if 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
 + "cfg-if 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
   "crossbeam-utils 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
-  "lazy_static 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "lazy_static 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
   "memoffset 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
   "nodrop 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
   "scopeguard 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -584,7 +620,7 @@ index 8896cfeddb28..a048a5522ab0 100644
 - "cfg-if 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
 + "cfg-if 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
   "crossbeam-utils 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
-  "lazy_static 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+  "lazy_static 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
   "memoffset 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
   "scopeguard 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  ]
@@ -608,7 +644,16 @@ index 8896cfeddb28..a048a5522ab0 100644
  ]
  
  [[package]]
-@@ -848,25 +848,25 @@ name = "encoding_c"
+ name = "crossbeam-utils"
+ version = "0.6.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ dependencies = [
+- "cfg-if 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
++ "cfg-if 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ ]
+ 
+ [[package]]
+@@ -869,25 +869,25 @@ name = "encoding_c"
  version = "0.9.0"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  dependencies = [
@@ -639,7 +684,7 @@ index 8896cfeddb28..a048a5522ab0 100644
  ]
  
  [[package]]
-@@ -1477,7 +1477,7 @@ name = "log"
+@@ -1524,7 +1524,7 @@ name = "log"
  version = "0.4.6"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  dependencies = [
@@ -648,7 +693,7 @@ index 8896cfeddb28..a048a5522ab0 100644
  ]
  
  [[package]]
-@@ -1719,7 +1719,7 @@ name = "net2"
+@@ -1789,7 +1789,7 @@ name = "net2"
  version = "0.2.32"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  dependencies = [
@@ -657,7 +702,7 @@ index 8896cfeddb28..a048a5522ab0 100644
   "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
   "winapi 0.3.6 (git+https://github.com/froydnj/winapi-rs?branch=aarch64)",
  ]
-@@ -1773,7 +1773,7 @@ name = "nsstring"
+@@ -1843,7 +1843,7 @@ name = "nsstring"
  version = "0.1.0"
  dependencies = [
   "bitflags 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -666,7 +711,7 @@ index 8896cfeddb28..a048a5522ab0 100644
  ]
  
  [[package]]
-@@ -1859,6 +1859,14 @@ dependencies = [
+@@ -1929,6 +1929,14 @@ dependencies = [
   "stable_deref_trait 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  ]
  
@@ -681,7 +726,7 @@ index 8896cfeddb28..a048a5522ab0 100644
  [[package]]
  name = "parking_lot"
  version = "0.6.3"
-@@ -2354,11 +2362,6 @@ dependencies = [
+@@ -2442,11 +2450,6 @@ dependencies = [
   "opaque-debug 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  ]
  
@@ -693,7 +738,7 @@ index 8896cfeddb28..a048a5522ab0 100644
  [[package]]
  name = "siphasher"
  version = "0.2.1"
-@@ -2936,7 +2939,7 @@ name = "uuid"
+@@ -3040,7 +3043,7 @@ name = "uuid"
  version = "0.6.5"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  dependencies = [
@@ -702,7 +747,7 @@ index 8896cfeddb28..a048a5522ab0 100644
   "rand 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
  ]
  
-@@ -3017,7 +3020,7 @@ dependencies = [
+@@ -3125,7 +3128,7 @@ dependencies = [
   "bincode 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
   "bitflags 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
   "byteorder 1.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -711,16 +756,16 @@ index 8896cfeddb28..a048a5522ab0 100644
   "core-foundation 0.6.3 (registry+https://github.com/rust-lang/crates.io-index)",
   "core-graphics 0.17.1 (registry+https://github.com/rust-lang/crates.io-index)",
   "core-text 13.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-@@ -3253,7 +3256,7 @@ dependencies = [
+@@ -3365,7 +3368,7 @@ dependencies = [
  "checksum cast 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "926013f2860c46252efceabb19f4a6b308197505082c609025aa6706c011d427"
- "checksum cc 1.0.23 (registry+https://github.com/rust-lang/crates.io-index)" = "c37f0efaa4b9b001fa6f02d4b644dee4af97d3414df07c51e3e4f015f3a3e131"
+ "checksum cc 1.0.23 (git+https://github.com/glandium/cc-rs?branch=1.0.23-clang-cl-aarch64)" = "<none>"
  "checksum cexpr 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "8fc0086be9ca82f7fc89fc873435531cb898b86e850005850de1f820e2db6e9b"
 -"checksum cfg-if 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "d4c819a1287eb618df47cc647173c5c4c66ba19d888a6e50d605672aed3140de"
 +"checksum cfg-if 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "082bb9b28e00d3c9d39cc03e64ce4cea0f1bb9b3fde493f0cbc008472d22bdf4"
  "checksum chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "45912881121cb26fad7c38c17ba7daa18764771836b34fab7d3fbd93ed633878"
  "checksum clang-sys 0.26.1 (registry+https://github.com/rust-lang/crates.io-index)" = "481e42017c1416b1c0856ece45658ecbb7c93d8a93455f7e5fa77f3b35455557"
  "checksum clap 2.31.2 (registry+https://github.com/rust-lang/crates.io-index)" = "f0f16b89cbb9ee36d87483dc939fe9f1e13c05898d56d7b230a0d4dff033a536"
-@@ -3303,7 +3306,7 @@ dependencies = [
+@@ -3416,7 +3419,7 @@ dependencies = [
  "checksum either 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "18785c1ba806c258137c937e44ada9ee7e69a37e3c72077542cd2f069d78562a"
  "checksum ena 0.9.3 (registry+https://github.com/rust-lang/crates.io-index)" = "88dc8393b3c7352f94092497f6b52019643e493b6b890eb417cdb7c46117e621"
  "checksum encoding_c 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "769ecb8b33323998e482b218c0d13cd64c267609023b4b7ec3ee740714c318ee"
@@ -729,7 +774,7 @@ index 8896cfeddb28..a048a5522ab0 100644
  "checksum env_logger 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)" = "0561146661ae44c579e993456bc76d11ce1e0c7d745e57b2fa7146b6e49fa2ad"
  "checksum error-chain 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ff511d5dc435d703f4971bc399647c9bc38e20cb41452e3b9feb4765419ed3f3"
  "checksum euclid 0.19.5 (registry+https://github.com/rust-lang/crates.io-index)" = "d1a7698bdda3d7444a79d33bdc96e8b518d44ea3ff101d8492a6ca1207b886ea"
-@@ -3388,6 +3391,7 @@ dependencies = [
+@@ -3502,6 +3505,7 @@ dependencies = [
  "checksum ordered-float 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "2f0015e9e8e28ee20c581cfbfe47c650cedeb9ed0721090e0b7ebb10b9cdbcc2"
  "checksum ordermap 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "a86ed3f5f244b372d6b1a00b72ef7f8876d0bc6a78a4c9985c53614041512063"
  "checksum owning_ref 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "49a4b8ea2179e6a2e27411d3bca09ca6dd630821cf6894c6c7c8467a8ee7ef13"
@@ -737,7 +782,7 @@ index 8896cfeddb28..a048a5522ab0 100644
  "checksum parking_lot 0.6.3 (registry+https://github.com/rust-lang/crates.io-index)" = "69376b761943787ebd5cc85a5bc95958651a22609c5c1c2b65de21786baec72b"
  "checksum parking_lot_core 0.2.14 (registry+https://github.com/rust-lang/crates.io-index)" = "4db1a8ccf734a7bce794cc19b3df06ed87ab2f3907036b693c68f56b4d4537fa"
  "checksum peeking_take_while 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
-@@ -3441,7 +3445,6 @@ dependencies = [
+@@ -3557,7 +3561,6 @@ dependencies = [
  "checksum serde_json 1.0.26 (registry+https://github.com/rust-lang/crates.io-index)" = "44dd2cfde475037451fa99b7e5df77aa3cfd1536575fa8e7a538ab36dcde49ae"
  "checksum sha2 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)" = "9eb6be24e4c23a84d7184280d2722f7f2731fcdd4a9d886efbfe4413e4847ea0"
  "checksum sha2 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)" = "7b4d8bfd0e469f417657573d8451fb33d16cfe0989359b93baf3a1ffc639543d"
@@ -746,13 +791,13 @@ index 8896cfeddb28..a048a5522ab0 100644
  "checksum slab 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "17b4fcaed89ab08ef143da37bc52adbcc04d4a69014f4c1208d6b51f0c47bc23"
  "checksum slab 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "5f9776d6b986f77b35c6cf846c11ad986ff128fe0b2b63a3628e3755e8d3102d"
 diff --git a/Cargo.toml b/Cargo.toml
-index d64cbc77b53d..25859a20ecc3 100644
+index c63c81e3409d..4a9d9212514a 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -59,3 +59,4 @@ codegen-units = 1
- libudev-sys = { path = "dom/webauthn/libudev-sys" }
+@@ -61,3 +61,4 @@ libudev-sys = { path = "dom/webauthn/libudev-sys" }
  serde_derive = { git = "https://github.com/servo/serde", branch = "deserialize_from_enums9" }
  winapi = { git = "https://github.com/froydnj/winapi-rs", branch = "aarch64" }
+ cc = { git = "https://github.com/glandium/cc-rs", branch = "1.0.23-clang-cl-aarch64" }
 +packed_simd = { git = "https://github.com/hsivonen/packed_simd", branch = "rust_1_32" }
 diff --git a/third_party/rust/cfg-if/.cargo-checksum.json b/third_party/rust/cfg-if/.cargo-checksum.json
 index 89b14a227216..b744a21d9fd1 100644
@@ -786,19 +831,20 @@ index 7afa063d1ef5..84c4fc7835ab 100644
 +version = "0.1.6"
  authors = ["Alex Crichton <alex@alexcrichton.com>"]
 -license = "MIT/Apache-2.0"
+-readme = "README.md"
+-repository = "https://github.com/alexcrichton/cfg-if"
 +description = "A macro to ergonomically define an item depending on a large number of #[cfg]\nparameters. Structured like an if-else chain, the first matching branch is the\nitem that gets emitted.\n"
-+homepage = "https://github.com/alexcrichton/cfg-if"
-+documentation = "https://docs.rs/cfg-if"
- readme = "README.md"
-+license = "MIT/Apache-2.0"
- repository = "https://github.com/alexcrichton/cfg-if"
--homepage = "https://github.com/alexcrichton/cfg-if"
+ homepage = "https://github.com/alexcrichton/cfg-if"
 -documentation = "http://alexcrichton.com/cfg-if"
 -description = """
 -A macro to ergonomically define an item depending on a large number of #[cfg]
 -parameters. Structured like an if-else chain, the first matching branch is the
 -item that gets emitted.
 -"""
++documentation = "https://docs.rs/cfg-if"
++readme = "README.md"
++license = "MIT/Apache-2.0"
++repository = "https://github.com/alexcrichton/cfg-if"
 +[badges.travis-ci]
 +repository = "alexcrichton/cfg-if"
 diff --git a/third_party/rust/cfg-if/README.md b/third_party/rust/cfg-if/README.md
@@ -986,17 +1032,17 @@ index 65fc8e8dffcd..e29f19fb9afe 100644
  [dependencies.cfg-if]
  version = "0.1.0"
  
+-[dependencies.serde]
+-version = "1.0"
 +[dependencies.packed_simd]
 +version = "0.3.3"
-+optional = true
-+
- [dependencies.serde]
- version = "1.0"
  optional = true
--
+ 
 -[dependencies.simd]
 -version = "0.2.3"
--optional = true
++[dependencies.serde]
++version = "1.0"
+ optional = true
  [dev-dependencies.bincode]
  version = "0.8"
  
@@ -1034,13 +1080,12 @@ index 3446efd0bb43..8a72b515450e 100644
 -this feature to become the normal on-by-default behavior once
 -[portable SIMD](https://github.com/rust-lang/rfcs/pull/2366) becames part of
 -stable Rust.
--
++Enables SIMD acceleration using the nightly-dependent `packed_simd` crate.
+ 
 -Enabling this feature breaks the build unless the target is x86 with SSE2
 -(Rust's default 32-bit x86 target, `i686`, has SSE2, but Linux distros may
 -use an x86 target without SSE2, i.e. `i586` in `rustup` terms), ARMv7 or
 -thumbv7 with NEON (`-C target_feature=+neon`), x86_64 or Aarch64.
-+Enables SIMD acceleration using the nightly-dependent `packed_simd` crate.
-+
 +This is an opt-in feature, because enabling this feature _opts out_ of Rust's
 +guarantees of future compilers compiling old code (aka. "stability story").
 +
@@ -26934,10 +26979,10 @@ index aa22a08a68a4..000000000000
 -    }
 -}
 diff --git a/toolkit/moz.configure b/toolkit/moz.configure
-index c2b3c768cba9..c3f3de62f09a 100644
+index 70416df2f6df..c1bf3721e423 100644
 --- a/toolkit/moz.configure
 +++ b/toolkit/moz.configure
-@@ -696,14 +696,11 @@ set_config('MOZ_ENABLE_WEBRENDER', webrender.enable)
+@@ -716,14 +716,11 @@ set_config('MOZ_ENABLE_WEBRENDER', webrender.enable)
  option('--enable-rust-simd', env='MOZ_RUST_SIMD',
         help='Enable explicit SIMD in Rust code.')
  
