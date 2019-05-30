@@ -1,0 +1,77 @@
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Maintainer: Jan de Groot <jgc@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - move gtk3 sdl qt5-base glu from checkdepends to makedepends (FS#62453)
+
+pkgbase=gst-plugins-base
+pkgname=(gst-plugins-base-libs gst-plugins-base)
+pkgver=1.16.0
+pkgrel=3
+pkgdesc="GStreamer open-source multimedia framework base plugins"
+url="https://gstreamer.freedesktop.org/"
+arch=(x86_64)
+license=(LGPL)
+depends=(gstreamer orc libxv iso-codes libgudev mesa)
+makedepends=(alsa-lib cdparanoia libvisual libvorbis libtheora pango opus graphene libpng libjpeg
+             gobject-introspection gtk-doc git meson gtk3 sdl qt5-base glu)
+checkdepends=(clutter xorg-server-xvfb)
+options=(!emptydirs)
+_commit=e0f8f635a96a3639be4d519fcf234b619bb74ca6  # tags/1.16.0^0
+source=("git+https://gitlab.freedesktop.org/gstreamer/gst-plugins-base.git#commit=$_commit"
+        "gst-common::git+https://gitlab.freedesktop.org/gstreamer/common.git")
+sha256sums=('SKIP'
+            'SKIP')
+
+pkgver() {
+  cd $pkgbase
+  git describe --tags | sed 's/-/+/g'
+}
+
+prepare() {
+  cd $pkgbase
+
+  # https://bugs.archlinux.org/task/62490
+  git cherry-pick -n 7095b7c47a84d54e3ea8fec57bac4d7855c4c28c
+
+  git submodule init
+  git config --local submodule.common.url "$srcdir/gst-common"
+  git submodule update
+}
+
+build() {
+  arch-meson $pkgbase build \
+    -D tremor=disabled \
+    -D gobject-cast-checks=disabled \
+    -D glib-asserts=disabled \
+    -D glib-checks=disabled \
+    -D package-name="GStreamer Base Plugins (Arch Linux)" \
+    -D package-origin="https://www.archlinux.org/"
+  ninja -C build
+}
+
+check() (
+  mkdir -p -m 700 "${XDG_RUNTIME_DIR:=$PWD/runtime-dir}"
+  export XDG_RUNTIME_DIR
+
+  xvfb-run -s '+iglx -noreset' meson test -C build --print-errorlogs
+)
+
+package_gst-plugins-base-libs() {
+  pkgdesc="${pkgdesc/plugins/libraries}"
+
+  DESTDIR="$pkgdir" meson install -C build
+
+  mkdir -p ext/lib/gstreamer-1.0
+  for _x in alsa cdparanoia libvisual ogg opengl opus pango theora vorbis; do
+    _x="lib/gstreamer-1.0/libgst${_x}.so"
+    mv "$pkgdir/usr/$_x" "ext/$_x"
+  done
+}
+
+package_gst-plugins-base() {
+  depends=("gst-plugins-base-libs=$pkgver"
+           alsa-lib cdparanoia libvisual libvorbis libtheora pango opus graphene libpng libjpeg)
+
+  mv ext "$pkgdir/usr"
+}
