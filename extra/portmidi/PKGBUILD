@@ -1,0 +1,54 @@
+# Maintainer: David Runge <dave@sleepmap.de>
+# Contributor: Eric Bélanger <eric@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - set !makeflags - parallel builds fail
+
+pkgname=portmidi
+pkgver=217
+pkgrel=7
+pkgdesc="Platform independent library for real-time MIDI input/output"
+arch=('x86_64')
+url="http://portmedia.sourceforge.net/"
+license=('MIT')
+depends=('alsa-lib')
+makedepends=('cmake' 'jdk8-openjdk')
+optdepends=('java-runtime: for using pmdefaults')
+options=('!makeflags')
+source=("https://downloads.sourceforge.net/project/portmedia/${pkgname}/${pkgver}/${pkgname}-src-${pkgver}.zip"
+        'portmidi-217-build-fix.patch')
+sha512sums=('d08d4d57429d26d292b5fe6868b7c7a32f2f1d2428f6695cd403a697e2d91629bd4380242ab2720e8f21c895bb75cb56b709fb663a20e8e623120e50bfc5d90b'
+            '643d249d53780519c9773c88974a34127ba64982ed75d2d0f55e99faf3bb7c8c97ba185412e70794319c8253de659b8658de95a8eb6fbfa3648c1be384bafbc1')
+
+prepare() {
+  mv -v "${pkgname}" "${pkgname}-${pkgver}"
+  cd "${pkgname}-${pkgver}"
+  mkdir -vp pm_java/Release
+  # fix hardcoding of output directories
+  sed -e "s|/usr/local|/usr|g" \
+      -i */CMakeLists.txt pm_python/setup.py
+  # build fix for "pm_java/CMakeLists.txt" (FS#27118)
+  patch -Np1 -i "../${pkgname}-217-build-fix.patch"
+}
+
+build() {
+  cd "${pkgname}-${pkgver}"
+  cmake -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=Release \
+        -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=Release \
+        -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=Release \
+        .
+  make VERBOSE=1
+}
+
+package() {
+  cd "${pkgname}-${pkgver}"
+  make DESTDIR="${pkgdir}" install
+
+  # Fix missing symlink for libporttime.so (FS#21528).
+  ln -s libportmidi.so "${pkgdir}/usr/lib/libporttime.so"
+
+  install -vDm 644 license.txt -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -vDm 644 {CHANGELOG,README}.txt \
+    -t "${pkgdir}/usr/share/doc/${pkgname}"
+}
