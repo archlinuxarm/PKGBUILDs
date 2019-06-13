@@ -5,23 +5,26 @@
 #    https://github.com/buytenh/ivykis/issues/15
 
 pkgname=syslog-ng
-pkgver=3.20.1
-pkgrel=1
+pkgver=3.21.1
+pkgrel=3
 pkgdesc="Next-generation syslogd with advanced networking and filtering capabilities"
 arch=('x86_64')
 url="https://www.syslog-ng.com/products/open-source-log-management/"
 license=('GPL2' 'LGPL2.1')
-depends=('awk' 'systemd-libs' 'glib2' 'libdbi' 'libnsl')
-makedepends=('libxslt' 'json-c' 'mongo-c-driver' 'librabbitmq-c' 'python' 'libesmtp' 'hiredis')
-checkdepends=('python-nose' 'python-ply' 'python2')
+depends=('awk' 'systemd-libs' 'glib2' 'libnsl' 'json-c' 'curl' 'libnet')
+makedepends=('libxslt' 'mongo-c-driver' 'librabbitmq-c' 'python' 'libesmtp' 'hiredis'
+             'libdbi' 'geoip' 'libmaxminddb')
+checkdepends=('python-nose' 'python-pylint' 'python-ply')
 optdepends=('logrotate: for rotating log files'
-	    'json-c: for json-plugin'
-            'curl: for the HTTP module'
+            'libdbi: for the SQL plugin'
             'librabbitmq-c: for the AMQP plugin'            
             'mongo-c-driver: for the MongoDB plugin'
             'python: for the Python plugin'
             'libesmtp: for the SMTP plugin'
-            'hiredis: fir the redis plugin')
+            'hiredis: for the Redis plugin'
+            'geoip: for the GeoIP plugin'
+            'libmaxminddb: for the GeoIP2 plugin'
+            'python: for Python-based plugins')
 conflicts=('eventlog')
 replaces=('eventlog')
 backup=('etc/syslog-ng/scl.conf'
@@ -31,7 +34,7 @@ backup=('etc/syslog-ng/scl.conf'
 source=(https://github.com/balabit/syslog-ng/releases/download/syslog-ng-$pkgver/$pkgname-$pkgver.tar.gz
         syslog-ng.conf syslog-ng.logrotate
         https://patch-diff.githubusercontent.com/raw/buytenh/ivykis/pull/16.patch)
-sha256sums=('a65858afe9c649119a23ff61669945cab8692a045ee8259e8ee666445c8fbda0'
+sha256sums=('8d163da5ad79cf3a5f043b2ed0fe18a4888d0d740542703bf2508f0b9996cd25'
             '31cee11ae3c897c51ea01982e1ea838aa8ac730d56661a17e66bd9de5bede1c7'
             '93c935eca56854011ea9e353b7a1da662ad40b2e8452954c5b4b5a1d5b2d5317'
             '9d020b5e0e92dc60267ef21d6a30cd2b4cfde8e55a622f894610758551e5b7ef')
@@ -39,7 +42,14 @@ sha256sums=('a65858afe9c649119a23ff61669945cab8692a045ee8259e8ee666445c8fbda0'
 prepare() {
   cd $pkgname-$pkgver
   sed -i -e 's,/bin/,/usr/bin/,' -e 's,/sbin/,/bin/,' contrib/systemd/syslog-ng@.service
-  sed -i -e 's|etc|etc/syslog-ng|g' -e 's|/var/run|/run|g' contrib/systemd/syslog-ng@default
+  sed -i -e 's|/var/run|/run|g' contrib/systemd/syslog-ng@default
+
+  # the version in pkg-config is 0.0.0 and so it won't detect the flags without
+  # this. since your version is newer this is an easy fix for now, but should
+  # eventually be removed when this bug is fixed:
+  # https://bugs.archlinux.org/task/61888
+  sed -i -e 's|^LMC_MIN_VERSION="1.0.0"|LMC_MIN_VERSION="0.0.0"|' configure.ac configure
+
   cd lib/ivykis
   patch -p1 -i "$srcdir/16.patch"
   autoreconf -fi
@@ -47,17 +57,19 @@ prepare() {
 
 build() {
   cd $pkgname-$pkgver
+  ./autogen.sh
   ./configure --prefix=/usr --sysconfdir=/etc/syslog-ng --libexecdir=/usr/lib \
     --sbindir=/usr/bin --localstatedir=/var/lib/syslog-ng --datadir=/usr/share \
-    --with-pidfile-dir=/run --disable-spoof-source --enable-ipv6 --enable-sql --enable-smtp \
+    --with-pidfile-dir=/run --enable-spoof-source --enable-ipv6 \
     --enable-systemd --with-systemdsystemunitdir=/usr/lib/systemd/system \
-    --enable-manpages --with-jsonc=system --with-mongoc=system --with-librabbitmq-client=system
+    --enable-manpages --enable-all-modules --disable-java --disable-java-modules  \
+    --disable-riemann --with-python=3 --with-jsonc=system
   make
 }
 
 check() {
   cd $pkgname-$pkgver
-  make check || /bin/true # python test requires pep8
+  make check || /bin/true # unit test requires criterion, python test requires pep8
 }
 
 package() {
@@ -66,7 +78,4 @@ package() {
   install -Dm644 "$srcdir/syslog-ng.conf" "$pkgdir/etc/syslog-ng/syslog-ng.conf"
   install -Dm644 "$srcdir/syslog-ng.logrotate" "$pkgdir/etc/logrotate.d/syslog-ng"
   install -Dm644 "$srcdir"/$pkgname-$pkgver/contrib/systemd/syslog-ng@default -t "$pkgdir"/etc/default
-
-  # See http://lists.balabit.hu/pipermail/syslog-ng/2016-February/022667.html
-  rm -r "$pkgdir"/usr/share/syslog-ng/include/scl/cim
 }
