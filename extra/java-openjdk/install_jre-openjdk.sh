@@ -1,4 +1,4 @@
-THIS_JRE='java-11-openjdk'
+THIS_JRE='java-12-openjdk'
 
 fix_default() {
   if [ ! -x /usr/bin/java ]; then

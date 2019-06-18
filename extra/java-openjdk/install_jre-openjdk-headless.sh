@@ -1,4 +1,4 @@
-THIS_JRE='java-11-openjdk'
+THIS_JRE='java-12-openjdk'
 
 fix_default() {
   if [ ! -x /usr/bin/java ]; then
@@ -25,7 +25,7 @@ post_install() {
   esac
 
   if [ ! -f /etc/ssl/certs/java/cacerts ]; then
-     /usr/bin/update-ca-trust
+    /usr/bin/update-ca-trust
   fi
 }
 

@@ -20,30 +20,28 @@
 
 pkgbase=java-openjdk
 pkgname=('jre-openjdk-headless' 'jre-openjdk' 'jdk-openjdk' 'openjdk-src')
-_majorver=11
+_majorver=12
 _minorver=0
-_securityver=3
-_updatever=4
+_securityver=1
+_updatever=12
 pkgrel=1
 pkgver=${_majorver}.${_minorver}.${_securityver}.u${_updatever}
 _hg_tag=jdk-${_majorver}.${_minorver}.${_securityver}+${_updatever}
 arch=('x86_64')
 url='https://openjdk.java.net/'
 license=('custom')
-makedepends=('java-environment>=10' 'cpio' 'unzip' 'zip' 'libelf' 'libcups' 'libx11'
-             'libxrender' 'libxtst' 'libxt' 'libxext' 'alsa-lib'
+makedepends=('java-environment>=11' 'cpio' 'unzip' 'zip' 'libelf' 'libcups' 'libx11'
+             'libxrender' 'libxtst' 'libxt' 'libxext' 'libxrandr' 'alsa-lib'
              'graphviz' 'freetype2' 'libjpeg-turbo' 'giflib' 'libpng' 'lcms2'
              'libnet' 'bash')
 source=(http://hg.openjdk.java.net/jdk-updates/jdk${_majorver}u/archive/${_hg_tag}.tar.gz
         freedesktop-java.desktop
         freedesktop-jconsole.desktop
-        freedesktop-policytool.desktop
         freedesktop-jshell.desktop)
-sha256sums=('a60b4dff1e726c4e0df25042db7ea30f4b9af2d0995deabc6172bfb7e9a5c104'
-            '575587ad58dfa9908f046d307b9afc7b0b2eb20a1eb454f8fdbbd539ea7b3d01'
-            '2f57b7c7dd671eabe9fa10c4f1283573e99d7f7c36eccd82c95b705979a2e8cb'
-            'd8907cefaf87f9afcbf1a2079868c03e0209cc1e7b99fbd4022641802c8cf30c'
-            'f271618a8c2a892b554caf26857af41efdf0d8bcb95d57ce7ba535d6979e96da')
+sha256sums=('055917843af812b2fcec82ec65c6448c353fa54174d3583d5c62ca8d9b15c0d0'
+            '779dba7cf4f5de7cd512adf969354ec4aefddb33d970757eb3c49ea1fd8d5184'
+            'fa67642a8ba1173c30536a12dfbeeacf5d0f37918849057c1049b88a81f261ed'
+            '0a1d66a3e4774d7fad267c8a4e726ecf362ae2f33df12439567e0fb249655c48')
 
 case "${CARCH}" in
   x86_64) _JARCH='x86_64';;
@@ -55,9 +53,9 @@ esac
 _jvmdir=/usr/lib/jvm/java-${_majorver}-openjdk
 _jdkdir=jdk${_majorver}u-${_hg_tag}
 if [[ $CARCH == "arm" ]]; then
-  _imgdir=${_jdkdir}/build/linux-${_JARCH}-normal-zero-release/images
+  _imgdir=${_jdkdir}/build/linux-${_JARCH}-zero-release/images
 else
-  _imgdir=${_jdkdir}/build/linux-${_JARCH}-normal-server-release/images
+  _imgdir=${_jdkdir}/build/linux-${_JARCH}-server-release/images
 fi
 
 _nonheadless=(lib/libawt_xawt.{so,debuginfo}
@@ -79,9 +77,9 @@ build() {
     NUM_PROC_OPT="--with-jobs=${MAKEFLAG_J}"
   fi
 
-  # We filter out -O flags so that the optimization of HotSpot is not lowered from O3 to O2
-  local _CFLAGS="${CFLAGS//-O2} ${CPPFLAGS}"
-  local _CXXFLAGS="${CXXFLAGS//-O2} ${CPPFLAGS}"
+  # Avoid optimization of HotSpot to be lowered from O3 to O2
+  local _CFLAGS="${CFLAGS//-O2/-O3} ${CPPFLAGS}"
+  local _CXXFLAGS="${CXXFLAGS//-O2/-O3} ${CPPFLAGS}"
   local _LDFLAGS=${LDFLAGS}
   if [[ ${CARCH} = i686 ]]; then
     echo "Removing '-fno-plt' from CFLAGS and CXXFLAGS to prevent build fail with this architecture"
@@ -165,7 +163,7 @@ package_jre-openjdk-headless() {
   cp -a bin lib \
     "${pkgdir}${_jvmdir}"
 
-  for f in ${_nonheadless[@]}; do
+  for f in "${_nonheadless[@]}"; do
     rm "${pkgdir}${_jvmdir}/${f}"
   done
 
@@ -184,8 +182,10 @@ package_jre-openjdk-headless() {
   ln -s /usr/share/licenses/${pkgbase} "${pkgdir}/${_jvmdir}/legal"
 
   # Man pages
-  for f in man/man1/* man/ja/man1/*; do
-    install -Dm 644 "${f}" "${pkgdir}/usr/share/${f/\.1/-openjdk${_majorver}.1}"
+  for f in bin/*; do
+    f=$(basename "${f}")
+    _man=../jdk/man/man1/"${f}.1"
+    test -f "${_man}" && install -Dm 644 "${_man}" "${pkgdir}/usr/share/man/man1/${f}-openjdk${_majorver}.1"
   done
   ln -s /usr/share/man "${pkgdir}/${_jvmdir}/man"
 
@@ -207,7 +207,7 @@ package_jre-openjdk() {
 
   install -dm 755 "${pkgdir}${_jvmdir}"
 
-  for f in ${_nonheadless[@]}; do
+  for f in "${_nonheadless[@]}"; do
     install -Dm 644 ${f} "${pkgdir}${_jvmdir}/${f}"
   done
 
@@ -251,10 +251,11 @@ package_jdk-openjdk() {
   ln -s ${pkgbase} "${pkgdir}/usr/share/licenses/${pkgname}"
 
   # Man pages
-  for f in man/man1/* man/ja/man1/*; do
-    if [ ! -e "../jre/${f}" ]; then
-      install -Dm 644 "${f}" "${pkgdir}/usr/share/${f/\.1/-openjdk${_majorver}.1}"
-    fi
+  for f in bin/*; do
+    f=$(basename "${f}")
+    _man=man/man1/"${f}.1"
+    test -f "../jre/bin/${f}" && continue
+    test -f "${_man}" && install -Dm 644 "${_man}" "${pkgdir}/usr/share/man/man1/${f}-openjdk${_majorver}.1"
   done
 
   # Icons
@@ -265,7 +266,7 @@ package_jdk-openjdk() {
   done
 
   # Desktop files
-  for f in jconsole policytool java jshell; do
+  for f in jconsole java jshell; do
     install -Dm 644 \
       "${srcdir}/freedesktop-${f}.desktop" \
       "${pkgdir}/usr/share/applications/${f}-${pkgbase}.desktop"
