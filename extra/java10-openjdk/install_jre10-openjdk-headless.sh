@@ -25,7 +25,7 @@ post_install() {
   esac
 
   if [ ! -f /etc/ssl/certs/java/cacerts ]; then
-     /usr/bin/update-ca-trust
+    /usr/bin/update-ca-trust
   fi
 }
 

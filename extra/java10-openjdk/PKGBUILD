@@ -11,14 +11,6 @@
 highmem=1
 
 # TODO add test, see about packaging jtreg and using it here
-# TODO see about building with OpenJDK10
-# TODO add javazi
-# TODO when IcedTea provides it, package icedtea-web and add it as optdepends
-# TODO package OpenJFX for OpenJDK10 and add it as optdepends
-
-## EXPLORATIONS
-# TODO extract a jmods package from jdk10-openjdk?
-# TODO extract a jdk-headless package?
 
 pkgbase=java10-openjdk
 pkgname=('jre10-openjdk-headless' 'jre10-openjdk' 'jdk10-openjdk' 'openjdk10-src')
@@ -26,7 +18,7 @@ _majorver=10
 _minorver=0
 _securityver=2
 _updatever=13
-pkgrel=1
+pkgrel=2
 pkgver=${_majorver}.${_minorver}.${_securityver}.u${_updatever}
 _hg_tag=jdk-${_majorver}.${_minorver}.${_securityver}+${_updatever}
 arch=('x86_64')
@@ -39,12 +31,10 @@ makedepends=('jdk10-openjdk' 'cpio' 'unzip' 'zip' 'libelf' 'libcups' 'libx11'
 source=(http://hg.openjdk.java.net/jdk-updates/jdk${_majorver}u/archive/${_hg_tag}.tar.gz
         freedesktop-java.desktop
         freedesktop-jconsole.desktop
-        freedesktop-policytool.desktop
         freedesktop-jshell.desktop)
 sha256sums=('f34a53b049f2e3ee8d954998687c4a48b56f24efbb2738ae7fe81bbbdff7f078'
             '819e6ca314641c3115566f9478fbd8671f5d884a3d4e65f05950b4bd2d3b8451'
             '5276edf203e5a75607c55b8bd4ae4f76cf61360811190286829c66d0c4b06554'
-            '7f3bc3e424b6d8bac403eb336d81524680f347300c233400222a3850f937c659'
             '0bcdb1eb9640775ca61e87ffeb9b0e0f99386b41f51fec753688bdd5ff9b6010')
 
 case "${CARCH}" in
@@ -79,9 +69,10 @@ build() {
     NUM_PROC_OPT="--with-jobs=${MAKEFLAG_J}"
   fi
 
-  _CFLAGS="${CFLAGS} ${CPPFLAGS}"
-  _CXXFLAGS="${CXXFLAGS} ${CPPFLAGS}"
-  _LDFLAGS=${LDFLAGS}
+  # Avoid optimization of HotSpot being lowered from O3 to O2
+  local _CFLAGS="${CFLAGS//-O2/-O3} ${CPPFLAGS}"
+  local _CXXFLAGS="${CXXFLAGS//-O2/-O3} ${CPPFLAGS}"
+  local _LDFLAGS=${LDFLAGS}
   if [[ ${CARCH} = i686 ]]; then
     echo "Removing '-fno-plt' from CFLAGS and CXXFLAGS to prevent build fail with this architecture"
     _CFLAGS=${CFLAGS/-fno-plt/}
@@ -129,10 +120,11 @@ build() {
   find "../${_imgdir}" -iname '*.so' -exec chmod +x {} \;
 }
 
-# check() {
-#   cd "${pkgname}-${pkgver}"
-#   make -k check
-# }
+check() {
+  cd ${_jdkdir}
+  #make -k check
+  #make run-test-tier1
+}
 
 package_jre10-openjdk-headless() {
   pkgdesc="OpenJDK Java ${_majorver} headless runtime environment"
@@ -163,7 +155,7 @@ package_jre10-openjdk-headless() {
   cp -a bin lib \
     "${pkgdir}${_jvmdir}"
 
-  for f in ${_nonheadless[@]}; do
+  for f in "${_nonheadless[@]}"; do
     rm "${pkgdir}${_jvmdir}/${f}"
   done
 
@@ -206,7 +198,7 @@ package_jre10-openjdk() {
 
   install -dm 755 "${pkgdir}${_jvmdir}"
 
-  for f in ${_nonheadless[@]}; do
+  for f in "${_nonheadless[@]}"; do
     install -Dm 644 ${f} "${pkgdir}${_jvmdir}/${f}"
   done
 
@@ -265,7 +257,7 @@ package_jdk10-openjdk() {
   done
 
   # Desktop files
-  for f in jconsole policytool java jshell; do
+  for f in jconsole java jshell; do
     install -Dm 644 \
       "${srcdir}/freedesktop-${f}.desktop" \
       "${pkgdir}/usr/share/applications/${f}-${pkgbase}.desktop"
