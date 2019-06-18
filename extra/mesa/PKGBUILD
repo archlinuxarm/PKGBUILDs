@@ -8,7 +8,7 @@
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=19.0.6
+pkgver=19.1.0
 pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
@@ -19,11 +19,13 @@ url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-Rip-out-VC4-forced-NEON.patch
-        LICENSE)
-sha512sums=('320fd6b12ccd5e4a40dfc93546354848a38da09d90e4d5a1dae5d100b8106942acfc25ac3f705a2d3ab3b355162c74c7dfadbdb99a46cf2e5e0761f8542bfeb1'
+        LICENSE
+        glesv2.pc)
+sha512sums=('25b186ae8037dedea5691e0b77b22f2065f3c877838378651726dfa1b34ef49dcc56f1dbd124e99285e5f14489db936a886a6740495b5b279e8363424bfb3433'
             'SKIP'
-            'df13eaff1f3a95821221637c56d482945c42faca789e8bc71c36d0526750863aac891afab9d51ce0a912d7eede5b2af7c14a1c36ebd17c1bde945c3e057b773b'
-            'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
+            '0f2862a74dccaa46ba1a647cc080be340d7346044eba5c9423c9d7177dae1f3c4181799a7b1ad38ce3eed37ea512c7678b98724f2d86e15c0399b9814432e7fc'
+            'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
+            'e5db81538625a056328c2ba83f3e6418e0d579c261bcddf685036ad19e816dd002313c80a6c48cef0289d1e1b0bdbe733810ae9f53604e380486253642cff52c')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
               'E3E8F480C52ADD73B278EE78E1ECBE07D7D70895'  # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>
@@ -39,6 +41,7 @@ prepare() {
 build() {
   [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,kmsro,tegra"
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",vc4" && MESON_OPT="-D asm=false"
+  [[ $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",panfrost,lima"
 
   arch-meson mesa-$pkgver build \
     -D b_lto=false \
@@ -57,7 +60,7 @@ build() {
     -D gallium-xa=false \
     -D gallium-xvmc=false \
     -D gbm=true \
-    -D gles1=true \
+    -D gles1=false \
     -D gles2=true \
     -D glvnd=true \
     -D glx=dri \
@@ -119,7 +122,7 @@ package_mesa() {
   _install fakeinstall/usr/share/drirc.d/00-mesa-defaults.conf
   _install fakeinstall/usr/share/glvnd/egl_vendor.d/50_mesa.json
 
-  # ati-dri, nouveau-dri, intel-dri, svga-dri, swrast
+  # ati-dri, nouveau-dri, intel-dri, svga-dri, swrast, swr
   _install fakeinstall/usr/lib/dri/*_dri.so
    
   _install fakeinstall/usr/lib/bellagio
@@ -127,9 +130,6 @@ package_mesa() {
   _install fakeinstall/usr/lib/lib{gbm,glapi}.so*
   _install fakeinstall/usr/lib/libOSMesa.so*
 
-  # in libglvnd
-  rm -v fakeinstall/usr/lib/libGLESv{1_CM,2}.so*
-  
   # in vulkan-headers
   rm -rfv fakeinstall/usr/include/vulkan
 
@@ -145,6 +145,9 @@ package_mesa() {
 
   # make sure there are no files left to install
   find fakeinstall -depth -print0 | xargs -0 rmdir
+
+  # bring back missing glesv2.pc
+  install -m644 -Dt ${pkgdir}/usr/lib/pkgconfig ${srcdir}/glesv2.pc
 
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
