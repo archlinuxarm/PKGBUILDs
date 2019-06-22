@@ -1,0 +1,120 @@
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor:  TDY <tdy@archlinux.info>
+# Contributor: Rémy Oudompheng <oudomphe@clipper.ens.fr>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - rm -fr "$pkgdir"/usr/lib/gap/pkg/digraphs-*/bin/lib/ for aarch64
+
+pkgbase=gap
+pkgname=(gap gap-doc gap-packages)
+pkgver=4.10.2
+pkgrel=1
+pkgdesc="Groups, Algorithms, Programming: a system for computational discrete algebra"
+arch=(x86_64)
+url="https://www.gap-system.org/"
+license=(GPL)
+source=("https://www.gap-system.org/pub/gap/gap-${pkgver%.*}/tar.gz/gap-$pkgver.tar.gz" gap.sh)
+sha256sums=('11175bed0234101643d510d4ab94c44db30bd303bfe63d86b9b86ae67cff9e49'
+            '143fb8a79a52c007903cce13407850df309ef803a9b00398d05169355917de46')
+makedepends=(libxaw givaro mpfi normaliz boost libsemigroups c-xsc zeromq fplll polymake wget chrpath)
+
+prepare() {
+  cd gap-$pkgver
+
+# Use system normaliz
+  sed -e '/build-normaliz.sh/d' -i bin/BuildPackages.sh
+# Use system libsemigroups
+  sed -e 's|test "$with_external_libsemigroups" = yes|true|' -i pkg/semigroups-*/configure
+# Disable anupq package, it's i686 only
+  rm -r pkg/anupq-*
+# Fix https://bugs.archlinux.org/task/55174
+  sed -e '/xgap/d' -i pkg/sonata-*/PackageInfo.g
+  sed -e '/XGAP/d' -i pkg/cryst/PackageInfo.g
+}
+
+build() {
+  cd gap-$pkgver
+  ./configure --prefix=/usr --with-gmp=system
+
+  # https://bugzilla.gnome.org/show_bug.cgi?id=655517
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+
+  make
+  make libgap.la
+
+  # Install libgap so we can link packages against it
+  mkdir -p tmp-install
+  libtool --mode=install install libgap.la "$srcdir"/gap-$pkgver/tmp-install
+
+  cd pkg
+  export CXXFLAGS+=" -I/usr/include/cxsc" # Find c-xsc headers
+  export LDFLAGS+=" -L$srcdir/gap-$pkgver/tmp-install -lgap" # See https://trac.sagemath.org/ticket/27372
+  export LD_LIBRARY_PATH="$srcdir"/gap-$pkgver/tmp-install
+  ../bin/BuildPackages.sh
+}
+
+_standardpkgs=(GAPDoc-* primgrp-* SmallGrp-* transgrp atlasrep autpgrp-* alnuth-* crisp-* ctbllib FactInt-* fga irredsol-* laguna-*
+               polenta-* polycyclic-* resclasses-* sophus-* tomlib-*)
+
+package_gap() {
+  depends=(gmp zlib)
+  optdepends=('gap-packages: extra packages' 'gap-doc: documentation')
+  conflicts=(libgap)
+  replaces=(gap-data libgap gap-4.8 gap-4.8-data)
+  cd gap-$pkgver
+
+  install -Dm644 src/*.h -t "$pkgdir"/usr/include/gap
+  install -Dm644 gen/config.h -t "$pkgdir"/usr/include/gap
+  install -Dm644 src/hpc/*.h -t "$pkgdir"/usr/include/gap/hpc
+
+  install -d "$pkgdir"/usr/lib
+  libtool --mode=install install libgap.la "$pkgdir"/usr/lib
+
+  mkdir -p "$pkgdir"/usr/{bin,lib/gap/pkg}
+  cp -r grp lib "$pkgdir"/usr/lib/gap
+  for _pkg in ${_standardpkgs[@]}; do
+    cp -r pkg/$_pkg "$pkgdir"/usr/lib/gap/pkg
+  done
+  install -Dm755 gap -t "$pkgdir"/usr/lib/gap
+# Install launcher script
+  install -Dm755 "$srcdir"/gap.sh "$pkgdir"/usr/bin/gap
+}
+
+package_gap-doc() {
+  depends=(gap)
+  replaces=(gap-4.8-doc)
+  pkgdesc="Documentation for GAP"
+  cd gap-$pkgver
+
+  mkdir -p "$pkgdir"/usr/lib/gap
+  cp -r doc "$pkgdir"/usr/lib/gap
+}
+
+package_gap-packages() {
+  depends=(gap)
+  replaces=(gap-4.8-packages)
+  optdepends=('normaliz: Normaliz interface package' 'libxaw: xgap package' 'c-xsc: float package' 'mpfi: float package'
+              'libmpc: float package' 'fplll: float package' 'zeromq: ZeroMQ interface package' 'planarity: digraph package'
+              'polymake: Polymake interface package' 'curl: curl interface package' 'libsemigroups: semigroups package')
+  pkgdesc="Extra packages for GAP"
+  cd gap-$pkgver
+
+  mkdir -p "$pkgdir"/usr/lib/gap
+  cp -r pkg "$pkgdir"/usr/lib/gap
+
+# provided by main gap package
+  for _pkg in ${_standardpkgs[@]}; do
+    rm -r "$pkgdir"/usr/lib/gap/pkg/$_pkg
+  done
+
+# fix RPATH
+  find "$pkgdir"/usr/lib/gap/pkg/ -name '*.so' | xargs chrpath -d
+
+# remove bundled planarity
+  rm -fr "$pkgdir"/usr/lib/gap/pkg/digraphs-*/bin/lib/
+
+# remove leftover binaries and source files
+  find "$pkgdir"/usr/lib/gap/pkg -name .libs -o -name '*.o' | xargs rm -fr
+  find "$pkgdir"/usr/lib/gap/pkg -type d -name src | xargs rm -fr
+  rm -fr "$pkgdir"/usr/lib/gap/pkg/log
+}
