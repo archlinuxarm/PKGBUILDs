@@ -10,7 +10,7 @@ pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=19.1.0
-pkgrel=3
+pkgrel=3.1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -24,7 +24,7 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         glesv2.pc)
 sha512sums=('25b186ae8037dedea5691e0b77b22f2065f3c877838378651726dfa1b34ef49dcc56f1dbd124e99285e5f14489db936a886a6740495b5b279e8363424bfb3433'
             'SKIP'
-            '0f2862a74dccaa46ba1a647cc080be340d7346044eba5c9423c9d7177dae1f3c4181799a7b1ad38ce3eed37ea512c7678b98724f2d86e15c0399b9814432e7fc'
+            'df13eaff1f3a95821221637c56d482945c42faca789e8bc71c36d0526750863aac891afab9d51ce0a912d7eede5b2af7c14a1c36ebd17c1bde945c3e057b773b'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
             'e5db81538625a056328c2ba83f3e6418e0d579c261bcddf685036ad19e816dd002313c80a6c48cef0289d1e1b0bdbe733810ae9f53604e380486253642cff52c')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
@@ -40,9 +40,12 @@ prepare() {
 }
 
 build() {
-  [[ $CARCH == "armv7h" ]] && GALLIUM=",etnaviv,kmsro,tegra"
-  [[ $CARCH == "armv6h" || $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",vc4" && MESON_OPT="-D asm=false"
-  [[ $CARCH == "armv7h" || $CARCH == "aarch64" ]] && GALLIUM+=",panfrost,lima"
+  MESON_OPT="-D asm=false"
+  case "${CARCH}" in
+    armv6h)  GALLIUM=",vc4" ;;
+    armv7h)  GALLIUM=",etnaviv,kmsro,lima,panfrost,tegra,vc4" ;;
+    aarch64) GALLIUM=",kmsro,lima,panfrost,v3d,vc4" ;;
+  esac
 
   arch-meson mesa-$pkgver build \
     -D b_lto=false \
