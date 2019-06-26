@@ -1,0 +1,82 @@
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - upstream patch to fix ARM FTBFS
+
+pkgname=opensips
+pkgver=3.0.0
+pkgrel=1
+pkgdesc="An Open Source SIP Server able to act as a SIP proxy, registrar, location server, redirect server ..."
+url="https://www.opensips.org"
+depends=('gcc-libs' 'openssl' 'db' 'attr' 'libxml2')
+makedepends=('postgresql-libs>=8.4.1' 'unixodbc' 'libldap>=2.4.18' 'libmariadbclient'
+	     'lynx' 'libxslt' 'libmicrohttpd')
+optdepends=('postgresql-libs'
+	    'unixodbc'
+	    'libldap'
+	    'mariadb-libs'
+	    'libsasl'
+	    'python2'
+	    'pcre')
+backup=("etc/opensips/opensips.cfg"
+	"etc/opensips/osipsconsolerc"
+	"etc/opensips/opensipsctlrc")
+arch=('x86_64')
+license=('GPL')
+install=opensips.install
+options=('!emptydirs' 'zipman' '!makeflags' 'docs')
+source=(https://opensips.org/pub/opensips/${pkgver}/opensips-${pkgver}.tar.gz
+	https://github.com/OpenSIPS/opensips/commit/8d43873f42e6901e83a0cb5c1cae42bce7d0a886.patch
+	opensips.service)
+sha256sums=('9f10001377b9457cb6abf0852b7eae97edf45520c1cafc6b6284d40647eccbae'
+            'dd45a1b85b645affd7fc4f5f5d879e433683d7b87f82b320dc957813da62f315'
+            'c2fec4be085b108db10834fa9832e98d696c2de6408f85f96cf89c13bf6be819')
+
+prepare() {
+  cd "$srcdir"/$pkgname-$pkgver/
+
+  # python2 fix
+  for file in $(find . -name '*.py' -print); do
+    sed -i 's_^#!.*/usr/bin/python_#!/usr/bin/python2_' $file
+    sed -i 's_^#!.*/usr/bin/env.*python_#!/usr/bin/env python2_' $file
+  done
+
+  sed -i 's|sbin|bin|g' Makefile
+  sed -i 's|bin-dir = sbin/|bin-dir = bin/|' Makefile.defs
+
+  patch -p1 -i ../8d43873f42e6901e83a0cb5c1cae42bce7d0a886.patch
+}
+
+_modules="ldap db_mysql db_postgres db_unixodbc presence presence_xml h350 proto_tls tlsops tls_mgm db_http httpd tm rr"
+
+build() {
+  cd "$srcdir"/$pkgname-$pkgver/
+
+  make \
+	include_modules="${_modules}" \
+	LIBDIR=lib PREFIX=/usr
+}
+
+package() {
+  cd "$srcdir"/$pkgname-$pkgver/
+
+  make \
+	include_modules="${_modules}" \
+	BASEDIR="$pkgdir" PREFIX=/usr LIBDIR=lib install
+
+  # Conforms to the arch packaging standards (https://wiki.archlinux.org/index.php/Arch_Packaging_Standards)
+  mkdir -p "$pkgdir"/etc/
+  mv "$pkgdir"/usr/etc/opensips/ "$pkgdir"/etc/
+  sed -i 's#mpath=".*lib/opensips/modules/"#mpath="/usr/lib/opensips/modules/"#' "$pkgdir"/etc/opensips/opensips.cfg
+
+  # fix bad paths
+  cd "$pkgdir"/usr/share
+  find -type f -exec sed -i "s#"$pkgdir"##" {} \;
+
+  mv "$pkgdir"/usr/sbin "$pkgdir"/usr/bin
+
+  cd "$pkgdir"/etc
+  find -type f -exec sed -i "s#"$pkgdir"##" {} \;
+
+  install -Dm0644 "$srcdir"/$pkgname.service "$pkgdir"/usr/lib/systemd/system/$pkgname.service
+}
