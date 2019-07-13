@@ -16,12 +16,12 @@ buildarch=12
 # or simply roll with a new version. I usually choose the latter when the former seems
 # unreasonable.
 
-# _gittag=v2.79b
-_gitcommit=054dbb833e15275e0e991e2c15e754a3e7583716
+_gittag=v2.80-rc1
+# _gitcommit=054dbb833e15275e0e991e2c15e754a3e7583716
 
 pkgname=blender
-pkgver=2.79.b
-[[ -n $_gitcommit ]] && pkgver=${pkgver}.git7.${_gitcommit:0:8}
+pkgver=2.80rc1
+[[ -n $_gitcommit ]] && pkgver=${pkgver}.git1.${_gitcommit:0:8}
 pkgrel=2
 epoch=17
 pkgdesc="A fully integrated 3D graphics creation suite"
@@ -33,15 +33,12 @@ depends=('libpng' 'libtiff' 'openexr' 'python' 'desktop-file-utils' 'python-requ
          'freetype2' 'openal' 'ffmpeg' 'fftw' 'boost-libs' 'opencollada' 'alembic'
          'openimageio' 'libsndfile' 'jack' 'opencolorio' 'openshadinglanguage'
          'jemalloc' 'libspnav' 'ptex' 'opensubdiv' 'openvdb' 'log4cplus' 'sdl2')
-makedepends=('cmake' 'boost' 'mesa' 'git' 'llvm')
+makedepends=('cmake' 'boost' 'mesa' 'git' 'llvm' 'ninja')
 options=(!strip)
 source=("git://git.blender.org/blender-addons.git"
         "git://git.blender.org/blender-addons-contrib.git"
         "git://git.blender.org/blender-translations.git"
-        "git://git.blender.org/blender-dev-tools.git"
-        "git://git.blender.org/scons.git"
-        stl_export_iter.patch
-        python3.7.patch)
+        "git://git.blender.org/blender-dev-tools.git")
 if [[ -n $_gittag ]]; then
     source+=("${pkgname}-${pkgver}::git://git.blender.org/blender.git#tag=${_gittag}")
 elif [[ -n $_gitcommit ]]; then
@@ -51,9 +48,6 @@ sha512sums=('SKIP'
             'SKIP'
             'SKIP'
             'SKIP'
-            'SKIP'
-            '51f30acc407179f003d1dbec25fb47b0bf1fe8d2eb16e069a6ca83ab8b21f6032d636a42e0b140537ad1ad25ad38c52a87a2a33e51822729ab196fcef4682818'
-            'f5564e8db242f6fa9cd951590f4c6de8f5b1a8bbd73aeb6e837a840dd2696e71f7b6bb1c94f9c2377b199159f87a95bead8ee113c01e8763f3843918395cc177'
             'SKIP')
 
 prepare() {
@@ -64,11 +58,7 @@ prepare() {
   git config submodule."release/scripts/addons_contrib".url ${srcdir}/blender-addons-contrib
   git config submodule."release/datafiles/locale".url ${srcdir}/blender-translations
   git config submodule."source/tools".url ${srcdir}/blender-dev-tools
-  git config submodule."scons".url ${srcdir}/scons
   git submodule update
-
-  patch -Np1 -i "$srcdir"/stl_export_iter.patch
-  patch -Np1 -i "$srcdir"/python3.7.patch -d release/scripts/addons_contrib
 
   mkdir build
 }
@@ -76,33 +66,25 @@ prepare() {
 build() {
   cd "$srcdir/$pkgname-$pkgver"/build
 
-  cmake -C../build_files/cmake/config/blender_release.cmake .. \
+  cmake -GNinja -C../build_files/cmake/config/blender_release.cmake .. \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=Release \
     -DWITH_INSTALL_PORTABLE=OFF \
     -DWITH_PYTHON_INSTALL=OFF \
-    -DOPENIMAGEIO_ROOT_DIR=/usr \
-    -DWITH_SYSTEM_OPENJPEG=ON \
-    -DWITH_GL_PROFILE_CORE=OFF \
-    -DWITH_GL_PROFILE_ES20=OFF \
-    -DWITH_LLVM=ON \
-    -DWITH_CYCLES_PTEX=OFF \
-    -DWITH_OPENVDB_3_ABI_COMPATIBLE=ON \
     -DWITH_CYCLES=OFF \
     -DWITH_RAYOPTIMIZATION=OFF \
     -DPYTHON_VERSION=3.7 \
     -DPYTHON_LIBPATH=/usr/lib \
     -DPYTHON_LIBRARY=python3.7m \
     -DPYTHON_INCLUDE_DIRS=/usr/include/python3.7m
-  make
 
-  # PTEX is currently broken and experimental in blender anyway
+  ninja
 }
 
 package() {
   cd "$srcdir/$pkgname-$pkgver/build"
 
-  make DESTDIR="${pkgdir}" install
+  DESTDIR="${pkgdir}" ninja install
   install -Dm755 ../release/bin/blender-softwaregl "${pkgdir}/usr/bin/blender-softwaregl"
   python -m compileall "${pkgdir}/usr/share/blender"
   python -O -m compileall "${pkgdir}/usr/share/blender"
