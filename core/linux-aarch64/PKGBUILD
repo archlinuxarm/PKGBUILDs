@@ -8,7 +8,7 @@ _srcname=linux-5.2
 _kernelname=${pkgbase#linux}
 _desc="AArch64 multi-platform"
 pkgver=5.2.1
-pkgrel=1
+pkgrel=2
 arch=('aarch64')
 url="http://www.kernel.org/"
 license=('GPL2')
@@ -99,9 +99,8 @@ build() {
 }
 
 _package() {
-  pkgdesc="The Linux Kernel and modules - ${_desc}"
-  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
-  optdepends=('crda: to set the correct wireless channels of your country')
+  pkgdesc="The Linux Kernel image - ${_desc}"
+  depends=('mkinitcpio>=0.7' 'linux-aarch64-modules=$pkgver')
   provides=('kernel26' "linux=${pkgver}")
   replaces=('linux-armv8')
   conflicts=('linux')
@@ -117,10 +116,45 @@ _package() {
   _basekernel=${_kernver%%-*}
   _basekernel=${_basekernel%.*}
 
-  mkdir -p "${pkgdir}"/{boot,usr/lib/modules}
-  make INSTALL_MOD_PATH="${pkgdir}/usr" modules_install
-  make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
+  mkdir -p "${pkgdir}"/boot
   cp arch/$KARCH/boot/Image{,.gz} "${pkgdir}/boot"
+
+  # sed expression for following substitutions
+  local _subst="
+    s|%PKGBASE%|${pkgbase}|g
+    s|%KERNVER%|${_kernver}|g
+    s|%EXTRAMODULES%|${_extramodules}|g
+  "
+
+  # install mkinitcpio preset file
+  sed "${_subst}" ../linux.preset |
+    install -Dm644 /dev/stdin "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
+
+  # install pacman hooks
+  sed "${_subst}" ../60-linux.hook |
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/60-${pkgbase}.hook"
+  sed "${_subst}" ../90-linux.hook |
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
+}
+
+_package-modules() {
+  pkgdesc="The Linux Kernel's modules - ${_desc}"
+
+  depends=('coreutils' 'linux-firmware' 'kmod')
+  optdepends=('crda: to set the correct wireless channels of your country')
+
+  cd ${_srcname}
+
+  KARCH=arm64
+
+  # get kernel version
+  _kernver="$(make kernelrelease)"
+  _basekernel=${_kernver%%-*}
+  _basekernel=${_basekernel%.*}
+
+  mkdir -p "${pkgdir}"/usr/lib/modules
+  make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
+  make INSTALL_MOD_PATH="${pkgdir}/usr" modules_install
 
   # make room for external modules
   local _extramodules="extramodules-${_basekernel}${_kernelname}"
@@ -139,22 +173,9 @@ _package() {
   # add vmlinux
   install -Dt "${pkgdir}/usr/lib/modules/${_kernver}/build" -m644 vmlinux
 
-  # sed expression for following substitutions
-  local _subst="
-    s|%PKGBASE%|${pkgbase}|g
-    s|%KERNVER%|${_kernver}|g
-    s|%EXTRAMODULES%|${_extramodules}|g
-  "
-
-  # install mkinitcpio preset file
-  sed "${_subst}" ../linux.preset |
-    install -Dm644 /dev/stdin "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
-
-  # install pacman hooks
+  # install pacman hook
   sed "${_subst}" ../60-linux.hook |
     install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/60-${pkgbase}.hook"
-  sed "${_subst}" ../90-linux.hook |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
 }
 
 _package-headers() {
@@ -227,7 +248,7 @@ _package-headers() {
 
 _package-chromebook() {
   pkgdesc="The Linux Kernel - ${_desc} - Chromebooks"
-  depends=('linux-aarch64')
+  depends=('linux-aarch64-modules=$pkgver')
   conflicts=('linux-aarch64-rc-chromebook')
   install=${pkgname}.install
 
@@ -252,7 +273,7 @@ _package-chromebook() {
   cp vmlinux.kpart "${pkgdir}/boot"
 }
 
-pkgname=("${pkgbase}" "${pkgbase}-headers" "${pkgbase}-chromebook")
+pkgname=("${pkgbase}" "${pkgbase}-modules" "${pkgbase}-headers" "${pkgbase}-chromebook")
 for _p in ${pkgname[@]}; do
   eval "package_${_p}() {
     _package${_p#${pkgbase}}
