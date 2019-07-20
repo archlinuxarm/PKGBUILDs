@@ -10,7 +10,7 @@ pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=19.1.2
-pkgrel=1
+pkgrel=1.1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -43,7 +43,7 @@ build() {
   MESON_OPT="-D asm=false"
   case "${CARCH}" in
     armv6h)  GALLIUM=",vc4" ;;
-    armv7h)  GALLIUM=",etnaviv,kmsro,lima,panfrost,tegra,vc4" ;;
+    armv7h)  GALLIUM=",etnaviv,kmsro,lima,panfrost,tegra,v3d,vc4" ;;
     aarch64) GALLIUM=",kmsro,lima,panfrost,v3d,vc4" ;;
   esac
 
