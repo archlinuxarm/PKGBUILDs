@@ -1,5 +1,6 @@
 # vim:set ts=2 sw=2 et:
 # Contributor: graysky <graysky AT archlinux DOT us>
+# Contributor: popcornmix & asavah from kodi forums - adapting for makechrootpkg
 # Contributor: BlackIkeEagle < ike DOT devolder AT gmail DOT com >
 # Contributor: Oleg Rakhmanov <oleg [at] archlinuxarm [dot] com>
 # Contributor: tomasgroth at yahoo.dk
@@ -25,7 +26,7 @@ _prefix=/usr
 pkgbase=kodi-rbp4
 pkgname=('kodi-rbp4' 'kodi-rbp4-eventclients' 'kodi-rbp4-tools-texturepacker' 'kodi-rbp4-dev')
 pkgver=18.3
-pkgrel=1
+pkgrel=2
 _codename=Leia
 _tag="18.3-$_codename"
 _ffmpeg_version="4.0.3-$_codename-18.2"
@@ -50,7 +51,14 @@ makedepends=(
   'upower' 'giflib' 'rapidjson' 'ghostscript'
   'libinput' 'libxkbcommon'
 )
-source=(https://github.com/xbmc/xbmc/archive/18.3-Leia.tar.gz
+
+# leia_rpi4 branch contains patches to enable hardware decoding on rpi4
+# expect kodi v19 to not to use MMAL but to use ffmpeg+v4l2
+# https://github.com/popcornmix/xbmc/commits/leia_pi4
+_commit=b0e4133d0f26c0dd2f305c689c8c6b3ea084d7b1
+
+source=(
+  "xbmc-18.3-Leia.zip::https://github.com/popcornmix/xbmc/archive/$_commit.zip"
   'kodi.service'
   '99-kodi.rules'
   'polkit.rules'
@@ -63,6 +71,7 @@ source=(https://github.com/xbmc/xbmc/archive/18.3-Leia.tar.gz
   "http://mirrors.kodi.tv/build-deps/sources/crossguid-$_crossguid_version.tar.gz"
   "http://mirrors.kodi.tv/build-deps/sources/fstrcmp-$_fstrcmp_version.tar.gz"
   "http://mirrors.kodi.tv/build-deps/sources/flatbuffers-$_flatbuffers_version.tar.gz"
+  01-fix.in-tree.ffmpeg.paths.for.makechrootpkg.hack.patch
 )
 noextract=(
   "libdvdcss-$_libdvdcss_version.tar.gz"
@@ -74,9 +83,9 @@ noextract=(
   "fstrcmp-$_fstrcmp_version.tar.gz"
   "flatbuffers-$_flatbuffers_version.tar.gz"
 )
-sha256sums=('4f265901c00f582beb8d6ad96c9c303e5ab82611e828c7121ae822b07c0915cc'
+sha256sums=('38b4b3d431fe76670bf74d8fea659c7244a5ddd927a4d703250e347a924eb798'
             '585796d8a7f1ece32c24ff67b38885f0e3397372a4b9879eee3160a59391e333'
-            'b31570f95654434b01fd8531612fbb6be77cbc1c519dd60f92feae26eb160f3d'
+            '23db962574ac1f5b891502d6d627c004050023138b5819c257de0eb47f36133f'
             '9ea592205023ba861603d74b63cdb73126c56372a366dc4cb7beb379073cbb96'
             '849daf1d5b081ef6d0e428bbc7d448799fc43a8ac9e79cd7513de0eb5a91b0bb'
             '68535cc2a000946b62ce4be6edf7dda7900bd524f22bcb826800b94f4a873314'
@@ -86,35 +95,76 @@ sha256sums=('4f265901c00f582beb8d6ad96c9c303e5ab82611e828c7121ae822b07c0915cc'
             '73d4cab4fa8a3482643d8703de4d9522d7a56981c938eca42d929106ff474b44'
             '3d77d09a5df0de510aeeb940df4cb534787ddff3bb1828779753f5dfa1229d10'
             'e4018e850f80700acee8da296e56e15b1eef711ab15157e542e7d7e1237c3476'
-            '5ca5491e4260cacae30f1a5786d109230db3f3a6e5a0eb45d0d0608293d247e3')
+            '5ca5491e4260cacae30f1a5786d109230db3f3a6e5a0eb45d0d0608293d247e3'
+            '70b4c7db8766761ca060c038c8abb36c8c678246ca6c5efbde84c58442748ef2')
 
 prepare() {
+  # Must use MMAL headers and pc files rather than opengl ones so we copy the
+  # contents of raspberrypi-firmware dependency to $srcdir and delete the offending
+  # directories therein as well as redirect cmake
+
+  mkdir -p "$srcdir/opt"
+  cp -a /opt/vc "$srcdir/opt"
+  rm -rf "$srcdir"/opt/vc/include/{EGL,GLES,GLES2}
+
+  # Just these three are needed in a directory all by themselves
+  # to which we point cmake via PKG_CONFIG_PATH
+
+  mkdir "$srcdir/pkgconfig"
+  for i in bcm_host.pc mmal.pc vcsm.pc; do
+    cp "$srcdir/opt/vc/lib/pkgconfig/$i" "$srcdir/pkgconfig"
+  done
+
   # force python 'binary' as python2
   [[ -d "$srcdir/path" ]] && rm -rf "$srcdir/path"
   mkdir "$srcdir/path"
   ln -s /usr/bin/python2 "$srcdir/path/python"
 
-  [[ -d kodi-build ]] && rm -rf kodi-build
-  mkdir $srcdir/kodi-build
+  cd "xbmc-$_commit"
 
-  cd "xbmc-$pkgver-$_codename"
+  [[ -d kodi-build ]] && rm -rf kodi-build
+  mkdir "$srcdir/kodi-build"
+
   patch -Np1 -i ../00-fix.building.with.mariadb.patch
+
+  # Big thanks to asavah for helpful advice here and in the cmake step
+  patch -Np1 -i ../01-fix.in-tree.ffmpeg.paths.for.makechrootpkg.hack.patch
 }
 
 build() {
   export PATH="$srcdir/path:$PATH"
 
-  cd kodi-build
+  cd "$srcdir/kodi-build"
 
   # building for RPi4
   unset CFLAGS CXXFLAGS
   CFLAGS=" -march=armv8-a+crc -mfpu=neon-fp-armv8 -mcpu=cortex-a72 -mfloat-abi=hard -O2 -pipe -fstack-protector-strong -fno-plt"
   CXXFLAGS="${CFLAGS}"
 
+  # exporting PKG_CONFIG_PATH and building with the extra lib definitions
+  # are part of the workaround discussed above
+
+  export PKG_CONFIG_PATH="$srcdir/pkgconfig"
+
+  _rootopt="$srcdir/opt/vc"
+  _libdir="$_rootopt/lib"
+
   cmake -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_LIBDIR=/usr/lib \
-    -DENABLE_EVENTCLIENTS=ON \
-    -DENABLE_OPENGL=OFF \
+    -DMMAL_INCLUDE_DIR="$_rootopt/include" \
+    -DMMAL_LIBRARY="$_libdir/libmmal.so" \
+    -DMMALCORE_LIBRARY="$_libdir/libmmal_core.so" \
+    -DMMALUTIL_LIBRARY="$_libdir/libmmal_util.so" \
+    -DMMALCLIENT_LIBRARY="$_libdir/libmmal_vc_client.so" \
+    -DMMALCOMPONENT_LIBRARY="$_libdir/libmmal_components.so" \
+    -DBCM_LIBRARY="$_libdir/libbcm_host.so" \
+    -DVCHIQ_LIBRARY="$_libdir/libvchiq_arm.so" \
+    -DVCHOSTIF_LIBRARY="$_libdir/libvchostif.a" \
+    -DVCILCS_LIBRARY="$_libdir/libvcilcs.a" \
+    -DVCOS_LIBRARY="$_libdir/libvcos.so" \
+    -DVCSM_LIBRARY="$_libdir/libvcsm.so" \
+    -DCONTAINER_LIBRARY="$_libdir/libcontainers.so" \
+    -DVERBOSE=ON \
     -DENABLE_INTERNAL_FFMPEG=ON \
     -DENABLE_INTERNAL_FMT=ON \
     -DENABLE_INTERNAL_CROSSGUID=ON \
@@ -122,6 +172,7 @@ build() {
     -DENABLE_INTERNAL_FLATBUFFERS=ON \
     -DENABLE_VAAPI=OFF \
     -DENABLE_VDPAU=OFF \
+    -DENABLE_OPENGL=OFF \
     -DENABLE_MARIADBCLIENT=ON \
     -DENABLE_MYSQLCLIENT=OFF \
     -Dlibdvdcss_URL="$srcdir/libdvdcss-$_libdvdcss_version.tar.gz" \
@@ -134,7 +185,7 @@ build() {
     -DFLATBUFFERS_URL="$srcdir/flatbuffers-$_flatbuffers_version.tar.gz" \
     -DCORE_PLATFORM_NAME=gbm \
     -DGBM_RENDER_SYSTEM=gles \
-    ../"xbmc-$pkgver-$_codename"
+    ../xbmc-"$_commit"
   make
   make preinstall
 }
@@ -153,7 +204,7 @@ package_kodi-rbp4() {
     'afpfs-ng: Apple shares support'
     'bluez: Blutooth support'
     'python2-pybluez: Bluetooth support'
-    'libplist: AirPlay support'
+    'libplist: Limited AirPlay support'
     'pulseaudio: PulseAudio support'
     'shairplay: Limited AirPlay support'
     'upower: Display battery level'
@@ -220,7 +271,6 @@ package_kodi-rbp4-tools-texturepacker() {
   _components=('kodi-tools-texturepacker')
 
   cd kodi-build
-  # install eventclients
   for _cmp in ${_components[@]}; do
     DESTDIR="$pkgdir" /usr/bin/cmake \
       -DCMAKE_INSTALL_COMPONENT="$_cmp" \
