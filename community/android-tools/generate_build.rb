@@ -21,7 +21,7 @@ def compile(sources, cflags)
       lang_flags = "-std=gnu11 $CFLAGS $CPPFLAGS"
     when ".cpp", ".cc"
       cc = "cxx"
-      lang_flags = "-std=gnu++17 $CXXFLAGS $CPPFLAGS"
+      lang_flags = "-std=gnu++2a $CXXFLAGS $CPPFLAGS"
     else
       raise "Unknown extension #{ext}"
     end
@@ -52,7 +52,7 @@ puts "CXX = #{ENV["CXX"] || "clang++"}\n\n"
 puts "CFLAGS = #{ENV["CFLAGS"]}"
 puts "CXXFLAGS = #{ENV["CXXFLAGS"]}"
 puts "LDFLAGS = #{ENV["LDFLAGS"]}"
-puts "PKGVER = #{ENV["PKGVER"]}\n\n"
+puts "PLATFORM_TOOLS_VERSION = #{ENV["PLATFORM_TOOLS_VERSION"]}\n\n"
 
 puts "" "
 rule cc
@@ -73,60 +73,62 @@ adbdfiles = %w(
   adb_listeners.cpp
   adb_trace.cpp
   adb_utils.cpp
-  bugreport.cpp
-  line_printer.cpp
   sockets.cpp
   transport.cpp
   transport_local.cpp
   transport_usb.cpp
-  transport_mdns_unsupported.cpp
   fdevent.cpp
-  adb_auth_host.cpp
   shell_service_protocol.cpp
 )
-libadbd = compile(expand("core/adb", adbdfiles), '-DADB_VERSION="\"$PKGVER\"" -DADB_HOST=1 -Icore/include -Icore/base/include -Icore/adb -Icore/libcrypto_utils/include -Iboringssl/include')
+libadbd = compile(expand("core/adb", adbdfiles), '-DPLATFORM_TOOLS_VERSION="\"$PLATFORM_TOOLS_VERSION\"" -DADB_HOST=1 -Icore/include -Icore/base/include -Icore/adb -Icore/libcrypto_utils/include -Iboringssl/include -Icore/diagnose_usb/include')
 
 adbfiles = %w(
-  console.cpp
   socket_spec.cpp
-  commandline.cpp
-  adb_client.cpp
   services.cpp
-  file_sync_client.cpp
   sysdeps_unix.cpp
   sysdeps/errno.cpp
   client/main.cpp
+  client/adb_client.cpp
+  client/auth.cpp
+  client/commandline.cpp
   client/usb_dispatch.cpp
   client/usb_linux.cpp
   client/usb_libusb.cpp
+  client/bugreport.cpp
+  client/file_sync_client.cpp
+  client/line_printer.cpp
+  client/adb_install.cpp
+  client/console.cpp
   sysdeps/posix/network.cpp
 )
-libadb = compile(expand("core/adb", adbfiles), "-D_GNU_SOURCE -DADB_HOST=1 -Icore/include -Icore/base/include -Icore/adb")
+libadb = compile(expand("core/adb", adbfiles), "-D_GNU_SOURCE -DADB_HOST=1 -Icore/include -Icore/base/include -Icore/adb -Icore/libcrypto_utils/include -Iboringssl/include")
 
 basefiles = %w(
   file.cpp
   logging.cpp
+  threads.cpp
+  mapped_file.cpp
   parsenetaddress.cpp
   stringprintf.cpp
   strings.cpp
   errors_unix.cpp
   test_utils.cpp
+  chrono_utils.cpp
 )
 libbase = compile(expand("core/base", basefiles), "-DADB_HOST=1 -Icore/base/include -Icore/include")
 
 logfiles = %w(
-  log_event_write.c
-  fake_log_device.c
-  log_event_list.c
-  logger_write.c
-  config_write.c
-  config_read.c
-  logger_lock.c
-  local_logger.c
-  fake_writer.c
-  logger_name.c
-  stderr_write.c
-  logprint.c
+  log_event_write.cpp
+  fake_log_device.cpp
+  log_event_list.cpp
+  logger_write.cpp
+  config_write.cpp
+  config_read.cpp
+  logger_lock.cpp
+  fake_writer.cpp
+  logger_name.cpp
+  stderr_write.cpp
+  logprint.cpp
 )
 liblog = compile(expand("core/liblog", logfiles), "-DLIBLOG_LOG_TAG=1006 -D_XOPEN_SOURCE=700 -DFAKE_LOG_DEVICE=1 -Icore/log/include -Icore/include")
 
@@ -143,12 +145,12 @@ cutilsfiles = %w(
   fs_config.cpp
   canned_fs_config.cpp
 )
-libcutils = compile(expand("core/libcutils", cutilsfiles), "-D_GNU_SOURCE -Icore/libcutils/include -Icore/include")
+libcutils = compile(expand("core/libcutils", cutilsfiles), "-D_GNU_SOURCE -Icore/libcutils/include -Icore/include -Icore/base/include")
 
 diagnoseusbfiles = %w(
   diagnose_usb.cpp
 )
-libdiagnoseusb = compile(expand("core/adb", diagnoseusbfiles), "-Icore/include -Icore/base/include")
+libdiagnoseusb = compile(expand("core/diagnose_usb", diagnoseusbfiles), "-Icore/include -Icore/base/include -Icore/diagnose_usb/include")
 
 libcryptofiles = %w(
   android_pubkey.c
@@ -162,8 +164,6 @@ boringssl = ["boringssl/build/crypto/libcrypto.a"]
 link("adb", libbase + liblog + libcutils + libadbd + libadb + libdiagnoseusb + libcrypto + boringssl, "-lpthread -lusb-1.0")
 
 fastbootfiles = %w(
-  protocol.cpp
-  engine.cpp
   bootimg_utils.cpp
   fastboot.cpp
   util.cpp
@@ -172,15 +172,26 @@ fastbootfiles = %w(
   socket.cpp
   tcp.cpp
   udp.cpp
+  main.cpp
+  fastboot_driver.cpp
 )
-libfastboot = compile(expand("core/fastboot", fastbootfiles), '-DFASTBOOT_VERSION="\"$PKGVER\"" -D_GNU_SOURCE -D_XOPEN_SOURCE=700 -DUSE_F2FS -Icore/base/include -Icore/include -Icore/adb -Icore/libsparse/include -Icore/mkbootimg -Iextras/ext4_utils/include -Iextras/f2fs_utils -Icore/libziparchive/include -Icore/mkbootimg/include/bootimg')
+libfastboot = compile(expand("core/fastboot", fastbootfiles), '-DPLATFORM_TOOLS_VERSION="\"$PLATFORM_TOOLS_VERSION\"" -D_GNU_SOURCE -D_XOPEN_SOURCE=700 -DUSE_F2FS -Icore/base/include -Icore/include -Icore/adb -Icore/libsparse/include -Icore/mkbootimg -Iextras/ext4_utils/include -Iextras/f2fs_utils -Icore/libziparchive/include -Icore/mkbootimg/include/bootimg -Icore/fs_mgr/liblp/include -Icore/diagnose_usb/include')
+
+fsmgrfiles = %w(
+  liblp/reader.cpp
+  liblp/writer.cpp
+  liblp/utility.cpp
+  liblp/partition_opener.cpp
+  liblp/images.cpp
+)
+libfsmgr = compile(expand("core/fs_mgr", fsmgrfiles), '-Icore/fs_mgr/liblp/include -Icore/base/include -Iextras/ext4_utils/include -Icore/libsparse/include')
 
 sparsefiles = %w(
-  backed_block.c
-  output_file.c
-  sparse.c
-  sparse_crc32.c
-  sparse_err.c
+  backed_block.cpp
+  output_file.cpp
+  sparse.cpp
+  sparse_crc32.cpp
+  sparse_err.cpp
   sparse_read.cpp
 )
 libsparse = compile(expand("core/libsparse", sparsefiles), "-Icore/libsparse/include -Icore/base/include")
@@ -200,11 +211,11 @@ utilfiles = %w(
 libutil = compile(expand("core/libutils", utilfiles), "-Icore/include")
 
 ext4files = %w(
-  ext4_utils.c
-  wipe.c
-  ext4_sb.c
+  ext4_utils.cpp
+  wipe.cpp
+  ext4_sb.cpp
 )
-libext4 = compile(expand("extras/ext4_utils", ext4files), "-D_GNU_SOURCE -Icore/libsparse/include -Icore/include -Iselinux/libselinux/include -Iextras/ext4_utils/include")
+libext4 = compile(expand("extras/ext4_utils", ext4files), "-D_GNU_SOURCE -Icore/libsparse/include -Icore/include -Iselinux/libselinux/include -Iextras/ext4_utils/include -Icore/base/include")
 
 selinuxfiles = %w(
   callbacks.c
@@ -258,10 +269,11 @@ libsepolfiles = %w(
   constraint.c
   expand.c
   hierarchy.c
+  kernel_to_common.c
 )
 libsepol = compile(expand("selinux/libsepol/src", libsepolfiles), "-Iselinux/libsepol/include")
 
-link("fastboot", libsparse + libzip + libcutils + liblog + libutil + libbase + libext4 + f2fs + libselinux + libsepol + libfastboot + libdiagnoseusb, "-lz -lpcre2-8 -lpthread -ldl")
+link("fastboot", libfsmgr + libsparse + libzip + libcutils + liblog + libutil + libbase + libext4 + f2fs + libselinux + libsepol + libfastboot + libdiagnoseusb + boringssl, "-lz -lpcre2-8 -lpthread -ldl")
 
 # mke2fs.android - a ustom version of mke2fs that supports --android_sparse (FS#56955)
 libext2fsfiles = %w(
@@ -357,6 +369,7 @@ libext2fsfiles = %w(
   lib/support/quotaio.c
   lib/support/quotaio_tree.c
   lib/support/quotaio_v2.c
+  lib/uuid/clear.c
   lib/uuid/gen_uuid.c
   lib/uuid/isnull.c
   lib/uuid/pack.c
