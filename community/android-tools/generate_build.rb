@@ -77,7 +77,8 @@ adbdfiles = %w(
   transport.cpp
   transport_local.cpp
   transport_usb.cpp
-  fdevent.cpp
+  fdevent/fdevent.cpp
+  fdevent/fdevent_poll.cpp
   shell_service_protocol.cpp
 )
 libadbd = compile(expand("core/adb", adbdfiles), '-DPLATFORM_TOOLS_VERSION="\"$PLATFORM_TOOLS_VERSION\"" -DADB_HOST=1 -Icore/include -Icore/base/include -Icore/adb -Icore/libcrypto_utils/include -Iboringssl/include -Icore/diagnose_usb/include')
@@ -175,7 +176,7 @@ fastbootfiles = %w(
   main.cpp
   fastboot_driver.cpp
 )
-libfastboot = compile(expand("core/fastboot", fastbootfiles), '-DPLATFORM_TOOLS_VERSION="\"$PLATFORM_TOOLS_VERSION\"" -D_GNU_SOURCE -D_XOPEN_SOURCE=700 -DUSE_F2FS -Icore/base/include -Icore/include -Icore/adb -Icore/libsparse/include -Icore/mkbootimg -Iextras/ext4_utils/include -Iextras/f2fs_utils -Icore/libziparchive/include -Icore/mkbootimg/include/bootimg -Icore/fs_mgr/liblp/include -Icore/diagnose_usb/include')
+libfastboot = compile(expand("core/fastboot", fastbootfiles), '-DPLATFORM_TOOLS_VERSION="\"$PLATFORM_TOOLS_VERSION\"" -D_GNU_SOURCE -D_XOPEN_SOURCE=700 -DUSE_F2FS -Icore/base/include -Icore/include -Icore/adb -Icore/libsparse/include -Imkbootimg/include/bootimg -Iextras/ext4_utils/include -Iextras/f2fs_utils -Icore/libziparchive/include -Imkbootimg/include/bootimg/include/bootimg -Icore/fs_mgr/liblp/include -Icore/diagnose_usb/include')
 
 fsmgrfiles = %w(
   liblp/reader.cpp
