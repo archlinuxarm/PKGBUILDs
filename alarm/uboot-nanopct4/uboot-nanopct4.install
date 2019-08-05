@@ -1,0 +1,43 @@
+sd_fuse() {
+  device=$1
+
+  if [ ! -b /dev/${device} ]; then
+    echo "No MMC device to flash, exiting."
+    exit 0
+  fi
+
+  dd if=/boot/idbloader.img of=/dev/${device} seek=64 conv=notrunc
+  dd if=/boot/uboot.img of=/dev/${device} seek=16384 conv=notrunc
+  dd if=/boot/trust.img of=/dev/${device} seek=24576 conv=notrunc
+}
+
+flash_uboot() {
+  if mountpoint -d /boot > /dev/null 2>&1; then
+    base=/boot
+  else
+    base=/
+  fi
+  major=$(mountpoint -d $base | cut -f 1 -d ':')
+  minor=$(expr $(mountpoint -d $base | cut -f 2 -d ':') - 1)
+  device=$(cat /proc/partitions | awk {'if ($1 == "'${major}'" && $2 == "'${minor}'") print $4 '})
+
+  echo "A new U-Boot version needs to be flashed onto /dev/${device}."
+  echo "Do you want to do this now? [y|N]"
+  read -r shouldwe
+  if [[ $shouldwe =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    sd_fuse $device
+  else
+    echo "You can do this later by running:"
+    echo "# dd if=/boot/idbloader.img of=/dev/${device} seek=64 conv=notrunc"
+    echo "# dd if=/boot/uboot.img of=/dev/${device} seek=16384 conv=notrunc"
+    echo "# dd if=/boot/trust.img of=/dev/${device} seek=24576 conv=notrunc"
+  fi
+}
+
+post_install() {
+  flash_uboot
+}
+
+post_upgrade() {
+  flash_uboot
+}
