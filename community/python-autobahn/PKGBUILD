@@ -7,7 +7,7 @@
 
 pkgname=python-autobahn
 pkgver=19.8.1
-pkgrel=1
+pkgrel=2
 pkgdesc='Real-time framework for Web, Mobile & Internet of Things'
 arch=(x86_64)
 url='https://crossbar.io/autobahn/'
@@ -15,7 +15,8 @@ license=(MIT)
 depends=(python-cffi python-twisted python-six python-txaio python-wsaccel
          python-setuptools python-cryptography)
 makedepends=(python-argon2_cffi python-cbor python-flatbuffers
-             python-msgpack python-passlib python-pynacl python-ubjson)
+             python-msgpack python-passlib python-pynacl python-pytrie
+             python-ubjson)
 checkdepends=(python-mock python-pytest python-pytest-asyncio)
 optdepends=(
   'python-cbor: CBOR serializer support'
@@ -24,12 +25,19 @@ optdepends=(
   'python-ubjson: UBJSON serializer support'
   'python-argon2_cffi: WAMP-SCRAM authentication support'
   'python-passlib: WAMP-SCRAM authentication support'
-  'python-pynacl: WAMP-cryptosign support'
+  'python-pynacl: WAMP-cryptosign and WAMP-cryptobox support'
+  'python-pytrie: WAMP-cryptobox support'
 )
 
 source=(https://files.pythonhosted.org/packages/source/a/autobahn/autobahn-$pkgver.tar.gz)
 sha256sums=('294e7381dd54e73834354832604ae85567caf391c39363fed0ea2bfa86aa4304')
 
+prepare() {
+  cd "$srcdir/autobahn-$pkgver"
+  # test_depleting checks whether the entropy on the running machine can be depleted or not.
+  # Unrelated to autobahn and makes the test suite flaky
+  sed -i -r 's/^(\s*)(def test_depleting)/\1@unittest.skip("flaky")\n\1\2/' autobahn/test/test_rng.py
+}
 build() {
   cd "$srcdir/autobahn-$pkgver"
   python setup.py build
@@ -38,10 +46,8 @@ build() {
 check() {
   cd "$srcdir/autobahn-$pkgver"
   pyver=$(python -c "import sys; print('{}.{}'.format(*sys.version_info[:2]))")
-  # test_depleting checks whether the entropy on the running machine can be depleted or not.
-  # Unrelated to autobahn and makes the test suite flaky
-  USE_TWISTED=1 PYTHONPATH=.:build/lib.linux-$CARCH-$pyver pytest -v autobahn -k 'not test_depleting'
-  USE_ASYNCIO=1 PYTHONPATH=.:build/lib.linux-$CARCH-$pyver pytest -v autobahn -k 'not test_depleting'
+  USE_TWISTED=1 PYTHONPATH=.:build/lib.linux-$CARCH-$pyver trial3 autobahn
+  USE_ASYNCIO=1 PYTHONPATH=.:build/lib.linux-$CARCH-$pyver pytest -v autobahn
 }
 
 package() {
