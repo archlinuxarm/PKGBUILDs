@@ -176,7 +176,7 @@ fastbootfiles = %w(
   main.cpp
   fastboot_driver.cpp
 )
-libfastboot = compile(expand("core/fastboot", fastbootfiles), '-DPLATFORM_TOOLS_VERSION="\"$PLATFORM_TOOLS_VERSION\"" -D_GNU_SOURCE -D_XOPEN_SOURCE=700 -DUSE_F2FS -Icore/base/include -Icore/include -Icore/adb -Icore/libsparse/include -Imkbootimg/include/bootimg -Iextras/ext4_utils/include -Iextras/f2fs_utils -Icore/libziparchive/include -Imkbootimg/include/bootimg/include/bootimg -Icore/fs_mgr/liblp/include -Icore/diagnose_usb/include')
+libfastboot = compile(expand("core/fastboot", fastbootfiles), '-DPLATFORM_TOOLS_VERSION="\"$PLATFORM_TOOLS_VERSION\"" -D_GNU_SOURCE -D_XOPEN_SOURCE=700 -DUSE_F2FS -Icore/base/include -Icore/include -Icore/adb -Icore/libsparse/include -Imkbootimg/include/bootimg -Iextras/ext4_utils/include -Iextras/f2fs_utils -Icore/libziparchive/include -Icore/fs_mgr/liblp/include -Icore/diagnose_usb/include')
 
 fsmgrfiles = %w(
   liblp/reader.cpp
@@ -272,7 +272,7 @@ libsepolfiles = %w(
   hierarchy.c
   kernel_to_common.c
 )
-libsepol = compile(expand("selinux/libsepol/src", libsepolfiles), "-Iselinux/libsepol/include")
+libsepol = compile(expand("selinux/libsepol/src", libsepolfiles), "-Iselinux/libsepol/include -Iselinux/libsepol/src")
 
 link("fastboot", libfsmgr + libsparse + libzip + libcutils + liblog + libutil + libbase + libext4 + f2fs + libselinux + libsepol + libfastboot + libdiagnoseusb + boringssl, "-lz -lpcre2-8 -lpthread -ldl")
 
