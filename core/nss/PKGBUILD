@@ -1,0 +1,95 @@
+# Maintainer: Jan de Groot <jgc@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove -march=armv8-a in AArch64 CFLAGS to not conflict with -march=armv8-a+crypto being added
+#    this is a stupid, dirty hack that shouldn't be necessary
+
+pkgbase=nss
+pkgname=(nss ca-certificates-mozilla)
+pkgver=3.46
+pkgrel=1
+pkgdesc="Network Security Services"
+url="https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS"
+arch=(x86_64)
+license=(MPL GPL)
+_nsprver=4.20
+depends=("nspr>=${_nsprver}" sqlite zlib sh p11-kit)
+makedepends=(perl python python2 gyp)
+source=("https://ftp.mozilla.org/pub/security/nss/releases/NSS_${pkgver//./_}_RTM/src/nss-${pkgver}.tar.gz"
+        certdata2pem.py bundle.sh)
+sha256sums=('6b699649d285602ba258a4b0957cb841eafc94eff5735a9da8da0adbb9a10cef'
+            '0be02cecc27a6e55e1cad1783033b147f502b26f9fb1bb5a53e7a43bbcb68fa0'
+            '3bfadf722da6773bdabdd25bdf78158648043d1b7e57615574f189a88ca865dd')
+
+prepare() {
+  mkdir certs path
+  ln -s /usr/bin/python2 path/python
+
+  cd nss-$pkgver
+  ln -sr nss/lib/ckfw/builtins/certdata.txt ../certs/
+  ln -sr nss/lib/ckfw/builtins/nssckbi.h ../certs/
+}
+
+build() {
+  [[ $CARCH == "aarch64" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/-march=armv8-a//'` && CXXFLAGS="$CFLAGS"
+
+  ( cd certs; python ../certdata2pem.py; )
+  sh bundle.sh
+
+  cd nss-$pkgver/nss
+  PATH="$srcdir/path:$PATH" bash -x ./build.sh -v \
+    --opt --system-sqlite --system-nspr --enable-libpkix --disable-tests
+}
+
+package_nss() {
+  local vmajor vminor vpatch
+  cd nss-$pkgver
+
+  { read vmajor; read vminor; read vpatch; } \
+    < <(awk '/#define.*NSS_V(MAJOR|MINOR|PATCH)/ {print $3}' nss/lib/nss/nss.h)
+
+  sed nss/pkg/pkg-config/nss.pc.in \
+    -e "s,%libdir%,/usr/lib,g" \
+    -e "s,%prefix%,/usr,g" \
+    -e "s,%exec_prefix%,/usr/bin,g" \
+    -e "s,%includedir%,/usr/include/nss,g" \
+    -e "s,%NSPR_VERSION%,$_nsprver,g" \
+    -e "s,%NSS_VERSION%,$pkgver,g" |
+    install -Dm644 /dev/stdin "$pkgdir/usr/lib/pkgconfig/nss.pc"
+
+  ln -s nss.pc "$pkgdir/usr/lib/pkgconfig/mozilla-nss.pc"
+
+  sed nss/pkg/pkg-config/nss-config.in \
+    -e "s,@libdir@,/usr/lib,g" \
+    -e "s,@prefix@,/usr/bin,g" \
+    -e "s,@exec_prefix@,/usr/bin,g" \
+    -e "s,@includedir@,/usr/include/nss,g" \
+    -e "s,@MOD_MAJOR_VERSION@,$vmajor,g" \
+    -e "s,@MOD_MINOR_VERSION@,$vminor,g" \
+    -e "s,@MOD_PATCH_VERSION@,$vpatch,g" |
+    install -D /dev/stdin "$pkgdir/usr/bin/nss-config"
+
+  cd nss/doc/nroff
+  install -Dt "$pkgdir/usr/share/man/man1" -m644 *util.1 signtool.1 signver.1 ssltap.1
+
+  cd ../../../dist
+  install -Dt "$pkgdir/usr/include/nss" -m644 public/nss/*.h
+
+  cd Release/bin
+  install -Dt "$pkgdir/usr/bin" *util shlibsign signtool signver ssltap
+
+  cd ../lib
+  install -Dt "$pkgdir/usr/lib" *.so
+  install -Dt "$pkgdir/usr/lib" -m644 *.chk
+
+  # Replace built-in trust with p11-kit connection
+  ln -sf libnssckbi-p11-kit.so "$pkgdir/usr/lib/libnssckbi.so"
+}
+
+package_ca-certificates-mozilla() {
+  pkgdesc="Mozilla's set of trusted CA certificates"
+  depends=(ca-certificates-utils)
+
+  install -Dm644 ca-bundle.trust.p11-kit \
+    "$pkgdir/usr/share/ca-certificates/trust-source/mozilla.trust.p11-kit"
+}
