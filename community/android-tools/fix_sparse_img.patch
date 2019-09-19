@@ -1,0 +1,38 @@
+commit fbb9535aaea5ae4011f3c3edf4c00b27452f57ec
+Author: Tom Cherry <tomcherry@google.com>
+Date:   Tue Sep 17 13:34:04 2019 -0700
+
+    fastboot: don't use sparse_file_import_auto() in load_buf_fd()
+    
+    load_buf_fd() attempts to find the size of the file that it is about
+    to load by first calling sparse_file_import_auto() then using
+    sparse_file_len() upon success or falling back to the file size on the
+    filesystem on failure.
+    
+    This is problematic however as sparse_file_import_auto() creates a
+    sparse_file out of the normal file, but does not resparse it, so an
+    assertion fails during the sparse_file_len() call.
+    
+    This is fixed by using sparse_file_import() instead.  This will fail
+    in the case that the file is not sparse and the call to
+    sparse_file_len() will be properly skipped.
+    
+    Bug: 140538105
+    Test: flash blueline factory image with assertions enabled in
+          libsparse/sparse.cpp
+    
+    Change-Id: I0283be33563a3301ce5b09bde41105a20f91086c
+
+diff --git a/fastboot/fastboot.cpp b/fastboot/fastboot.cpp
+index 4737ae4d66..a7fc628c43 100644
+--- a/fastboot/fastboot.cpp
++++ b/fastboot/fastboot.cpp
+@@ -874,7 +874,7 @@ static bool load_buf_fd(int fd, struct fastboot_buffer* buf) {
+         return false;
+     }
+ 
+-    if (sparse_file* s = sparse_file_import_auto(fd, false, false)) {
++    if (sparse_file* s = sparse_file_import(fd, false, false)) {
+         buf->image_size = sparse_file_len(s, false, false);
+         sparse_file_destroy(s);
+     } else {
