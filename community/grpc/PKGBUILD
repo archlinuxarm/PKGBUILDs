@@ -1,0 +1,108 @@
+# Maintainer: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
+# Contributor: Aleksey Filippov <sarum9in@gmail.com>
+# Contributor: Victor Aurélio Santos <victoraur.santos@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - explicitly link v5/v6 with libatomic
+
+pkgbase='grpc'
+pkgname=('grpc' 'python-grpcio' 'php-grpc' 'grpc-cli')
+pkgver=1.24.0
+_gtestver=1.8.1
+_upbver=931bbecbd3230ae7f22efa5d203639facc47f719
+pkgrel=1
+pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
+arch=('x86_64')
+url='https://grpc.io'
+license=('BSD')
+makedepends=('re2c' 'protobuf' 'php' 'c-ares' 'openssl' 'chrpath' 'gflags'
+             'cython')
+source=("https://github.com/$pkgname/$pkgname/archive/v$pkgver/$pkgname-$pkgver.tar.gz"
+        "https://github.com/google/googletest/archive/release-$_gtestver/googletest-$_gtestver.tar.gz"
+        "https://github.com/protocolbuffers/upb/archive/$_upbver/upb-$_upbver.tar.gz"
+        "makefile.patch")
+sha256sums=('03a22a2fbfec8ccc44ff2e8061c312c9b4a0d33046b6d0c84c8eca5c56569387'
+            '9bf1fe5182a604b4135edc1a425ae356c9ad15e9b23f9f12a02e80184c3a249c'
+            '95150db57b51b65f3422c38953956e0f786945d842d76f8ab685fbcd93ab5caa'
+            'f292cb387f0cf7567e6e8004a6dd57bf0375abbaa8968dcd97cbd7e72409670f')
+
+prepare() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  patch -p1 -i "$srcdir/makefile.patch"
+
+  sed -r 's/-Werror//g;/ldconfig/d;s/ strip-(static|shared)_c(xx)? / /' -i Makefile
+
+  ln -sf "$srcdir/googletest-release-$_gtestver/"{googlemock,googletest} \
+    third_party/googletest
+
+  rm -rf third_party/upb
+  ln -s "$srcdir/upb-$_upbver" third_party/upb
+}
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+  export CFLAGS="$CFLAGS -Wno-unused-parameter"
+  export CXXFLAGS="$CXXFLAGS -Wno-unused-parameter"
+
+  [[ $CARCH == "armv6h" || $CARCH == "arm" ]] && LIBS="-latomic"
+  make prefix=/usr EXTRA_LDLIBS="$LIBS"
+  make prefix=/usr grpc_cli EXTRA_LDLIBS="$LIBS"
+
+  # Don't install it as part of main package
+  mv bins/opt/grpc_cli .
+
+  # Python
+  GRPC_PYTHON_BUILD_WITH_CYTHON=1 \
+  GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
+  GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1 \
+  GRPC_PYTHON_BUILD_SYSTEM_CARES=1 \
+  python setup.py build
+
+  # PHP
+  cd "$srcdir/$pkgbase-$pkgver/src/php/ext/$pkgbase"
+  phpize
+  LDFLAGS=-L"$srcdir/$pkgname-$pkgver/libs/opt" ./configure --enable-grpc="$srcdir/$pkgname-$pkgver"
+  make
+}
+
+package_grpc() {
+  depends=('c-ares' 'protobuf' 'openssl')
+
+  cd "$srcdir/$pkgbase-$pkgver"
+  make prefix="$pkgdir/usr" install
+  find "$pkgdir"/usr/{include,share,lib/pkgconfig} -type f -exec chmod a-x {} +
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+package_python-grpcio() {
+  depends=('c-ares' 'python')
+
+  cd "$srcdir/$pkgbase-$pkgver"
+  python setup.py install -O1 --skip-build --root="$pkgdir"
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+package_php-grpc() {
+  depends=('grpc' 'php')
+  backup=('etc/php/conf.d/grpc.ini')
+
+  # Install PHP extension.
+  cd "$srcdir/$pkgbase-$pkgver/src/php/ext/$pkgbase"
+  make install "INSTALL_ROOT=$pkgdir"
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+  # Remove RPATH
+  chrpath -d "$pkgdir/usr/lib/php/modules/grpc.so"
+
+  echo ';extension=grpc.so' >grpc.ini
+  install -Dm644 grpc.ini "$pkgdir/etc/php/conf.d/grpc.ini"
+}
+
+package_grpc-cli() {
+  depends=('c-ares' 'gflags' 'protobuf' 'openssl')
+
+  cd "$srcdir/$pkgbase-$pkgver"
+  install -Dm755 grpc_cli "$pkgdir"/usr/bin/grpc_cli
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
