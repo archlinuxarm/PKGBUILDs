@@ -145,6 +145,7 @@ package_mesa() {
   rm -rfv fakeinstall/usr/include/vulkan
 
   _install fakeinstall/usr/include
+  rm -f fakeinstall/usr/lib/pkgconfig/{egl,gl}.pc
   _install fakeinstall/usr/lib/pkgconfig
 
   # libglvnd support
