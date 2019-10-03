@@ -16,8 +16,8 @@ highmem=1
 
 pkgname=('rust' 'rust-docs')
 epoch=1
-pkgver=1.37.0
-pkgrel=2
+pkgver=1.38.0
+pkgrel=1
 
 _llvm_ver=8.0.1
 
@@ -33,18 +33,24 @@ options=('!emptydirs')
 
 source=("https://static.rust-lang.org/dist/rustc-$pkgver-src.tar.gz"{,.asc}
         "https://github.com/llvm/llvm-project/releases/download/llvmorg-$_llvm_ver/compiler-rt-$_llvm_ver.src.tar.xz"{,.sig}
+        0001-WIP-minimize-the-rust-std-component.patch
         config.toml)
 
-sha256sums=('120e7020d065499cc6b28759ff04153bfdc2ac9b5adeb252331a4eb87cbe38c3'
+sha256sums=('644263ca7c7106f8ee8fcde6bb16910d246b30668a74be20b8c7e0e9f4a52d80'
             'SKIP'
             '11828fb4823387d820c6715b25f6b2405e60837d12a7469e7a8882911c721837'
             'SKIP'
-            '4773c50dca4ee344e33ea9ef3af89647fedef1ede5cbc2d3a8e57afd88a979cc')
+            '1d6b69444ef6ff033fe1612e56ecdaad5c52aa44395e704f78b1a047c65b9321'
+            '27ac00c9e3a1daeed7b5d343cd7ef45c98a348e6d9178b4d7a501d97eb16e5c7')
 validpgpkeys=('108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE'  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
               '474E22316ABF4785A88C6E8EA2C794A986419D8A') # Tom Stellard <tstellar@redhat.com>
 
 prepare() {
   cd "rustc-$pkgver-src"
+
+  # For https://bugzilla.redhat.com/show_bug.cgi?id=1756487
+  # From https://src.fedoraproject.org/rpms/rust/tree/master
+  patch -Np1 -i ../0001-WIP-minimize-the-rust-std-component.patch
 
   cp "$srcdir"/config.toml config.toml
 
@@ -77,13 +83,15 @@ package_rust() {
 
   DESTDIR="$pkgdir" python ./x.py install
 
-  for license in APACHE MIT; do install -Dm644 "LICENSE-$license" \
-    "$pkgdir/usr/share/licenses/$pkgname/LICENSE-$license"; done
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE*
 
-  cd "$pkgdir/usr/lib"
+  # delete unnecesary files, e.g. components and manifest files only used for the uninstall script
+  cd "$pkgdir"/usr/lib/rustlib
+  rm components install.log manifest-* rust-installer-version uninstall.sh
 
-  rm rustlib/{components,manifest-rustc,rust-installer-version}
-  ln -sf rustlib/$CARCH-unknown-linux-gnu/lib/*.so .
+  # rustbuild always installs copies of the shared libraries to /usr/lib,
+  # overwrite them with symlinks to the per-architecture versions
+  ln -srft "$pkgdir"/usr/lib x86_64-unknown-linux-gnu/lib/*.so
 
   # move docs out of the way for splitting
   mv "$pkgdir"/usr/share/doc "$srcdir"
@@ -93,11 +101,12 @@ package_rust() {
 }
 
 package_rust-docs() {
-  install -d "$pkgdir/usr/share/doc/"
-  mv "$srcdir"/doc/* "$pkgdir"/usr/share/doc/rust/
+  description=('Documentation for the Rust programming language')
 
-  for license in APACHE MIT; do install -Dm644 "rustc-$pkgver-src/LICENSE-$license" \
-    "$pkgdir/usr/share/licenses/$pkgname/LICENSE-$license"; done
+  cd "rustc-$pkgver-src"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE*
+
+  mv "$srcdir"/doc "$pkgdir"/usr/share/doc
 }
 
 # vim:set ts=2 sw=2 et:

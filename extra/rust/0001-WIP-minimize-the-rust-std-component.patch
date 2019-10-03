@@ -1,0 +1,74 @@
+From 2bf05f208272cd58c57f4d7d8d0e10fdb22e8719 Mon Sep 17 00:00:00 2001
+From: Josh Stone <jistone@redhat.com>
+Date: Fri, 27 Sep 2019 12:33:08 -0700
+Subject: [PATCH] [WIP] minimize the rust-std component
+
+---
+ src/bootstrap/dist.rs | 45 +++++++++++++++----------------------------
+ 1 file changed, 16 insertions(+), 29 deletions(-)
+
+diff --git a/src/bootstrap/dist.rs b/src/bootstrap/dist.rs
+index 552965863d10..76fbd07f9fb5 100644
+--- a/src/bootstrap/dist.rs
++++ b/src/bootstrap/dist.rs
+@@ -667,41 +667,28 @@ impl Step for Std {
+             return distdir(builder).join(format!("{}-{}.tar.gz", name, target));
+         }
+ 
+-        // We want to package up as many target libraries as possible
+-        // for the `rust-std` package, so if this is a host target we
+-        // depend on librustc and otherwise we just depend on libtest.
+-        if builder.hosts.iter().any(|t| t == target) {
+-            builder.ensure(compile::Rustc { compiler, target });
+-        } else {
+-            if builder.no_std(target) == Some(true) {
+-                // the `test` doesn't compile for no-std targets
+-                builder.ensure(compile::Std { compiler, target });
+-            } else {
+-                builder.ensure(compile::Test { compiler, target });
+-            }
+-        }
++        builder.ensure(compile::Std { compiler, target });
++        builder.ensure(compile::Test { compiler, target });
+ 
+         let image = tmpdir(builder).join(format!("{}-{}-image", name, target));
+         let _ = fs::remove_dir_all(&image);
+ 
+-        let dst = image.join("lib/rustlib").join(target);
++        let dst = image.join("lib/rustlib").join(target).join("lib");
+         t!(fs::create_dir_all(&dst));
+-        let mut src = builder.sysroot_libdir(compiler, target).to_path_buf();
+-        src.pop(); // Remove the trailing /lib folder from the sysroot_libdir
+-        builder.cp_filtered(&src, &dst, &|path| {
+-            if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+-                if name == builder.config.rust_codegen_backends_dir.as_str() {
+-                    return false
+-                }
+-                if name == "bin" {
+-                    return false
+-                }
+-                if name.contains("LLVM") {
+-                    return false
+-                }
++
++        let compiler_to_use = builder.compiler_for(compiler.stage, compiler.host, target);
++        let stamp = dbg!(compile::libstd_stamp(builder, compiler_to_use, target));
++        for (path, host) in builder.read_stamp_file(&stamp) {
++            if !host {
++                builder.copy(&path, &dst.join(path.file_name().unwrap()));
+             }
+-            true
+-        });
++        }
++        let stamp = dbg!(compile::libtest_stamp(builder, compiler_to_use, target));
++        for (path, host) in builder.read_stamp_file(&stamp) {
++            if !host {
++                builder.copy(&path, &dst.join(path.file_name().unwrap()));
++            }
++        }
+ 
+         let mut cmd = rust_installer(builder);
+         cmd.arg("generate")
+-- 
+2.21.0
+
