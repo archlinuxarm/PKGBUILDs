@@ -10,7 +10,7 @@ buildarch=12
 highmem=1
 
 pkgname=firefox
-pkgver=69.0.1
+pkgver=69.0.2
 pkgrel=1
 pkgdesc="Standalone web browser from mozilla.org"
 arch=(x86_64)
@@ -28,12 +28,14 @@ optdepends=('networkmanager: Location detection via available WiFi networks'
             'hunspell-en_US: Spell checking, American English')
 options=(!emptydirs !makeflags !strip)
 source=(https://archive.mozilla.org/pub/firefox/releases/$pkgver/source/firefox-$pkgver.source.tar.xz{,.asc}
+        no-relinking.patch
         arm.patch
         build-arm-libopus.patch
         0001-Use-remoting-name-for-GDK-application-names.patch
         $pkgname.desktop firefox-symbolic.svg)
-sha256sums=('f5f2f592b8296812d43244d6a50c0c57ad11a5324db8e4e79749545482b79033'
+sha256sums=('2904ef954626d2a7f320670ccb7cb5d9060610f091c94190a6cbee14aa2cd82e'
             'SKIP'
+            '2dc9d1aa5eb7798c89f46478f254ae61e4122b4d1956d6044426288627d8a014'
             'bc00516032330760444939c516a60c78f868631e1b37f075f0fe71a53737b966'
             '2d4d91f7e35d0860225084e37ec320ca6cae669f6c9c8fe7735cdbd542e3a7c9'
             'ab07ab26617ff76fce68e07c66b8aa9b96c2d3e5b5517e51a3c3eac2edd88894'
@@ -57,6 +59,9 @@ _mozilla_api_key=e05d56db0a694edc8b5aaebda3f2db6a
 prepare() {
   mkdir mozbuild
   cd firefox-$pkgver
+
+  # Avoid relinking during buildsymbols
+  patch -Np1 -i ../no-relinking.patch
 
   # https://bugzilla.mozilla.org/show_bug.cgi?id=1530052
   patch -Np1 -i ../0001-Use-remoting-name-for-GDK-application-names.patch
@@ -145,7 +150,6 @@ build() {
 package() {
   cd firefox-$pkgver
   DESTDIR="$pkgdir" ./mach install
-  find . -name '*crashreporter-symbols-full.zip' -exec cp -fvt "$startdir" {} +
 
   _vendorjs="$pkgdir/usr/lib/$pkgname/browser/defaults/preferences/vendor.js"
   install -Dm644 /dev/stdin "$_vendorjs" <<END
@@ -200,6 +204,14 @@ END
   # https://bugzilla.mozilla.org/show_bug.cgi?id=658850
   ln -srf "$pkgdir/usr/bin/$pkgname" \
     "$pkgdir/usr/lib/$pkgname/firefox-bin"
+
+  if [[ -f "$startdir/.crash-stats-api.token" ]]; then
+    find . -name '*crashreporter-symbols-full.zip' -exec \
+      "$startdir/upload-symbol-archive" "$startdir/.crash-stats-api.token" {} +
+  else
+    find . -name '*crashreporter-symbols-full.zip' -exec \
+      cp -fvt "$startdir" {} +
+  fi
 }
 
 # vim:set sw=2 et:
