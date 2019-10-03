@@ -9,8 +9,8 @@
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=19.1.7
-pkgrel=1
+pkgver=19.2.0
+pkgrel=2
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -21,12 +21,14 @@ license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-Rip-out-VC4-forced-NEON.patch
         LICENSE
-        glesv2.pc)
-sha512sums=('0865b5f91e5daa00e1da2b3d8b65fe5d2ff6332372bf8fec7d671d05d8d64ec5a7abea1858cdfc506c76b7226d2bea0af3426565f156b796d8e0f949ea33dc15'
+        glvnd.patch
+	intel-topology-query-fix-old-gens.patch)
+sha512sums=('7278bbfba9c29fe91d1959ff1a48422e917db85287460523d12ae8c6d7f49f76e9636bf4c0d8d7d89e5569b3c67135f1b23b8f6c9d52d39413d8ec22e3bb40f0'
             'SKIP'
             'df13eaff1f3a95821221637c56d482945c42faca789e8bc71c36d0526750863aac891afab9d51ce0a912d7eede5b2af7c14a1c36ebd17c1bde945c3e057b773b'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
-            'd3adb2081c945df701d2e0ad0ecd19f96ebffaba9878da31bf670b1b591a7d9d5895f4b10cda1f9dbf51e551baa8dda5d061e61256225b464eeec34f29141dff')
+            '3e5746dcd493bff3f04b26de6168b15d0f161de62c1c6657106b61cbb1ad4925cbf3a691d5055491e759f88dbe0362dc909e7d726f87528980662f26ceb6dcbc'
+            'a5e2ccef20edc81859255c66cb838c5244774d9d6c56dcfce2e462b6ddaa66ef7847242b050402305621c9c9e706629af30dd27c8466b6bd32d1be40cb3e53a0')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
               'E3E8F480C52ADD73B278EE78E1ECBE07D7D70895'  # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>
@@ -34,7 +36,12 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
               '71C4B75620BC75708B4BDB254C95FAAB3EB073EC') # Dylan Baker <dylan@pnwbakers.com>
 
 prepare() {
-  cd mesa-${pkgver}
+  cd mesa-$pkgver
+
+  # libglvnd-1.2.0 support
+  patch -Np1 -i ${srcdir}/glvnd.patch
+  # Fix FS#63945
+  patch -Np1 -i ${srcdir}/intel-topology-query-fix-old-gens.patch
 
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i ../0001-Rip-out-VC4-forced-NEON.patch || true
 }
@@ -149,9 +156,6 @@ package_mesa() {
 
   # make sure there are no files left to install
   find fakeinstall -depth -print0 | xargs -0 rmdir
-
-  # bring back missing glesv2.pc
-  install -m644 -Dt ${pkgdir}/usr/lib/pkgconfig ${srcdir}/glesv2.pc
 
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
