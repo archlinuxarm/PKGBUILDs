@@ -1,0 +1,64 @@
+# Maintainer: David Runge <dave@sleepmap.de>
+# Contributor: Ray Rashif <schiv@archlinux.org>
+# Contributor: Daniele Paolella <danielepaolella@email.it>
+# Contributor: Philipp Überbacher <hollunder at gmx dot at>
+# Contributor: Thomas Bahn <thomas-bahn at gmx dot net>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to fix FTBFS on ARM
+
+pkgname=jack2
+pkgdesc="C++ version of the JACK low-latency audio server for multi-processor machines"
+pkgver=1.9.13
+pkgrel=1
+arch=('x86_64')
+url="https://github.com/jackaudio/jack2"
+license=('GPL2' 'LGPL2.1')
+depends=('alsa-lib' 'celt' 'glibc' 'libsamplerate' 'opus')
+makedepends=('libffado' 'portaudio' 'waf')
+optdepends=('a2jmidid: Expose ALSA MIDI in JACK MIDI'
+            'libffado: Firewire support'
+            'portaudio: Portaudio support'
+            'python-dbus: For jack_control'
+            'realtime-privileges: Acquire realtime privileges')
+provides=('jack' 'libjack.so' 'libjacknet.so' 'libjackserver.so')
+conflicts=('jack')
+replaces=('jack2-dbus')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/jackaudio/${pkgname}/archive/v${pkgver}.tar.gz"
+        '0001-Fix-undeclared-value-in-dbus-sigsegv.c.patch')
+sha512sums=('947ddd55c0dfbaa71e510c2870434ccf10acc51e416ae97d4e8db9c3c25bd1103520698879163ed7e4a13e92ec5bb3d24b949db1321795042c58e58336d7f300'
+            '767183a6e233bfd6a98391e3711e5c3de1f1fdb37f7b4da1d5643ed7fe8c320c459f721d4e57f9007c0cd2eaa5b6804f2cb548dc9b49715863bd0f613245c4dd')
+
+prepare() {
+  cd "${pkgname}-${pkgver}"
+  # copying relevant custom waf scripts and loading them specifically using
+  # wscript
+  (
+    touch __init__.py
+    mkdir -vp tools
+    cp -v waflib/extras/xcode*.py tools
+    rm -rv waflib
+    sed -e "s/load('xcode'/load('xcode', tooldir='tools'/g" \
+        -e "s/load('xcode6'/load('xcode6', tooldir='tools'/g" \
+        -i wscript
+  )
+  patch -p1 -i ../0001-Fix-undeclared-value-in-dbus-sigsegv.c.patch
+}
+
+build() {
+  cd "${pkgname}-${pkgver}"
+  export PYTHONPATH="${PWD}:${PYTHONPATH}"
+  waf configure --prefix=/usr \
+                --htmldir="/usr/share/doc/${pkgbase}/" \
+                --systemd-unit \
+                --classic \
+                --dbus
+  waf build
+}
+
+package() {
+  cd "${pkgname}-${pkgver}"
+  export PYTHONPATH="${PWD}:${PYTHONPATH}"
+  waf install --destdir="${pkgdir}"
+}
+# vim:set ts=2 sw=2 et:
