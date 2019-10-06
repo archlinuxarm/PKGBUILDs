@@ -8,25 +8,24 @@
 #  - removed lib32 package make/optdepends
 
 buildarch=12
-#noautobuild=1
+noautobuild=1
 
 pkgname=valgrind
-_commit=3a3000290b4af0e8ef9880293c54659a6819ba78
-pkgver=3.14.0
+_commit=608cb11914e5f23d0fc12c61dad29c5c7952a1de  # tags/VALGRIND_3_15_0^0
+pkgver=3.15.0
 pkgrel=1
 pkgdesc='Tool to help find memory-management problems in programs'
 arch=('x86_64')
 license=('GPL')
 url='http://valgrind.org/'
 depends=('glibc' 'perl')
-makedepends=('gdb' 'openmpi' 'git' 'docbook-xml'
+makedepends=('gdb' 'git' 'docbook-xml'
              'docbook-xsl' 'docbook-sgml')
 checkdepends=('procps-ng')
-optdepends=('openmpi: MPI support')
 provides=('valgrind-multilib')
 replaces=('valgrind-multilib')
 options=('!emptydirs' '!strip')
-source=("git+http://repo.or.cz/valgrind.git#commit=$_commit"
+source=("git+https://repo.or.cz/valgrind.git#commit=$_commit"
         valgrind-3.7.0-respect-flags.patch
         valgrind-3.13.0-arm64-hwcap.patch)
 md5sums=('SKIP'
@@ -51,16 +50,18 @@ prepare() {
 }
 
 build() {
-  # valgrind does not like stack protector flags
+  # valgrind does not like some of our flags
   CPPFLAGS=${CPPFLAGS/-D_FORTIFY_SOURCE=2/}
-  CFLAGS=${CFLAGS/-fstack-protector-strong -fno-plt/}
-  CXXFLAGS=${CXXFLAGS/-fstack-protector-strong -fno-plt/}
+  CFLAGS=${CFLAGS/-fno-plt/}
+  CXXFLAGS=${CXXFLAGS/-fno-plt/}
 
   cd valgrind
   ./configure \
     --prefix=/usr \
-    --mandir=/usr/share/man \
-    --with-mpicc=mpicc
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --libexecdir=/usr/lib \
+    --mandir=/usr/share/man
   make
   make -C docs man-pages
 }
@@ -71,48 +72,46 @@ check() {
   # Make sure a basic binary runs. There should be no errors.
   ./vg-in-place --error-exitcode=1 /bin/true
 
-  # Make sure no extra CFLAGS, CXXFLAGS or LDFLAGS leak through,
-  # the testsuite sets all flags necessary. See also configure above.
-  make check CFLAGS="" CXXFLAGS="" LDFLAGS=""
+  # Make sure no extra FLAGS leak through, the testsuite
+  # sets all flags necessary. See also configure above.
+  make check CPPFLAGS= CFLAGS= CXXFLAGS= LDFLAGS=
 
   # XXX: run full regtest but only report issues some tests fail duo
   # current toolchain and expectations, take a manual look if its fine
-  echo ===============TESTING===================
+  echo "===============TESTING==================="
   make regtest || :
 
   # Make sure test failures show up in build.log
   # Gather up the diffs (at most the first 20 lines for each one)
-  MAX_LINES=20
-  diff_files=$(find . -name '*.diff' | sort)
-  if [ z"${diff_files}" = z ] ; then
+  local f max_lines=20 diff_files=()
+  mapfile -d '' diff_files < <(find . -name '*.diff' -print0 | sort -z)
+  if (( ${#diff_files[@]} == 0 )); then
     echo "Congratulations, all tests passed!"
   else
     warning "Some tests failed!"
-    for f in ${diff_files} ; do
-        echo "=================================================" >> diffs
-        echo "${f}"                                              >> diffs
-        echo "=================================================" >> diffs
-        if [ "$(wc -l < "${f}")" -le ${MAX_LINES} ] ; then
-          cat "${f}"                                             >> diffs
+    for f in "${diff_files[@]}"; do
+        echo "================================================="
+        echo "${f}"
+        echo "================================================="
+        if (( $(wc -l < "${f}") < ${max_lines} )); then
+          cat "${f}"
         else
-          head -n ${MAX_LINES} "${f}"                            >> diffs
-          echo "<truncated beyond ${MAX_LINES} lines>"           >> diffs
+          head -n ${max_lines} "${f}"
+          echo "<truncated beyond ${max_lines} lines>"
         fi
-    done
+    done | tee diffs
   fi
-  cat diffs
-  echo ===============END TESTING===============
+  echo "===============END TESTING==============="
 }
 
 package() {
   cd valgrind
   make DESTDIR="${pkgdir}" install
 
-  install -d "$pkgdir/usr/share/man/man1"
-  install -m644 docs/*.1 -t "$pkgdir/usr/share/man/man1"
+  install -Dm644 docs/*.1 -t "$pkgdir/usr/share/man/man1"
 
   if check_option 'debug' n; then
-    find "${pkgdir}/usr/bin" -type f -executable -exec strip $STRIP_BINARIES {} + || true
+    find "${pkgdir}/usr/bin" -type f -executable -exec strip $STRIP_BINARIES {} + || :
   fi
 }
 
