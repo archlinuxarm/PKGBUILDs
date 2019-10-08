@@ -1,4 +1,4 @@
-THIS_JDK='java-12-openjdk'
+THIS_JDK='java-13-openjdk'
 
 fix_default() {
   if [ ! -x /usr/bin/java ]; then
