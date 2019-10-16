@@ -1,0 +1,67 @@
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Jameson Pugh <imntreal@gmail.com>
+# Contributor: Tim Jester-Pfadt <t.jp<at>gmx.de>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to remove invalid compiler option
+
+pkgbase=appstream
+pkgname=(appstream appstream-qt)
+pkgver=0.12.9
+pkgrel=2
+pkgdesc="Provides a standard for creating app stores across distributions"
+arch=(x86_64)
+url="https://distributions.freedesktop.org/wiki/AppStream"
+license=(GPL)
+depends=(libyaml libxml2 libstemmer glib2 lmdb)
+makedepends=(meson xmlto gobject-introspection gtk-doc qt5-tools itstool vala gperf)
+source=("https://www.freedesktop.org/software/appstream/releases/AppStream-$pkgver.tar.xz"{,.asc}
+        update-appstream-cache.hook
+        appstream-fix-double-free.patch::"https://github.com/ximion/appstream/commit/da9f330d.patch"
+        0001-Remove-Wno-error-deprecated-copy.patch)
+sha256sums=('459273e3aaaf8c393441c9532c0b808e61f0278ff6623c058563af1c904aa31d'
+            'SKIP'
+            'a6c42e4607ffd7d7dc931d608f1856e2ba7689d4caac0783e7100d86de0f951b'
+            'fb49831d8c8353d8e634c8a68f06d62baadc70dd28c06e388d8e6270e2b55e7d'
+            'e4cfc8b0f72c6a659e70dbd7dc870431faa0cf3320a64c8ca4f0df3a5e13117e')
+validpgpkeys=(D33A3F0CA16B0ACC51A60738494C8A5FBF4DECEB) # Matthias Klumpp <matthias@tenstral.net>
+
+prepare() {
+  mkdir -p build
+
+  cd AppStream-$pkgver
+  patch -p1 -i ../appstream-fix-double-free.patch # Fix double free when running appstream generator
+  patch -p1 -i ../0001-Remove-Wno-error-deprecated-copy.patch
+}
+
+build() {
+  cd build
+
+  meson ../AppStream-$pkgver \
+    --prefix=/usr \
+    -Dqt=true \
+    -Dvapi=true
+  ninja
+}
+
+package_appstream() {
+  cd build
+
+  DESTDIR="$pkgdir" ninja install
+
+# provided by -qt subpackage
+  rm -r "$pkgdir"/usr/{include/AppStreamQt,lib/cmake,lib/libAppStreamQt.*}
+
+  install -Dm644 "$srcdir"/update-appstream-cache.hook "$pkgdir"/usr/share/libalpm/hooks/update-appstream-cache.hook
+}
+
+package_appstream-qt() {
+  pkgdesc='Qt5 interface for AppStream'
+  depends=(appstream qt5-base)
+
+  cd build
+  DESTDIR="$pkgdir" ninja install
+
+# provided by appstream
+  rm -r "$pkgdir"{/etc,/usr/{bin,include/appstream,lib/{girepository-1.0,libappstream*,pkgconfig},share}}
+}
