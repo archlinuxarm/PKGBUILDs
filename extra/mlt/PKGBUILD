@@ -1,0 +1,81 @@
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Fabian Schoelzel <myfirstname.mylastname@googlemail.com>
+# Contributor: funkyou <spamopfer@nickname.berlin.de>
+# Contributor: tardo <tardo@nagi-fanboi.net>
+# Contributor: Stefan Husmann <stefan-husmann@t-online.de>
+# Contributor: Gustavo Alvarez <sl1pkn07@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - explicitly link v5/v6 with libatomic
+
+pkgbase=mlt
+pkgname=(mlt python-mlt)
+pkgver=6.18.0
+pkgrel=1
+pkgdesc="An open source multimedia framework"
+arch=(x86_64)
+url="https://www.mltframework.org"
+license=(GPL)
+makedepends=(ladspa frei0r-plugins libdv sdl_image libsamplerate sox ffmpeg vid.stab qt5-svg
+             jack libexif python swig movit eigen opencv libebur128 gtk2)
+source=($pkgname-$pkgver.tar.gz::"https://github.com/mltframework/mlt/archive/v$pkgver.tar.gz"
+        mlt-opencv4.patch)
+sha256sums=('9ea6775300b9f997460f5d6adde1ea41e525ecfd30a70b987e13800e4c387ddb'
+            'e770eaa39337cbbeb7d03357c11013e62ea355696023d1bd2d0fca6d1812b627')
+
+prepare() {
+  cd $pkgname-$pkgver
+  patch -p1 -i ../mlt-opencv4.patch # Fix build with openCV 4
+}
+
+build() {
+  cd mlt-$pkgver
+
+  [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && LIBS="-latomic"
+  ./configure --prefix=/usr \
+	--avformat-swscale \
+	--enable-gpl \
+        --enable-gpl3 \
+        --enable-opencv \
+        --avformat-ldextra=$LIBS
+  make
+
+# python bindings
+  cd src/swig/python
+  ./build
+}
+
+package_mlt() {
+  depends=(libebur128)
+  optdepends=('sdl_image: SDL1 plugin'
+        'sdl2: SDL2 plugin'
+        'libsamplerate: libavresample plugin'
+        'sox: SOX (Audio Swiss Army Knife) plugin'
+        'ffmpeg: ffmpeg plugin'
+        'vid.stab: video stabilize plugin'
+        'gtk2: Gtk plugin'
+        'qt5-svg: Qt5 plugins'
+        'jack: JACK sound output plugin'
+        'ladspa: LADSPA plugins'
+        'libexif: auto rotate plugin'
+        'frei0r-plugins: for additional effects'
+        'movit: opengl plugin'
+        'opencv: openCV plugin')
+
+  cd mlt-$pkgver
+  make DESTDIR="$pkgdir" install
+}
+
+package_python-mlt() {
+  depends=(python mlt)
+  conflicts=(mlt-python-bindings)
+  provides=(mlt-python-bindings)
+  replaces=(mlt-python-bindings)
+
+  _pythonpath=`python -c "from sysconfig import get_path; print(get_path('platlib'))"`
+  cd "$srcdir/mlt-$pkgver/src/swig/python"
+  mkdir -p "$pkgdir/$_pythonpath"
+  install -m755 mlt.py "$pkgdir/$_pythonpath"
+  install -m755 _mlt.so "$pkgdir/$_pythonpath"
+}
