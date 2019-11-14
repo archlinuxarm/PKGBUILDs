@@ -9,8 +9,8 @@
 pkgbase=mesa
 pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=19.2.3
-pkgrel=2
+pkgver=19.2.4
+pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'glproto' 'libdrm' 'dri2proto' 'dri3proto' 'presentproto' 
              'libxshmfence' 'libxxf86vm' 'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
@@ -21,7 +21,7 @@ license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-Rip-out-VC4-forced-NEON.patch
         LICENSE)
-sha512sums=('a64a6b508c28a61b9f5a50f639d0cdca2546caa2118c2478100e3535961d76bf3877357d4a7ddd7dc1d3dfc617883c8ee188915523b003aed8db03e0d5e1c007'
+sha512sums=('e8a0e90460f3153d730f8fb13f2c912a9826c05d2af9e22dc575bcd8885bf6a33c0af1c6659e81701ff097a132df88eead208e89dceb552b9da809ab543fa479'
             'SKIP'
             'ba55fd9816ebd9147be120da1fd4fa0364d19967a11570e6d5dd9d8b4f7971df46ced8b151ee07afaaa98043e131eed14918ec25f8c9b0f7e5c53f452674ee5c'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
