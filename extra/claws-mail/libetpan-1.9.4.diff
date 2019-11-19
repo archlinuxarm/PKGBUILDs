@@ -1,0 +1,240 @@
+From f4ea5707862db1678e418fbdde805d09efaa2ee5 Mon Sep 17 00:00:00 2001
+From: wwp <subscript@free.fr>
+Date: Wed, 6 Nov 2019 11:42:59 +0100
+Subject: [PATCH] Add support for libetpan 1.9.4 (it now uses pkg-config), fix
+ a bit version matching related to former 1.x.x and 0.x versions as well.
+
+---
+ configure.ac | 105 +++++++++++++++++++++++++++++++++------------------
+ 1 file changed, 69 insertions(+), 36 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 412a3f014..663e7b892 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -908,38 +908,62 @@ fi
+ dnl Libetpan
+ AC_MSG_CHECKING([whether to use libetpan])
+ if test x"$enable_libetpan" = xyes; then
+-	AC_MSG_RESULT(yes)
+-	libetpan_result=no
+-	AC_PATH_PROG(libetpanconfig, [libetpan-config])
+-	if test "x$libetpanconfig" != "x"; then
+-	  CPPFLAGS="$CPPFLAGS `$libetpanconfig --cflags 2>/dev/null`"
+-	  AC_CHECK_HEADER(libetpan/libetpan.h, [libetpan_result=yes])
+-	  if test "x$libetpan_result" = "xyes"; then
+-	    AC_MSG_CHECKING([whether libetpan-config hints compiles and links fine])
+-	    LIBS="$LIBS `$libetpanconfig --libs 2>/dev/null`"
+-	    AC_TRY_LINK([#include <libetpan/dbstorage.h>], [db_mailstorage_init(NULL, NULL);], [libetpan_result=yes], [libetpan_result=no])
+-	    AC_MSG_RESULT([$libetpan_result])
+-	  fi
+-	fi
+-	if test "x$libetpan_result" = "xyes"; then
+-	   LIBETPAN_CPPFLAGS="`$libetpanconfig --cflags`"
+-	   LIBETPAN_LIBS="`$libetpanconfig --libs`"
+-	   LIBETPAN_VERSION=`$libetpanconfig --version | $AWK -F. '{printf "%d", ($1 * 100) + $2}'`
+-	   if test "$LIBETPAN_VERSION" -lt "57"; then
+-		AC_MSG_RESULT([*** Claws Mail requires libetpan 0.57 or newer. See http://www.etpan.org/])
+-		AC_MSG_RESULT([*** You can use --disable-libetpan if you don't need IMAP4 and/or NNTP support.])
++    AC_MSG_RESULT(yes)
++
++    libetpan_config=no
++    libetpan_result=no
++    libetpan_versiontype=0
++
++    # since 1.9.4, libetpan uses pkg-config
++    PKG_CHECK_MODULES([LIBETPAN], [libetpan >= 1.9.4],
++    [
++        LIBETPAN_VERSION=`pkg-config --modversion | $AWK -F. '{printf "%d", ($1 * 10000) + ($2 * 100) + $3}'`
++        libetpan_config=yes
++    ],
++    [
++        # before 1.9.4, libetpan uses its own libetpan-config script
++        AC_PATH_PROG(libetpanconfig, [libetpan-config])
++        if test "x$libetpanconfig" != "x"; then
++            LIBETPAN_CPPFLAGS="`$libetpanconfig --cflags`"
++            LIBETPAN_LIBS="`$libetpanconfig --libs`"
++            # support libetpan version like x.x and x.x.x
++            libetpan_versiontype=`$libetpanconfig --version | tr -dc . | wc -c`
++            if test $libetpan_versiontype -eq 1; then
++                LIBETPAN_VERSION=`$libetpanconfig --version | $AWK -F. '{printf "%d", ($1 * 100) + $2}'`
++            else
++                LIBETPAN_VERSION=`$libetpanconfig --version | $AWK -F. '{printf "%d", ($1 * 10000) + ($2 * 100) + $3}'`
++            fi
++            libetpan_config=yes
++        fi
++    ])
++    if test "x$libetpan_config" = "xyes"; then
++        CPPFLAGS="$CPPFLAGS $LIBETPAN_FLAGS"
++        AC_CHECK_HEADER(libetpan/libetpan.h, [libetpan_result=yes])
++        if test "x$libetpan_result" = "xyes"; then
++            AC_MSG_CHECKING([whether libetpan-config hints compiles and links fine])
++            LIBS="$LIBS $LIBETPAN_LIBS"
++            AC_TRY_LINK([#include <libetpan/dbstorage.h>], [db_mailstorage_init(NULL, NULL);], [libetpan_result=yes], [libetpan_result=no])
++            AC_MSG_RESULT([$libetpan_result])
++        fi
++    fi
++    if test "x$libetpan_result" = "xyes"; then
++        if test $libetpan_versiontype -eq 1; then
++            if test "$LIBETPAN_VERSION" -lt "57"; then
++                AC_MSG_RESULT([*** Claws Mail requires libetpan 0.57 or newer. See http://www.etpan.org/])
++                AC_MSG_RESULT([*** You can use --disable-libetpan if you don't need IMAP4 and/or NNTP support.])
+                 AC_MSG_ERROR([libetpan 0.57 not found])
+-	   fi
+-	   AC_SUBST(LIBETPAN_FLAGS)
+-	   AC_SUBST(LIBETPAN_LIBS)
+-	   AC_DEFINE(HAVE_LIBETPAN, 1, Define if you want IMAP and/or NNTP support.)
+-	else
+-	   AC_MSG_RESULT([*** Claws Mail requires libetpan 0.57 or newer. See http://www.etpan.org/ ])
+-	   AC_MSG_RESULT([*** You can use --disable-libetpan if you don't need IMAP4 and/or NNTP support.])
+-           AC_MSG_ERROR([libetpan 0.57 not found])
+-	fi
++            fi
++        fi
++        AC_SUBST(LIBETPAN_FLAGS)
++        AC_SUBST(LIBETPAN_LIBS)
++        AC_DEFINE(HAVE_LIBETPAN, 1, Define if you want IMAP and/or NNit TP support.)
++    else
++        AC_MSG_RESULT([*** Claws Mail requires libetpan 0.57 or newer. See http://www.etpan.org/ ])
++        AC_MSG_RESULT([*** You can use --disable-libetpan if you don't need IMAP4 and/or NNTP support.])
++        AC_MSG_ERROR([libetpan 0.57 not found])
++    fi
+ else
+-	AC_MSG_RESULT(no)
++    AC_MSG_RESULT(no)
+ fi
+ AM_CONDITIONAL(CLAWS_LIBETPAN, test "x$libetpan_result" = "xyes")
+ 
+@@ -1119,6 +1143,10 @@ AC_ARG_ENABLE(vcalendar-plugin,
+ 		[  --disable-vcalendar-plugin      Do not build vcalendar plugin],
+ 		[enable_vcalendar_plugin=$enableval], [enable_vcalendar_plugin=auto])
+ 
++AC_ARG_ENABLE(vfolder-plugin,
++		[  --disable-vfolder-plugin        Do not build vfolder plugin],
++		[enable_vfolder_plugin=$enableval], [enable_vfolder_plugin=auto])
++
+ dnl disabled by default
+ AC_ARG_ENABLE(demo-plugin,
+ 		[  --enable-demo-plugin            Build demo plugin],
+@@ -1197,12 +1225,6 @@ dnl libarchive *****************************************************************
+ PKG_CHECK_MODULES(LIBARCHIVE, libarchive, HAVE_ARCHIVE=yes, HAVE_ARCHIVE=no)
+ AC_SUBST(ARCHIVE_LIBS)
+ AC_SUBST(ARCHIVE_CFLAGS)
+-AC_CHECK_LIB([archive], [archive_read_new],
+-		       ARCHIVE_LIBS=-larchive
+-		       HAVE_ARCHIVE=yes
+-		       AC_SUBST(ARCHIVE_LIBS,$ARCHIVE_CFLAGS),
+-		       HAVE_ARCHIVE=no
+-		       )
+ 
+ dnl libgdata *******************************************************************
+ PKG_CHECK_MODULES(GDATA, libgdata >= 0.17.2, HAVE_GDATA=yes, HAVE_GDATA=no)
+@@ -2071,6 +2093,15 @@ else
+ 	AC_MSG_RESULT(no)
+ fi
+ 
++AC_MSG_CHECKING([whether to build vfolder plugin])
++if test x"$enable_vfolder_plugin" != xno; then
++	PLUGINS="$PLUGINS vfolder"
++	AC_MSG_RESULT(yes)
++else
++	DISABLED_PLUGINS="$DISABLED_PLUGINS vfolder"
++	AC_MSG_RESULT(no)
++fi
++
+ dnl And finally the automake conditionals.
+ 
+ AM_CONDITIONAL(BUILD_ACPI_NOTIFIER_PLUGIN,	test x"$enable_acpi_notifier_plugin" != xno)
+@@ -2105,6 +2136,7 @@ AM_CONDITIONAL(BUILD_SPAMASSASSIN_PLUGIN,	test x"$enable_spamassassin_plugin" !=
+ AM_CONDITIONAL(BUILD_SPAM_REPORT_PLUGIN,	test x"$enable_spam_report_plugin" != xno)
+ AM_CONDITIONAL(BUILD_TNEF_PARSE_PLUGIN,		test x"$enable_tnef_parse_plugin" != xno)
+ AM_CONDITIONAL(BUILD_VCALENDAR_PLUGIN,		test x"$enable_vcalendar_plugin" != xno)
++AM_CONDITIONAL(BUILD_VFOLDER_PLUGIN,		test x"$enable_vfolder_plugin" != xno)
+ 
+ 
+ dnl ****************************
+@@ -2163,6 +2195,7 @@ src/plugins/spamassassin/Makefile
+ src/plugins/spam_report/Makefile
+ src/plugins/tnef_parse/Makefile
+ src/plugins/vcalendar/Makefile
++src/plugins/vfolder/Makefile
+ src/tests/Makefile
+ doc/Makefile
+ doc/man/Makefile
+-- 
+2.17.1
+
+From 6f1eb3954f61cf772fb24eea82b599cdcf7b0b56 Mon Sep 17 00:00:00 2001
+From: wwp <subscript@free.fr>
+Date: Wed, 6 Nov 2019 12:01:51 +0100
+Subject: [PATCH] Revert parts of configure.ac, unexpected changes from another
+ patch.
+
+---
+ configure.ac | 21 ++++++---------------
+ 1 file changed, 6 insertions(+), 15 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 663e7b892..187074c55 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1143,10 +1143,6 @@ AC_ARG_ENABLE(vcalendar-plugin,
+ 		[  --disable-vcalendar-plugin      Do not build vcalendar plugin],
+ 		[enable_vcalendar_plugin=$enableval], [enable_vcalendar_plugin=auto])
+ 
+-AC_ARG_ENABLE(vfolder-plugin,
+-		[  --disable-vfolder-plugin        Do not build vfolder plugin],
+-		[enable_vfolder_plugin=$enableval], [enable_vfolder_plugin=auto])
+-
+ dnl disabled by default
+ AC_ARG_ENABLE(demo-plugin,
+ 		[  --enable-demo-plugin            Build demo plugin],
+@@ -1225,6 +1221,12 @@ dnl libarchive *****************************************************************
+ PKG_CHECK_MODULES(LIBARCHIVE, libarchive, HAVE_ARCHIVE=yes, HAVE_ARCHIVE=no)
+ AC_SUBST(ARCHIVE_LIBS)
+ AC_SUBST(ARCHIVE_CFLAGS)
++AC_CHECK_LIB([archive], [archive_read_new],
++		       ARCHIVE_LIBS=-larchive
++		       HAVE_ARCHIVE=yes
++		       AC_SUBST(ARCHIVE_LIBS,$ARCHIVE_CFLAGS),
++		       HAVE_ARCHIVE=no
++		       )
+ 
+ dnl libgdata *******************************************************************
+ PKG_CHECK_MODULES(GDATA, libgdata >= 0.17.2, HAVE_GDATA=yes, HAVE_GDATA=no)
+@@ -2093,15 +2095,6 @@ else
+ 	AC_MSG_RESULT(no)
+ fi
+ 
+-AC_MSG_CHECKING([whether to build vfolder plugin])
+-if test x"$enable_vfolder_plugin" != xno; then
+-	PLUGINS="$PLUGINS vfolder"
+-	AC_MSG_RESULT(yes)
+-else
+-	DISABLED_PLUGINS="$DISABLED_PLUGINS vfolder"
+-	AC_MSG_RESULT(no)
+-fi
+-
+ dnl And finally the automake conditionals.
+ 
+ AM_CONDITIONAL(BUILD_ACPI_NOTIFIER_PLUGIN,	test x"$enable_acpi_notifier_plugin" != xno)
+@@ -2136,7 +2129,6 @@ AM_CONDITIONAL(BUILD_SPAMASSASSIN_PLUGIN,	test x"$enable_spamassassin_plugin" !=
+ AM_CONDITIONAL(BUILD_SPAM_REPORT_PLUGIN,	test x"$enable_spam_report_plugin" != xno)
+ AM_CONDITIONAL(BUILD_TNEF_PARSE_PLUGIN,		test x"$enable_tnef_parse_plugin" != xno)
+ AM_CONDITIONAL(BUILD_VCALENDAR_PLUGIN,		test x"$enable_vcalendar_plugin" != xno)
+-AM_CONDITIONAL(BUILD_VFOLDER_PLUGIN,		test x"$enable_vfolder_plugin" != xno)
+ 
+ 
+ dnl ****************************
+@@ -2195,7 +2187,6 @@ src/plugins/spamassassin/Makefile
+ src/plugins/spam_report/Makefile
+ src/plugins/tnef_parse/Makefile
+ src/plugins/vcalendar/Makefile
+-src/plugins/vfolder/Makefile
+ src/tests/Makefile
+ doc/Makefile
+ doc/man/Makefile
+-- 
+2.17.1
+
+
