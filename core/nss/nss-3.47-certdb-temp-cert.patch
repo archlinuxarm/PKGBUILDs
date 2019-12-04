@@ -1,20 +1,15 @@
 # HG changeset patch
 # User Daiki Ueno <dueno@redhat.com>
-# Date 1575381287 -3600
-#      Tue Dec 03 14:54:47 2019 +0100
-# Node ID 5ad40d3c760edac96d22b99e4e3e916b74f903fe
+# Date 1575450841 -3600
+#      Wed Dec 04 10:14:01 2019 +0100
+# Node ID 017097f0a0eaea1a3d849f3de79475c9bc28fcc2
 # Parent  d64102b76a437f24d98a20480dcc9f1655143e7c
-Bug 1593167, certdb: prefer perm certs over temp certs when trust is not available
+Bug 1593167, certdb: propagate trust information if trust module is loaded afterwards
 
 Summary:
-When a builtin root module is loaded after some temp certs being
-loaded, our certificate lookup logic preferred those temp certs over
-perm certs stored on the root module.  This was a problem because such
-temp certs are usually not accompanied with trust information.
+When the builtin trust module is loaded after some temp certs being created, these temp certs are usually not accompanied by trust information. This causes a problem in Firefox as it loads the module from a separate thread while accessing the network cache which populates temp certs.
 
-This makes the certificate lookup logic capable of handling such
-situations by checking if the trust information is attached to temp
-certs and otherwise falling back to perm certs.
+This change makes it properly roll up the trust information, if a temp cert doesn't have trust information.
 
 Reviewers: rrelyea, keeler
 
@@ -29,7 +24,7 @@ Differential Revision: https://phabricator.services.mozilla.com/D54726
 diff --git a/lib/pki/pki3hack.c b/lib/pki/pki3hack.c
 --- a/lib/pki/pki3hack.c
 +++ b/lib/pki/pki3hack.c
-@@ -921,14 +921,24 @@ stan_GetCERTCertificate(NSSCertificate *
+@@ -921,14 +921,28 @@ stan_GetCERTCertificate(NSSCertificate *
      }
      if (!cc->nssCertificate || forceUpdate) {
          fill_CERTCertificateFields(c, cc, forceUpdate);
@@ -49,15 +44,19 @@ diff --git a/lib/pki/pki3hack.c b/lib/pki/pki3hack.c
 +             */
 +            trust = nssTrust_GetCERTCertTrustForCert(c, cc);
 +        } else {
-+            /* If it's a temp cert, it might have been stored before
-+             * the builtin module is loaded, so look for the trust
-+             * again, but not set the empty trust if not found.
++            /* If it's a temp cert, it might have been stored before the
++             * builtin trust module is loaded, so look for the trust
++             * again, but don't set the empty trust if it is not found.
 +             */
 +            NSSTrust *t = nssTrustDomain_FindTrustForCertificate(c->object.cryptoContext->td, c);
 +            if (!t) {
 +                goto loser;
 +            }
 +            trust = cert_trust_from_stan_trust(t, cc->arena);
++            nssTrust_Destroy(t);
++            if (!trust) {
++                goto loser;
++            }
 +        }
  
          CERT_LockCertTrust(cc);
