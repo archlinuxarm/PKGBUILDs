@@ -11,14 +11,14 @@ pkgbase=bind
 pkgname=(bind bind-tools)
 _pkgver=9.14.8
 pkgver=${_pkgver//-/.}
-pkgrel=2
+pkgrel=4
 url='https://www.isc.org/software/bind/'
 license=('MPL2')
 arch=('x86_64')
 options=('!emptydirs' '!makeflags')
 makedepends=('libcap' 'libxml2' 'zlib' 'krb5' 'e2fsprogs' 'openssl' 'readline'
-  'libidn2' 'geoip' 'dnssec-anchors' 'python' 'json-c' 'python-ply' 'lmdb'
-  'zlib' 'icu' 'xz')
+  'libidn2' 'dnssec-anchors' 'python' 'json-c' 'python-ply' 'lmdb' 'zlib' 'icu'
+  'xz' 'libmaxminddb')
 validpgpkeys=('AE3FAC796711EC59FC007AA474BB6B9A4CBB3D38') #ISC Code Signing Key 2019 – 2020 (codesign@isc.org)
 source=("https://ftp.isc.org/isc/bind9/${_pkgver}/bind-${_pkgver}.tar.gz"{,.asc}
         'tmpfiles.conf'
@@ -27,32 +27,27 @@ source=("https://ftp.isc.org/isc/bind9/${_pkgver}/bind-${_pkgver}.tar.gz"{,.asc}
         'named.service'
         'localhost.zone'
         'localhost.ip6.zone'
-        '127.0.0.zone'
-        'empty.zone')
+        '127.0.0.zone')
 sha256sums=('e545aa75ced6695a9bf4b591606ef00260fb3c055c2865b299cfe0fe6eeea076'
             'SKIP'
             'f0423c4ee8495da487e07e9144bec1d25f46a0cd2dfa7cfd7a761ef15bfefc98'
             '7c0acefcfcc3ae093550caed7ec90fe84bec8f7477459ffa7e71dda76bcbdb2c'
-            'b625d8b92832a7b8b80432ee0a78361f23bf8a097bd4d8e922499e9406cfc00c'
+            'e08a01d41b18bdb771d534daca99642314939aafdb088e5cfcf0ef2d33f8e7eb'
             '3f0f8db0a1deae270dd166b4750be7c1041b4b44891176f35a8df7dd55d24d34'
             '0011708e516128647dd25b59b6ebc465f36e85bbe0a8fbdc3eb04b7f28c2197f'
             'c06fc270e32a843c8b6d86335a2ec607d405dfba6875de8d8a9abde39a9e2c17'
-            'b88fd2b99e7d42d414b329b814b9ff3304fa0ef9c67df81bde235bbfa0f3a3b8'
-            '4adfd0433850f3b6e168a80d211b8a0c3de95711315bdeb47dfae4c1af3d5dec')
+            'b88fd2b99e7d42d414b329b814b9ff3304fa0ef9c67df81bde235bbfa0f3a3b8')
 
 prepare() {
-  msg2 'Getting a fresh version of root DNS'
-  # no more using source array, lack of versioning.
-  curl -o root.hint https://www.internic.net/zones/named.root
-  [[ -s root.hint ]]
   cd bind-$_pkgver
   # apply patch from the source array (should be a pacman feature)
-  local filename
-  for filename in "${source[@]}"; do
-    if [[ "$filename" =~ \.patch$ ]]; then
-      msg2 "Applying patch ${filename##*/}"
-      patch -p1 -N -i "$srcdir/${filename##*/}"
-    fi
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    [[ $src = *.patch ]] || continue
+    msg2 "Applying patch $src..."
+    patch -Np1 < "../$src"
   done
 }
 
@@ -69,9 +64,8 @@ build() {
     --enable-fixed-rrset \
     --enable-full-report \
     --enable-dnsrps \
-    --enable-filter-aaaa \
     --with-python=/usr/bin/python \
-    --with-geoip \
+    --with-geoip2 \
     --with-openssl \
     --with-libidn2 \
     --with-libjson \
@@ -85,17 +79,17 @@ package_bind() {
   pkgdesc='The ISC DNS Server'
   provides=('dns-server')
   depends=('glibc' 'libxml2' 'libcap' 'openssl' 'geoip' 'json-c' 'bind-tools'
-           'zlib' 'lmdb')
+           'zlib' 'lmdb' 'libmaxminddb')
   backup=('etc/named.conf'
           'var/named/127.0.0.zone'
           'var/named/localhost.zone'
-          'var/named/localhost.ip6.zone'
-          'var/named/empty.zone')
+          'var/named/localhost.ip6.zone')
+  install=bind.install
 
   cd "bind-$_pkgver"
   install -dm755 "$pkgdir/usr/share/licenses/$pkgname/"
   install -Dm644 LICENSE COPYRIGHT "$pkgdir/usr/share/licenses/$pkgname/"
-  for _d in bin/{check,named,rndc}; do
+  for _d in bin/{check,named,rndc,plugins}; do
     (cd "$_d" && make DESTDIR="$pkgdir" install)
   done
 
@@ -107,18 +101,16 @@ package_bind() {
   install -D -m640 -o 0 -g 40 named.conf "$pkgdir/etc/named.conf"
 
   install -d -m770 -o 0 -g 40 "$pkgdir/var/named"
-  install    -m640 -o 0 -g 40 root.hint "$pkgdir/var/named"
   install    -m640 -o 0 -g 40 localhost.zone "$pkgdir/var/named"
   install    -m640 -o 0 -g 40 localhost.ip6.zone "$pkgdir/var/named"
   install    -m640 -o 0 -g 40 127.0.0.zone "$pkgdir/var/named"
-  install    -m640 -o 0 -g 40 empty.zone "$pkgdir/var/named"
 }
 
 package_bind-tools() {
   pkgdesc='The ISC DNS tools'
   depends=('glibc' 'libcap' 'libxml2' 'zlib' 'krb5' 'e2fsprogs' 'python' 'bash'
-           'openssl' 'readline' 'geoip' 'libidn2' 'dnssec-anchors' 'json-c'
-           'lmdb' 'xz' 'icu')
+           'openssl' 'readline' 'libidn2' 'dnssec-anchors' 'json-c' 'lmdb' 'xz'
+           'icu' 'python-ply' 'libmaxminddb')
   conflicts=('dnsutils')
   replaces=('dnsutils' 'host')
   provides=("dnsutils=$pkgver")
