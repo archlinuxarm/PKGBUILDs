@@ -3,27 +3,27 @@
 # Contributor: Jason Chu <jchu@xentac.net>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - fix for unimplemented _FPU_EXTENDED
-#  - patch to use neon only on 32bit ARM
+#  - disable neon (-DALSOFT_CPUEXT_NEON=OFF)
 
 pkgbase=openal
 pkgname=(openal openal-examples)
-pkgver=1.19.1
-pkgrel=2
+pkgver=1.20.0
+pkgrel=1
 pkgdesc="Cross-platform 3D audio library, software implementation"
-arch=(i686 x86_64)
+arch=(x86_64)
 url="https://github.com/kcat/openal-soft"
 license=(LGPL)
-depends=(glibc)
-makedepends=(alsa-lib libpulse fluidsynth portaudio jack qt5-base sdl2 sdl_sound ffmpeg
-             git cmake ninja)
-_commit=6761218e51699f46bf25c377e65b3e9ea5e434b9  # tags/openal-soft-1.19.1
+depends=(gcc-libs)
+makedepends=(alsa-lib libpulse fluidsynth portaudio jack qt5-base sdl2 sdl_sound
+             ffmpeg libmysofa git cmake)
+optdepends=('qt5-base: alsoft-config GUI Configurator'
+            'fluidsynth: MIDI rendering'
+            'libmysofa: makemhr tool')
+_commit=c0cf323e1d56ce605e90927324d2fdafcfbb564a  # tags/openal-soft-1.20.0
 source=("git+https://github.com/kcat/openal-soft#commit=$_commit"
-        'no-fpuextended.patch'
-        'openal-soft-arm_neon-only-for-32bit.patch')
+        sdl_sound.diff)
 sha512sums=('SKIP'
-            'e782025501a62003ee7e63dcdb50343add8b1241b2efd606cc9a7f61a01d4625c777a647d7647b0b19798f247efca213bce3b3f40e22c8903355f7058e3d2011'
-            'e2bdf53d9bb154be83db134ad256333dcbb25715946e4f4098808200a3ff250d2ff492008ec64ddc2b0b67c84fca1392f568a455c819c487c7efc92793ede98a')
+            'ebfdb316adbfbdfc6e6236a390dc33579e9eb06918ba110e436ffa91b4535c82ad225b1379587e1ba6b444abcc5f65d53e0360823a054f860bc57bc6f4b51334')
 
 pkgver() {
   cd openal-soft
@@ -31,40 +31,38 @@ pkgver() {
 }
 
 prepare() {
-  mkdir build examples
   cd openal-soft
-  git cherry-pick -n 8bacb5dfb8ef910586fcf5b5cd89526ec81061e8
 
-  patch -p1 -i "${srcdir}"/no-fpuextended.patch
-  patch -p0 -i "${srcdir}"/openal-soft-arm_neon-only-for-32bit.patch
+  # Fix building some things with our old SDL_sound (and SDL1)
+  git apply -3 ../sdl_sound.diff
 }
 
 build() {
-  cd build
-  cmake ../openal-soft -G Ninja \
+  cmake -Hopenal-soft -Bbuild \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_LIBDIR=lib
-  ninja
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DALSOFT_CPUEXT_NEON=OFF
+  cmake --build build
 }
 
 package_openal() {
-  optdepends=('qt5-base: alsoft-config GUI Configurator'
-              'fluidsynth: MIDI rendering')
-
-  DESTDIR="$pkgdir" ninja -C build install
+  DESTDIR="$pkgdir" cmake --build build --target install
   install -Dt "$pkgdir/usr/share/doc/openal" -m644 openal-soft/docs/*
 
 ### Split openal-examples
-  cd "$pkgdir/usr/bin"
-  mv -vt "$srcdir/examples" alffplay alhrtf allatency alloopback almultireverb \
-    alplay alrecord alreverb alstream altonegen
+  mkdir -p examples/usr/bin
+  for f in \
+    alffplay alhrtf allatency alloopback almultireverb alplay alrecord \
+    alreverb alstream altonegen
+  do
+    mv -v "$pkgdir/usr/bin/$f" examples/usr/bin/$f
+  done
 }
 
 package_openal-examples() {
   pkgdesc+=" (example programs)"
   depends=("openal=$pkgver-$pkgrel" sdl2 sdl_sound ffmpeg)
-
-  mkdir "$pkgdir/usr"
-  mv -v examples "$pkgdir/usr/bin"
+  optdepends=()
+  mv examples/* "$pkgdir"
 }
