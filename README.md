@@ -1,3 +1,5 @@
+wifi-menu works
+
 This repository hosts
 [PKGBUILDs](https://wiki.archlinux.org/index.php/PKGBUILD) that have been
 modified from the upstream [Arch Linux](http://archlinux.org) release in order
