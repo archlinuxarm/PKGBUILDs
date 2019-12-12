@@ -1,0 +1,39 @@
+From c4a2ad579a2fe5d357f2d6486c1afe84ef18a029 Mon Sep 17 00:00:00 2001
+From: Arne Welzel <arne.welzel@gmail.com>
+Date: Sun, 8 Dec 2019 12:59:45 +0100
+Subject: [PATCH] php: Properly zero initialize zend_file_handle
+
+In the PHP bugtracker [1], the stacktrace included a bogus pointer value
+being passed to `_efree`. The ASCII value of the pointer is "02.11.81"
+which heavily pointed at usage of non-initialized data.
+
+    #1  0x00007f8fe07e9e96 in _efree (ptr=0x30322e31312e3831) at /data/work/php-src-php-7.4.0RC6/Zend/zend_alloc.c:2549
+
+The solution is to use an open-coded version of`zend_stream_init_filename()` [2].
+Maybe we could actually use the above helper, but I'm not familiar enough
+with PHP/versions/compat, so the proposed change seems safer.
+
+Should fix #2096.
+
+[1] https://bugs.php.net/bug.php?id=78828
+[2] https://github.com/php/php-src/blob/bc6e4b6c574261188519a1e83ba49998ffbcb12b/Zend/zend_stream.c#L70
+---
+ plugins/php/php_plugin.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/plugins/php/php_plugin.c b/plugins/php/php_plugin.c
+index 72c390223..1690fb60c 100644
+--- a/plugins/php/php_plugin.c
++++ b/plugins/php/php_plugin.c
+@@ -1115,10 +1115,9 @@ int uwsgi_php_request(struct wsgi_request *wsgi_req) {
+ 
+ 	SG(request_info).path_translated = wsgi_req->file;
+ 
++        memset(&file_handle, 0, sizeof(zend_file_handle));
+         file_handle.type = ZEND_HANDLE_FILENAME;
+         file_handle.filename = real_filename;
+-        file_handle.free_filename = 0;
+-        file_handle.opened_path = NULL;
+ 
+         if (php_request_startup(TSRMLS_C) == FAILURE) {
+ 		uwsgi_500(wsgi_req);
