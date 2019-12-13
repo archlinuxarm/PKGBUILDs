@@ -2,58 +2,74 @@
 # Contributor: Enlightenment Developers <enlightenment-devel@enlightenment.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - configure with --disable-neon for !aarch64
-#  - aarch64: depend on lua52, configure with --enable-lua-old
+#  - configure with -Dnative-arch-optimization=false for !aarch64
 
 pkgbase=efl
 pkgname=('efl' 'efl-docs')
-pkgver=1.22.2
+pkgver=1.23.1
 pkgrel=1
 pkgdesc="Enlightenment Foundation Libraries"
 arch=('x86_64')
 url="https://www.enlightenment.org"
 license=('BSD' 'LGPL2.1' 'GPL2' 'custom')
-depends=('bullet' 'libjpeg-turbo' 'gst-plugins-base'
-         'luajit' 'curl' 'fribidi' 'libpulse' 'libxcomposite'
-         'libxinerama' 'libxrandr' 'libxss' 'libinput'
-         'libxcursor' 'libxp' 'libwebp' 'shared-mime-info'
-         'libxkbcommon' 'libxkbcommon-x11' 'wayland' 'lz4' 'openjpeg' 'avahi'
-         'libspectre' 'libraw' 'librsvg' 'wayland-protocols'
-         'mesa' 'hicolor-icon-theme' 'poppler')
-depends_aarch64=('lua52')
-optdepends=('python2: einabench-cmp' 'libreoffice: thumbnailing for DOC/PPT/XLS files')
-makedepends=('doxygen' 'python' 'texlive-core' 'ghostscript' 'imagemagick')
+depends=('avahi' 'bullet' 'curl' 'fontconfig' 'fribidi'
+         'gst-plugins-base-libs' 'luajit' 'libexif' 'libgl' 'libinput'
+         'libpulse' 'libspectre' 'libraw' 'librsvg' 'libwebp' 'libxcomposite'
+         'libxcursor' 'libxinerama' 'libxkbcommon' 'libxp' 'libxrandr'
+         'libxss' 'libunwind' 'mesa' 'openjpeg2' 'poppler'
+         'shared-mime-info' 'mailcap' 'ttf-font' 'scim' 'libibus' 'glib2'
+         'wayland' 'wayland-protocols' 'libxkbcommon-x11'
+         'pulseaudio')
+optdepends=('geoclue: For elocation'
+            'gst-plugins-base: Video and thumbnail codecs'
+            'gst-plugins-good: Video and thumbnail codecs'
+            'gst-plugins-bad: Video and thumbnail codecs'
+            'gst-plugins-ugly: Video and thumbnail codecs'
+            'gst-libav: Video and thumbnails with ffmpeg/libav'
+            'libreoffice: Office document thumbnails'
+            'python2: Compare Eina benchmarks')
+makedepends=('doxygen' 'python' 'texlive-core' 'ghostscript' 'imagemagick' 'meson' 'ninja')
 options=('!emptydirs')
 source=(https://download.enlightenment.org/rel/libs/${pkgname}/$pkgname-$pkgver.tar.xz)
-sha256sums=('1699891f825911622de0aa77fe1140eff7335aba619d2352485e54dcff6b1cd0')
+sha256sums=('d62220cca16d434c18b36fe3acffa0f5c0e669da4931b133524183308f242f61')
+
 
 build() {
   cd "${srcdir}/${pkgname}-${pkgver}"
 
   export CFLAGS="$CFLAGS -fvisibility=hidden"
 
-  [[ $CARCH != "aarch64" ]] && CONFIG="--disable-neon"
-  [[ $CARCH == "aarch64" ]] && CONFIG="--enable-lua-old"
+  if [ -d build ]; then
+    rm -rf build
+  fi
+  mkdir -p build
 
-  ./configure --prefix=/usr \
-  --disable-static --disable-tslib --enable-fb \
-  --enable-xinput22 --enable-multisense --enable-systemd \
-  --enable-image-loader-webp --enable-harfbuzz --enable-wayland \
-  --enable-liblz4 --enable-drm --enable-elput --enable-egl --with-opengl=es $CONFIG
+  [[ $CARCH != "aarch64" ]] && CONFIG="-Dnative-arch-optimization=false"
 
-  make
+  meson --prefix=/usr \
+    -Dfb=true \
+    -Ddrm=true \
+    -Dwl=true \
+    -Dnetwork-backend=connman \
+    -Devas-loaders-disabler=json \
+    -Dbindings= \
+    -Dbuild-examples=false \
+    -Dbuild-tests=false \
+    -Decore-imf-loaders-disabler= \
+    $CONFIG . build
 
-  cd doc
+  ninja -C build
+
+  cd build/doc
   doxygen
-  #make -j1 doc || return 0  # don't fail on the docs
 }
 
 package_efl(){
   replaces=('elementary' 'evas_generic_loaders' 'emotion_generic_players')
 
   cd "${srcdir}/${pkgname}-${pkgver}"
-  make -j1 DESTDIR=${pkgdir} install
-
+  DESTDIR="${pkgdir}" ninja -C build install
+  
   # install non-standard license files
   install -Dm644 "${srcdir}/${pkgname}-${pkgver}/licenses/COPYING.BSD" \
     "${pkgdir}/usr/share/licenses/${pkgname}/COPYING.BSD"
@@ -65,9 +81,11 @@ package_efl-docs() {
   pkgdesc="Documentation for the Enlightenment Foundation Libraries"
   depends=()
 
-  cd "${srcdir}/${pkgbase}-${pkgver}"
+  cd "${srcdir}/${pkgbase}-${pkgver}/build"
   install -d "${pkgdir}/usr/share/doc/${pkgbase}"
-  cp -a doc/html "${pkgdir}/usr/share/doc/${pkgbase}/html"
-  cp -a doc/latex "${pkgdir}/usr/share/doc/${pkgbase}/latex"
+  cp -a html "${pkgdir}/usr/share/doc/${pkgbase}/html"
+  cp -a latex "${pkgdir}/usr/share/doc/${pkgbase}/latex"
+  #cp -a man "${pkgdir}/usr/share"
+  
 }
 
