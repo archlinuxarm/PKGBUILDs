@@ -22,17 +22,19 @@ license=(MPL GPL LGPL)
 depends=(gtk3 mozilla-common libxt startup-notification mime-types dbus-glib alsa-lib
          nss hunspell sqlite ttf-font icu)  # libvpx
 makedepends=(unzip zip diffutils python python2 yasm nasm mesa imake libpulse inetutils xorg-server-xvfb
-             autoconf2.13 rust clang llvm gtk2 cbindgen nodejs)
+             autoconf2.13 rust clang llvm gtk2 cbindgen nodejs distcc-clang)
 optdepends=('libcanberra: sound support')
 options=(!emptydirs !makeflags)
 source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz{,.asc}
         $pkgname.desktop
         thunderbird-rust-1.39.patch
+        arm.patch
         Bug-1238661---fix-mozillaSignalTrampoline-to-work-.patch)
 sha256sums=('f68cb53deb6c1840cc3f2b1e842bac8ebaf090e9cd89afb376ba0e1ba62820aa'
             'SKIP'
             'e44c55501f650a4e80b9c353b81f33e07ca65808db831eff6ca616aded233827'
             '08834ef1c2dd685edd40dea20dfa9d4b889f5c387385ac329a162eeff6cf90be'
+            'bc00516032330760444939c516a60c78f868631e1b37f075f0fe71a53737b966'
             '36a655ce3987159990d46a13d9955305a72a8a737e6af983eb170c4f652eb39a')
 validpgpkeys=(14F26682D0916CDD81E37B6D61B7B526D98F0353) # Mozilla Software Releases <release@mozilla.com>
 
@@ -109,13 +111,20 @@ END
 
   if [[ $CARCH == "armv7h" ]]; then
     echo "ac_add_options --disable-elf-hack" >> .mozconfig
-    echo 'ac_add_options --enable-optimize="-g -O2 -fno-schedule-insns"' >> .mozconfig
-  elif [[ $CARCH == "aarch64" ]]; then
-    echo 'ac_add_options --enable-optimize="-O2"' >> .mozconfig
+    MAKEFLAGS="-j2"
   fi
 
+  echo 'ac_add_options --enable-optimize="-g0 -O2"' >> .mozconfig
+  echo "mk_add_options MOZ_MAKE_FLAGS=\"${MAKEFLAGS}\"" >> .mozconfig
+
+  export MOZ_DEBUG_FLAGS=" "
+  export CFLAGS+=" -g0"
+  export CXXFLAGS+=" -g0"
+  export LDFLAGS+=" -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
+  export RUSTFLAGS="-Cdebuginfo=0"
+
+  patch -p1 -i ../arm.patch
   patch -p1 -i ../Bug-1238661---fix-mozillaSignalTrampoline-to-work-.patch
-  LDFLAGS+=" -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
 }
 
 build() {
