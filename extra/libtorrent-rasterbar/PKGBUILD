@@ -1,0 +1,64 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Ionut Biru <ibiru@archlinux.org>
+# Contributor: Hugo Doria <hugo@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - explicitly link v5/v6 with libatomic
+
+pkgname=libtorrent-rasterbar
+pkgver=1.2.2
+pkgrel=1
+epoch=1
+pkgdesc="A C++ BitTorrent library that aims to be a good alternative to all the other implementations around"
+url="https://www.rasterbar.com/products/libtorrent/"
+arch=('x86_64')
+license=('BSD')
+depends=('boost-libs')
+makedepends=('boost' 'python2' 'python')
+options=('!emptydirs')
+_pkgver=${pkgver//./_}
+source=(https://github.com/arvidn/libtorrent/releases/download/libtorrent-$_pkgver/$pkgname-$pkgver.tar.gz)
+sha512sums=('8ef867d253fe187336ec5919683526997298319b755bcd72eeca2c56c81462d2aed912d2eadcd560d2a8729b36798718f9a1668a83927211f49667af9bdf0a06')
+
+prepare() {
+  mkdir py2 py3
+  cd $pkgname-$pkgver
+
+  # Avoid depending on newer processors
+  sed -i 's/-msse4.2//' configure.ac
+
+  autoreconf -if
+}
+
+_build() (
+  cd py$1
+
+  # FS#50745
+  _boost="boost_python"
+  if [ $1 -eq 3 ]; then _boost="boost_python3"; fi
+
+  [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && LIBS="-latomic"
+  LIBS=$LIBS PYTHON=/usr/bin/python$1 \
+  ../$pkgname-$pkgver/configure \
+    --prefix=/usr \
+    --enable-python-binding \
+    --enable-examples \
+    --disable-static \
+    --with-libiconv \
+    --with-boost-python=$_boost
+)
+
+build() {
+  _build 2
+  _build 3
+}
+
+package() {
+  make -C py2 DESTDIR="$pkgdir" install
+  make -C py3 DESTDIR="$pkgdir" install
+  install -Dm644 $pkgname-$pkgver/COPYING \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  # Remove most example binaries
+  rm "$pkgdir"/usr/bin/{*_test,*_tester,simple_client,stats_counters}
+}
