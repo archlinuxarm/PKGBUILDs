@@ -1,4 +1,4 @@
-# Maintainer: David Runge <dave@sleepmap.de>
+# Maintainer: David Runge <dvzrv@archlinux.org>
 # Contributor: Ainola
 # Contributor: speps
 # Contributor: Bernardo Barros
@@ -13,16 +13,19 @@ buildarch=22
 pkgbase=csound
 pkgname=('csound' 'csound-doc')
 pkgver=6.13.0
-pkgrel=3
+pkgrel=4
 pkgdesc="A programming language for sound rendering and signal processing."
 arch=('x86_64')
 url="https://csound.com"
 license=('LGPL')
 # libpd needs to be packaged: https://github.com/libpd/libpd/releases
 # gmm > 5.1 breaks linear-algebra opcode: https://github.com/csound/csound/issues/920
-makedepends=('boost' 'cmake' 'cunit' 'doxygen' 'dssi' 'eigen' 'faust' 'fltk'
-'fluidsynth' 'hdf5' 'java-environment' 'ladspa' 'libmusicxml' 'libwebsockets'
-'link' 'llvm' 'lua' 'portmidi' 'portsmf' 'python2' 'stk' 'swig' 'wiiuse')
+makedepends=('alsa-lib' 'boost' 'cmake' 'doxygen' 'dssi' 'eigen' 'faust' 'fltk'
+'libfluidsynth.so' 'hdf5' 'java-environment' 'ladspa'
+'libjack.so' 'libmusicxml2.so' 'libwebsockets' 'link' 'llvm' 'lua'
+'libportaudio.so' 'libportmidi.so' 'libsamplerate' 'libsndfile' 'libportSMF.so'
+'libstk.so' 'openssl' 'swig' 'libwiiuse.so')
+checkdepends=('cunit')
 source=("${pkgbase}-${pkgver}.tar.gz::https://github.com/${pkgbase}/${pkgbase}/archive/${pkgver}.tar.gz"
         "${pkgbase}.sh"
         "https://github.com/${pkgbase}/${pkgbase}/releases/download/${pkgver}/Csound${pkgver}_manual_html.zip"
@@ -33,58 +36,67 @@ sha512sums=('51a30cb426fc77ac648f6a9fb669b9298e6608b39ae3b12181d16ecf1fb6f2ed3db
             '30a55ec2c3ab0e243ac48a081954bea1f8fa653d25c908383c49a879972b94ba2ce7c3b3b0701be18ace28dc7fd199597d889fa1f9e5aca478792b835909c8fa')
 
 prepare() {
-  cd "${pkgbase}-${pkgver}"
-  mkdir build
+  # fix file permissions in html manual
+  find html/ -type f -exec chmod -c 644 {} \;
 }
 
 build() {
   local _java_major=$(java --version 2>/dev/null |grep 'openjdk'| cut -d ' ' -f2| cut -d '.' -f1)
-  cd "${pkgbase}-${pkgver}/build"
+  cd "${pkgbase}-${pkgver}"
   # without CMAKE_BUILD_TYPE=Release, csound is build as beta: https://bugs.archlinux.org/task/63348
   # it's not allowed to redistribute the scansyn opcodes: https://github.com/csound/csound/issues/1148
+  # the python plugin is not python3 compatible: https://github.com/csound/csound/issues/631
   cmake -DCMAKE_INSTALL_PREFIX=/usr \
         -DCMAKE_BUILD_TYPE='Release' \
         -DBUILD_SCANSYN_OPCODES=OFF \
         -DCMAKE_CXX_FLAGS="-Wno-error -Wno-missing-field-initializers -DPFFFT_SIMD_DISABLE" \
         -DCMAKE_C_FLAGS="-Wno-error -Wno-missing-field-initializers -DPFFFT_SIMD_DISABLE" \
         -DBUILD_JAVA_INTERFACE=0 \
+        -DJAVA_AWT_LIBRARY="/usr/lib/jvm/java-${_java_major}-openjdk/jre/lib/libawt.so" \
+        -DJAVA_JVM_LIBRARY="/usr/lib/jvm/java-${_java_major}-openjdk/jre/lib" \
         -DLUA_LIBRARY=/usr/lib/liblua.so \
-        -DPYTHON_MODULE_INSTALL_DIR=/usr/lib/python2.7/site-packages \
         -DBUILD_STATIC_LIBRARY=ON \
         -DBUILD_ABLETON_LINK_OPCODES=ON \
         -DABLETON_LINK_HOME=/usr/include/ableton \
-        ..
-  make VERBOSE=1
+        -B build \
+        -S .
+  make VERBOSE=1 -C build
 }
 
 check() {
-  cd "${pkgbase}-${pkgver}/build"
-  make test
+  cd "${pkgbase}-${pkgver}"
+  make test -C build
 }
 
 package_csound() {
   groups=('pro-audio')
-  depends=('curl' 'libsndfile')
-  optdepends=('alsa-lib: librtalsa opcode'
-              'csound-doc: The canonical Csound Reference Manual'
-              'csoundqt: frontend/ editor with integrated help'
-              'fltk: libvirtual/libwidgets opcode'
-              'faust: libfaustcsound opcode'
-              'fluidsynth: libfluidsynth opcode'
-              'hdf5: hdf5ops opcode'
-              'jack: libjacko, librtjack, libjackTransport opcode'
+  depends=('gcc-libs' 'glibc' 'libcurl.so' 'libsamplerate' 'libsndfile')
+  optdepends=('alsa-lib: for librtalsa plugin'
+              'csound-doc: for the canonical Csound Reference Manual'
+              'csoundqt: for frontend/ editor with integrated help'
+              'fltk: for libvirtual and libwidgets plugins'
+              'hdf5: for hdf5ops plugin'
               'java-runtime: java integration'
-              'liblo: OSC opcode'
-              'libpulse: librtpulse opcode'
-              'libwebsockets: libwebsocketIO opcode'
-              'lua: LUA integration'
-              'portmidi: libpmidi opcode'
-              'python2: libpy opcode/ python2 integration'
-              'stk: stk opcode'
+              'libfaust.so: for libfaustcsound plugin'
+              'libfluidsynth.so: for libfluidOpcodes plugin'
+              'libjack.so: for libjacko, librtjack and libjackTransport plugins'
+              'liblo.so: for libosc plugin'
+              'libncursesw.so: for libfaustcsound plugin'
+              'libpng: for libimage plugin'
+              'libportmidi.so: for libpmidi plugin'
+              'libportaudio.so: for librtpa plugin'
+              'libpulse: for librtpulse plugin'
+              'libstk.so: for libstkops plugin'
+              'libwebsockets: for libwebsocketIO plugin'
+              'libwiiuse.so: for libwiimote plugin'
+              'libx11: for libwidgets plugin'
+              'lua: for LUA integration'
+              'openssl: for libfaustcsound plugin'
               'vim-csound: vim integration'
-              'wiiuse: wiimote opcode')
-  cd "${pkgname}-${pkgver}/build"
-  make DESTDIR="${pkgdir}/" install
+              'zlib: for libfaustcsound plugin')
+  provides=('libcsound64.so' 'libcsnd6.so')
+  cd "${pkgname}-${pkgver}"
+  make DESTDIR="${pkgdir}/" install -C build
 
   # export vars in profile.d
   install -vDm 755 "${srcdir}/${pkgname}.sh" -t "${pkgdir}/etc/profile.d/"
@@ -98,13 +110,9 @@ package_csound() {
 
 package_csound-doc() {
   license=('LGPL' 'GPL')
-  install -vDm 644 "Csound${pkgver}_manual.pdf" \
+  install -vDm 644 "${srcdir}/Csound${pkgver}_manual.pdf" \
     "${pkgdir}/usr/share/doc/${pkgname}/${pkgbase}-manual.pdf"
-
   install -dv "${pkgdir}/usr/share/doc/${pkgname}/html"
-  cp -av "${srcdir}"/html/* "${pkgdir}/usr/share/doc/${pkgname}/html"
-  # fix file permissions
-  find "${pkgdir}" -type f -exec chmod -c 644 {} \;
+  cp -av "${srcdir}/html/"* "${pkgdir}/usr/share/doc/${pkgname}/html"
 }
-
 # vim:set ts=2 sw=2 et:
