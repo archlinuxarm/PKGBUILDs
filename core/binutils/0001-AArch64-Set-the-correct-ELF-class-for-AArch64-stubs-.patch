@@ -1,0 +1,145 @@
+From 8a49de34004f86920bb6fea16ff0784fa377d83d Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Tue, 7 Jan 2020 17:41:03 -0700
+Subject: [PATCH] AArch64: Set the correct ELF class for AArch64 stubs
+ (PR/25210)
+
+This fixes PR 25210 by specifying the the correct ELF class for AArch64 stubs.
+After doing this the stub section starts behaving like a normal object file
+loaded from disk.  That is SEC_LINKER_CREATED causes us to have to write the
+section manually.
+
+This flag was added as a fix for PR 24753.  I believe that
+fix to still be correct as linker created sections don't have a size on disk
+and it fixes the Arm bootstrap regression. But in this case specifying the
+correct section class also makes the stub section not be considered by
+compress.c.
+
+So I'm partially revert this change so that we don't have to manage the section
+manually as implied by SEC_LINKER_CREATED.
+
+bfd/ChangeLog:
+
+	PR 25210
+	PR 24753
+	* elfnn-aarch64.c (_bfd_aarch64_create_stub_section): Set ELF class.
+
+ld/ChangeLog:
+
+	PR 25210
+	PR 24753
+	* emultempl/aarch64elf.em (elf${ELFSIZE}_aarch64_add_stub_section):
+	Remove SEC_LINKER_CREATED.
+	* testsuite/ld-aarch64/aarch64-elf.exp: Add erratum835769-843419.
+	* testsuite/ld-aarch64/erratum835769-843419.d: New test.
+---
+ bfd/elfnn-aarch64.c                           |  4 ++
+ ld/emultempl/aarch64elf.em                    |  2 +-
+ ld/testsuite/ld-aarch64/aarch64-elf.exp       |  1 +
+ .../ld-aarch64/erratum835769-843419.d         | 54 +++++++++++++++++++
+ 4 files changed, 60 insertions(+), 1 deletion(-)
+ create mode 100644 ld/testsuite/ld-aarch64/erratum835769-843419.d
+
+diff --git a/bfd/elfnn-aarch64.c b/bfd/elfnn-aarch64.c
+index fd44505da4..6b1b7b55e4 100644
+--- a/bfd/elfnn-aarch64.c
++++ b/bfd/elfnn-aarch64.c
+@@ -3176,6 +3176,10 @@ _bfd_aarch64_create_stub_section (asection *section,
+   if (s_name == NULL)
+     return NULL;
+ 
++  /* PR 25210.  Set the right class on the stub_bfd.  */
++  elf_elfheader (htab->stub_bfd)->e_ident[EI_CLASS] = ELFCLASSNN;
++  BFD_ASSERT (ELFCLASSNN == get_elf_backend_data (htab->stub_bfd)->s->elfclass);
++
+   memcpy (s_name, section->name, namelen);
+   memcpy (s_name + namelen, STUB_SUFFIX, sizeof (STUB_SUFFIX));
+   return (*htab->add_stub_section) (s_name, section);
+diff --git a/ld/emultempl/aarch64elf.em b/ld/emultempl/aarch64elf.em
+index 93f60a9b61..4c13f26f4e 100644
+--- a/ld/emultempl/aarch64elf.em
++++ b/ld/emultempl/aarch64elf.em
+@@ -169,7 +169,7 @@ elf${ELFSIZE}_aarch64_add_stub_section (const char *stub_sec_name,
+   lang_output_section_statement_type *os;
+   struct hook_stub_info info;
+ 
+-  flags = (SEC_ALLOC | SEC_LOAD | SEC_READONLY | SEC_CODE | SEC_LINKER_CREATED
++  flags = (SEC_ALLOC | SEC_LOAD | SEC_READONLY | SEC_CODE
+ 	   | SEC_HAS_CONTENTS | SEC_RELOC | SEC_IN_MEMORY | SEC_KEEP);
+   stub_sec = bfd_make_section_anyway_with_flags (stub_file->the_bfd,
+ 						 stub_sec_name, flags);
+diff --git a/ld/testsuite/ld-aarch64/aarch64-elf.exp b/ld/testsuite/ld-aarch64/aarch64-elf.exp
+index 631fde0f31..d02bc25091 100644
+--- a/ld/testsuite/ld-aarch64/aarch64-elf.exp
++++ b/ld/testsuite/ld-aarch64/aarch64-elf.exp
+@@ -93,6 +93,7 @@ run_dump_test "erratum843419-far-adr"
+ run_dump_test "erratum843419-far-full"
+ run_dump_test "erratum843419-full"
+ run_dump_test "erratum843419-no-args"
++run_dump_test "erratum835769-843419"
+ 
+ # Relocation Tests
+ run_dump_test_lp64 "weak-undefined"
+diff --git a/ld/testsuite/ld-aarch64/erratum835769-843419.d b/ld/testsuite/ld-aarch64/erratum835769-843419.d
+new file mode 100644
+index 0000000000..728765f61d
+--- /dev/null
++++ b/ld/testsuite/ld-aarch64/erratum835769-843419.d
+@@ -0,0 +1,54 @@
++#source: erratum835769.s
++#as:
++#ld: --fix-cortex-a53-835769 --fix-cortex-a53-843419=full -e0x400000
++#objdump: -dr
++#...
++Disassembly of section .text:
++#...
++[0-9a-f]+ <a1ldr>:
++[ \t0-9a-f]+:[ \t]+b8408c87[ \t]+ldr[ \t]+w7, \[x4, #8\]\!
++[ \t0-9a-f]+:[ \t]+1b017c06[ \t]+mul[ \t]+w6, w0, w1
++[ \t0-9a-f]+:[ \t]+f9400084[ \t]+ldr[ \t]+x4, \[x4\]
++[ \t0-9a-f]+:[ \t0-9a-z]+[ \t]+b[ \t]+[0-9a-f]+ <__erratum_835769_veneer_0>
++[ \t0-9a-f]+:[ \t]+aa0503e0[ \t]+mov[ \t]+x0, x5
++[ \t0-9a-f]+:[ \t]+d65f03c0[ \t]+ret
++
++[0-9a-f]+ <a5ldr>:
++[ \t0-9a-f]+:[ \t]+b8408c87[ \t]+ldr[ \t]+w7, \[x4, #8\]!
++[ \t0-9a-f]+:[ \t]+1b017c06[ \t]+mul[ \t]+w6, w0, w1
++[ \t0-9a-f]+:[ \t]+f9400084[ \t]+ldr[ \t]+x4, \[x4\]
++[ \t0-9a-f]+:[ \t0-9a-z]+[ \t]+b[ \t]+[0-9a-f]+ <__erratum_835769_veneer_1>
++[ \t0-9a-f]+:[ \t]+aa0503e0[ \t]+mov[ \t]+x0, x5
++[ \t0-9a-f]+:[ \t]+d65f03c0[ \t]+ret
++
++[0-9a-f]+ <a6ldr>:
++[ \t0-9a-f]+:[ \t]+b8408c87[ \t]+ldr[ \t]+w7, \[x4, #8\]!
++[ \t0-9a-f]+:[ \t]+1b017c06[ \t]+mul[ \t]+w6, w0, w1
++[ \t0-9a-f]+:[ \t]+f9400084[ \t]+ldr[ \t]+x4, \[x4\]
++[ \t0-9a-f]+:[ \t]+9b031885[ \t]+madd[ \t]+x5, x4, x3, x6
++[ \t0-9a-f]+:[ \t]+aa0503e0[ \t]+mov[ \t]+x0, x5
++[ \t0-9a-f]+:[ \t]+d65f03c0[ \t]+ret
++
++[0-9a-f]+ <a7str>:
++[ \t0-9a-f]+:[ \t]+b8408c87[ \t]+ldr[ \t]+w7, \[x4, #8\]!
++[ \t0-9a-f]+:[ \t]+1b017c06[ \t]+mul[ \t]+w6, w0, w1
++[ \t0-9a-f]+:[ \t]+f9000084[ \t]+str[ \t]+x4, \[x4\]
++[ \t0-9a-f]+:[ \t0-9a-z]+[ \t]+b[ \t]+[0-9a-f]+ <__erratum_835769_veneer_2>
++[ \t0-9a-f]+:[ \t]+aa0503e0[ \t]+mov[ \t]+x0, x5
++[ \t0-9a-f]+:[ \t]+d65f03c0[ \t]+ret
++
++[ \t0-9a-f]+:[ \t]+d503201f[ \t]+nop
++[ \t0-9a-f]+:[ \t]+14000400[ \t]+b[ \t]+[0-9a-f]+ <__erratum_835769_veneer_0\+0xfe8>
++[ \t0-9a-f]+:[ \t]+d503201f[ \t]+nop
++[0-9a-f]+ <__erratum_835769_veneer_2>:
++[ \t0-9a-f]+:[ \t]+9b031885[ \t]+madd[ \t]+x5, x4, x3, x6
++[ \t0-9a-f]+:[ \t0-9a-z]+[ \t]+b[ \t]+[0-9a-f]+ <a7str\+0x[0-9a-f]+>
++
++[0-9a-f]+ <__erratum_835769_veneer_1>:
++[ \t0-9a-f]+:[ \t]+9ba31845[ \t]+umaddl[ \t]+x5, w2, w3, x6
++[ \t0-9a-f]+:[ \t0-9a-z]+[ \t]+b[ \t]+[0-9a-f]+ <a5ldr\+0x[0-9a-f]+>
++
++[0-9a-f]+ <__erratum_835769_veneer_0>:
++[ \t0-9a-f]+:[ \t]+9b031845[ \t]+madd[ \t]+x5, x2, x3, x6
++[ \t0-9a-f]+:[ \t0-9a-z]+[ \t]+b[ \t]+[0-9a-f]+ <a1ldr\+0x[0-9a-f]+>
++#pass
+-- 
+2.24.1
+
