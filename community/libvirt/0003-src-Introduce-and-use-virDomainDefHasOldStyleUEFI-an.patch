@@ -1,0 +1,194 @@
+From 482e078b654c63590a09958b63b221fa80efcc6e Mon Sep 17 00:00:00 2001
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 7 Jan 2020 10:34:03 +0100
+Subject: [PATCH 3/4] src: Introduce and use virDomainDefHasOldStyleUEFI() and
+ virDomainDefHasOldStyleROUEFI()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+These functions are meant to replace verbose check for the old
+style of specifying UEFI with a simple function call.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+---
+ src/bhyve/bhyve_driver.c |  3 +--
+ src/conf/domain_conf.c   | 16 ++++++++++++++++
+ src/conf/domain_conf.h   |  6 ++++++
+ src/libvirt_private.syms |  2 ++
+ src/libxl/libxl_conf.c   |  3 +--
+ src/libxl/xen_xl.c       |  8 +++-----
+ src/qemu/qemu_domain.c   | 14 ++++----------
+ src/qemu/qemu_driver.c   |  3 +--
+ 8 files changed, 34 insertions(+), 21 deletions(-)
+
+diff --git a/src/bhyve/bhyve_driver.c b/src/bhyve/bhyve_driver.c
+index d40ae1cd23..6edcc37326 100644
+--- a/src/bhyve/bhyve_driver.c
++++ b/src/bhyve/bhyve_driver.c
+@@ -714,8 +714,7 @@ bhyveConnectDomainXMLToNative(virConnectPtr conn,
+     if (def->os.bootloader == NULL &&
+         def->os.loader) {
+ 
+-        if ((def->os.loader->readonly != VIR_TRISTATE_BOOL_YES) ||
+-            (def->os.loader->type != VIR_DOMAIN_LOADER_TYPE_PFLASH)) {
++        if (!virDomainDefHasOldStyleROUEFI(def)) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                            _("Only read-only pflash is supported."));
+             goto cleanup;
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 9580884747..54234049f7 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -31400,6 +31400,22 @@ virDomainDefHasMdevHostdev(const virDomainDef *def)
+ }
+ 
+ 
++bool
++virDomainDefHasOldStyleUEFI(const virDomainDef *def)
++{
++    return def->os.loader &&
++           def->os.loader->type == VIR_DOMAIN_LOADER_TYPE_PFLASH;
++}
++
++
++bool
++virDomainDefHasOldStyleROUEFI(const virDomainDef *def)
++{
++    return virDomainDefHasOldStyleUEFI(def) &&
++           def->os.loader->readonly == VIR_TRISTATE_BOOL_YES;
++}
++
++
+ /**
+  * virDomainGraphicsDefHasOpenGL:
+  * @def: domain definition
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 49cb6970e6..1332bdecc2 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -3680,6 +3680,12 @@ virDomainDefHasVFIOHostdev(const virDomainDef *def);
+ bool
+ virDomainDefHasMdevHostdev(const virDomainDef *def);
+ 
++bool
++virDomainDefHasOldStyleUEFI(const virDomainDef *def);
++
++bool
++virDomainDefHasOldStyleROUEFI(const virDomainDef *def);
++
+ bool
+ virDomainGraphicsDefHasOpenGL(const virDomainDef *def);
+ 
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 8fe0bf9365..5cfc8af46d 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -297,6 +297,8 @@ virDomainDefHasManagedPR;
+ virDomainDefHasMdevHostdev;
+ virDomainDefHasMemballoon;
+ virDomainDefHasMemoryHotplug;
++virDomainDefHasOldStyleROUEFI;
++virDomainDefHasOldStyleUEFI;
+ virDomainDefHasUSB;
+ virDomainDefHasVcpusOffline;
+ virDomainDefHasVFIOHostdev;
+diff --git a/src/libxl/libxl_conf.c b/src/libxl/libxl_conf.c
+index 37fe360067..d712515b05 100644
+--- a/src/libxl/libxl_conf.c
++++ b/src/libxl/libxl_conf.c
+@@ -546,8 +546,7 @@ libxlMakeDomBuildInfo(virDomainDefPtr def,
+          * future, Xen will support a user-specified firmware path. See
+          * http://lists.xenproject.org/archives/html/xen-devel/2016-03/msg01628.html
+          */
+-        if (def->os.loader &&
+-            def->os.loader->type == VIR_DOMAIN_LOADER_TYPE_PFLASH)
++        if (virDomainDefHasOldStyleUEFI(def))
+             b_info->u.hvm.bios = LIBXL_BIOS_TYPE_OVMF;
+ 
+         if (def->emulator) {
+diff --git a/src/libxl/xen_xl.c b/src/libxl/xen_xl.c
+index 396adf6dac..f0269b01ff 100644
+--- a/src/libxl/xen_xl.c
++++ b/src/libxl/xen_xl.c
+@@ -1235,11 +1235,9 @@ xenFormatXLOS(virConfPtr conf, virDomainDefPtr def)
+         if (xenConfigSetString(conf, "builder", "hvm") < 0)
+             return -1;
+ 
+-        if (def->os.loader &&
+-            def->os.loader->type == VIR_DOMAIN_LOADER_TYPE_PFLASH) {
+-            if (xenConfigSetString(conf, "bios", "ovmf") < 0)
+-                return -1;
+-        }
++        if (virDomainDefHasOldStyleUEFI(def) &&
++            xenConfigSetString(conf, "bios", "ovmf") < 0)
++            return -1;
+ 
+         if (def->os.slic_table &&
+             xenConfigSetString(conf, "acpi_firmware", def->os.slic_table) < 0)
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index d1596a28ca..626ed5f326 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -4968,8 +4968,7 @@ qemuDomainDefValidate(const virDomainDef *def,
+ 
+     /* On x86, UEFI requires ACPI */
+     if ((def->os.firmware == VIR_DOMAIN_OS_DEF_FIRMWARE_EFI ||
+-         (def->os.loader &&
+-          def->os.loader->type == VIR_DOMAIN_LOADER_TYPE_PFLASH)) &&
++         virDomainDefHasOldStyleUEFI(def)) &&
+         ARCH_IS_X86(def->os.arch) &&
+         def->features[VIR_DOMAIN_FEATURE_ACPI] != VIR_TRISTATE_SWITCH_ON) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+@@ -4981,8 +4980,7 @@ qemuDomainDefValidate(const virDomainDef *def,
+     if (def->features[VIR_DOMAIN_FEATURE_ACPI] == VIR_TRISTATE_SWITCH_ON &&
+         def->os.arch == VIR_ARCH_AARCH64 &&
+         (def->os.firmware != VIR_DOMAIN_OS_DEF_FIRMWARE_EFI &&
+-         (!def->os.loader ||
+-          def->os.loader->type != VIR_DOMAIN_LOADER_TYPE_PFLASH))) {
++         !virDomainDefHasOldStyleUEFI(def))) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                        _("ACPI requires UEFI on this architecture"));
+         goto cleanup;
+@@ -15545,12 +15543,9 @@ void
+ qemuDomainNVRAMPathGenerate(virQEMUDriverConfigPtr cfg,
+                             virDomainDefPtr def)
+ {
+-    if (def->os.loader &&
+-        def->os.loader->type == VIR_DOMAIN_LOADER_TYPE_PFLASH &&
+-        def->os.loader->readonly == VIR_TRISTATE_BOOL_YES &&
++    if (virDomainDefHasOldStyleROUEFI(def) &&
+         !def->os.loader->nvram)
+         qemuDomainNVRAMPathFormat(cfg, def, &def->os.loader->nvram);
+-
+ }
+ 
+ 
+@@ -15677,8 +15672,7 @@ qemuDomainInitializePflashStorageSource(virDomainObjPtr vm)
+     if (!virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_BLOCKDEV))
+         return 0;
+ 
+-    if (!def->os.loader ||
+-        def->os.loader->type != VIR_DOMAIN_LOADER_TYPE_PFLASH)
++    if (!virDomainDefHasOldStyleUEFI(def))
+         return 0;
+ 
+     if (!(pflash0 = virStorageSourceNew()))
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 06d16ee8e6..becb83f32b 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -15129,8 +15129,7 @@ qemuDomainSnapshotPrepare(virDomainObjPtr vm,
+      * Avoid the issues by forbidding internal snapshot with pflash completely.
+      */
+     if (found_internal &&
+-        vm->def->os.loader &&
+-        vm->def->os.loader->type == VIR_DOMAIN_LOADER_TYPE_PFLASH) {
++        virDomainDefHasOldStyleUEFI(vm->def)) {
+         virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                        _("internal snapshots of a VM with pflash based "
+                          "firmware are not supported"));
+-- 
+2.24.1
+

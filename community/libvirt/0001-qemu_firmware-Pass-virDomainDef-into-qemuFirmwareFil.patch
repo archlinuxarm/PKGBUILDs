@@ -1,0 +1,104 @@
+From 08fca7705b22c438e40f0202c5307ef2bae5b0f4 Mon Sep 17 00:00:00 2001
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 13 Dec 2019 15:41:16 +0100
+Subject: [PATCH 1/4] qemu_firmware: Pass virDomainDef into
+ qemuFirmwareFillDomain()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This function needs domain definition really, we don't need to
+pass the whole domain object. This saves couple of dereferences
+and characters esp. in more checks to come.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Cole Robinson <crobinso@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+---
+ src/qemu/qemu_firmware.c | 12 ++++++------
+ src/qemu/qemu_firmware.h |  2 +-
+ src/qemu/qemu_process.c  |  2 +-
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/src/qemu/qemu_firmware.c b/src/qemu/qemu_firmware.c
+index f62ce90ac9..96058c9b45 100644
+--- a/src/qemu/qemu_firmware.c
++++ b/src/qemu/qemu_firmware.c
+@@ -1204,7 +1204,7 @@ qemuFirmwareFetchParsedConfigs(bool privileged,
+ 
+ int
+ qemuFirmwareFillDomain(virQEMUDriverPtr driver,
+-                       virDomainObjPtr vm,
++                       virDomainDefPtr def,
+                        unsigned int flags)
+ {
+     VIR_AUTOSTRINGLIST paths = NULL;
+@@ -1217,7 +1217,7 @@ qemuFirmwareFillDomain(virQEMUDriverPtr driver,
+     if (!(flags & VIR_QEMU_PROCESS_START_NEW))
+         return 0;
+ 
+-    if (vm->def->os.firmware == VIR_DOMAIN_OS_DEF_FIRMWARE_NONE)
++    if (def->os.firmware == VIR_DOMAIN_OS_DEF_FIRMWARE_NONE)
+         return 0;
+ 
+     if ((nfirmwares = qemuFirmwareFetchParsedConfigs(driver->privileged,
+@@ -1225,7 +1225,7 @@ qemuFirmwareFillDomain(virQEMUDriverPtr driver,
+         return -1;
+ 
+     for (i = 0; i < nfirmwares; i++) {
+-        if (qemuFirmwareMatchDomain(vm->def, firmwares[i], paths[i])) {
++        if (qemuFirmwareMatchDomain(def, firmwares[i], paths[i])) {
+             theone = firmwares[i];
+             VIR_DEBUG("Found matching firmware (description path '%s')",
+                       paths[i]);
+@@ -1236,7 +1236,7 @@ qemuFirmwareFillDomain(virQEMUDriverPtr driver,
+     if (!theone) {
+         virReportError(VIR_ERR_OPERATION_FAILED,
+                        _("Unable to find any firmware to satisfy '%s'"),
+-                       virDomainOsDefFirmwareTypeToString(vm->def->os.firmware));
++                       virDomainOsDefFirmwareTypeToString(def->os.firmware));
+         goto cleanup;
+     }
+ 
+@@ -1245,10 +1245,10 @@ qemuFirmwareFillDomain(virQEMUDriverPtr driver,
+      * likely that admin/FW manufacturer messed up. */
+     qemuFirmwareSanityCheck(theone, paths[i]);
+ 
+-    if (qemuFirmwareEnableFeatures(driver, vm->def, theone) < 0)
++    if (qemuFirmwareEnableFeatures(driver, def, theone) < 0)
+         goto cleanup;
+ 
+-    vm->def->os.firmware = VIR_DOMAIN_OS_DEF_FIRMWARE_NONE;
++    def->os.firmware = VIR_DOMAIN_OS_DEF_FIRMWARE_NONE;
+ 
+     ret = 0;
+  cleanup:
+diff --git a/src/qemu/qemu_firmware.h b/src/qemu/qemu_firmware.h
+index 4be65bc664..37cbfae39d 100644
+--- a/src/qemu/qemu_firmware.h
++++ b/src/qemu/qemu_firmware.h
+@@ -45,7 +45,7 @@ qemuFirmwareFetchConfigs(char ***firmwares,
+ 
+ int
+ qemuFirmwareFillDomain(virQEMUDriverPtr driver,
+-                       virDomainObjPtr vm,
++                       virDomainDefPtr def,
+                        unsigned int flags);
+ 
+ int
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index a588ee25f8..ac0c052fc0 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -6289,7 +6289,7 @@ qemuProcessPrepareDomain(virQEMUDriverPtr driver,
+         goto cleanup;
+ 
+     VIR_DEBUG("Prepare bios/uefi paths");
+-    if (qemuFirmwareFillDomain(driver, vm, flags) < 0)
++    if (qemuFirmwareFillDomain(driver, vm->def, flags) < 0)
+         goto cleanup;
+     if (qemuDomainInitializePflashStorageSource(vm) < 0)
+         goto cleanup;
+-- 
+2.24.1
+
