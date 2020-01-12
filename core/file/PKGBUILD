@@ -1,0 +1,62 @@
+# Maintainer: Sébastien Luttringer 
+# Contributor: Allan McRae 
+# Contributor: Andreas Radke 
+
+# ALARM: Thibaut Girka <thib@sitedethib.com>
+#  - disable libseccomp support as it fails on aarch64
+
+pkgname=file
+pkgver=5.38
+pkgrel=2
+pkgdesc='File type identification utility'
+arch=('x86_64')
+license=('custom')
+groups=('base-devel')
+url='https://www.darwinsys.com/file/'
+depends=('glibc' 'zlib' 'xz' 'bzip2')
+provides=('libmagic.so')
+source=("ftp://ftp.astron.com/pub/$pkgname/$pkgname-$pkgver.tar.gz"{,.asc})
+validpgpkeys=('BE04995BA8F90ED0C0C176C471112AB16CB33B3A') # Christos Zoulas
+sha256sums=('593c2ffc2ab349c5aea0f55fedfe4d681737b6b62376a9b3ad1e77b2cc19fa34'
+            'SKIP')
+
+prepare() {
+  cd $pkgname-$pkgver
+  # apply patch from the source array (should be a pacman feature)
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    [[ $src = *.patch ]] || continue
+    msg2 "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
+}
+
+build() {
+  cd $pkgname-$pkgver
+
+  # Fix linking libmagic (vfork needs libpthread)
+  CFLAGS+=" -pthread"
+
+  ./configure \
+    --prefix=/usr \
+    --datadir=/usr/share/file \
+    --enable-fsect-man5 \
+    --disable-libseccomp
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+  make
+}
+
+check() {
+  cd $pkgname-$pkgver
+  make check
+}
+
+package() {
+  cd $pkgname-$pkgver
+  make DESTDIR="$pkgdir" install
+  install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+# vim:set ts=2 sw=2 et:
