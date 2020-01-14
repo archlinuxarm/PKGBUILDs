@@ -12,7 +12,7 @@ _prefix=/usr
 pkgbase=kodi-rbp3
 pkgname=('kodi-rbp3' 'kodi-rbp3-eventclients' 'kodi-rbp3-tools-texturepacker' 'kodi-rbp3-dev')
 pkgver=18.5
-pkgrel=1
+pkgrel=2
 _codename=Leia
 _tag="$pkgver-$_codename"
 _ffmpeg_version="4.0.4-$_codename-18.4"
@@ -50,6 +50,8 @@ source=("https://github.com/popcornmix/xbmc/archive/newclock5_$_tag.tar.gz"
   "http://mirrors.kodi.tv/build-deps/sources/crossguid-$_crossguid_version.tar.gz"
   "http://mirrors.kodi.tv/build-deps/sources/fstrcmp-$_fstrcmp_version.tar.gz"
   "http://mirrors.kodi.tv/build-deps/sources/flatbuffers-$_flatbuffers_version.tar.gz"
+  sysusers.conf
+  tmpfiles.conf
 )
 noextract=(
   "libdvdcss-$_libdvdcss_version.tar.gz"
@@ -74,7 +76,9 @@ sha256sums=('c6b608db0b2b9d7fe4163797acfe0fe73fe063fe62c7d88326edbbcc1d0ae400'
             '73d4cab4fa8a3482643d8703de4d9522d7a56981c938eca42d929106ff474b44'
             '3d77d09a5df0de510aeeb940df4cb534787ddff3bb1828779753f5dfa1229d10'
             'e4018e850f80700acee8da296e56e15b1eef711ab15157e542e7d7e1237c3476'
-            '5ca5491e4260cacae30f1a5786d109230db3f3a6e5a0eb45d0d0608293d247e3')
+            '5ca5491e4260cacae30f1a5786d109230db3f3a6e5a0eb45d0d0608293d247e3'
+            'f521b98232e5035b7cada46cf03975b8d753e93d0802bf22913fceed769f9d96'
+            '9c5e79ed8719cd032a3b17dac585aeff28a198e37af1da9af68ef1b86bab4d18')
 prepare() {
   # force python 'binary' as python2
   [[ -d "$srcdir/path" ]] && rm -rf "$srcdir/path"
@@ -164,15 +168,21 @@ package_kodi-rbp3() {
 
   # python2 is being used
   cd "$pkgdir"
-  grep -lR '#!.*python' * | while read file; do sed -s 's/\(#!.*python\)/\12/g' -i "$file"; done
-
-  install -Dm0644 "$srcdir/kodi.service" "$pkgdir/usr/lib/systemd/system/kodi.service"
-  install -Dm0644 "$srcdir/kodi-framebuffer" "$pkgdir/etc/conf.d/kodi-framebuffer"
-  install -Dm0644 "$srcdir/polkit.rules" "$pkgdir/usr/share/polkit-1/rules.d/10-kodi.rules"
-  chmod 0750 "$pkgdir/usr/share/polkit-1/rules.d/"
+  grep -lR '#!.*python' * | \
+    while read file; do sed -s 's/\(#!.*python\)/\12/g' -i "$file"; done
 
   # fix permissions necessary for accelerated video playback
   install -Dm0644 "$srcdir/99-kodi.rules" "$pkgdir/etc/udev/rules.d/99-kodi.rules"
+
+  # systemd manages kodi user
+  install -Dm644 "$srcdir"/sysusers.conf "$pkgdir/usr/lib/sysusers.d/kodi.conf"
+  install -Dm644 "$srcdir"/tmpfiles.conf "$pkgdir/usr/lib/tmpfiles.d/kodi.conf"
+
+  # systemd service, polkit rules, and framebuffer tweak
+  install -Dm0644 "$srcdir/kodi.service" "$pkgdir/usr/lib/systemd/system/kodi.service"
+  install -Dm0644 "$srcdir/polkit.rules" "$pkgdir/usr/share/polkit-1/rules.d/10-kodi.rules"
+  install -Dm0644 "$srcdir/kodi-framebuffer" "$pkgdir/etc/conf.d/kodi-framebuffer"
+  chmod 0750 "$pkgdir/usr/share/polkit-1/rules.d/"
 }
 
 package_kodi-rbp3-eventclients() {
@@ -180,9 +190,12 @@ package_kodi-rbp3-eventclients() {
   provides=('kodi-eventclients')
   conflicts=('kodi-eventclients')
   optdepends=('python2: most eventclients are implemented in python2')
-  _components=('kodi-eventclients-common'
+
+  _components=(
+    'kodi-eventclients-common'
     'kodi-eventclients-ps3'
-    'kodi-eventclients-kodi-send')
+    'kodi-eventclients-kodi-send'
+  )
 
   export PATH="$srcdir/path:$PATH"
 
@@ -195,7 +208,8 @@ package_kodi-rbp3-eventclients() {
 
   # python2 is being used
   cd "$pkgdir"
-  grep -lR '#!.*python' * | while read file; do sed -s 's/\(#!.*python\)/\12/g' -i "$file"; done
+  grep -lR '#!.*python' * | \
+    while read file; do sed -s 's/\(#!.*python\)/\12/g' -i "$file"; done
 }
 
 package_kodi-rbp3-tools-texturepacker() {
@@ -239,5 +253,6 @@ package_kodi-rbp3-dev() {
 
   # python2 is being used
   cd "$pkgdir"
-  grep -lR '#!.*python' * | while read file; do sed -s 's/\(#!.*python\)/\12/g' -i "$file"; done
+  grep -lR '#!.*python' * | \
+    while read file; do sed -s 's/\(#!.*python\)/\12/g' -i "$file"; done
 }
