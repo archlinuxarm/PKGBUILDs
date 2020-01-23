@@ -2,20 +2,20 @@
 # Maintainer: Andreas Radke <andyrtr@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, radeon, VMware svga).
+#  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, VMware svga).
 #  - disable assembly and rip out VC4 forced NEON for v6/v7
 #  - remove makedepend on valgrind, -Dvalgrind=false
 
 pkgbase=mesa
-pkgname=('libva-mesa-driver' 'mesa-vdpau' 'mesa')
+pkgname=('vulkan-mesa-layer' 'opencl-mesa' 'vulkan-radeon' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=19.3.2
-pkgrel=2
+pkgrel=2.1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols'
-             'elfutils' 'llvm' 'libomxil-bellagio' 'clang' 'libglvnd' 'lm_sensors'
-             'libxrandr' 'meson')
+             'elfutils' 'llvm' 'libomxil-bellagio' 'libclc' 'clang' 'libglvnd' 'lm_sensors'
+             'libxrandr' 'glslang' 'meson')
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
@@ -49,14 +49,16 @@ build() {
     -D b_lto=false \
     -D b_ndebug=true \
     -D platforms=x11,wayland,drm,surfaceless \
-    -D dri-drivers=nouveau \
-    -D gallium-drivers=freedreno,nouveau,swrast,virgl${GALLIUM} \
-    -D vulkan-drivers= \
+    -D dri-drivers=r100,r200,nouveau \
+    -D gallium-drivers=r300,r600,radeonsi,freedreno,nouveau,swrast,virgl${GALLIUM} \
+    -D vulkan-drivers=amd \
+    -D vulkan-overlay-layer=true \
     -D dri3=true \
     -D egl=true \
     -D gallium-extra-hud=true \
     -D gallium-nine=true \
     -D gallium-omx=bellagio \
+    -D gallium-opencl=icd \
     -D gallium-va=true \
     -D gallium-vdpau=true \
     -D gallium-xa=false \
@@ -91,6 +93,40 @@ _install() {
     install -m755 -d "${dir}"
     mv -v "${src}" "${dir}/"
   done
+}
+
+package_vulkan-mesa-layer() {
+  pkgdesc="Vulkan overlay layer to display information about the application"
+  
+  _install fakeinstall/usr/share/vulkan/explicit_layer.d
+  _install fakeinstall/usr/lib/libVkLayer_MESA_overlay.so
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+}
+
+package_opencl-mesa() {
+  pkgdesc="OpenCL support for AMD/ATI Radeon mesa drivers"
+  depends=('expat' 'libdrm' 'libelf' 'libclc' 'clang')
+  optdepends=('opencl-headers: headers necessary for OpenCL development')
+  provides=('opencl-driver')
+
+  _install fakeinstall/etc/OpenCL
+  _install fakeinstall/usr/lib/lib*OpenCL*
+  _install fakeinstall/usr/lib/gallium-pipe
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+}
+
+package_vulkan-radeon() {
+  pkgdesc="Radeon's Vulkan mesa driver"
+  depends=('wayland' 'libx11' 'libxshmfence' 'libelf' 'libdrm' 'llvm-libs')
+  optdepends=('vulkan-mesa-layer: a vulkan layer to display information using an overlay')
+  provides=('vulkan-driver')
+ 
+  _install fakeinstall/usr/share/vulkan/icd.d/radeon_icd*.json
+  _install fakeinstall/usr/lib/libvulkan_radeon.so
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
 
 package_libva-mesa-driver() {
