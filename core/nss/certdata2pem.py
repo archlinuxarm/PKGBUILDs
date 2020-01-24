@@ -177,6 +177,11 @@ openssl_trust = {
   "CKA_TRUST_EMAIL_PROTECTION": "emailProtection",
 }
 
+cert_distrust_types = {
+  "CKA_NSS_SERVER_DISTRUST_AFTER": "nss-server-distrust-after",
+  "CKA_NSS_EMAIL_DISTRUST_AFTER": "nss-email-distrust-after",
+}
+
 for tobj in objects:
     if tobj['CKA_CLASS'] == 'CKO_NSS_TRUST':
         key = tobj['CKA_LABEL'] + printable_serial(tobj)
@@ -368,6 +373,16 @@ for tobj in objects:
             # requires p11-kit >= 0.23.4
             f.write("nss-mozilla-ca-policy: true\n")
             f.write("modifiable: false\n");
+
+            # requires p11-kit >= 0.23.19
+            for t in list(cert_distrust_types.keys()):
+                if t in obj:
+                    value = obj[t]
+                    if value == 'CK_FALSE':
+                        value = bytearray(1)
+                    f.write(cert_distrust_types[t] + ": \"")
+                    f.write(urllib.parse.quote(value));
+                    f.write("\"\n")
 
             f.write("-----BEGIN CERTIFICATE-----\n")
             temp_encoded_b64 = base64.b64encode(obj['CKA_VALUE'])
