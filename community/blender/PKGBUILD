@@ -6,8 +6,18 @@
 #  - remove makedepend, optdepend on cuda
 #  - remove depend on openimagedenoise
 #  - set -DWITH_CYCLES=OFF, -DWITH_RAYOPTIMIZATION=OFF
+# ALARM: Rostislav Medvěd <rostik.medved@gmail.com>
+#  - Removed the unnecessary Optix source
+#  - Enabled Cycles and ray optimisation
+#  - Disabled CUDA and Optix Cycles device support
+#  - Tested building on ARMv6 (Pi 0 W) and ARMv7 (Odroid XU-4)
+#  - Enabled building for ARMv6 and ARMv7
+#  - Lowered number of building threads to 1 to stay below 500MB RAM usage
+#  - Applied patch for building on ARMv6 and ARMv7
+#  - This SHOULD build on ARMv6, but I couldn't test, because I keeep running out of RAM
 
-buildarch=8
+buildarch=28
+highmem=0
 
 # Sometimes blender.org takes some time to release patch releases and because Arch users
 # are impatient, we sometimes need to build from git directly.
@@ -27,7 +37,7 @@ _gittag=v2.81a
 pkgname=blender
 pkgver=2.81.a
 [[ -n $_gitcommit ]] && pkgver=${pkgver}.git1.${_gitcommit:0:8}
-pkgrel=4
+pkgrel=4.1
 epoch=17
 pkgdesc="A fully integrated 3D graphics creation suite"
 arch=('x86_64')
@@ -44,7 +54,8 @@ source=("git://git.blender.org/blender-addons.git"
         "git://git.blender.org/blender-addons-contrib.git"
         "git://git.blender.org/blender-translations.git"
         "git://git.blender.org/blender-dev-tools.git"
-        https://developer.download.nvidia.com/redist/optix/v7.0/OptiX-7.0.0-include.zip)
+        "dna_gpencil_types.patch"
+        "dna_scene_types.patch")
 if [[ -n $_gittag ]]; then
     source+=("${pkgname}-${pkgver}::git://git.blender.org/blender.git#tag=${_gittag}")
 elif [[ -n $_gitcommit ]]; then
@@ -54,8 +65,9 @@ sha512sums=('SKIP'
             'SKIP'
             'SKIP'
             'SKIP'
-            'b2cff73def3757d4259f4b4d318a8ccfe166bf7c215cbb2124f1c81bd6e742f96207285b24eb4d99b527b7b97dc6d5e8fdf2f16d78d5d1e2684c26d681328491'
-            'SKIP')
+            'SKIP'
+            '3f72497c41bda9acd0abd63c113f29d8d0c45978f5665d82fee7664727f8623eb1e7ebc4f5442cfe8e4a574ea6afe8eb30c8f7dfcf5666ba46fb2443d81c4d9a'
+            'c38cc98624be3d3e98005a8ef970f1566e71cc56f89ce7adc376a6737fb0c85ec14465c0e0c855b1e8a4e42c662feffb6d5c24f2f649b1be1a6ce0900a240d76')
 
 prepare() {
   cd "$srcdir/$pkgname-$pkgver"
@@ -67,6 +79,14 @@ prepare() {
   git config submodule."source/tools".url "${srcdir}/blender-dev-tools"
   git submodule update
 
+  if [[ $(uname -m) == armv7l ]] || [[ $(uname -m) == armv6l ]]
+  then
+    patch source/blender/makesdna/DNA_gpencil_types.h -i $srcdir/../dna_gpencil_types.patch
+    patch source/blender/makesdna/DNA_scene_types.h -i $srcdir/../dna_scene_types.patch
+  else
+    :
+  fi
+
   mkdir build
 }
 
@@ -76,19 +96,20 @@ build() {
   cmake \
     -GNinja \
     -C../build_files/cmake/config/blender_release.cmake .. \
-    -DOPTIX_ROOT_DIR="$srcdir"/include \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=Release \
     -DWITH_INSTALL_PORTABLE=OFF \
     -DWITH_PYTHON_INSTALL=OFF \
-    -DWITH_CYCLES=OFF \
-    -DWITH_RAYOPTIMIZATION=OFF \
+    -DWITH_CYCLES=ON \
+    -DWITH_RAYOPTIMIZATION=ON \
     -DPYTHON_VERSION=3.8 \
     -DPYTHON_LIBPATH=/usr/lib \
     -DPYTHON_LIBRARY=python3.8 \
-    -DPYTHON_INCLUDE_DIRS=/usr/include/python3.8
+    -DPYTHON_INCLUDE_DIRS=/usr/include/python3.8 \
+    -DWITH_CYCLES_DEVICE_CUDA=OFF \
+    -DWITH_CYCLES_DEVICE_OPTIX=OFF
 
-  ninja
+  ninja -j1
 }
 
 package() {
@@ -99,3 +120,4 @@ package() {
   python -m compileall "${pkgdir}/usr/share/blender"
   python -O -m compileall "${pkgdir}/usr/share/blender"
 }
+
