@@ -14,7 +14,7 @@ shopt -s extglob
 pkgbase=python
 pkgname=(python python-tests)
 pkgver=3.8.1
-pkgrel=3
+pkgrel=4
 _pybasever=${pkgver%.*}
 pkgdesc="Next generation of the python high-level scripting language"
 arch=('x86_64')
@@ -23,10 +23,12 @@ url="https://www.python.org/"
 depends=('expat' 'bzip2' 'gdbm' 'openssl' 'libffi' 'zlib' 'libnsl')
 makedepends=('tk' 'sqlite' 'bluez-libs' 'mpdecimal' 'llvm' 'gdb' 'xorg-server-xvfb')
 source=("https://www.python.org/ftp/python/${pkgver%rc*}/Python-${pkgver}.tar.xz"{,.asc}
-        0001-compileall-Fix-ddir-when-recursing.patch)
+        0001-compileall-Fix-ddir-when-recursing.patch
+        fix-zip-import.patch::https://github.com/python/cpython/commit/9955f33cdbf27de270038dfbad37d15b160ecca2.patch)
 sha512sums=('d41381848cc1ec8009643b71875f395a9ac2c8e12a5b1efef33caf8a9e99a337c790d4354695c85352d11b62092ae372b5af62f78724363fcbf3504ff9a6ddca'
             'SKIP'
-            'ebd04c3b6d41321b1f0d439d356e0ce463760db55dc64109854c70d017cf56608aa19de9fc4a21bf840795ff202b4703444f9af8074b661780798c17e03089ff')
+            'ebd04c3b6d41321b1f0d439d356e0ce463760db55dc64109854c70d017cf56608aa19de9fc4a21bf840795ff202b4703444f9af8074b661780798c17e03089ff'
+            'a2c1b0a236e998d5cbeb4de2d9449e20b97b8993bef70c0ed0a7e672fc1cbbaaa364c10115fafb80319a5d5a53496777c17b074d757d7ac23f6c1d5c91997af9')
 validpgpkeys=('0D96DF4D4110E5C43FBFB17F2D347EA6AA65421D'  # Ned Deily (Python release signing key) <nad@python.org>
               'E3FF2839C048B25C084DEBE9B26995E310250568') # Łukasz Langa (GPG langa.pl) <lukasz@langa.pl>
 
@@ -35,6 +37,9 @@ prepare() {
 
   # FS#59997
   patch -p1 -i ../0001-compileall-Fix-ddir-when-recursing.patch
+
+  # FS#65233
+  patch -p1 -i ../fix-zip-import.patch
 
   # https://bugs.python.org/issue34587
   sed -i -e "s|testCongestion|disabled_&|" Lib/test/test_socket.py
@@ -56,12 +61,14 @@ build() {
   cd Python-${pkgver}
 
   # PGO should be done with -O3
-  CFLAGS="${CFLAGS/-O2/-O3}"
+  # Also included the -fno-semantic-interposition optimization:
+  # https://fedoraproject.org/wiki/Changes/PythonNoSemanticInterpositionSpeedup
+  CFLAGS="${CFLAGS/-O2/-O3} -fno-semantic-interposition"
+  LDFLAGS="$LDFLAGS -fno-semantic-interposition"
 
   # Disable bundled pip & setuptools
   ./configure --prefix=/usr \
               --enable-shared \
-              --with-threads \
               --with-computed-gotos \
               --without-lto \
               --enable-ipv6 \
