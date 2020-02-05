@@ -10,53 +10,50 @@ pkgname=('grpc' 'python-grpcio' 'php-grpc' 'grpc-cli')
 pkgver=1.27.0
 _gtestver=c9ccac7cb7345901884aabf5d1a786cfa6e2f397
 _abseilcppver=37dd2562ec830d547a1524bb306be313ac3f2556
-pkgrel=1
+pkgrel=2
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
 arch=('x86_64')
 url='https://grpc.io'
 license=('BSD')
-makedepends=('re2c' 'protobuf' 'php' 'c-ares' 'openssl' 'chrpath' 'gflags'
-             'cython')
+makedepends=('re2c' 'protobuf' 'php' 'c-ares' 'openssl' 'chrpath' 'gflags' 'cython' 'cmake')
 source=("https://github.com/$pkgname/$pkgname/archive/v$pkgver/$pkgname-$pkgver.tar.gz"
         "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
-        "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz"
-        "makefile.patch"
-        "makefile-remove-extra-semi.patch"
-        "makefile-disable-strip.patch"
-        "makefile-disable-ldconfig.patch")
+        "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz")
 sha256sums=('3ccc4e5ae8c1ce844456e39cc11f1c991a7da74396faabe83d779836ef449bce'
             '443d383db648ebb8e391382c0ab63263b7091d03197f304390baac10f178a468'
-            '19391fb4882601a65cb648d638c11aa301ce5f525ef02da1a9eafd22f72d7c59'
-            'f292cb387f0cf7567e6e8004a6dd57bf0375abbaa8968dcd97cbd7e72409670f'
-            'e2b70ba6c75de1f50bd33686e01b3fe35f08e74556c5cbc9755c758d700815d8'
-            'da7ef0f69f2318ccd50bbb011b07bd973a8609e098b016fdec25833ff8fccd9a'
-            '1d910fb15f93f7d4f74a11c092bc427f0624aedb4185af143640afa137e1fb73')
+            '19391fb4882601a65cb648d638c11aa301ce5f525ef02da1a9eafd22f72d7c59')
 
 prepare() {
   cd "$srcdir/$pkgname-$pkgver"
-
-  for patch in "$srcdir/"*.patch; do
-    patch -p1 -i "$patch"
-  done
 
   ln -sf "$srcdir/googletest-$_gtestver/"{googlemock,googletest} \
     third_party/googletest
 
   rm -rf third_party/abseil-cpp
   ln -s "$srcdir/abseil-cpp-$_abseilcppver/" third_party/abseil-cpp
+
+  mkdir build
+  cd build
+  cmake \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DgRPC_BUILD_CSHARP_EXT=OFF \
+    -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=OFF \
+    -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=OFF \
+    -DgRPC_CARES_PROVIDER=package \
+    -DgRPC_PROTOBUF_PROVIDER=package \
+    -DgRPC_SSL_PROVIDER=package \
+    -DgRPC_ZLIB_PROVIDER=package \
+    ..
 }
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
-  export CFLAGS="$CFLAGS -Wno-unused-parameter"
-  export CXXFLAGS="$CXXFLAGS -Wno-unused-parameter"
-
+  export CFLAGS="$CFLAGS -Wno-unused-parameter -Wno-unused-function"
+  export CXXFLAGS="$CXXFLAGS -Wno-unused-parameter -Wno-unused-function"
   [[ $CARCH == "armv6h" || $CARCH == "arm" ]] && LIBS="-latomic"
-  make prefix=/usr EXTRA_LDLIBS="$LIBS"
-  make prefix=/usr grpc_cli EXTRA_LDLIBS="$LIBS"
 
-  # Don't install it as part of main package
-  mv bins/opt/grpc_cli .
+  make shared plugins EXTRA_LDLIBS="$LIBS"
 
   # Python
   GRPC_PYTHON_BUILD_WITH_CYTHON=1 \
@@ -82,6 +79,7 @@ package_grpc() {
 }
 
 package_python-grpcio() {
+  description='Python language bindings for grpc, remote procedure call (RPC) framework'
   depends=('c-ares' 'python')
 
   cd "$srcdir/$pkgbase-$pkgver"
@@ -90,6 +88,7 @@ package_python-grpcio() {
 }
 
 package_php-grpc() {
+  description='gRPC module for PHP'
   depends=('grpc' 'php')
   backup=('etc/php/conf.d/grpc.ini')
 
@@ -106,9 +105,10 @@ package_php-grpc() {
 }
 
 package_grpc-cli() {
+  description='gRPC protocol buffers cli'
   depends=('c-ares' 'gflags' 'protobuf' 'openssl')
 
   cd "$srcdir/$pkgbase-$pkgver"
-  install -Dm755 grpc_cli "$pkgdir"/usr/bin/grpc_cli
+  make prefix="$pkgdir/usr" install-grpc-cli
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
