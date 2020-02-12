@@ -23,7 +23,7 @@ cd src/ghc-${pkgver}/libraries
 # $2 is the string for the test, either '=' or '<'
 print_var() {
   printf "  $1=("
-  for path in $(ls ./*/*.cabal); do
+  for path in $(ls ./*/*.cabal ./containers/containers/*.cabal); do
     dirname=$(echo $path | awk -F '/' '{ print $2 }')
     cabalfile=$(echo $path | awk -F '/' '{ print $3 }')
     cabalname=$(basename $cabalfile .cabal)
