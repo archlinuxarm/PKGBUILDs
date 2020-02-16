@@ -21,8 +21,8 @@ pkgname=(
   'gpio-utils'
   'iio-utils'
 )
-pkgver=5.4
-pkgrel=3
+pkgver=5.5
+pkgrel=1
 license=('GPL2')
 arch=('x86_64')
 url='https://www.kernel.org'
@@ -43,7 +43,8 @@ makedepends+=('ncurses')
 makedepends+=('python-docutils')
 groups=("$pkgbase")
 source=("https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-${pkgver}.tar.xz"
-        "https://cdn.kernel.org/pub/linux/kernel/v5.x/patch-$pkgver.1.xz"
+        "https://cdn.kernel.org/pub/linux/kernel/v5.x/patch-$pkgver.4.xz"
+        "01-fix-perf-build-libbfd.patch::https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/patch/?id=0ada120c883d4f1f6aafd01cf0fbb10d8bbba015"
         '0001-perf-fix-debug-printf-for-32-bit.patch'
         'cpupower.default'
         'cpupower.systemd'
@@ -52,8 +53,9 @@ source=("https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-${pkgver}.tar.xz"
         'hv_fcopy_daemon.service'
         'hv_kvp_daemon.service'
         'hv_vss_daemon.service')
-sha256sums=('bf338980b1670bca287f9994b7441c2361907635879169c64ae78364efc5f491'
-            '78f08a9d16bc88f1478c560bd9a3a71be6e2af1bbd5f6ff60771fa1e14b74705'
+sha256sums=('a6fbd4ee903c128367892c2393ee0d9657b6ed3ea90016d4dc6f1f6da20b2330'
+            'cf640d75bdf4211446aa699a562c7bbd6d0360c6bc11e9ca22e8032de14697db'
+            '61f5398b2adcf024516e3368f242d2398c9286a5272eaf7fdd21530e1494d47e'
             '8dce2b1e5dec90473677adf289c50745daaa059b9f61487d0bc857b16fdef5ae'
             '4fa509949d6863d001075fa3e8671eff2599c046d20c98bb4a70778595cd1c3f'
             'd2e8e5e8b22c6089a91f573aa1c59e442a1f3b67a2c9f047abe3b57d3d6558cc'
@@ -67,26 +69,24 @@ prepare() {
   cd linux-$pkgver
 
   # apply patch from the source array (should be a pacman feature)
-  local filename
-  for filename in "${source[@]}"; do
-    filename="${filename##*/}"
-    if [[ "$filename" =~ \.patch$ ]]; then
-      msg2 "Applying patch $filename"
-      patch -p1 -N -i "$srcdir/$filename"
-    elif [[ "$filename" =~ ^patch- ]]; then
-      msg2 "Applying linux $filename"
-      patch -p1 -N -i "$srcdir/${filename%.*}"
-    fi
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    src="${src%.xz}"
+    [[ $src = *.patch || $src = patch-* ]] || continue
+    echo ":: Applying patch $src"
+    patch -p1 -N -i "$srcdir/$src"
   done
 }
 
 build() {
-  msg2 'libtraceevent'
+  echo ':: libtraceevent'
   pushd linux-$pkgver/tools/lib/traceevent
   make
   popd
 
-  msg2 'perf'
+  echo ':: perf'
   pushd linux-$pkgver/tools/perf
   make -f Makefile.perf \
     prefix=/usr \
@@ -99,12 +99,12 @@ build() {
     DESTDIR="$pkgdir"
   popd
 
-  msg2 'cpupower'
+  echo ':: cpupower'
   pushd linux-$pkgver/tools/power/cpupower
   make VERSION=$pkgver-$pkgrel
   popd
 
-  msg2 'usbip'
+  echo ':: usbip'
   pushd linux-$pkgver/tools/usb/usbip
   # Fix gcc compilation
   sed -i 's,-Wall -Werror -Wextra,,' configure.ac
@@ -113,32 +113,32 @@ build() {
   make
   popd
 
-  msg2 'tmon'
+  echo ':: tmon'
   pushd linux-$pkgver/tools/thermal/tmon
   make
   popd
 
-  msg2 'cgroup_event_listener'
+  echo ':: cgroup_event_listener'
   pushd linux-$pkgver/tools/cgroup
   make
   popd
 
-  msg2 'hv'
+  echo ':: hv'
   pushd linux-$pkgver/tools/hv
   CFLAGS+=' -DKVP_SCRIPTS_PATH=\"/usr/lib/hyperv/kvp_scripts/\"' make
   popd
 
-  msg2 'gpio'
+  echo ':: gpio'
   pushd linux-$pkgver/tools/gpio
   make
   popd
 
-  msg2 'iio'
+  echo ':: iio'
   pushd linux-$pkgver/tools/iio
   make
   popd
 
-  msg2 'bpf'
+  echo ':: bpf'
   pushd linux-$pkgver/tools/bpf
   # doesn't compile when we don't first compile bpftool in its directory
   make -C bpftool all doc
