@@ -1,3 +1,4 @@
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
 # Maintainer: Jan de Groot <jgc@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
@@ -6,13 +7,13 @@
 pkgbase=pipewire
 pkgname=(pipewire pipewire-docs)
 pkgver=0.2.7
-pkgrel=1
+pkgrel=2
 pkgdesc="Server and user space API to deal with multimedia pipelines"
 url="https://pipewire.org"
 license=(LGPL2.1)
 arch=(x86_64)
-depends=(gstreamer gst-plugins-base sbc ffmpeg rtkit)
-makedepends=(git meson doxygen graphviz xmltoman)
+makedepends=(git meson doxygen graphviz xmltoman alsa-lib gstreamer
+             gst-plugins-base sbc rtkit dbus)
 _commit=14c11c0fe4d366bad4cfecdee97b6652ff9ed63d  # tags/0.2.7
 source=("git+https://github.com/PipeWire/pipewire#commit=$_commit")
 sha256sums=('SKIP')
@@ -25,16 +26,14 @@ pkgver() {
 
 prepare() {
   cd $pkgbase
-
-  # Reduce docs size
-  printf '%s\n' >>doc/Doxyfile.in \
-    HAVE_DOT=yes DOT_IMAGE_FORMAT=svg INTERACTIVE_SVG=yes
 }
 
 build() {
   arch-meson $pkgbase build \
     -D docs=true \
+    -D ffmpeg=false \
     -D man=true
+
   ninja -C build
 }
 
@@ -42,19 +41,31 @@ check() {
   meson test -C build --print-errorlogs
 }
 
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
 package_pipewire() {
+  depends=(gstreamer gst-plugins-base sbc rtkit libdbus-1.so)
+  provides=(libpipewire-0.2.so)
+  backup=(etc/pipewire/pipewire.conf)
   install=pipewire.install
 
   DESTDIR="$pkgdir" meson install -C build
 
-  # Split pipewire-docs
-  mkdir -p docs/share
-  mv "$pkgdir/usr/share/doc" docs/share/
+  cd "$pkgdir"
+
+  _pick docs usr/share/doc
 }
 
 package_pipewire-docs() {
   pkgdesc+=" (documentation)"
-  depends=()
 
-  mv docs "$pkgdir/usr"
+  mv docs/* "$pkgdir"
 }
