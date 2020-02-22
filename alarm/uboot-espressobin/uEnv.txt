@@ -5,8 +5,14 @@ fdt_high=0xffffffffffffffff
 image_name=/boot/Image
 ramdisk_name=/boot/initramfs-linux.uimg
 fdt_name=/boot/dtbs/marvell/armada-3720-espressobin.dtb
-get_env=if ext4load mmc 0 $loadaddr /boot/uEnv.txt; then env import -t $loadaddr $filesize; if test -n ${uenvcmd}; then run uenvcmd; fi; fi
-get_images=ext4load mmc 0 $kernel_addr $image_name && ext4load mmc 0 $fdt_addr $fdt_name
-get_ramdisk=ext4load mmc 0 $ramdisk_addr $ramdisk_name
-bootargs=console=ttyMV0,115200 earlycon=ar3700_uart,0xd0012000 root=/dev/mmcblk0p1 rw rootwait
-bootcmd=mmc dev 0; run get_env; if run get_images; then if run get_ramdisk; then booti $kernel_addr $ramdisk_addr $fdt_addr; else booti $kernel_addr - $fdt_addr; fi; fi
+boot_targets=mmc0 mmc1 usb sata
+get_env=if ext4load $boot_interface $devnum:1 $loadaddr /boot/uEnv.txt; then env import -t $loadaddr $filesize; if test -n ${uenvcmd}; then run uenvcmd; fi; fi
+get_images=ext4load $boot_interface $devnum:1 $kernel_addr $image_name && ext4load $boot_interface $devnum:1 $fdt_addr $fdt_name
+get_ramdisk=ext4load $boot_interface $devnum:1 $ramdisk_addr $ramdisk_name
+set_bootargs=setenv bootargs console=ttyMV0,115200 earlycon=ar3700_uart,0xd0012000 root=/dev/${boot_dev} rw rootwait
+try_boot=run set_bootargs; run get_env; if run get_images; then if run get_ramdisk; then booti $kernel_addr $ramdisk_addr $fdt_addr; else booti $kernel_addr - $fdt_addr; fi; fi
+bootcmd_mmc0=setenv devnum 0; setenv boot_interface mmc; setenv boot_dev mmcblk0p1; mmc dev 0; run try_boot;
+bootcmd_mmc1=setenv devnum 1; setenv boot_interface mmc; setenv boot_dev mmcblk0p1; mmc dev 1; run try_boot;
+bootcmd_usb=setenv devnum 0; setenv boot_interface usb; setenv boot_dev sda1; usb start; run try_boot;
+bootcmd_sata=setenv devnum 0; setenv boot_interface scsi; setenv boot_dev sda1; scsi scan; scsi dev 0; run try_boot;
+bootcmd=for target in ${boot_targets}; do run bootcmd_${target}; done
