@@ -1,0 +1,51 @@
+From 412858de9094de06047a33237ebf12753324636e Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Wed, 11 Mar 2020 07:28:28 -0600
+Subject: [PATCH] atomic
+
+---
+ pipewire-jack/src/meson.build | 23 ++++++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/pipewire-jack/src/meson.build b/pipewire-jack/src/meson.build
+index 68821a1b..70bdd21b 100644
+--- a/pipewire-jack/src/meson.build
++++ b/pipewire-jack/src/meson.build
+@@ -13,12 +13,33 @@ pipewire_jack_c_args = [
+ #optional dependencies
+ jack_dep = dependency('jack', version : '>= 1.9.10', required : false)
+ 
++# Check for GCC style atomics
++dep_atomic = declare_dependency()
++
++if cc.compiles('int main() { int n; return __atomic_load_n(&n, __ATOMIC_ACQUIRE); }',
++               name : 'GCC atomic builtins')
++  # Not all atomic calls can be turned into lock-free instructions, in which
++  # GCC will make calls into the libatomic library. Check whether we need to
++  # link with -latomic.
++  #
++  # This can happen for 64-bit atomic operations on 32-bit architectures such
++  # as ARM.
++  if not cc.links('''#include <stdint.h>
++                     int main() {
++                       uint64_t n;
++                       return (int)__atomic_load_n(&n, __ATOMIC_ACQUIRE);
++                     }''',
++                  name : 'GCC atomic builtins required -latomic')
++    dep_atomic = cc.find_library('atomic')
++  endif
++endif
++
+ pipewire_jack = shared_library('jack-pw',
+     pipewire_jack_sources,
+     soversion : pipewire_version,
+     c_args : pipewire_jack_c_args,
+     include_directories : [configinc],
+-    dependencies : [pipewire_dep, jack_dep, mathlib],
++    dependencies : [pipewire_dep, jack_dep, mathlib, dep_atomic],
+     install : true,
+ )
+ 
+-- 
+2.24.1
+
