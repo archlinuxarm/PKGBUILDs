@@ -1,0 +1,171 @@
+From 7e1ed1f3b29162df25064b33dc55ac8cf432bb0b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Fri, 13 Mar 2020 18:33:44 +0100
+Subject: [PATCH 1/3] units: make systemd-repart.service installable
+
+This essentially adds another layer of configurability:
+build disable, this, presence of configuration. The default is
+set to enabled, because the service does nothing w/o config.
+---
+ presets/90-systemd.preset       | 1 +
+ units/meson.build               | 3 +--
+ units/systemd-repart.service.in | 6 +++++-
+ 3 files changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/presets/90-systemd.preset b/presets/90-systemd.preset
+index dc9d02f0b9..7406c92a5c 100644
+--- a/presets/90-systemd.preset
++++ b/presets/90-systemd.preset
+@@ -19,6 +19,7 @@ enable getty@.service
+ enable systemd-timesyncd.service
+ enable systemd-networkd.service
+ enable systemd-resolved.service
++enable systemd-repart.service
+ 
+ disable console-getty.service
+ disable debug-shell.service
+diff --git a/units/meson.build b/units/meson.build
+index ea91f0cc9e..9964eb79a4 100644
+--- a/units/meson.build
++++ b/units/meson.build
+@@ -228,8 +228,7 @@ in_units = [
+          'multi-user.target.wants/'],
+         ['systemd-vconsole-setup.service',       'ENABLE_VCONSOLE'],
+         ['systemd-volatile-root.service',        ''],
+-        ['systemd-repart.service',               'ENABLE_REPART',
+-         'sysinit.target.wants/ initrd-root-fs.target.wants/'],
++        ['systemd-repart.service',               'ENABLE_REPART'],
+         ['user-runtime-dir@.service',            ''],
+         ['user@.service',                        ''],
+ ]
+diff --git a/units/systemd-repart.service.in b/units/systemd-repart.service.in
+index 7ce6aefd29..41a9d82b93 100644
+--- a/units/systemd-repart.service.in
++++ b/units/systemd-repart.service.in
+@@ -21,5 +21,9 @@ Type=oneshot
+ RemainAfterExit=yes
+ ExecStart=@rootbindir@/systemd-repart --dry-run=no
+ 
+-# The tool returns 77 if there's no GPT partition table pre-existing
++# The tool returns 77 if there's no existing GPT partition table
+ SuccessExitStatus=77
++
++[Install]
++WantedBy=sysinit.target
++WantedBy=initrd-root-fs.target
+From 5ef9eda17fda06aaf81ab3f0ff6f87a80b860c94 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Fri, 13 Mar 2020 18:38:09 +0100
+Subject: [PATCH 2/3] units: make systemd-homed.service installable
+
+Fixes #15083. Users might want to disable homed if not used to save resources.
+---
+ presets/90-systemd.preset       | 1 +
+ test/units/testsuite-46.service | 4 +++-
+ units/meson.build               | 3 +--
+ units/systemd-homed.service.in  | 4 ++++
+ 4 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/presets/90-systemd.preset b/presets/90-systemd.preset
+index 7406c92a5c..53eb8a7806 100644
+--- a/presets/90-systemd.preset
++++ b/presets/90-systemd.preset
+@@ -20,6 +20,7 @@ enable systemd-timesyncd.service
+ enable systemd-networkd.service
+ enable systemd-resolved.service
+ enable systemd-repart.service
++enable systemd-homed.service
+ 
+ disable console-getty.service
+ disable debug-shell.service
+diff --git a/units/meson.build b/units/meson.build
+index 9964eb79a4..d8ee6df184 100644
+--- a/units/meson.build
++++ b/units/meson.build
+@@ -201,8 +201,7 @@ in_units = [
+         ['systemd-portabled.service',            'ENABLE_PORTABLED',
+          'dbus-org.freedesktop.portable1.service'],
+         ['systemd-userdbd.service',              'ENABLE_USERDB'],
+-        ['systemd-homed.service',                'ENABLE_HOMED',
+-         'multi-user.target.wants/ dbus-org.freedesktop.home1.service'],
++        ['systemd-homed.service',                'ENABLE_HOMED'],
+         ['systemd-quotacheck.service',           'ENABLE_QUOTACHECK'],
+         ['systemd-random-seed.service',          'ENABLE_RANDOMSEED',
+          'sysinit.target.wants/'],
+diff --git a/units/systemd-homed.service.in b/units/systemd-homed.service.in
+index 7cf98e6fa6..8138f5125c 100644
+--- a/units/systemd-homed.service.in
++++ b/units/systemd-homed.service.in
+@@ -34,3 +34,7 @@ SystemCallArchitectures=native
+ SystemCallErrorNumber=EPERM
+ SystemCallFilter=@system-service @mount
+ @SERVICE_WATCHDOG@
++
++[Install]
++WantedBy=multi-user.target
++Alias=dbus-org.freedesktop.home1.service
+From ead7af30939e3f1903455c7e06bc7cfeef54d4a2 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Fri, 13 Mar 2020 18:40:54 +0100
+Subject: [PATCH 3/3] units: make systemd-userdbd.{socket,service} installable
+
+It's lightweight and generally useful, so it should be enabled by default. But
+users might want to disable it for whatever reason, and things should be fine
+without it, so let's make it installable so it can be disabled if wanted.
+
+Fixes #15175.
+---
+ presets/90-systemd.preset        | 1 +
+ units/meson.build                | 3 +--
+ units/systemd-userdbd.service.in | 3 +++
+ units/systemd-userdbd.socket     | 3 +++
+ 4 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/presets/90-systemd.preset b/presets/90-systemd.preset
+index 53eb8a7806..db61ef12d3 100644
+--- a/presets/90-systemd.preset
++++ b/presets/90-systemd.preset
+@@ -21,6 +21,7 @@ enable systemd-networkd.service
+ enable systemd-resolved.service
+ enable systemd-repart.service
+ enable systemd-homed.service
++enable systemd-userdbd.socket
+ 
+ disable console-getty.service
+ disable debug-shell.service
+diff --git a/units/meson.build b/units/meson.build
+index d8ee6df184..8ec9eb94e4 100644
+--- a/units/meson.build
++++ b/units/meson.build
+@@ -139,8 +139,7 @@ units = [
+          'sysinit.target.wants/'],
+         ['systemd-udevd-kernel.socket',         '',
+          'sockets.target.wants/'],
+-        ['systemd-userdbd.socket',              'ENABLE_USERDB',
+-         'sockets.target.wants/'],
++        ['systemd-userdbd.socket',              'ENABLE_USERDB'],
+         ['time-set.target',                     ''],
+         ['time-sync.target',                    ''],
+         ['timers.target',                       ''],
+diff --git a/units/systemd-userdbd.service.in b/units/systemd-userdbd.service.in
+index e30ed2109e..3b76705373 100644
+--- a/units/systemd-userdbd.service.in
++++ b/units/systemd-userdbd.service.in
+@@ -39,3 +39,6 @@ SystemCallErrorNumber=EPERM
+ SystemCallFilter=@system-service
+ Type=notify
+ @SERVICE_WATCHDOG@
++
++[Install]
++Also=systemd-userdbd.socket
+diff --git a/units/systemd-userdbd.socket b/units/systemd-userdbd.socket
+index 1c749ea1d2..2b4bb7a87a 100644
+--- a/units/systemd-userdbd.socket
++++ b/units/systemd-userdbd.socket
+@@ -17,3 +17,6 @@ Before=sockets.target
+ ListenStream=/run/systemd/userdb/io.systemd.Multiplexer
+ Symlinks=/run/systemd/userdb/io.systemd.NameServiceSwitch
+ SocketMode=0666
++
++[Install]
++WantedBy=sockets.target
