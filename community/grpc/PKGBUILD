@@ -7,9 +7,9 @@
 
 pkgbase='grpc'
 pkgname=('grpc' 'python-grpcio' 'php-grpc' 'grpc-cli')
-pkgver=1.27.3
+pkgver=1.28.1
 _gtestver=c9ccac7cb7345901884aabf5d1a786cfa6e2f397
-_abseilcppver=37dd2562ec830d547a1524bb306be313ac3f2556
+_abseilcppver=20200225.1
 pkgrel=1
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
 arch=('x86_64')
@@ -18,13 +18,16 @@ license=('BSD')
 makedepends=('re2c' 'protobuf' 'php' 'c-ares' 'openssl' 'chrpath' 'gflags' 'cython' 'cmake')
 source=("https://github.com/$pkgname/$pkgname/archive/v$pkgver/$pkgname-$pkgver.tar.gz"
         "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
-        "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz")
-sha256sums=('c2ab8a42a0d673c1acb596d276055adcc074c1116e427f118415da3e79e52969'
+        "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz"
+        "cmake-cli.patch")
+sha256sums=('4cbce7f708917b6e58b631c24c59fe720acc8fef5f959df9a58cdf9558d0a79b'
             '443d383db648ebb8e391382c0ab63263b7091d03197f304390baac10f178a468'
-            '19391fb4882601a65cb648d638c11aa301ce5f525ef02da1a9eafd22f72d7c59')
+            '0db0d26f43ba6806a8a3338da3e646bb581f0ca5359b3a201d8fb8e4752fd5f8'
+            'dfd1b8cd2a5860557fba06dbdb926b3b5122feca629af7972104204da1b50caf')
 
 prepare() {
   cd "$srcdir/$pkgname-$pkgver"
+  patch -p1 -i "$srcdir/cmake-cli.patch"
 
   ln -sf "$srcdir/googletest-$_gtestver/"{googlemock,googletest} \
     third_party/googletest
@@ -32,50 +35,48 @@ prepare() {
   rm -rf third_party/abseil-cpp
   ln -s "$srcdir/abseil-cpp-$_abseilcppver/" third_party/abseil-cpp
 
+  [[ $CARCH == "armv6h" || $CARCH == "arm" ]] && sed -i -e "s/set(_gRPC_ALLTARGETS_LIBRARIES \${CMAKE_DL_LIBS} rt m pthread)/set(_gRPC_ALLTARGETS_LIBRARIES \${CMAKE_DL_LIBS} atomic rt m pthread)/g" CMakeLists.txt
+
   mkdir build
   cd build
   cmake \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DgRPC_INSTALL=ON \
+    -DBUILD_SHARED_LIBS=ON \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DgRPC_BUILD_CSHARP_EXT=OFF \
-    -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=OFF \
-    -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=OFF \
     -DgRPC_CARES_PROVIDER=package \
     -DgRPC_PROTOBUF_PROVIDER=package \
     -DgRPC_SSL_PROVIDER=package \
     -DgRPC_ZLIB_PROVIDER=package \
+    -DgRPC_GFLAGS_PROVIDER=package \
     ..
 }
 
 build() {
-  cd "$srcdir/$pkgname-$pkgver"
-  export CFLAGS="$CFLAGS -Wno-unused-parameter -Wno-unused-function"
-  export CXXFLAGS="$CXXFLAGS -Wno-unused-parameter -Wno-unused-function"
-  [[ $CARCH == "armv6h" || $CARCH == "arm" ]] && LIBS="-latomic"
+  cd "$srcdir/$pkgname-$pkgver/build"
+  make
+  export LDFLAGS="$LDFLAGS -L$PWD"
 
-  make shared plugins EXTRA_LDLIBS="$LIBS"
+  # PHP
+  cd "$srcdir/$pkgbase-$pkgver/src/php/ext/$pkgbase"
+  phpize
+  ./configure --enable-grpc="$srcdir/$pkgname-$pkgver"
+  make
 
   # Python
+  cd "$srcdir/$pkgname-$pkgver"
   GRPC_PYTHON_BUILD_WITH_CYTHON=1 \
   GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
   GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1 \
   GRPC_PYTHON_BUILD_SYSTEM_CARES=1 \
   python setup.py build
-
-  # PHP
-  cd "$srcdir/$pkgbase-$pkgver/src/php/ext/$pkgbase"
-  phpize
-  LDFLAGS=-L"$srcdir/$pkgname-$pkgver/libs/opt" ./configure --enable-grpc="$srcdir/$pkgname-$pkgver"
-  make
 }
 
 package_grpc() {
   depends=('c-ares' 'protobuf' 'openssl')
 
-  cd "$srcdir/$pkgbase-$pkgver"
-  make prefix="$pkgdir/usr" install
-  find "$pkgdir"/usr/{include,share,lib/pkgconfig} -type f -exec chmod a-x {} +
-  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  cd "$srcdir/$pkgbase-$pkgver/build"
+  make DESTDIR="$pkgdir" install
+  install -Dm644 ../LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 package_python-grpcio() {
@@ -106,9 +107,11 @@ package_php-grpc() {
 
 package_grpc-cli() {
   pkgdesc='gRPC protocol buffers cli'
-  depends=('c-ares' 'gflags' 'protobuf' 'openssl')
+  depends=('grpc' 'gflags')
 
   cd "$srcdir/$pkgbase-$pkgver"
-  make prefix="$pkgdir/usr" install-grpc-cli
+  install -dm0755 "$pkgdir/usr/lib"
+  cp -a build/libgrpc{_cli_libs,++_test_config,++_proto_reflection_desc_db}.so* "$pkgdir/usr/lib/"
+  install -Dm0755 build/grpc_cli "$pkgdir/usr/bin/grpc_cli"
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
