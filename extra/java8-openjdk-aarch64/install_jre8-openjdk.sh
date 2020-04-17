@@ -24,21 +24,14 @@ post_install() {
       ;;
   esac
 
-  xdg-icon-resource forceupdate --theme hicolor 2> /dev/null
   echo "when you use a non-reparenting window manager,"
   echo "set _JAVA_AWT_WM_NONREPARENTING=1 in /etc/profile.d/jre.sh"
-
-#  update-desktop-database -q
 }
 
 post_upgrade() {
-  if [ -z $(fix_default) ]; then
+  if [ -z "$(fix_default)" ]; then
     /usr/bin/archlinux-java set ${THIS_JRE}
   fi
-
-  xdg-icon-resource forceupdate --theme hicolor 2> /dev/null
-
-#  update-desktop-database -q
 }
 
 pre_remove() {
@@ -46,10 +39,4 @@ pre_remove() {
     /usr/bin/archlinux-java unset
     echo "No Java environment is set as default anymore"
   fi
-}
-
-post_remove() {
-  xdg-icon-resource forceupdate --theme hicolor 2> /dev/null
-
-#  update-desktop-database -q
 }
