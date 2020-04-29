@@ -1,0 +1,71 @@
+From 8aeeb72b5af16e27b152f733da4a7de0ec47f328 Mon Sep 17 00:00:00 2001
+From: Christopher James Halse Rogers <christopher.halse.rogers@canonical.com>
+Date: Tue, 24 Mar 2020 14:19:51 +1100
+Subject: [PATCH 2/2] egl/wayland: Fix zwp_linux_dmabuf usage
+
+There's no guarantee that the formats advertised by wl_drm and the formats
+advertised by zwp_linux_dmabuf_v1 are the same.
+
+get_back_bo() handles this by falling back from createImageWithModifiers() to
+createImage() when there's a wl_drm format but no corresponding linux_dmabuf
+format, but create_wl_buffer() unconditionally tries to create a linux_dmabuf
+buffer unless DRIimage has DRM_FORMAT_MOD_INVALID.
+
+Fix this by always checking if the DRIimage modifier has been advertised
+by zwp_linux_dmabuf_v1, and falling back to wl_drm if not.
+
+If DRM_FORMAT_MOD_INVALID has been advertised then we trust the client
+has allocated something appropriate and treat any modifier as matching.
+
+Closes: https://gitlab.freedesktop.org/mesa/mesa/issues/2220
+Signed-off-by: Christopher James Halse Rogers <christopher.halse.rogers@canonical.com>
+---
+ src/egl/drivers/dri2/platform_wayland.c | 30 ++++++++++++++++---------
+ 1 file changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/src/egl/drivers/dri2/platform_wayland.c b/src/egl/drivers/dri2/platform_wayland.c
+index 324ac2357da..7b7646e6e7f 100644
+--- a/src/egl/drivers/dri2/platform_wayland.c
++++ b/src/egl/drivers/dri2/platform_wayland.c
+@@ -925,19 +925,27 @@ create_wl_buffer(struct dri2_egl_display *dri2_dpy,
+    }
+ 
+    bool supported_modifier = false;
+-   if (modifier != DRM_FORMAT_MOD_INVALID) {
+-      supported_modifier = true;
+-   } else {
+-      int visual_idx = dri2_wl_visual_idx_from_fourcc(fourcc);
+-      assert(visual_idx != -1);
++   bool mod_invalid_supported = false;
++   int visual_idx = dri2_wl_visual_idx_from_fourcc(fourcc);
++   assert(visual_idx != -1);
+ 
+-      uint64_t *mod;
+-      u_vector_foreach(mod, &dri2_dpy->wl_modifiers[visual_idx]) {
+-         if (*mod == DRM_FORMAT_MOD_INVALID) {
+-            supported_modifier = true;
+-            break;
+-         }
++   uint64_t *mod;
++   u_vector_foreach(mod, &dri2_dpy->wl_modifiers[visual_idx]) {
++      if (*mod == DRM_FORMAT_MOD_INVALID) {
++         mod_invalid_supported = true;
+       }
++      if (*mod == modifier) {
++         supported_modifier = true;
++         break;
++      }
++   }
++   if (!supported_modifier && mod_invalid_supported) {
++      /* If the server has advertised DRM_FORMAT_MOD_INVALID then we trust
++       * that the client has allocated the buffer with the right implicit
++       * modifier for the format, even though it's allocated a buffer the
++       * server hasn't explicitly claimed to support. */
++      modifier = DRM_FORMAT_MOD_INVALID;
++      supported_modifier = true;
+    }
+ 
+    if (dri2_dpy->wl_dmabuf && supported_modifier) {
+-- 
+2.26.2
+
