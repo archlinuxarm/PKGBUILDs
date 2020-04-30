@@ -9,8 +9,8 @@
 pkgbase=mesa
 pkgname=('vulkan-mesa-layer' 'opencl-mesa' 'vulkan-radeon' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=20.0.5
-pkgrel=3
+pkgver=20.0.6
+pkgrel=2
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd'
@@ -23,7 +23,7 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-egl-allow-INVALID-format-for-linux_dmabuf.patch
         0002-egl-wayland-Fix-zwp_linux_dmabuf-usage.patch
         LICENSE)
-sha512sums=('6f5780f7574400fea54978b40eb97faca35826a8a7bed96362d7bebcda78e2cadd44585ef8dd7dc126e0cc62cff61bee9b2ea360fedcc09a1fbb4c1f20c6aa08'
+sha512sums=('a93dc3ed57ed7469b7c60cdbdcf4f29c5da4ec3986171c7b534e009e136ca21fec16207ffab38a6747437a9b1060e2e6c4b74c4e5cdc168b9aba0fc1940b5e90'
             'SKIP'
             'ba55fd9816ebd9147be120da1fd4fa0364d19967a11570e6d5dd9d8b4f7971df46ced8b151ee07afaaa98043e131eed14918ec25f8c9b0f7e5c53f452674ee5c'
             '2371631512cd0f6aeaa9db3a8484da039fe98610123683520d0fe076dbf49860f00f8d44ecb0b0b149cee766946fe800080178c6fca8cff289329bf46ce97858'
@@ -88,6 +88,7 @@ build() {
   # Print config
   meson configure build
 
+  ninja -C build xmlpool-pot xmlpool-update-po xmlpool-gmo
   ninja -C build
 
   # fake installation to be seperated into packages
@@ -192,7 +193,7 @@ package_mesa() {
 
   # indirect rendering
   ln -s /usr/lib/libGLX_mesa.so.0 "${pkgdir}/usr/lib/libGLX_indirect.so.0"
-
+  
   # make sure there are no files left to install
   find fakeinstall -depth -print0 | xargs -0 rmdir
 
