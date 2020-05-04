@@ -1,0 +1,86 @@
+commit 7650d87cc4e3a153ecbefc657f97f4a78f899b29
+Author: valadaa48 <valadaa48@gmx.com>
+Date:   Wed Apr 1 19:57:55 2020 -0400
+
+    rga2: enable suspend/resume from upstream
+
+diff --git a/drivers/video/rockchip/rga2/rga2_drv.c b/drivers/video/rockchip/rga2/rga2_drv.c
+index b17d7394bbe7..564435852240 100644
+--- a/drivers/video/rockchip/rga2/rga2_drv.c
++++ b/drivers/video/rockchip/rga2/rga2_drv.c
+@@ -2203,6 +2203,67 @@ static int rga2_drv_remove(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
++static int rga_enable_clocks(struct device *dev)
++{
++    int ret;
++
++    ret = clk_prepare_enable(rga2_drvdata->clk_rga2);
++    if (ret) {
++        pr_err("Cannot enable rga sclk: %d\n", ret);
++        return ret;
++    }
++
++    ret = clk_prepare_enable(rga2_drvdata->aclk_rga2);
++    if (ret) {
++        pr_err("Cannot enable rga aclk: %d\n", ret);
++        goto err_disable_sclk;
++    }
++
++    ret = clk_prepare_enable(rga2_drvdata->hclk_rga2);
++    if (ret) {
++        pr_err("Cannot enable rga hclk: %d\n", ret);
++        goto err_disable_aclk;
++    }
++
++    return 0;
++
++err_disable_sclk:
++	clk_disable_unprepare(rga2_drvdata->clk_rga2);
++err_disable_aclk:
++	clk_disable_unprepare(rga2_drvdata->aclk_rga2);
++
++    return ret;
++}
++
++
++static void rga_disable_clocks(struct device *dev)
++{
++    (void)dev;
++	clk_disable_unprepare(rga2_drvdata->clk_rga2);
++	clk_disable_unprepare(rga2_drvdata->hclk_rga2);
++	clk_disable_unprepare(rga2_drvdata->aclk_rga2);
++}
++
++
++static int __maybe_unused rga_runtime_suspend(struct device *dev)
++{
++    rga_disable_clocks(dev);
++
++    return 0;
++}
++
++static int __maybe_unused rga_runtime_resume(struct device *dev)
++{
++    return rga_enable_clocks(dev);
++}
++
++
++static const struct dev_pm_ops rga_pm = {
++    SET_RUNTIME_PM_OPS(rga_runtime_suspend,
++        rga_runtime_resume, NULL)
++};
++
++
+ static struct platform_driver rga2_driver = {
+ 	.probe		= rga2_drv_probe,
+ 	.remove		= rga2_drv_remove,
+@@ -2211,6 +2272,7 @@ static struct platform_driver rga2_driver = {
+ 		.owner  = THIS_MODULE,
+ #endif
+ 		.name	= "rga2",
++		.pm     = &rga_pm,
+ 		.of_match_table = of_match_ptr(rockchip_rga_dt_ids),
+ 	},
+ };
