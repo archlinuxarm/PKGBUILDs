@@ -9,7 +9,7 @@
 pkgbase=mesa
 pkgname=('vulkan-mesa-layer' 'opencl-mesa' 'vulkan-radeon' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=20.0.6
+pkgver=20.0.7
 pkgrel=2
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
@@ -20,14 +20,14 @@ url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-Rip-out-VC4-forced-NEON.patch
-        0001-egl-allow-INVALID-format-for-linux_dmabuf.patch
-        0002-egl-wayland-Fix-zwp_linux_dmabuf-usage.patch
+	0001-swr-Fix-build-with-GCC-10.patch
+	0001-omx-fix-build-with-gcc-10.patch
         LICENSE)
-sha512sums=('a93dc3ed57ed7469b7c60cdbdcf4f29c5da4ec3986171c7b534e009e136ca21fec16207ffab38a6747437a9b1060e2e6c4b74c4e5cdc168b9aba0fc1940b5e90'
+sha512sums=('00baae50f14bf2b08b5654dffb11cf67499dc1825e1700b137fb5719e767e0e78e789979df2c194f677ea9c5e531f34965d47b9e37c239944c38d0570c7a9685'
             'SKIP'
             'ba55fd9816ebd9147be120da1fd4fa0364d19967a11570e6d5dd9d8b4f7971df46ced8b151ee07afaaa98043e131eed14918ec25f8c9b0f7e5c53f452674ee5c'
-            '2371631512cd0f6aeaa9db3a8484da039fe98610123683520d0fe076dbf49860f00f8d44ecb0b0b149cee766946fe800080178c6fca8cff289329bf46ce97858'
-            'd8998785c373743932674eecdfc1f502b5ef58b3f53572a42b177bf5b367d43b4af3867e37bd71c6a23f1b740841aabf2d42c68eb95f1bc33c0e58d9b7e029b8'
+            '296a7502e959ccd2a6f1279878c0562a853ecdd78b5960196fc8f99ed8dd995c6e1106551aef7a53db891295235ca55676788e7cf78e336e2d5ee49e4e463be5'
+            'e1f0fa2a8802184580d9d95777f02a1c35bf71c3ab380d88e5b9268f84c2ac338fa517d20065094b7764490bbbfb290c1c5ad6dec6d27f3dbf737dfa0b6c7263'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -39,10 +39,9 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 prepare() {
   cd mesa-$pkgver
 
-  # https://gitlab.gnome.org/GNOME/mutter/issues/987
-  # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/4294
-  patch -Np1 -i ../0001-egl-allow-INVALID-format-for-linux_dmabuf.patch
-  patch -Np1 -i ../0002-egl-wayland-Fix-zwp_linux_dmabuf-usage.patch
+  # fix building with gcc 10
+  patch -Np1 -i ../0001-swr-Fix-build-with-GCC-10.patch
+  patch -Np1 -i ../0001-omx-fix-build-with-gcc-10.patch
 
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i ../0001-Rip-out-VC4-forced-NEON.patch || true
 }
