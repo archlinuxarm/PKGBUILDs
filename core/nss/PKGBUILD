@@ -1,4 +1,5 @@
-# Maintainer: Jan de Groot <jgc@archlinux.org>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Contributor: Jan de Groot <jgc@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - remove -march=armv8-a in AArch64 CFLAGS to not conflict with -march=armv8-a+crypto being added
@@ -6,20 +7,19 @@
 
 pkgbase=nss
 pkgname=(nss ca-certificates-mozilla)
-pkgver=3.52
-pkgrel=1
+pkgver=3.52.1
+pkgrel=2
 pkgdesc="Network Security Services"
 url="https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS"
 arch=(x86_64)
 license=(MPL GPL)
-_nsprver=4.25
-depends=("nspr>=${_nsprver}" sqlite zlib sh 'p11-kit>=0.23.19')
+depends=(nspr sqlite zlib sh 'p11-kit>=0.23.19')
 makedepends=(perl python gyp)
 source=("https://ftp.mozilla.org/pub/security/nss/releases/NSS_${pkgver//./_}_RTM/src/nss-${pkgver}.tar.gz"
         certdata2pem.py bundle.sh
         0001-Don-t-USE_ARM_GCM.patch
         0002-fix-armv8_c_lib-dependency.patch)
-sha256sums=('0a0aeb0cdda65ddcb64f746223df58b150f6803f4bfa1a4e876bbe6f9c4c1561'
+sha256sums=('bcc81ac33aeb4ecad182dc21e34d2c97bcc148fd7b9e76f85bebb892405a9278'
             'd2a1579dae05fd16175fac27ef08b54731ecefdf414085c610179afcf62b096c'
             '3bfadf722da6773bdabdd25bdf78158648043d1b7e57615574f189a88ca865dd'
             'eccc7447d4fdbd1975bf65aef648df3a483d7bb4e458849ddd5dcaf4697771d2'
@@ -51,25 +51,29 @@ build() {
 }
 
 package_nss() {
-  local vmajor vminor vpatch
   cd nss-$pkgver
 
-  { read vmajor; read vminor; read vpatch; } \
-    < <(awk '/#define.*NSS_V(MAJOR|MINOR|PATCH)/ {print $3}' nss/lib/nss/nss.h)
-
+  local libdir=/usr/lib nsprver="$(pkg-config --modversion nspr)"
   sed nss/pkg/pkg-config/nss.pc.in \
-    -e "s,%libdir%,/usr/lib,g" \
+    -e "s,%libdir%,$libdir,g" \
     -e "s,%prefix%,/usr,g" \
     -e "s,%exec_prefix%,/usr/bin,g" \
     -e "s,%includedir%,/usr/include/nss,g" \
-    -e "s,%NSPR_VERSION%,$_nsprver,g" \
+    -e "s,%NSPR_VERSION%,$nsprver,g" \
     -e "s,%NSS_VERSION%,$pkgver,g" |
-    install -Dm644 /dev/stdin "$pkgdir/usr/lib/pkgconfig/nss.pc"
+    install -Dm644 /dev/stdin "$pkgdir$libdir/pkgconfig/nss.pc"
 
-  ln -s nss.pc "$pkgdir/usr/lib/pkgconfig/mozilla-nss.pc"
+  ln -s nss.pc "$pkgdir$libdir/pkgconfig/mozilla-nss.pc"
+
+  install -Dt "$pkgdir$libdir" dist/Release/lib/*.so
+  install -Dt "$pkgdir$libdir" -m644 dist/Release/lib/*.chk
+
+  local vmajor vminor vpatch
+  { read vmajor; read vminor; read vpatch; } \
+    < <(awk '/#define.*NSS_V(MAJOR|MINOR|PATCH)/ {print $3}' nss/lib/nss/nss.h)
 
   sed nss/pkg/pkg-config/nss-config.in \
-    -e "s,@libdir@,/usr/lib,g" \
+    -e "s,@libdir@,$libdir,g" \
     -e "s,@prefix@,/usr/bin,g" \
     -e "s,@exec_prefix@,/usr/bin,g" \
     -e "s,@includedir@,/usr/include/nss,g" \
@@ -78,22 +82,17 @@ package_nss() {
     -e "s,@MOD_PATCH_VERSION@,$vpatch,g" |
     install -D /dev/stdin "$pkgdir/usr/bin/nss-config"
 
-  cd nss/doc/nroff
-  install -Dt "$pkgdir/usr/share/man/man1" -m644 *util.1 signtool.1 signver.1 ssltap.1
+  install -Dt "$pkgdir/usr/bin" \
+    dist/Release/bin/{*util,shlibsign,signtool,signver,ssltap}
 
-  cd ../../../dist
-  install -Dt "$pkgdir/usr/include/nss" -m644 public/nss/*.h
+  install -Dt "$pkgdir/usr/include/nss" -m644 dist/public/nss/*.h
 
-  cd Release/bin
-  install -Dt "$pkgdir/usr/bin" *util shlibsign signtool signver ssltap
-
-  cd ../lib
-  install -Dt "$pkgdir/usr/lib" *.so
-  install -Dt "$pkgdir/usr/lib" -m644 *.chk
+  install -Dt "$pkgdir/usr/share/man/man1" -m644 \
+    nss/doc/nroff/{*util,signtool,signver,ssltap}.1
 
   # Replace built-in trust with p11-kit connection
-  ln -s pkcs11/p11-kit-trust.so "$pkgdir/usr/lib/p11-kit-trust.so"
-  ln -sf p11-kit-trust.so "$pkgdir/usr/lib/libnssckbi.so"
+  ln -s pkcs11/p11-kit-trust.so "$pkgdir$libdir/p11-kit-trust.so"
+  ln -sf p11-kit-trust.so "$pkgdir$libdir/libnssckbi.so"
 }
 
 package_ca-certificates-mozilla() {
