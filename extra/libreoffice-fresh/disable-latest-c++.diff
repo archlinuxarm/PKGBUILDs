@@ -1,0 +1,79 @@
+From f0b74640137f07ed74027f98fbf6d1c0d98939bf Mon Sep 17 00:00:00 2001
+From: Stephan Bergmann <sbergman@redhat.com>
+Date: Mon, 20 Apr 2020 11:40:24 +0200
+Subject: Add --with-latest-c++ to explicitly opt in for
+ -std=c++20/-std:c++latest
+
+Adaptation of this change to this branch. The point is to avoid
+compiling as C++2a as the code for externals has not been patched
+properly for that here. Here is the original commit message even if I
+assume it is a bit misleading in this branch:
+
+cd472d1d8489f30797f47d3f6dafede28c1feb90 "Compile as C++2a, where available" had
+started to unconditionally check for support of -std=c++2a (and later also
+-std=c++20) for Clang and GCC, but that can cause occasional issues especially
+for Linux distros, see e.g. 55c724b93dfd4c9a1afb10d60fbc2d7a9a66cf61 "replace
+boost::bimap in sdext pdfimport" or
+<https://bugzilla.redhat.com/show_bug.cgi?id=1818723>
+"/usr/include/boost/format/alt_sstream_impl.hpp incompatible with -std=c++20
+(std::allocator::allocate hint argument)" (where
+677c8de4fa79cd9b278b142013ba7f1c9e4e41c3 "external/boost: Adapt to
+std::allocator parts removed in C++20" is not picked up due to
+--with-system-boost).
+
+So better require an explicit opt-in via a new --with-latest-c++.  And while at
+it, also make that enable -std:c++latest for MSVC.
+
+Change-Id: I2d1f03144fad9a7884562e56b1b76cab5eb8f080
+Reviewed-on: https://gerrit.libreoffice.org/c/core/+/92555
+Tested-by: Jenkins
+Reviewed-by: Stephan Bergmann <sbergman@redhat.com>
+Reviewed-on: https://gerrit.libreoffice.org/c/core/+/93204
+Tested-by: Jenkins CollaboraOffice <jenkinscollaboraoffice@gmail.com>
+Reviewed-by: Tor Lillqvist <tml@collabora.com>
+Reviewed-on: https://gerrit.libreoffice.org/c/core/+/93692
+Tested-by: Tor Lillqvist <tml@collabora.com>
+---
+ configure.ac | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 78080305f3d6..8364138bdc96 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -2143,6 +2143,12 @@ libo_FUZZ_ARG_WITH(lxml,
+          report widget classes and ids.]),
+ ,)
+ 
++libo_FUZZ_ARG_WITH(latest-c++,
++    AS_HELP_STRING([--with-latest-c++],
++        [Try to enable the latest features of the C++ compiler, even if they are not yet part of a
++         published standard.]),,
++        [$with_latest_c__=no])
++
+ dnl ===================================================================
+ dnl Branding
+ dnl ===================================================================
+@@ -6456,9 +6462,17 @@ dnl ===================================================================
+ AC_MSG_CHECKING([whether $CXX_BASE supports C++17])
+ CXXFLAGS_CXX11=
+ if test "$COM" = MSC -a "$COM_IS_CLANG" != TRUE; then
+-    CXXFLAGS_CXX11='-std:c++17 -Zc:__cplusplus'
++    if test "$with_latest_c__" = yes; then
++        CXXFLAGS_CXX11=-std:c++latest
++    else
++        CXXFLAGS_CXX11=-std:c++17
++    fi
++    CXXFLAGS_CXX11="$CXXFLAGS_CXX11 -Zc:__cplusplus"
+ elif test "$GCC" = "yes" -o "$COM_IS_CLANG" = TRUE; then
+-    my_flags='-std=c++2a -std=c++17 -std=c++1z'
++    my_flags='-std=c++17 -std=c++1z'
++    if test "$with_latest_c__" = yes; then
++        my_flags="-std=gnu++2a -std=c++2a $my_flags"
++    fi
+     for flag in $my_flags; do
+         if test "$COM" = MSC; then
+             flag="-Xclang $flag"
+-- 
+cgit v1.2.1
+
