@@ -16,7 +16,7 @@ appendpath () {
 appendpath '/usr/local/sbin'
 appendpath '/usr/local/bin'
 appendpath '/usr/bin'
-unset appendpath
+unset -f appendpath
 
 export PATH
 
