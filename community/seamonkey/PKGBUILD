@@ -6,66 +6,52 @@
 highmem=1
 
 pkgname=seamonkey
-pkgver=2.49.4
-pkgrel=5
+pkgver=2.53.2
+pkgrel=1
 pkgdesc="SeaMonkey internet suite"
 arch=('x86_64')
 license=('MPL')
-depends=('alsa-lib'  'dbus-glib'  'desktop-file-utils'  'gtk2' 'gtk3' 'hunspell'  'libevent'  'libnotify'  'libvpx'  'libxt' 'mime-types'  'mozilla-common'  'nss'  'sqlite'  'startup-notification' 'libpulse' 'icu')
-makedepends=('unzip' 'zip' 'python2' 'yasm' 'mesa' 'autoconf2.13' 'imake' 'python3' 'gst-plugins-base')
-optdepends=('gst-plugins-base: vorbis decoding, ogg demuxing'
-            'gst-plugins-bad: aac, vp8 and opus decoding'
-            'gst-plugins-good: webm and mp4 demuxing'
-            'gst-plugins-ugly: h.264 decoding'
-            'networkmanager: Location detection via available WiFi networks')
+depends=('dbus-glib' 'gtk3' 'hunspell' 'icu'
+         'libevent' 'libpulse' 'libvpx' 'libxt' 'mime-types'
+         'nss' 'sqlite' 'startup-notification')
+makedepends=('autoconf2.13' 'clang' 'gtk2' 'imake' 'llvm' 'mesa' 'python2-setuptools'
+             'python2-psutil' 'rust' 'yasm' 'unzip' 'zip')
+optdepends=('networkmanager: Location detection via available WiFi networks'
+	    'libnotify: Notification integration'
+	    'pulseaudio: Audio support')
 url="https://www.seamonkey-project.org/"
-source=("https://archive.mozilla.org/pub/mozilla.org/seamonkey/releases/$pkgver/source/seamonkey-$pkgver.source.tar.xz"
-        mozconfig
-        seamonkey-2.0-lang.patch
-        patch-bug1435212.xz
-        gettid.patch
-	no-crmf.diff
-        xulrunner-27.0-build-arm.patch)
-sha256sums=('c8a66774d0a3525698b559fa2c41397186f2de99c5733e35b8eafb0ae5ccc4ee'
-            '6ff9fd323eec175eb02cfefd3136c79491c3b40be0b1f899da7c75c2f76259ca'
-            'ab19d10fbd6258aec37ab5e5efb12429814b2c24a1193284a48dd654311b4e2e'
-            'dce68858694f820a9a1fc2428038a88ea00b4835cea0778734db794fea3bb21a'
-            '923154d052f041af15a2495ceb1f76f7c8619fd8bfc66a0bbedfeab2514adf0b'
-            'fb85a538044c15471c12cf561d6aa74570f8de7b054a7063ef88ee1bdfc1ccbb'
+source=("https://archive.mozilla.org/pub/seamonkey/releases/$pkgver/source/seamonkey-$pkgver.source.tar.xz"
+        "mozconfig"
+        "xulrunner-27.0-build-arm.patch")
+sha256sums=('d339a2968191368b3444635cf91d19b73d6499566c27e3833150d16083448a83'
+            'ad6ba5338340498971219eed6246b4ae27427511e126f4b3ad1b6f305883b8b7'
             'bc83b8a51c81a401da2fbe1f7cd0843248c32607d3a51119585df074d797922e')
+install="$pkgname.install"
+
+# Google API keys (see http://www.chromium.org/developers/how-tos/api-keys)
+# Note: These are for Arch Linux use ONLY. For your own distribution, please
+# get your own set of keys. Feel free to contact foutrelis@archlinux.org for
+# more information.
+_google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
+
+# Mozilla API keys (see https://location.services.mozilla.com/api)
+# Note: These are for Arch Linux use ONLY. For your own distribution, please
+# get your own set of keys. Feel free to contact heftig@archlinux.org for
+# more information.
+_mozilla_api_key=e05d56db0a694edc8b5aaebda3f2db6a
 
 prepare() {
   cd "$pkgname-$pkgver"
   cp ../mozconfig .mozconfig
-  #patch -Np1 -i ../seamonkey-2.0-lang.patch
 
-  # FS#48404
-  #echo "ac_add_options --enable-gstreamer=1.0" >> .mozconfig
+  echo -n "$_google_api_key" > google-api-key
+  echo -n "$_mozilla_api_key" > mozilla-api-key
 
-  # ffmpeg 4.0 patch from freebsd
-  # https://github.com/freebsd/freebsd-ports/blob/master/www/seamonkey/files/patch-bug1435212
-  patch -Np1 -d mozilla -i ../../patch-bug1435212
-
-  # https://bugzilla.mozilla.org/show_bug.cgi?id=1533969
-  patch -Np1 -i ../gettid.patch
-
-  # Don't exit with error when some libs are missing which we have in
-  # system.
-  sed -i '/^MOZ_PKG_FATAL_WARNINGS/s@= 1@= 0@' suite/installer/Makefile.in
-
-  # configure script misdetects the preprocessor without an optimization level
-  sed -i '/ac_cpp=/s/$CPPFLAGS/& -O2/' configure
-
-  # 2.26 build fix from wgnie (blfs ch 37)
-  sed -i 's/$(MOZ_ZLIB_CFLAGS)/& $(MOZ_PIXMAN_CFLAGS)/' config/config.mk
-
-  # work around from FS#54395
-  patch -Np1 -d mozilla -i ../../no-crmf.diff
-  sed -i "s/'crmf',//" mozilla/security/manager/ssl/moz.build
-  sed -i 's/^.*-lcrmf/#&/' mozilla/config/external/nss/crmf/moz.build
-  sed -i 's/ -lcrmf"/"/' mozilla/old-configure.in.orig
-  sed -i 's/ -lcrmf"/"/' mozilla/old-configure
-  sed -i 's/SDK_LIBS = crmf/SDK_LIBS = /' mozilla/config/external/nss/Makefile.in
+  cat >> .mozconfig <<EOF
+  ac_add_options --with-google-location-service-api-keyfile=${PWD@Q}/google-api-key
+  ac_add_options --with-google-safebrowsing-api-keyfile=${PWD@Q}/google-api-key
+  ac_add_options --with-mozilla-api-keyfile=${PWD@Q}/mozilla-api-key
+EOF
 
   [[ $CARCH != "aarch64" ]] && echo "ac_add_options --disable-elf-hack" >> .mozconfig
   LDFLAGS+=" -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
@@ -75,39 +61,24 @@ prepare() {
 build() {
   cd "$pkgname-$pkgver"
 
-  export LDFLAGS="$LDFLAGS -Wl,-rpath,/usr/lib/seamonkey-$pkgver"
-  export MOZ_MAKE_FLAGS="$MAKEFLAGS"
-  unset MAKEFLAGS
-  unset CPPFLAGS
-
-  # GCC 6
-  CFLAGS+=" -fno-delete-null-pointer-checks -fno-lifetime-dse -fno-schedule-insns2"
-  CXXFLAGS+=" -fno-delete-null-pointer-checks -fno-lifetime-dse -fno-schedule-insns2"
-
-  # GCC 9
-  CXXFLAGS+=" -Wno-format-overflow"
-
-  make -j1 -f client.mk build
+  make -f client.mk build
 }
 
 package() {
   cd "$pkgname-$pkgver"
 
-  make -j1 -f client.mk DESTDIR="$pkgdir" INSTALL_SDK= install
+  make -f client.mk DESTDIR="$pkgdir" INSTALL_SDK= install
 
-  rm -rf "$pkgdir"/usr/lib/seamonkey-$pkgver/{dictionaries,hyphenation}
-  ln -s /usr/share/hunspell "$pkgdir/usr/lib/seamonkey-$pkgver/dictionaries"
-  ln -s /usr/share/hyphen "$pkgdir/usr/lib/seamonkey-$pkgver/hyphenation"
+  rm -rf "$pkgdir"/usr/lib/seamonkey/{dictionaries,hyphenation}
+  ln -s /usr/share/hunspell "$pkgdir/usr/lib/seamonkey/dictionaries"
+  ln -s /usr/share/hyphen "$pkgdir/usr/lib/seamonkey/hyphenation"
 
-  install -Dm644 suite/branding/nightly/icons/gtk/seamonkey.png \
-                "$pkgdir/usr/share/pixmaps/seamonkey.png"
+  install -Dm644 suite/branding/seamonkey/default128.png \
+          "$pkgdir/usr/share/pixmaps/seamonkey.png"
 
   install -Dm644 mozilla/toolkit/mozapps/installer/linux/rpm/mozilla.desktop \
                 "$pkgdir/usr/share/applications/seamonkey.desktop"
   sed -i 's/@MOZ_APP_DISPLAYNAME@/SeaMonkey internet suite/' \
                 "$pkgdir/usr/share/applications/seamonkey.desktop"
   sed -i 's/@MOZ_APP_NAME@/seamonkey/' "$pkgdir/usr/share/applications/seamonkey.desktop"
-
-  rm -f "$pkgdir/usr/lib/pkgconfig/"seamonkey-ns{s,pr}.pc
-  #rm -r "$pkgdir"/usr/{include,lib/seamonkey-devel-$pkgver,share/idl}
 }
