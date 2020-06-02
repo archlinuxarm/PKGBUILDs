@@ -7,9 +7,10 @@
 
 pkgbase='grpc'
 pkgname=('grpc' 'python-grpcio' 'php-grpc' 'grpc-cli')
-pkgver=1.28.1
+pkgver=1.29.1
 _gtestver=c9ccac7cb7345901884aabf5d1a786cfa6e2f397
-_abseilcppver=20200225.1
+_abseilcppver=20200225.2
+_gbenchmark=1.5.0
 pkgrel=1
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
 arch=('x86_64')
@@ -19,21 +20,24 @@ makedepends=('re2c' 'protobuf' 'php' 'c-ares' 'openssl' 'chrpath' 'gflags' 'cyth
 source=("https://github.com/$pkgname/$pkgname/archive/v$pkgver/$pkgname-$pkgver.tar.gz"
         "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
         "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz"
-        "cmake-cli.patch")
-sha256sums=('4cbce7f708917b6e58b631c24c59fe720acc8fef5f959df9a58cdf9558d0a79b'
+        "https://github.com/google/benchmark/archive/v$_gbenchmark/google-benchmark-$_gbenchmark.tar.gz")
+sha256sums=('0343e6dbde66e9a31c691f2f61e98d79f3584e03a11511fad3f10e3667832a45'
             '443d383db648ebb8e391382c0ab63263b7091d03197f304390baac10f178a468'
-            '0db0d26f43ba6806a8a3338da3e646bb581f0ca5359b3a201d8fb8e4752fd5f8'
-            'dfd1b8cd2a5860557fba06dbdb926b3b5122feca629af7972104204da1b50caf')
+            'f41868f7a938605c92936230081175d1eae87f6ea2c248f41077c8f88316f111'
+            '3c6a165b6ecc948967a1ead710d4a181d7b0fbcaa183ef7ea84604994966221a')
 
 prepare() {
   cd "$srcdir/$pkgname-$pkgver"
-  patch -p1 -i "$srcdir/cmake-cli.patch"
-
   ln -sf "$srcdir/googletest-$_gtestver/"{googlemock,googletest} \
     third_party/googletest
 
   rm -rf third_party/abseil-cpp
   ln -s "$srcdir/abseil-cpp-$_abseilcppver/" third_party/abseil-cpp
+
+  rm -rf third_party/benchmark
+  ln -s "$srcdir/benchmark-$_gbenchmark/" third_party/benchmark
+
+  sed '/TARGET gflags::gflags/i \  set(_gRPC_GFLAGS_LIBRARIES gflags)' -i cmake/gflags.cmake
 
   [[ $CARCH == "armv6h" || $CARCH == "arm" ]] && sed -i -e "s/set(_gRPC_ALLTARGETS_LIBRARIES \${CMAKE_DL_LIBS} rt m pthread)/set(_gRPC_ALLTARGETS_LIBRARIES \${CMAKE_DL_LIBS} atomic rt m pthread)/g" CMakeLists.txt
 
@@ -42,12 +46,14 @@ prepare() {
   cmake \
     -DgRPC_INSTALL=ON \
     -DBUILD_SHARED_LIBS=ON \
+    -DgRPC_BUILD_TESTS=ON \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DgRPC_CARES_PROVIDER=package \
     -DgRPC_PROTOBUF_PROVIDER=package \
     -DgRPC_SSL_PROVIDER=package \
     -DgRPC_ZLIB_PROVIDER=package \
     -DgRPC_GFLAGS_PROVIDER=package \
+    -DBENCHMARK_HAS_CXX03_FLAG=OFF \
     ..
 }
 
@@ -111,7 +117,7 @@ package_grpc-cli() {
 
   cd "$srcdir/$pkgbase-$pkgver"
   install -dm0755 "$pkgdir/usr/lib"
-  cp -a build/libgrpc{_cli_libs,++_test_config,++_proto_reflection_desc_db}.so* "$pkgdir/usr/lib/"
+  cp -a build/libgrpc++_test_config.so* "$pkgdir/usr/lib/"
   install -Dm0755 build/grpc_cli "$pkgdir/usr/bin/grpc_cli"
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
