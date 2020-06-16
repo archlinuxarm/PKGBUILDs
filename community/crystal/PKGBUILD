@@ -1,0 +1,98 @@
+# Maintainer: Anatol Pomozov <anatol.pomozov@gmail.com>
+# Contributor: Jonne Haß <me@jhass.eu>
+
+# ALARM: Jonne Haß <me@jhass.eu>
+# - Bootstrap aarch64 using static build provided by Alpine
+#   This is necessary because Crystal is a self hosted compiler and
+#   it can be removed on the first package upgrade. That is move crystal back
+#   to the general makedepends, as  it guarantees being able to build the current
+#   release with the previous one.
+# - Pull in patches needed for  aarch64 compatibility
+
+buildarch=8
+highmem=1
+
+pkgname=crystal
+pkgver=0.35.0
+pkgrel=1
+pkgdesc='The Crystal Programming Language'
+arch=(x86_64 aarch64)
+url='https://crystal-lang.org'
+license=(Apache)
+depends=(gc libatomic_ops pcre libevent llvm-libs)
+makedepends=(libxml2 llvm)
+makedepends_x86_64=(crystal) # to compile version N we need crystal compiler of N-1 version
+checkdepends=(libyaml libxml2 gmp inetutils git)
+optdepends=('shards: crystal language package manager'
+            'libyaml: For YAML support'
+            'gmp: For BigInt support'
+            'libxml2: For XML support')
+source=(crystal-$pkgver.tar.gz::https://github.com/crystal-lang/crystal/archive/$pkgver.tar.gz)
+source_aarch64=(https://dev.alpinelinux.org/archive/crystal/crystal-0.35.0-aarch64-alpine-linux-musl.tar.gz
+  global_isel.patch::https://github.com/crystal-lang/crystal/commit/b0435958a0cf91f6d72aae299ec18baddeab026b.patch
+  c_abi.patch::https://github.com/crystal-lang/crystal/commit/99eff6acb33fc754b09d5418b69a25848da1b92e.patch
+  valist.patch::https://github.com/crystal-lang/crystal/commit/759f6a35cafd3aaad5cc290ee085918ebf400058.patch)
+sha256sums=('9281afe3bee8cffff5d3aa32e66ed2129946893fe65a3791f3f27b5b13abc006')
+sha256sums_aarch64=('de903f2b53eec558cb77520cd9d52bde357bffae37fc6120308b4ddd8a7d65f9'
+                    'e478e82388437d86e3d6921e0f1e8786232f472484e77aee393e7b634059b6d0'
+                    '5198112f76c58954112bc434e1165d1134adef9cc42abcd2d8f45d99e2309303'
+                    '5044d1a22687c712ee8bfb152fd2336b5333d6709bdb98c9450fbcf19cc5ddad')
+
+prepare() {
+  cd $pkgname-$pkgver
+
+  if [ "$CARCH" = "aarch64" ]; then
+    patch -p1 < "$srcdir/global_isel.patch"
+    patch -p1 < "$srcdir/c_abi.patch"
+    patch -p1 < "$srcdir/valist.patch"
+    export PATH="$srcdir/crystal-0.35.0-aarch64-alpine-linux-musl/bin:$PATH"
+    export EXPORT_CC="CC=cc" # Prevent lld usage in case it's available, as its broken on aarch64, see Makefile
+  fi
+}
+
+build() {
+  cd $pkgname-$pkgver
+
+  make release=1 \
+       FLAGS="--release --no-debug" \
+       CRYSTAL_PATH="$srcdir/$pkgname-$pkgver/src" \
+       CRYSTAL_CONFIG_VERSION="$pkgver" \
+       CRYSTAL_CONFIG_PATH="lib:/usr/lib/crystal" \
+       CRYSTAL_CACHE_DIR="/tmp/crystal"
+  make docs CRYSTAL_CACHE_DIR="/tmp/crystal"
+}
+
+check() {
+  cd $pkgname-$pkgver
+  return # tests require too much RAM, disable it temporary
+
+  make spec CRYSTAL_PATH="$srcdir/$pkgname-$pkgver/src" \
+            CRYSTAL_CONFIG_VERSION="$pkgver" \
+            CRYSTAL_CACHE_DIR="/tmp/crystal" \
+            PATH=".build:$PATH"
+}
+
+package() {
+  cd $pkgname-$pkgver
+
+  # /usr/bin/crystal                compiled executable
+  # /usr/lib/crystal/               compiler src & core libs
+  # /usr/share/doc/crystal/api      api docs
+  # /usr/share/doc/crystal/samples/ samples
+
+  install -Dm755 ".build/crystal" "$pkgdir/usr/bin/crystal"
+
+  install -dm755 "$pkgdir/usr/lib" "$pkgdir/usr/share/man/man1"
+  cp -r src "$pkgdir/usr/lib/crystal"
+
+  install -dm755 "$pkgdir/usr/share/doc/crystal"
+  cp -r docs "$pkgdir/usr/share/doc/crystal/api"
+  cp -r samples "$pkgdir/usr/share/doc/crystal/"
+
+  install -Dm644 man/crystal.1 "$pkgdir/usr/share/man/man1/"
+
+  install -Dm644 etc/completion.bash "$pkgdir/usr/share/bash-completion/completions/crystal"
+  install -Dm644 etc/completion.zsh "$pkgdir/usr/share/zsh/site-functions/_crystal"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
