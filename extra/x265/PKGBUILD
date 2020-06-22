@@ -9,7 +9,7 @@
 #  - patch from upstream bug https://bitbucket.org/multicoreware/x265/issues/442
 
 pkgname=x265
-pkgver=3.3
+pkgver=3.4
 pkgrel=1
 pkgdesc='Open Source H265/HEVC video encoder'
 arch=(x86_64)
@@ -20,12 +20,13 @@ makedepends=(
   cmake
   mercurial
   nasm
+  ninja
 )
 provides=(libx265.so)
-source=(hg+https://bitbucket.org/multicoreware/x265#tag=057215961bc4b51b6260a584ff3d506e6d65cfd6
+source=(hg+https://bitbucket.org/multicoreware/x265#tag=2a65b720985096bcb1664f7cb05c3d04aeb576f5
         arm.patch)
 sha256sums=('SKIP'
-            'd292976588ea1cb12f6371a2379fe7e22b93c18a16ea0a5acd1fbebab48988f2')
+            '067b934ae83339deedc58608d272529a004789c3e2819b94636d66a5806fd64b')
 
 pkgver() {
   cd x265
@@ -35,74 +36,20 @@ pkgver() {
 
 prepare() {
   cd x265
-
   patch -p1 -i ../arm.patch
-  [[ $CARCH == "aarch64" ]] && CFLAGS+=" -fPIC" && CXXFLAGS+=" -fPIC"
-  [[ $CARCH != "aarch64" ]] && CONFIG="-DENABLE_ASSEMBLY=OFF"
-
-  for d in 8 $([[ $CARCH == 'aarch64' ]] && echo "10 12"); do
-    if [[ -d build-$d ]]; then
-      rm -rf build-$d
-    fi
-    mkdir build-$d
-  done
 }
 
 build() {
-if [[ $CARCH == aarch64 ]]; then
-
-  cd x265/build-12
-
-  cmake ../source \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DHIGH_BIT_DEPTH=TRUE \
-    -DMAIN12=TRUE \
-    -DEXPORT_C_API=FALSE \
-    -DENABLE_CLI=FALSE \
-    -DENABLE_SHARED=FALSE
-  make
-
-  cd ../build-10
-
-  cmake ../source \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DHIGH_BIT_DEPTH=TRUE \
-    -DEXPORT_C_API=FALSE \
-    -DENABLE_CLI=FALSE \
-    -DENABLE_SHARED=FALSE
-  make
-
-  cd ../build-8
-
-  ln -s ../build-10/libx265.a libx265_main10.a
-  ln -s ../build-12/libx265.a libx265_main12.a
-
-  cmake ../source \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DENABLE_SHARED=TRUE \
-    -DENABLE_HDR10_PLUS=TRUE \
-    -DEXTRA_LIB='x265_main10.a;x265_main12.a' \
-    -DEXTRA_LINK_FLAGS='-L .' \
-    -DLINKED_10BIT=TRUE \
-    -DLINKED_12BIT=TRUE
-  make
-
-else
-
-  cd x265/build-8
-
-  cmake ../source \
+  [[ $CARCH != "aarch64" ]] && CONFIG="-DENABLE_ASSEMBLY=OFF"
+  cmake -S x265/source -B build -G Ninja \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DENABLE_SHARED=TRUE \
     $CONFIG
-
-fi
+  ninja -C build
 }
 
 package() {
-  cd x265/build-8
-
-  make DESTDIR="${pkgdir}" install
+  DESTDIR="${pkgdir}" ninja -C build install
 }
 
 # vim: ts=2 sw=2 et:

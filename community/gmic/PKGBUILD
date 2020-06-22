@@ -5,88 +5,63 @@
 # Contributor: Archie <Mymaud@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - remove -mtune=generic from makefile, replace with our CFLAGS
-#  - remove -flto from makefile
 #  - set LTO=off for gmic-qt
 
 highmem=1
 
 pkgbase=gmic
 pkgname=(gmic zart gimp-plugin-gmic krita-plugin-gmic digikam-plugin-gmic)
-pkgver=2.9.0
-pkgrel=11
+pkgver=2.9.1
+pkgrel=2
 arch=(x86_64)
 url="https://gmic.eu/"
 license=(custom:CeCILL)
 makedepends=(cmake gimp qt5-base fftw openexr opencv eigen graphicsmagick qt5-tools digikam)
-source=(https://gmic.eu/files/source/gmic_$pkgver.tar.gz zart-opencv4.patch gmic-fix-cmake.patch)
-sha256sums=('6233695f9b27999dcc7cc3aa7480b0f192bd44de85209091a3b4b8a65ae8c4b5'
-            'f4295a2b9a6730060e1dd763c602bd5156570d623bc69c2214dfd11e94943296'
-            'f4fd5e274347777e9d5a030c22a0f279e32dc023bb4723ca09a6c10c7d2cac75')
-
-prepare() {
-  mkdir -p build{,-qt,-krita,-gimp,-digikam,-zart}
-
-  sed -e 's|pkg_check_modules(OPENCV opencv)|pkg_check_modules(OPENCV opencv4)|' -i gmic-$pkgver/CMakeLists.txt
-
-  cd gmic-$pkgver
-  patch -p1 -i "$srcdir"/gmic-fix-cmake.patch
-
-# fix build with openCV 4.0
-  cd zart
-  patch -p1 -i ../../zart-opencv4.patch
-  sed -e 's|opencv|opencv4|' -i zart.pro
-
-  cd ..
-  sed -i "s|-mtune=generic|${CFLAGS}|" src/Makefile
-  sed -i 's/-flto//g' src/Makefile
-}
+source=(https://gmic.eu/files/source/gmic_$pkgver.tar.gz)
+sha256sums=('50c9dd418b8d0e80c703c2e2b179b6049343567483d37d9ff6c642c6ede95d8d')
 
 build() {
-  cd build
-  cmake ../gmic-$pkgver \
+  cmake -B build -S gmic-$pkgver \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DENABLE_DYNAMIC_LINKING=ON
-  make
+    -DENABLE_DYNAMIC_LINKING=ON \
+    -DBUILD_LIB_STATIC=OFF
+  cmake --build build
 
   export LDFLAGS="$LDFLAGS -L../build"
-  cd ../build-qt
-  cmake ../gmic-$pkgver/gmic-qt \
+  cmake -B build-qt -S gmic-$pkgver/gmic-qt \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DENABLE_DYNAMIC_LINKING=ON \
     -DGMIC_PATH="$srcdir"/gmic-$pkgver/src \
     -DGMIC_QT_HOST=none \
     -DENABLE_LTO=OFF
-  make
+  cmake --build build-qt
 
-  cd ../build-gimp
-  cmake ../gmic-$pkgver/gmic-qt \
+  cmake -B build-gimp -S gmic-$pkgver/gmic-qt \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DENABLE_DYNAMIC_LINKING=ON \
     -DGMIC_PATH="$srcdir"/gmic-$pkgver/src \
     -DGMIC_QT_HOST=gimp \
     -DENABLE_LTO=OFF
-  make
+  cmake --build build-gimp
 
-  cd ../build-krita
-  cmake ../gmic-$pkgver/gmic-qt \
+  cmake -B build-krita -S gmic-$pkgver/gmic-qt \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DENABLE_DYNAMIC_LINKING=ON \
     -DGMIC_PATH="$srcdir"/gmic-$pkgver/src \
     -DGMIC_QT_HOST=krita \
     -DENABLE_LTO=OFF
-  make
+  cmake --build build-krita
 
-  cd ../build-digikam
-  cmake ../gmic-$pkgver/gmic-qt \
+  cmake -B build-digikam -S gmic-$pkgver/gmic-qt \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DENABLE_DYNAMIC_LINKING=ON \
     -DGMIC_PATH="$srcdir"/gmic-$pkgver/src \
     -DGMIC_QT_HOST=digikam \
     -DENABLE_LTO=OFF
-  make
+  cmake --build build-digikam
 
-  cd ../build-zart
+  mkdir -p build-zart
+  cd build-zart
   unset CXXFLAGS # https://github.com/c-koi/zart/issues/14
   qmake ../gmic-$pkgver/zart \
     GMIC_PATH="$srcdir"/gmic-$pkgver/src GMIC_DYNAMIC_LINKING=on QMAKE_CXXFLAGS+=" -DOPENCV2_HEADERS"
@@ -98,14 +73,12 @@ package_gmic() {
   depends=(graphicsmagick opencv fftw)
   optdepends=('qt5-base: for the Qt UI')
 
-  cd build
-  make DESTDIR="$pkgdir" install
-  install -Dm644 ../gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 
-  cd ../build-qt
-  make DESTDIR="$pkgdir" install
+  DESTDIR="$pkgdir" cmake --install build-qt
 
-  install -Dm644 "$srcdir"/gmic-$pkgver/resources/gmic_cluts.gmz -t "$pkgdir"/usr/share/gmic
+  install -Dm644 gmic-$pkgver/resources/gmic_cluts.gmz -t "$pkgdir"/usr/share/gmic
 }
 
 package_zart() {
@@ -121,25 +94,22 @@ package_gimp-plugin-gmic() {
   pkgdesc="Gimp plugin for the G'MIC image processing framework"
   depends=(gimp gmic qt5-base)
 
-  cd build-gimp
-  make DESTDIR="$pkgdir" install
-  install -Dm644 ../gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  DESTDIR="$pkgdir" cmake --install build-gimp
+  install -Dm644 gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 package_krita-plugin-gmic() {
   pkgdesc="Krita plugin for the G'MIC image processing framework"
   depends=(krita gmic)
 
-  cd build-krita
-  make DESTDIR="$pkgdir" install
-  install -Dm644 ../gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  DESTDIR="$pkgdir" cmake --install build-krita
+  install -Dm644 gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 package_digikam-plugin-gmic() {
   pkgdesc="DigiKam plugin for the G'MIC image processing framework"
   depends=(digikam gmic)
 
-  cd build-digikam
-  make DESTDIR="$pkgdir" install
-  install -Dm644 ../gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  DESTDIR="$pkgdir" cmake --install build-digikam
+  install -Dm644 gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
