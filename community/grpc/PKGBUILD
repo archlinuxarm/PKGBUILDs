@@ -7,43 +7,42 @@
 
 pkgbase='grpc'
 pkgname=('grpc' 'python-grpcio' 'php-grpc' 'grpc-cli')
-pkgver=1.29.1
+pkgver=1.30.0
 _gtestver=c9ccac7cb7345901884aabf5d1a786cfa6e2f397
 _abseilcppver=20200225.2
-_gbenchmark=1.5.0
-pkgrel=1
+pkgrel=2
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
 arch=('x86_64')
 url='https://grpc.io'
 license=('BSD')
-makedepends=('re2c' 'protobuf' 'php' 'c-ares' 'openssl' 'chrpath' 'gflags' 'cython' 'cmake')
-source=("https://github.com/$pkgname/$pkgname/archive/v$pkgver/$pkgname-$pkgver.tar.gz"
+makedepends=('re2c' 'protobuf' 'php' 'c-ares' 'openssl' 'chrpath' 'gflags' 'cython' 'cmake' 'benchmark')
+source=("https://github.com/grpc/grpc/archive/v$pkgver/$pkgbase-$pkgver.tar.gz"
         "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
-        "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz"
-        "https://github.com/google/benchmark/archive/v$_gbenchmark/google-benchmark-$_gbenchmark.tar.gz")
-sha256sums=('0343e6dbde66e9a31c691f2f61e98d79f3584e03a11511fad3f10e3667832a45'
+        "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz")
+sha256sums=('419dba362eaf8f1d36849ceee17c3e2ff8ff12ac666b42d3ff02a164ebe090e9'
             '443d383db648ebb8e391382c0ab63263b7091d03197f304390baac10f178a468'
-            'f41868f7a938605c92936230081175d1eae87f6ea2c248f41077c8f88316f111'
-            '3c6a165b6ecc948967a1ead710d4a181d7b0fbcaa183ef7ea84604994966221a')
+            'f41868f7a938605c92936230081175d1eae87f6ea2c248f41077c8f88316f111')
 
 prepare() {
-  cd "$srcdir/$pkgname-$pkgver"
+  cd "$srcdir/$pkgbase-$pkgver"
   ln -sf "$srcdir/googletest-$_gtestver/"{googlemock,googletest} \
     third_party/googletest
 
   rm -rf third_party/abseil-cpp
   ln -s "$srcdir/abseil-cpp-$_abseilcppver/" third_party/abseil-cpp
 
-  rm -rf third_party/benchmark
-  ln -s "$srcdir/benchmark-$_gbenchmark/" third_party/benchmark
-
   sed '/TARGET gflags::gflags/i \  set(_gRPC_GFLAGS_LIBRARIES gflags)' -i cmake/gflags.cmake
 
   [[ $CARCH == "armv6h" || $CARCH == "arm" ]] && sed -i -e "s/set(_gRPC_ALLTARGETS_LIBRARIES \${CMAKE_DL_LIBS} rt m pthread)/set(_gRPC_ALLTARGETS_LIBRARIES \${CMAKE_DL_LIBS} atomic rt m pthread)/g" CMakeLists.txt
 
   mkdir build
-  cd build
+}
+
+build() {
+  cd "$srcdir/$pkgbase-$pkgver/build"
   cmake \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_CXX_FLAGS=-DNDEBUG \
     -DgRPC_INSTALL=ON \
     -DBUILD_SHARED_LIBS=ON \
     -DgRPC_BUILD_TESTS=ON \
@@ -53,23 +52,20 @@ prepare() {
     -DgRPC_SSL_PROVIDER=package \
     -DgRPC_ZLIB_PROVIDER=package \
     -DgRPC_GFLAGS_PROVIDER=package \
-    -DBENCHMARK_HAS_CXX03_FLAG=OFF \
+    -DgRPC_BENCHMARK_PROVIDER=package \
     ..
-}
 
-build() {
-  cd "$srcdir/$pkgname-$pkgver/build"
   make
   export LDFLAGS="$LDFLAGS -L$PWD"
 
   # PHP
   cd "$srcdir/$pkgbase-$pkgver/src/php/ext/$pkgbase"
   phpize
-  ./configure --enable-grpc="$srcdir/$pkgname-$pkgver"
+  ./configure --enable-grpc="$srcdir/$pkgbase-$pkgver"
   make
 
   # Python
-  cd "$srcdir/$pkgname-$pkgver"
+  cd "$srcdir/$pkgbase-$pkgver"
   GRPC_PYTHON_BUILD_WITH_CYTHON=1 \
   GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
   GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1 \
@@ -78,7 +74,7 @@ build() {
 }
 
 package_grpc() {
-  depends=('c-ares' 'protobuf' 'openssl')
+  depends=('c-ares' 'protobuf' 'openssl' 'benchmark')
 
   cd "$srcdir/$pkgbase-$pkgver/build"
   make DESTDIR="$pkgdir" install
