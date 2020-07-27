@@ -27,7 +27,7 @@ _gittag=v2.83.3
 pkgname=blender
 pkgver=2.83.3
 [[ -n $_gitcommit ]] && pkgver=${pkgver}.git1.${_gitcommit:0:8}
-pkgrel=2
+pkgrel=3
 epoch=17
 pkgdesc="A fully integrated 3D graphics creation suite"
 arch=('x86_64')
@@ -46,6 +46,7 @@ source=("git://git.blender.org/blender-addons.git"
         "git://git.blender.org/blender-dev-tools.git"
         embree.patch
         D8063-cuda11.diff
+        D8355-ffmpeg43.patch
         https://developer.download.nvidia.com/redist/optix/v7.0/OptiX-7.0.0-include.zip)
 if [[ -n $_gittag ]]; then
     source+=("${pkgname}-${pkgver}::git://git.blender.org/blender.git#tag=${_gittag}")
@@ -58,6 +59,7 @@ sha512sums=('SKIP'
             'SKIP'
             '6de779ad8649a034ee65c45a36d7838ac0b8b32c3336b4d476186265c060f56276e3e0a2860ec4bff42bef7d5582ee82238013845f6a697672767a05a455aaca'
             '7b0dc31c8babaaeed35807d27cc54e6e9fb79a08c4c267244bea2b47149e05089fe495f239fff7d4fff9b1ebcafd588396e8d1db5529dc7ac49d78731575e128'
+            '70e3bd8762c573cac4ec1d6772cdaab3ce6a248c26c78cbfe729d29058b3bf764305ee02525529955f292ad682883433ca20a91096ccb10d0cfe0148a67ee15f'
             'b2cff73def3757d4259f4b4d318a8ccfe166bf7c215cbb2124f1c81bd6e742f96207285b24eb4d99b527b7b97dc6d5e8fdf2f16d78d5d1e2684c26d681328491'
             'SKIP')
 
@@ -74,15 +76,19 @@ prepare() {
   patch -Np1 -i "$srcdir"/embree.patch
   patch -Np1 -i "$srcdir"/D8063-cuda11.diff
 
+  # Fix crash with ffmpeg 4.3 (https://bugs.archlinux.org/task/67402)
+  patch -Np1 -i "$srcdir"/D8355-ffmpeg43.patch
+
   mkdir build
 }
 
 build() {
-  cd "$srcdir/$pkgname-$pkgver"/build
+  cd "$srcdir/$pkgname-$pkgver"
 
-  cmake \
+  cmake . \
+    -Bbuild \
     -GNinja \
-    -C../build_files/cmake/config/blender_release.cmake .. \
+    -Cbuild_files/cmake/config/blender_release.cmake \
     -DOPTIX_ROOT_DIR="$srcdir"/include \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=Release \
@@ -95,16 +101,16 @@ build() {
     -DPYTHON_LIBRARY=python3.8 \
     -DPYTHON_INCLUDE_DIRS=/usr/include/python3.8
 
-  ninja
+  ninja -C build
 }
 
 package() {
-  cd "$srcdir/$pkgname-$pkgver/build"
+  cd "$srcdir/$pkgname-$pkgver"
 
-  DESTDIR="${pkgdir}" ninja install
-  install -Dm755 ../release/bin/blender-softwaregl "${pkgdir}/usr/bin/blender-softwaregl"
+  DESTDIR="${pkgdir}" ninja -C build install
+  install -Dm755 release/bin/blender-softwaregl "${pkgdir}/usr/bin/blender-softwaregl"
   python -m compileall "${pkgdir}/usr/share/blender"
   python -O -m compileall "${pkgdir}/usr/share/blender"
 
-  install -Dm644 ../release/freedesktop/org.blender.Blender.appdata.xml "${pkgdir}/usr/share/metainfo/org.blender.Blender.appdata.xml"
+  install -Dm644 release/freedesktop/org.blender.Blender.appdata.xml "${pkgdir}/usr/share/metainfo/org.blender.Blender.appdata.xml"
 }
