@@ -7,11 +7,11 @@
 # Contributor: Gustavo Alvarez <sl1pkn07@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - explicitly link v5/v6 with libatomic
+#  - delete x86 file so that it's not picked up for the build
 
 pkgname=mlt
-pkgver=6.20.0
-pkgrel=5
+pkgver=6.22.0
+pkgrel=1
 pkgdesc="An open source multimedia framework"
 arch=(x86_64)
 url="https://www.mltframework.org"
@@ -23,7 +23,6 @@ optdepends=('sdl_image: SDL1 plugin'
         'sox: SOX (Audio Swiss Army Knife) plugin'
         'ffmpeg: ffmpeg plugin'
         'vid.stab: video stabilize plugin'
-        'gtk2: Gtk plugin'
         'qt5-svg: Qt5 plugins'
         'jack: JACK sound output plugin'
         'ladspa: LADSPA plugins'
@@ -32,49 +31,45 @@ optdepends=('sdl_image: SDL1 plugin'
         'movit: opengl plugin'
         'opencv: openCV plugin'
         'rubberband: rubberband plugin'
+        'gdk-pixbuf2: gdk plugin'
+        'pango: gdk plugin'
+        'rtaudio: rtaudio plugin'
         'python: python bindings')
-makedepends=(ladspa frei0r-plugins libdv sdl_image libsamplerate sox ffmpeg vid.stab qt5-svg
-             jack libexif python swig movit eigen opencv gtk2 rubberband)
+makedepends=(cmake ladspa frei0r-plugins libdv sdl_image libsamplerate sox ffmpeg vid.stab qt5-svg
+             jack libexif python swig movit eigen opencv rubberband gdk-pixbuf2 pango rtaudio)
 conflicts=(python-mlt)
 provides=(python-mlt)
 replaces=(python-mlt)
 source=($pkgname-$pkgver.tar.gz::"https://github.com/mltframework/mlt/archive/v$pkgver.tar.gz"
-        mlt-opencv4.patch
-        mlt-qt5.15.patch::"https://github.com/mltframework/mlt/commit/f58b44d7.patch")
-sha256sums=('ab211e27c06c0688f9cbe2d74dc0623624ef75ea4f94eea915cdc313196be2dd'
-            'e770eaa39337cbbeb7d03357c11013e62ea355696023d1bd2d0fca6d1812b627'
-            '7bb659b08c776d81bc88a9aff3ed78553df23ea847ba31d7fbf7e0090f1f6dc3')
+        mlt-cmake-fix-build.patch
+        mlt-cmake-fix-python-bindings.patch)
+sha256sums=('3392d70c528d7f32e78329232b1b93a5a36b058215f664953090315132b797e5'
+            '5871dee1c2153cf70d2a27782eba38eb694421dd089d83636b2a7f1d60938264'
+            'db0430533324ad65c1846e5391d012b97f856025ce661241f5584b681dfe0075')
 
 prepare() {
-  cd $pkgname-$pkgver
-  patch -p1 -i ../mlt-opencv4.patch # Fix build with openCV 4
-  patch -p1 -i ../mlt-qt5.15.patch # Fix build with Qt 5.15
+  patch -d $pkgname-$pkgver -p1 -i ../mlt-cmake-fix-build.patch # Fix build with cmake
+  patch -d $pkgname-$pkgver -p1 -i ../mlt-cmake-fix-python-bindings.patch # Fix python bindings build with cmake
+
+  rm $pkgname-$pkgver/src/modules/core/composite_line_yuv_sse2_simple.c
 }
 
 build() {
-  cd mlt-$pkgver
-
-  [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && LIBS="-latomic"
-  ./configure --prefix=/usr \
-	--avformat-swscale \
-	--enable-gpl \
-        --enable-gpl3 \
-        --enable-opencv \
-        --avformat-ldextra=$LIBS
-  make
+  cmake -B build -S $pkgname-$pkgver \
+    -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON
+  cmake --build build
 
 # python bindings
-  cd src/swig/python
+  cd $pkgname-$pkgver/src/swig/python
   ./build
 }
 
 package() {
-  cd mlt-$pkgver
-  make DESTDIR="$pkgdir" install
+  DESTDIR="$pkgdir" cmake --install build
 
 # Install python bindings
   _pythonpath=`python -c "from sysconfig import get_path; print(get_path('platlib'))"`
-  cd "$srcdir/mlt-$pkgver/src/swig/python"
+  cd $pkgname-$pkgver/src/swig/python
   mkdir -p "$pkgdir/$_pythonpath"
   install -m755 mlt.py "$pkgdir/$_pythonpath" 
   install -m755 _mlt.so "$pkgdir/$_pythonpath"
