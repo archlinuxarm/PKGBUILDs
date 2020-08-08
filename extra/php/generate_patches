@@ -1,0 +1,63 @@
+#!/bin/bash
+
+. PKGBUILD
+
+makepkg -o --nodeps --noprepare --skipinteg
+
+pushd src/${pkgbase}-${pkgver}
+
+sed '/APACHE_THREADED_MPM=/d' -i.orig sapi/apache2handler/config.m4
+
+sed 's/.conf.default/.conf/g' -i.orig sapi/fpm/Makefile.frag
+
+sed \
+	-e 's#run/php-fpm.pid#/run/php-fpm/php-fpm.pid#' \
+	-e 's#^;error_log =.*#error_log = syslog#' \
+	-i.orig sapi/fpm/php-fpm.conf.in
+
+sed \
+	-e 's#^listen =.*#listen = /run/php-fpm/php-fpm.sock#' \
+	-e 's#^;listen.owner =#listen.owner =#' \
+	-e 's#^;listen.group =#listen.group =#' \
+	-e 's#^;chdir =.*#;chdir = /srv/http#' \
+	-i.orig sapi/fpm/www.conf.in
+
+sed \
+	-e 's#^PIDFile=.*#PIDFile=/run/php-fpm/php-fpm.pid#' \
+	-i.orig sapi/fpm/php-fpm.service.in
+
+extensions=";extension=bcmath\n;extension=bz2\n;extension=calendar\nextension=curl\n;extension=dba\n;extension=enchant\n;extension=exif\n;extension=ffi\n;extension=ftp\n;extension=gd\n;extension=gettext\n;extension=gmp\n;extension=iconv\n;extension=imap\n;extension=intl\n;extension=ldap\n;extension=mysqli\n;extension=odbc\n;zend_extension=opcache\n;extension=pdo_dblib\n;extension=pdo_mysql\n;extension=pdo_odbc\n;extension=pdo_pgsql\n;extension=pdo_sqlite\n;extension=pgsql\n;extension=pspell\n;extension=shmop\n;extension=snmp\n;extension=soap\n;extension=sockets\n;extension=sodium\n;extension=sqlite3\n;extension=sysvmsg\n;extension=sysvsem\n;extension=sysvshm\n;extension=tidy\n;extension=xmlrpc\n;extension=xsl\nextension=zip\n"
+
+sed \
+	-r ":a;N;\$!ba;s/; Notes for Windows environments :\n.+;?extension=\w+\n/${extensions}/g" \
+	-i.orig php.ini-production
+sed \
+	-e 's#^;extension_dir = "\./"$#extension_dir = "/usr/lib/php/modules/"#g' \
+	-i php.ini-production
+
+sed \
+	-r 's#PKG_CHECK_MODULES\(\[ENCHANT\], \[enchant\]\)#PKG_CHECK_MODULES([ENCHANT], [enchant-2])#g' \
+	-i.orig ext/enchant/config.m4
+sed \
+	-r 's#enchant_dict_free_suggestions\(pdict->pdict, suggs\)#enchant_dict_free_string_list(pdict->pdict, suggs)#g' \
+	-i.orig ext/enchant/enchant.c
+sed \
+	-r 's#enchant_dict_add_to_personal\(pdict->pdict, word, wordlen\)#enchant_dict_add(pdict->pdict, word, wordlen)#g' \
+	-i ext/enchant/enchant.c
+sed \
+	-r 's#enchant_dict_is_in_session\(pdict->pdict, word, wordlen\)#enchant_dict_is_added(pdict->pdict, word, wordlen)#g' \
+	-i ext/enchant/enchant.c
+
+diff -u sapi/apache2handler/config.m4.orig sapi/apache2handler/config.m4 | filterdiff --clean --remove-timestamps > ../../apache.patch
+
+diff -u sapi/fpm/Makefile.frag.orig sapi/fpm/Makefile.frag | filterdiff --clean --remove-timestamps > ../../php-fpm.patch
+diff -u sapi/fpm/php-fpm.conf.in.orig sapi/fpm/php-fpm.conf.in | filterdiff --clean --remove-timestamps >> ../../php-fpm.patch
+diff -u sapi/fpm/www.conf.in.orig sapi/fpm/www.conf.in | filterdiff --clean --remove-timestamps >> ../../php-fpm.patch
+diff -u sapi/fpm/php-fpm.service.in.orig sapi/fpm/php-fpm.service.in | filterdiff --clean --remove-timestamps >> ../../php-fpm.patch
+
+diff -u php.ini-production.orig php.ini-production | filterdiff --clean --remove-timestamps > ../../php.ini.patch
+
+diff -u ext/enchant/config.m4.orig ext/enchant/config.m4 | filterdiff --clean --remove-timestamps > ../../enchant-2.patch
+diff -u ext/enchant/enchant.c.orig ext/enchant/enchant.c | filterdiff --clean --remove-timestamps >> ../../enchant-2.patch
+
+popd
