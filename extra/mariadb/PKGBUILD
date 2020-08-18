@@ -8,13 +8,13 @@
 pkgbase=mariadb
 pkgname=('mariadb-libs' 'mariadb-clients' 'mariadb' 'mytop')
 pkgdesc='Fast SQL database server, derived from MySQL'
-pkgver=10.4.14
+pkgver=10.5.5
 pkgrel=1
 arch=('x86_64')
 license=('GPL')
 url='https://mariadb.org/'
-makedepends=('rsync' 'boost' 'bzip2' 'cmake' 'jemalloc' 'libaio' 'libxml2'
-             'lz4' 'lzo' 'openssl' 'systemd' 'zlib' 'zstd')
+makedepends=('rsync' 'boost' 'bzip2' 'cmake' 'jemalloc' 'libaio' 'libxml2' 'lz4' 'lzo'
+             'openssl' 'systemd' 'zlib' 'zstd' 'curl' 'krb5')
 validpgpkeys=('199369E5404BD5FC7D2FE43BCBCB082A1BB943DB') # MariaDB Package Signing Key <package-signing-key@mariadb.org>
 # The default links with mirror redirection fail for signatures, specific
 # mirrors may be out of date every now and then. Let's use the upstream
@@ -22,13 +22,11 @@ validpgpkeys=('199369E5404BD5FC7D2FE43BCBCB082A1BB943DB') # MariaDB Package Sign
 # https://mariadb.com/kb/en/library/mirror-sites-for-mariadb/
 source=("rsync://rsync.osuosl.org/mariadb/mariadb-${pkgver}/source/mariadb-${pkgver}.tar.gz"{,.asc}
         '0001-arch-specific.patch'
-        '0004-MDEV-15526-systemd-unit-files-naming-and-installation.patch'
         '0001-libatomic.patch')
-sha256sums=('f92fcd59e0122461482f28c67c5ea01c7cf6979494a571db68074396864c86fc'
+sha256sums=('cf6b2c061754c07bbb1d20b29ae111bf2d098297c9b8c321b810638a179088a4'
             'SKIP'
-            '3289efb3452d199aec872115f35da3f1d6fd4ce774615076690e9bc8afae1460'
-            '1bb3b18afac8c95dbe964046e18b866288f41f8ec3a4a9c69875ca1620b89d29'
-            '1c7360453b6e964c6546cbbb10fff697f6227554eba716b2a1df74f7c2613d95')
+            'c97e36bd0aeb10f506f4843761a0cd13dbe2e7bc71c3e5cdcd1a5310338bffaf'
+            '59947e8154dceae50a38053ed4f659f23e5c95eb2a2fc06f60d57be5814ae1c3')
 
 prepare() {
   cd $pkgbase-$pkgver/
@@ -38,9 +36,6 @@ prepare() {
   #  * force preloading jemalloc for memory management
   #  * make systemd-tmpfiles create MYSQL_DATADIR
   patch -Np1 < ../0001-arch-specific.patch
-
-  # MDEV-15526 systemd unit files naming and installation
-  patch -Np1 < ../0004-MDEV-15526-systemd-unit-files-naming-and-installation.patch
 
   if [[ $CARCH == arm || $CARCH == armv6h ]]; then
     patch -p1 -i ../0001-libatomic.patch
@@ -120,6 +115,7 @@ check() {
 package_mariadb-libs() {
   pkgdesc='MariaDB libraries'
   depends=('bzip2' 'libaio' 'lz4' 'lzo' 'openssl' 'xz' 'zlib')
+  optdepends=('krb5: for gssapi authentication')
   conflicts=('libmysqlclient' 'libmariadbclient' 'mariadb-connector-c')
   provides=('libmariadbclient' 'mariadb-connector-c' 'libmariadb.so' 'libmariadbd.so')
   replaces=('libmariadbclient')
@@ -165,10 +161,14 @@ package_mariadb() {
           'etc/my.cnf.d/enable_encryption.preset'
           'etc/my.cnf.d/mysql-clients.cnf'
           'etc/my.cnf.d/server.cnf'
+          'etc/my.cnf.d/s3.cnf'
+          'etc/my.cnf.d/spider.cnf'
           'etc/security/user_map.conf')
   install=mariadb.install
   depends=("mariadb-clients=${pkgver}" 'inetutils' 'systemd-libs' 'libxml2' 'zstd')
-  optdepends=('galera: for MariaDB cluster with Galera WSREP'
+  optdepends=('curl: for ha_s3 plugin'
+              'galera: for MariaDB cluster with Galera WSREP'
+              'mysql-python: for myrocks_hotbackup'
               'perl-dbd-mysql: for mysqlhotcopy, mysql_convert_table_format and mysql_setpermission')
   conflicts=('mysql')
   provides=("mysql=$pkgver")
@@ -184,10 +184,6 @@ package_mariadb() {
   rm -r etc/logrotate.d
   rm usr/bin/rcmysql
   rm usr/share/mysql/{binary-configure,mysql{,d_multi}.server}
-
-  # link service files with old name for compatibility
-  ln -s mariadb.service usr/lib/systemd/system/mysqld.service
-  ln -s mariadb@.service usr/lib/systemd/system/mysqld@.service
 
   # move to proper licenses directories
   install -d usr/share/licenses/mariadb
@@ -217,14 +213,14 @@ package_mariadb() {
 
   # provided by mariadb-clients
   rm usr/bin/mysql{,_plugin,_upgrade,admin,binlog,check,dump,import,show,slap,test}
-  rm usr/bin/mariadb{,-{admin,binlog,check,dump,import,plugin,show,slap,test,upgrade}}
+  rm usr/bin/mariadb{,-{admin,binlog,check,conv,dump,import,plugin,show,slap,test,upgrade}}
   rm usr/share/man/man1/mysql{,_plugin,_upgrade,admin,binlog,check,dump,import,show,slap,test}.1
 
   # provided by mytop
   rm usr/bin/mytop
 
   # not needed
-  rm -r usr/{data,mysql-test,sql-bench}
+  rm -r usr/{mysql-test,sql-bench}
   rm usr/share/man/man1/mysql-test-run.pl.1
 }
 
