@@ -11,30 +11,41 @@ _kernelname=${pkgbase#linux}
 _desc="Raspberry Pi 4"
 pkgver=5.4.61
 pkgrel=2
-arch=('armv7h')
+arch=('armv7h' 'aarch64')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://github.com/raspberrypi/linux/archive/${_commit}.tar.gz"
         'config.txt'
+	'config64.txt'
         'cmdline.txt'
         'config'
+	'config64'
         'linux.preset'
         '60-linux.hook'
-        '90-linux.hook')
+        '90-linux.hook'
+        '90-linux-64.hook')
 md5sums=('6773e432c9bd9382bd921d0fa6080b97'
          '7c6b37a1353caccf6d3786bb4161c218'
+         'fe7bfcd3cef188885abb115286b2e0f5'
          '60bc3624123c183305677097bcd56212'
          'ab58eb04119b20683cb69102a5a7326e'
+         'ec0970ee422c1b4b0b107b501bf52f66'
          '86d4a35722b5410e3b29fc92dae15d4b'
          'ce6c81ad1ad1f8b333fd6077d47abdaf'
-         '69e1db90d78f691dc446fe2ab94727eb')
+         '69e1db90d78f691dc446fe2ab94727eb'
+         '0a98f67d3354d5a2f9fe1a62a0c0839c')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
-  cat "${srcdir}/config" > ./.config
+  if [ "$CARCH" == "aarch64" ]
+  then
+    cat "${srcdir}/config64" > ./.config
+  else
+    cat "${srcdir}/config" > ./.config
+  fi
 
   # add pkgrel to extraversion
   sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
@@ -70,7 +81,12 @@ build() {
 
   #yes "" | make config
 
-  make ${MAKEFLAGS} zImage modules dtbs
+  if [ "$CARCH" == "aarch64" ]
+  then
+    make ${MAKEFLAGS} Image modules dtbs
+  else
+    make ${MAKEFLAGS} Image.gz modules dtbs
+  fi
 }
 
 _package() {
@@ -96,8 +112,19 @@ _package() {
   make INSTALL_MOD_PATH="${pkgdir}/usr" modules_install
   make INSTALL_DTBS_PATH="${pkgdir}/boot" dtbs_install
 
-  cp arch/$KARCH/boot/zImage "${pkgdir}/boot/kernel7.img"
-  cp arch/$KARCH/boot/dts/overlays/README "${pkgdir}/boot/overlays"
+  if [ "$CARCH" == "aarch64" ]
+  then
+    archdir="arm64"
+    image="Image"
+    kernfile="kernel8.img"
+  else
+    archdir="arm"
+    image="zImage"
+    kernfile="kernel7.img"
+  fi
+
+  cp arch/$archdir/boot/${image} "${pkgdir}/boot/${kernfile}"
+  cp arch/$archdir/boot/dts/overlays/README "${pkgdir}/boot/overlays"
 
   # make room for external modules
   local _extramodules="extramodules-${_basekernel}${_kernelname}"
@@ -127,11 +154,23 @@ _package() {
   # install pacman hooks
   sed "${_subst}" ../60-linux.hook |
     install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/60-${pkgbase}.hook"
-  sed "${_subst}" ../90-linux.hook |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
+  if [ "$CARCH" == "aarch64" ]
+  then
+    sed "${_subst}" ../90-linux-64.hook |
+      install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
+  else
+    sed "${_subst}" ../90-linux.hook |
+      install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
+  fi
 
   # install boot files
-  install -m644 ../config.txt ../cmdline.txt "${pkgdir}/boot"
+  if [ "$CARCH" == "aarch64" ]
+  then
+    install -m644 ../config64.txt "${pkgdir}/boot/config.txt"
+    install -m644 ../cmdline.txt "${pkgdir}/boot"
+  else
+    install -m644 ../config.txt ../cmdline.txt "${pkgdir}/boot"
+  fi
 }
 
 _package-headers() {
@@ -150,10 +189,17 @@ _package-headers() {
 
   cp -t "${_builddir}" -a include scripts
 
-  install -Dt "${_builddir}/arch/${KARCH}" -m644 arch/${KARCH}/Makefile
-  install -Dt "${_builddir}/arch/${KARCH}/kernel" -m644 arch/${KARCH}/kernel/asm-offsets.s arch/$KARCH/kernel/module.lds
+  if [ "$CARCH" == "aarch64" ]
+  then
+    archdir="arm64"
+  else
+    archdir="arm"
+  fi
 
-  cp -t "${_builddir}/arch/${KARCH}" -a arch/${KARCH}/include
+  install -Dt "${_builddir}/arch/${archdir}" -m644 arch/${archdir}/Makefile
+  install -Dt "${_builddir}/arch/${archdir}/kernel" -m644 arch/${archdir}/kernel/asm-offsets.s arch/$archdir/kernel/module.lds
+
+  cp -t "${_builddir}/arch/${archdir}" -a arch/${archdir}/include
 
   install -Dt "${_builddir}/drivers/md" -m644 drivers/md/*.h
   install -Dt "${_builddir}/net/mac80211" -m644 net/mac80211/*.h
@@ -174,9 +220,17 @@ _package-headers() {
 
   # remove unneeded architectures
   local _arch
+  local _current_arch
   for _arch in "${_builddir}"/arch/*/; do
     [[ ${_arch} == */${KARCH}/ ]] && continue
-    rm -r "${_arch}"
+    _current_arch=$(basename "${_arch}")
+    if [ "${_current_arch}" != "arm" -a "${_current_arch}" != "arm64" ]
+    then
+      rm -r "${_arch}"
+    elif [ "${_current_arch}" == "arm64" -a "${CARCH}" != "aarch64" ]
+    then
+      rm -r "${_arch}"
+    fi
   done
 
   # remove files already in linux-docs package
