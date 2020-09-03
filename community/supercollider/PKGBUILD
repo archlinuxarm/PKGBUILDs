@@ -7,8 +7,8 @@
 
 _name=SuperCollider
 pkgname=supercollider
-pkgver=3.11.0
-pkgrel=4
+pkgver=3.11.1
+pkgrel=1
 pkgdesc="Environment and programming language for real time audio synthesis and algorithmic composition"
 arch=('x86_64')
 url="https://supercollider.github.io"
@@ -22,12 +22,21 @@ checkdepends=('xorg-server-xvfb')
 optdepends=('emacs: emacs interface'
             'gedit: gedit interface'
             'sc3-plugins: additional extension plugins for scsynth')
-provides=("libscsynth.so" "sclang=${pkgver}" "scsynth=${pkgver}")
-source=("https://github.com/${pkgname}/${pkgname}/releases/download/Version-${pkgver}/${_name}-${pkgver}-Source.tar.bz2"
-        "${pkgname}-3.11.0-use_system_link.patch")
+provides=('libscsynth.so' "sclang=${pkgver}" "scsynth=${pkgver}")
+source=("https://github.com/${pkgname}/${pkgname}/releases/download/Version-${pkgver}/${_name}-${pkgver}-Source.tar.bz2"{,.asc}
+        "${pkgname}-3.11.1-devendor_abletonlink.patch::https://github.com/supercollider/supercollider/pull/4836/commits/95bd9721226f3cb1bba903bea8154cee5859cfb8.patch"
+        "${pkgname}-3.11.1-fix_linker_errors.patch"
+)
 install="${pkgname}.install"
-sha512sums=('64fef4d751436337baf40ced068a496d3e9221f751dcde7bfc2857a79c094764dff814d1c0cf519380053ddcfdb2c3f2b8eb787d3cff03e522c19fd95951b1da'
-            '1a9977f7b1a1a90ea3b4163ef6f6f963325e8d87b6ca16fecaa5a1816323d6cb4ab7eb750957d58be34a99fd3ed08ed7b7a92ac5352f31c894a8eb002f0aa71c')
+sha512sums=('5c4c5ba75f32ee7dda9a9e30c346ff028aedce81374474b4ee93fb8dc631f7b6ea54e91706b3502be6ed84baa69f6d659fcddaf5140ca292827d62734efbd6b2'
+            'SKIP'
+            '6a31c8c2edd102b806cfe110c2f27516e9fe05a7b074d50e14d5aad69cb80a2badfcb3a20f942d6dee90dfaf4bf5ae7eb8b8ef8c517ea8e0110bee7f0c2c4f40'
+            '900f6559986ba80fe5aa8a05881f1ccfc2ae01d5b18dc0cf963bf86bfb7cbc0b77dfb9a4f059e588c9563c2ef9f8632731f3d046b79d8bfdffa88111cae7c52a')
+b2sums=('0fed25646c7163e8e13ae27024a25206f1ea141c5c23b93d7a1f4c00a30f0ce15a084b73eccb424f724f2000db138e3539b568045afddcfd612cf5dab99cb94d'
+        'SKIP'
+        'c589ea2451b4c232fa34de1b442e6822fb5867475b0e0bb7b94563cbfac54f09f47a7be8cf1e9f4a2896ffa678db40d718ec9ee301ad037eaebeb71772e773e4'
+        'b8d0b153d08dcf98b5b2c385c52a1c446086f4c795f34840bf1a55f8eccdf53e262fcfb8b7245332919d1b932e5887dc20236ad35df29c4712853d2676e89a20')
+validpgpkeys=('0B7D1EA4E32B5C3C4275D3C70796CC538BEFF177') # Brian Heim <self@brianlheim.com>
 
 
 prepare() {
@@ -36,16 +45,16 @@ prepare() {
   # devendoring Ableton Link:
   # https://github.com/supercollider/supercollider/issues/4818
   # https://github.com/supercollider/supercollider/pull/4836
-  patch -Np1 -i "../${pkgname}-3.11.0-use_system_link.patch"
-  # removing macOS hidden files (due to release tarball issues):
-  # https://github.com/supercollider/supercollider/issues/4545
-  find . -type f -iname "*\._*" -delete
+  patch -Np1 -i "../${pkgname}-3.11.1-devendor_abletonlink.patch"
+  # fix linker issues with libscsynth.so (backported patch)
+  # https://github.com/supercollider/supercollider/issues/4992
+  patch -Np1 -i "../${pkgname}-3.11.1-fix_linker_errors.patch"
 }
 
 build() {
   cd "${pkgname}-${pkgver}"
   cmake -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_BUILD_TYPE='None' \
         -DBoost_NO_BOOST_CMAKE=ON \
         -DLIBSCSYNTH=ON \
         -DFORTIFY=ON \
@@ -53,16 +62,17 @@ build() {
         -DSYSTEM_BOOST=ON \
         -DSYSTEM_YAMLCPP=ON \
         -DSC_VIM=OFF \
+        -Wno-dev \
         -B build \
         -DSSE=OFF -DSSE2=OFF -DSUPERNOVA=OFF -DNOVA_SIMD=ON -DNATIVE=OFF \
         -DCMAKE_C_FLAGS="${CFLAGS}" \
-        .
+        -S .
   make VERBOSE=1 -C build
 }
 
 check() {
-  cd "${pkgname}-${pkgver}/build"
-  xvfb-run make test ARGS="-V" -C build || echo "Known failing tests: https://github.com/supercollider/supercollider/issues/3555"
+  cd "${pkgname}-${pkgver}"
+  xvfb-run make test ARGS="-V" -C build
 }
 
 package() {
