@@ -3,8 +3,9 @@
 # Set our umask
 umask 022
 
-# Append our default paths
-appendpath () {
+# Append "$1" to $PATH when not already in.
+# This function API is accessible to scripts in /etc/profile.d
+append_path () {
     case ":$PATH:" in
         *:"$1":*)
             ;;
@@ -13,11 +14,12 @@ appendpath () {
     esac
 }
 
-appendpath '/usr/local/sbin'
-appendpath '/usr/local/bin'
-appendpath '/usr/bin'
-unset -f appendpath
+# Append our default paths
+append_path '/usr/local/sbin'
+append_path '/usr/local/bin'
+append_path '/usr/bin'
 
+# Force PATH to be environment
 export PATH
 
 # Load profiles from /etc/profile.d
@@ -27,6 +29,9 @@ if test -d /etc/profile.d/; then
 	done
 	unset profile
 fi
+
+# Unload our profile API functions
+unset -f append_path
 
 # Source global bash config, when interactive but not posix or sh mode
 if test "$BASH" &&\
