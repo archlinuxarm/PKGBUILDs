@@ -6,39 +6,37 @@
 
 pkgbase=bullet
 pkgname=('bullet' 'bullet-docs' 'python-pybullet')
-pkgver=2.89
-pkgrel=2
+pkgver=3.05
+pkgrel=1
 pkgdesc="A 3D Collision Detection and Rigid Body Dynamics Library for games and animation"
 arch=('x86_64')
 url="http://www.bulletphysics.com/Bullet/"
 license=('custom:zlib')
-makedepends=('cmake' 'doxygen' 'graphviz' 'ttf-dejavu' 'mesa' 'glu' 'python' 'python-numpy' 'python-setuptools')
-source=("https://github.com/bulletphysics/bullet3/archive/${pkgver}.tar.gz"
+makedepends=('cmake' 'doxygen' 'graphviz' 'ttf-dejavu' 'mesa' 'glu' 'python' 'python-numpy' 'python-setuptools' 'ninja')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/bulletphysics/bullet3/archive/${pkgver}.tar.gz"
         bullet3_examplebrowser.sh)
-sha512sums=('3c4ba6a3b3623ef44dd4a23e0bc2e90dec1f2b7af463edcb886e110feac1dfb4a91945f0ed640052cac228318539e275976d37238102fb10a0f78aef065a730b'
+sha512sums=('4cb67547b466e01f6c2258b1f350fdfac0f2dc73a7962b6e196491e6722e1cd22cdfe80d7b2f4e1e92a90f91e277bff5cabfd0f55ef55010f9a4d7286843cecd'
             '8741ad94b6c46c226d89aebc8ab06d8a11bac3c04d3f0a2bf7a7524792a3375aa7bf7d295410b16fbeb4c348a31057b4570acdebe9bbaea251f44daca8d9fe81')
 
-prepare() {
-  mkdir bullet3-${pkgver}/build
-}
-
 build() {
-  cd bullet3-${pkgver}/build
+  cd bullet3-${pkgver}
 
-  cmake .. \
-       -DCMAKE_INSTALL_PREFIX=/usr \
-       -DBUILD_SHARED_LIBS=1 \
-       -DINSTALL_LIBS=1 \
-       -DINSTALL_EXTRA_LIBS=1 \
-       -DBUILD_PYBULLET=ON \
-       -DBUILD_PYBULLET_NUMPY=ON \
-       -DCMAKE_BUILD_TYPE=Release \
-       -DBUILD_BULLET2_DEMOS=OFF \
-       -DBUILD_UNIT_TESTS=OFF
+  cmake . \
+      -Bbuild \
+      -GNinja \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DBUILD_SHARED_LIBS=1 \
+      -DINSTALL_LIBS=1 \
+      -DINSTALL_EXTRA_LIBS=1 \
+      -DBUILD_PYBULLET=ON \
+      -DBUILD_PYBULLET_NUMPY=ON \
+      -DBUILD_OPENGL3_DEMOS=ON \
+      -DBUILD_BULLET2_DEMOS=OFF \
+      -DBUILD_UNIT_TESTS=OFF \
+      -DCMAKE_BUILD_TYPE=Release
 
-  make
+  ninja -C build
 
-  cd ..
   python setup.py build
   doxygen
 }
@@ -49,29 +47,33 @@ package_bullet() {
               'python-numpy: python bindings'
               'bullet-docs: documentation')
 
-  cd bullet3-${pkgver}/build
+  cd bullet3-${pkgver}
 
-  make DESTDIR=${pkgdir} install
+  DESTDIR="${pkgdir}" ninja -C build install
 
-  #install -Dm755 examples/pybullet/pybullet.so.${pkgver} ${pkgdir}/usr/lib/libpybullet.so.${pkgver}
-  #install -Dm755 examples/ExampleBrowser/libBulletExampleBrowserLib.so.${pkgver} ${pkgdir}/usr/lib/libBulletExampleBrowserLib.so.${pkgver}
-  #install -Dm755 examples/OpenGLWindow/libOpenGLWindow.so ${pkgdir}/usr/lib/libOpenGLWindow.so
-  #install -Dm755 examples/ThirdPartyLibs/Gwen/libgwen.so ${pkgdir}/usr/lib/libgwen.so
-  #install -Dm755 examples/ThirdPartyLibs/BussIK/libBussIK.so ${pkgdir}/usr/lib/libBussIK.so
-  #install -Dm755 ${srcdir}/bullet3_examplebrowser.sh ${pkgdir}/usr/bin/bullet3_examplebrowser
-  #install -Dm755 examples/ExampleBrowser/App_ExampleBrowser ${pkgdir}/opt/bullet/App_ExampleBrowser
-  #cp -r data ${pkgdir}/opt/bullet/
+  cd build
 
-  install -Dm644 ../LICENSE.txt ${pkgdir}/usr/share/licenses/${pkgbase}/LICENSE
+  install -Dm755 examples/pybullet/pybullet.so.${pkgver} "${pkgdir}"/usr/lib/libpybullet.so.${pkgver}
+  install -Dm755 examples/ExampleBrowser/libBulletExampleBrowserLib.so.${pkgver} "${pkgdir}"/usr/lib/libBulletExampleBrowserLib.so.${pkgver}
+  install -Dm755 examples/OpenGLWindow/libOpenGLWindow.so "${pkgdir}"/usr/lib/libOpenGLWindow.so
+  install -Dm755 examples/ThirdPartyLibs/Gwen/libgwen.so "${pkgdir}"/usr/lib/libgwen.so
+  install -Dm755 examples/ThirdPartyLibs/BussIK/libBussIK.so "${pkgdir}"/usr/lib/libBussIK.so
+  install -Dm755 "${srcdir}"/bullet3_examplebrowser.sh "${pkgdir}"/usr/bin/bullet3_examplebrowser
+  install -Dm755 examples/ExampleBrowser/App_ExampleBrowser "${pkgdir}"/opt/bullet/App_ExampleBrowser
+  cp -r data "${pkgdir}"/opt/bullet/
+
+  install -Dm644 ../LICENSE.txt "${pkgdir}"/usr/share/licenses/${pkgbase}/LICENSE
 }
 
 package_python-pybullet() {
   pkgdesc="Bullet Python bindings"
-  depends+=('bullet')
+  depends+=('bullet' 'gcc-libs')
 
   cd bullet3-${pkgver}
 
   python setup.py install --prefix=/usr --root="${pkgdir}" --optimize=1 --skip-build
+
+  install -Dm644 LICENSE.txt "${pkgdir}"/usr/share/licenses/${pkgname}/LICENSE
 }
 
 package_bullet-docs() {
@@ -80,9 +82,9 @@ package_bullet-docs() {
   cd bullet3-${pkgver}
 
   # install docs
-  install -Dm644 docs/GPU_rigidbody_using_OpenCL.pdf ${pkgdir}/usr/share/doc/bullet/GPU_rigidbody_using_OpenCL.pdf
-  install -Dm644 docs/Bullet_User_Manual.pdf ${pkgdir}/usr/share/doc/bullet/Bullet_User_Manual.pdf
-  install -Dm644 docs/BulletQuickstart.pdf ${pkgdir}/usr/share/doc/bullet/BulletQuickstart.pdf
-  cp -r html ${pkgdir}/usr/share/doc/bullet/html
+  install -Dm644 docs/GPU_rigidbody_using_OpenCL.pdf "${pkgdir}"/usr/share/doc/bullet/GPU_rigidbody_using_OpenCL.pdf
+  install -Dm644 docs/Bullet_User_Manual.pdf "${pkgdir}"/usr/share/doc/bullet/Bullet_User_Manual.pdf
+  install -Dm644 docs/BulletQuickstart.pdf "${pkgdir}"/usr/share/doc/bullet/BulletQuickstart.pdf
+  cp -r html "${pkgdir}"/usr/share/doc/bullet/html
 }
 # vim: sw=2 ts=2 et:
