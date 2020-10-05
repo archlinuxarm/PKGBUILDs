@@ -11,7 +11,7 @@
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=20.1.8
+pkgver=20.2.0
 pkgrel=2
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
@@ -23,7 +23,7 @@ license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-Rip-out-VC4-forced-NEON.patch
         LICENSE)
-sha512sums=('519b0e2837982d097c362d974a90c94efd1cdf14505fc43eaa740a23c042bc0c3f04d0edaf6b371966d82667cade6d0c68c92528e1be6c12884b38c67fd064c1'
+sha512sums=('3dd7def04ba4f196be8fd59999285febb10366e89d6e649c518b436b732c62d3f1bd235fc470de7fda4b4cc09a1baaadca4222dcdc2449225d789b151cea69d7'
             'SKIP'
             'ba55fd9816ebd9147be120da1fd4fa0364d19967a11570e6d5dd9d8b4f7971df46ced8b151ee07afaaa98043e131eed14918ec25f8c9b0f7e5c53f452674ee5c'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
@@ -51,38 +51,38 @@ build() {
   arch-meson mesa-$pkgver build \
     -D b_lto=false \
     -D b_ndebug=true \
-    -D platforms=x11,wayland,drm,surfaceless \
+    -D platforms=x11,wayland \
     -D dri-drivers=r100,r200,nouveau \
     -D gallium-drivers=r300,r600,radeonsi,freedreno,nouveau,swrast,virgl,zink${GALLIUM} \
     -D vulkan-drivers=amd \
     -D vulkan-overlay-layer=true \
     -D vulkan-device-select-layer=true \
-    -D dri3=true \
-    -D egl=true \
+    -D dri3=enabled \
+    -D egl=enabled \
     -D gallium-extra-hud=true \
     -D gallium-nine=true \
     -D gallium-omx=bellagio \
     -D gallium-opencl=icd \
-    -D gallium-va=true \
-    -D gallium-vdpau=true \
-    -D gallium-xa=false \
-    -D gallium-xvmc=false \
-    -D gbm=true \
-    -D gles1=false \
-    -D gles2=true \
+    -D gallium-va=enabled \
+    -D gallium-vdpau=enabled \
+    -D gallium-xa=disabled \
+    -D gallium-xvmc=disabled \
+    -D gbm=enabled \
+    -D gles1=disabled \
+    -D gles2=enabled \
     -D glvnd=true \
     -D glx=dri \
-    -D libunwind=false \
-    -D llvm=true \
-    -D lmsensors=true \
+    -D libunwind=disabled \
+    -D llvm=enabled \
+    -D lmsensors=enabled \
     -D osmesa=gallium \
-    -D shared-glapi=true \
-    -D valgrind=false $MESON_OPT
+    -D shared-glapi=enabled \
+    -D valgrind=disabled $MESON_OPT
 
   # Print config
   meson configure build
 
-  ninja -C build xmlpool-pot xmlpool-update-po xmlpool-gmo
+  ninja -C build
   meson compile -C build
 
   # fake installation to be seperated into packages
