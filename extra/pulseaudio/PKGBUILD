@@ -1,30 +1,25 @@
-# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
-# Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
-# Contributor: Corrado Primier <bardo@aur.archlinux.org>
-# Contributor: William Rea <sillywilly@gmail.com>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - patch to remove meson NEON check
 
 pkgbase=pulseaudio
-pkgname=(pulseaudio libpulse pulseaudio-{zeroconf,lirc,jack,bluetooth,equalizer})
+pkgname=(pulseaudio libpulse alsa-card-profiles pulseaudio-{zeroconf,lirc,jack,bluetooth,equalizer})
 pkgdesc="A featureful, general-purpose sound server"
-pkgver=13.0
-pkgrel=3
+pkgver=13.99.2+7+g6101798c7
+pkgrel=1
 arch=(x86_64)
 url="https://www.freedesktop.org/wiki/Software/PulseAudio/"
 license=(GPL)
 makedepends=(libasyncns libcap attr libxtst libsm libsndfile rtkit libsoxr
              speexdsp tdb systemd dbus avahi bluez bluez-libs jack2 sbc
              lirc openssl fftw orc gtk3 webrtc-audio-processing check git meson
-             xmltoman)
-_commit=200618b32f0964a479d69c9b6e5073e6931c370a  # tags/v13.0^0
+             xmltoman gst-plugins-base-libs)
+_commit=6101798c7a4fa5b8ce7f5589706b03d87a3aee76  # master
 source=("git+https://gitlab.freedesktop.org/pulseaudio/pulseaudio.git#commit=$_commit"
-        0001-meson-Define-TUNNEL_SINK-for-module-tunnel-sink.patch
         '0001-disable-neon.patch')
 sha256sums=('SKIP'
-            '4ff133e2847baad5bb6798b5816d67551cfba2efabb2f1f348628d7217abd07d'
-            'b1c20e992511e62f28434f0c4217c13aa9a557ae93dda5df4127aa42b0800614')
+            '7572bfc1a185f8b6f7757db217d35f9134128fc8cd047845f34acb17e2fe67d1')
 
 pkgver() {
   cd pulseaudio
@@ -37,9 +32,6 @@ prepare() {
   # Freeze version before patching
   ./git-version-gen doesnt-exist >.tarball-version
 
-  # https://bugs.archlinux.org/task/63755
-  git apply -3 ../0001-meson-Define-TUNNEL_SINK-for-module-tunnel-sink.patch
-
   if [[ $CARCH != "aarch64" ]]; then
     patch -p1 -i ../0001-disable-neon.patch
   fi
@@ -47,10 +39,11 @@ prepare() {
 
 build() {
   arch-meson pulseaudio build \
-    -D gcov=false \
+    -D alsadatadir=/usr/share/alsa-card-profile/mixer \
     -D pulsedsp-location='/usr/\$LIB/pulseaudio' \
+    -D stream-restore-clear-old-devices=true \
     -D udevrulesdir=/usr/lib/udev/rules.d
-  ninja -C build
+  meson compile -C build
 }
 
 check() {
@@ -69,8 +62,8 @@ _pick() {
 }
 
 package_pulseaudio() {
-  depends=("libpulse=$pkgver-$pkgrel" rtkit libltdl speexdsp tdb orc libsoxr
-           webrtc-audio-processing)
+  depends=("libpulse=$pkgver-$pkgrel" alsa-card-profiles rtkit libltdl speexdsp
+           tdb orc libsoxr webrtc-audio-processing gst-plugins-base-libs)
   optdepends=('pulseaudio-alsa: ALSA configuration (recommended)')
   backup=(etc/pulse/{daemon.conf,default.pa,system.pa})
   install=pulseaudio.install
@@ -85,14 +78,6 @@ package_pulseaudio() {
   DESTDIR="$pkgdir" meson install -C build
 
   cd "$pkgdir"
-
-  # Assumes that any volume adjustment is intended by the user, who can control
-  # each app's volume. Misbehaving clients can trigger earsplitting volume
-  # jumps. App volumes can diverge wildly and cause apps without their own
-  # volume control to fall below sink volume; a sink-only volume control will
-  # suddenly be unable to make such an app loud enough.
-  sed -e '/flat-volumes/iflat-volumes = no' \
-      -i etc/pulse/daemon.conf
 
   # Superseded by socket activation
   sed -e '/autospawn/iautospawn = no' \
@@ -119,6 +104,9 @@ package_pulseaudio() {
   _pick libpulse usr/share/man/man1/pa{cat,ctl,dsp,mon,play,rec,record}.1
   _pick libpulse usr/share/man/man5/pulse-client.conf.5
   _pick libpulse usr/share/vala
+
+### Split alsa-card-profiles
+  _pick alsa-card-profiles usr/share/alsa-card-profile
 
 ### Split modules
   local moddir=usr/lib/pulse-$pulsever/modules
@@ -148,6 +136,13 @@ package_libpulse() {
   backup=(etc/pulse/client.conf)
 
   mv libpulse/* "$pkgdir"
+}
+
+package_alsa-card-profiles() {
+  pkgdesc="ALSA card profiles shared by PulseAudio"
+  license=(LGPL)
+
+  mv alsa-card-profiles/* "$pkgdir"
 }
 
 package_pulseaudio-zeroconf(){
@@ -180,7 +175,7 @@ package_pulseaudio-bluetooth(){
 
 package_pulseaudio-equalizer(){
   pkgdesc="Equalizer for PulseAudio"
-  depends=("pulseaudio=$pkgver-$pkgrel" python-{pyqt5,dbus,sip} fftw)
+  depends=("pulseaudio=$pkgver-$pkgrel" python-{pyqt5,dbus} fftw)
 
   mv equalizer/* "$pkgdir"
 }
