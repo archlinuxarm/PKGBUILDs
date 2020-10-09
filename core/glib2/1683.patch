@@ -1,0 +1,102 @@
+From b411f518b8dc7a99bad52884048436d991c89b77 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=A0=D1=83=D1=81=D0=BB=D0=B0=D0=BD=20=D0=98=D0=B6=D0=B1?=
+ =?UTF-8?q?=D1=83=D0=BB=D0=B0=D1=82=D0=BE=D0=B2?= <lrn1986@gmail.com>
+Date: Mon, 5 Oct 2020 17:07:29 +0000
+Subject: [PATCH 1/2] Add a test for the 6-days-until-EOM bug
+
+---
+ glib/tests/gdatetime.c | 26 ++++++++++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/glib/tests/gdatetime.c b/glib/tests/gdatetime.c
+index 52eec1e46..0731f01f2 100644
+--- a/glib/tests/gdatetime.c
++++ b/glib/tests/gdatetime.c
+@@ -2192,6 +2192,31 @@ test_z (void)
+   g_time_zone_unref (tz);
+ }
+ 
++static void
++test_6_days_util_end_of_the_month (void)
++{
++  GTimeZone *tz;
++  GDateTime *dt;
++  gchar *p;
++
++  g_test_bug ("https://gitlab.gnome.org/GNOME/glib/-/issues/2215");
++
++#ifdef G_OS_UNIX
++  tz = g_time_zone_new ("Europe/Paris");
++#elif defined (G_OS_WIN32)
++  tz = g_time_zone_new ("Romance Standard Time");
++#endif
++  dt = g_date_time_new (tz, 2020, 10, 5, 1, 1, 1);
++
++  p = g_date_time_format (dt, "%Y-%m-%d %H:%M:%S%z");
++  /* Incorrect output is  "2020-10-05 01:01:01+0100" */
++  g_assert_cmpstr (p, ==, "2020-10-05 01:01:01+0200");
++  g_free (p);
++
++  g_date_time_unref (dt);
++  g_time_zone_unref (tz);
++}
++
+ static void
+ test_format_iso8601 (void)
+ {
+@@ -2785,6 +2810,7 @@ main (gint   argc,
+   g_test_add_func ("/GDateTime/new_from_iso8601/2", test_GDateTime_new_from_iso8601_2);
+   g_test_add_func ("/GDateTime/new_full", test_GDateTime_new_full);
+   g_test_add_func ("/GDateTime/now", test_GDateTime_now);
++  g_test_add_func ("/GDateTime/test-6-days-util-end-of-the-month", test_6_days_util_end_of_the_month);
+   g_test_add_func ("/GDateTime/printf", test_GDateTime_printf);
+   g_test_add_func ("/GDateTime/non_utf8_printf", test_non_utf8_printf);
+   g_test_add_func ("/GDateTime/format_unrepresentable", test_format_unrepresentable);
+-- 
+GitLab
+
+
+From 4a120c2e2e0a26e1cd5ce7cb4ebe906ef6d588d3 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=A0=D1=83=D1=81=D0=BB=D0=B0=D0=BD=20=D0=98=D0=B6=D0=B1?=
+ =?UTF-8?q?=D1=83=D0=BB=D0=B0=D1=82=D0=BE=D0=B2?= <lrn1986@gmail.com>
+Date: Mon, 5 Oct 2020 16:53:47 +0000
+Subject: [PATCH 2/2] Fix the 6-days-until-the-end-of-the-month bug
+
+The addition causes the date to shift
+forward into 1st of the next month, because a 0-based offset
+is compared to be "more than" the days in the month instead of "more than
+or equal to".
+
+This is triggered by corner-cases where transition date is 6 days
+off the end of the month and our calculations put it at N+1th day of the
+month (where N is the number of days in the month). The subtraction should
+be triggered to move the date back a week, putting it 6 days off the end;
+for example, October 25 for CET DST transition; but due to incorrect comparison
+the date isn't shifted back, we add 31 days to October 1st and end up
+at November 1st).
+
+Fixes issue #2215.
+---
+ glib/gtimezone.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/glib/gtimezone.c b/glib/gtimezone.c
+index ef67ec50b..0de5c92a3 100644
+--- a/glib/gtimezone.c
++++ b/glib/gtimezone.c
+@@ -1041,7 +1041,11 @@ find_relative_date (TimeZoneDate *buffer)
+       /* week is 1 <= w <= 5, we need 0-based */
+       days = 7 * (buffer->week - 1) + wday - first_wday;
+ 
+-      while (days > days_in_month)
++      /* "days" is a 0-based offset from the 1st of the month.
++       * Adding days == days_in_month would bring us into the next month,
++       * hence the ">=" instead of just ">".
++       */
++      while (days >= days_in_month)
+         days -= 7;
+ 
+       g_date_add_days (&date, days);
+-- 
+GitLab
+
