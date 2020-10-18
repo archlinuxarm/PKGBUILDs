@@ -8,8 +8,9 @@
 #  - removed qemu makedepend
 
 pkgname=(libvirt libvirt-storage-gluster libvirt-storage-iscsi-direct)
-pkgver=6.8.0
-pkgrel=1
+epoch=1
+pkgver=6.5.0
+pkgrel=2
 pkgdesc="API for controlling virtualization engines (openvz,kvm,qemu,virtualbox,xen,etc)"
 arch=('x86_64')
 url="https://libvirt.org/"
@@ -17,7 +18,7 @@ license=('LGPL' 'GPL3') #libvirt_parthelper links to libparted which is GPL3 onl
 install=libvirt.install
 depends=('libpciaccess' 'yajl' 'fuse2' 'gnutls' 'parted' 'libssh' 'libxml2' 'numactl' 'polkit')
 makedepends=('libxslt' 'python-docutils' 'lvm2' 'open-iscsi' 'libiscsi' 'glusterfs'
-             'bash-completion' 'rpcsvc-proto' 'dnsmasq' 'iproute2' 'meson')
+             'bash-completion' 'rpcsvc-proto' 'dnsmasq' 'iproute2')
 checkdepends=('ebtables')
 optdepends=('libvirt-storage-gluster: Gluster storage backend'
             'libvirt-storage-iscsi-direct: iSCSI-direct storage backend'
@@ -87,80 +88,53 @@ backup=(
   'etc/logrotate.d/libvirtd.qemu'
   'etc/sasl2/libvirt.conf'
 )
-source=("https://libvirt.org/sources/$pkgname-$pkgver.tar.xz"{,.asc})
-b2sums=('c118ca6b263054bb6941c62f3d1415f7ed1a3f29a35294272d04bc726643247ee5691e0310a1bf013faeba856d7aadd00a90fe8dbdca6ff4c7eb480e94d92fa2'
-        'SKIP')
-validpgpkeys=('C74415BA7C9C7F78F02E1DC34606B8A5DE95BC1F'  # Daniel Veillard <veillard@redhat.com>
-              '453B65310595562855471199CA68BE8010084C9C') # Jiří Denemark <jdenemar@redhat.com.
+source=("https://libvirt.org/sources/$pkgname-$pkgver.tar.xz"{,.asc}
+        "CVE-2020-14339.patch")
+sha256sums=('4915d9eab299ed79288d7598b717c587156708c05f701fe55a72293f32eb3182'
+            'SKIP'
+            'af90e325ae5f6f3f946695a8900ef2ea8cd579da61c608d69c4c550a8bc1b9db')
+validpgpkeys=('C74415BA7C9C7F78F02E1DC34606B8A5DE95BC1F') # Daniel Veillard <veillard@redhat.com>
 
 prepare() {
+  mkdir build
   cd "$pkgname-$pkgver"
 
+  patch -Np1 -i "${srcdir}/CVE-2020-14339.patch"
+
   sed -i 's|/sysconfig/|/conf.d/|g' \
-    src/interface/virtinterfaced.service.in \
-    src/libxl/virtxend.service.in \
+    src/remote/libvirtd.service.in \
+    tools/{libvirt-guests.service,libvirt-guests.sh,virt-pki-validate}.in \
     src/locking/virtlockd.service.in \
-    src/logging/virtlogd.service.in \
-    src/lxc/virtlxcd.service.in \
-    src/network/virtnetworkd.service.in \
-    src/node_device/virtnodedevd.service.in \
-    src/nwfilter/virtnwfilterd.service.in \
-    src/qemu/virtqemud.service.in \
-    src/remote/{virtproxyd.service.in,libvirtd.service.in} \
-    src/secret/virtsecretd.service.in \
-    src/storage/virtstoraged.service.in \
-    src/vbox/virtvboxd.service.in \
-    src/vz/virtvzd.service.in \
-    tools/{libvirt-guests.service,libvirt-guests.sh,virt-pki-validate}.in
-
+    src/logging/virtlogd.service.in
   sed -i 's|/usr/libexec/qemu-bridge-helper|/usr/lib/qemu/qemu-bridge-helper|g' \
-    src/qemu/{qemu.conf,test_libvirtd_qemu.aug.in}
+    src/qemu/qemu.conf \
+    src/qemu/test_libvirtd_qemu.aug.in
 
-  # ZFS HACK
-  sed -i "s/'zfs'/'zic'/;s/'zpool'/'zic'/" meson.build
+  sed -i 's/notify/simple/' src/remote/libvirtd.service.in
 }
 
 build() {
-  CFLAGS+=" -Wall" \
-  arch-meson $pkgname-$pkgver build \
-    -D apparmor=disabled \
-    -D hal=disabled \
-    -D netcf=disabled \
-    -D openwsman=disabled \
-    -D selinux=disabled \
-    -D wireshark_dissector=disabled \
-    -D driver_bhyve=disabled \
-    -D driver_hyperv=disabled \
-    -D driver_libxl=disabled \
-    -D driver_vz=disabled \
-    -D secdriver_apparmor=disabled \
-    -D secdriver_selinux=disabled \
-    -D storage_rbd=disabled \
-    -D storage_sheepdog=disabled \
-    -D storage_vstorage=disabled \
-    -D storage_zfs=enabled \
-    -D dtrace=disabled \
-    -D numad=disabled \
-    -D git_werror=disabled \
-    -D qemu_group=kvm \
-    -D runstatedir=/run
-
-  # ZFS HACK
-  sed -i '/ZIC/d' build/meson-config.h
-  echo '#define ZFS "/usr/bin/zfs"' >> build/meson-config.h
-  echo '#define ZPOOL "/usr/bin/zpool"' >> build/meson-config.h
-
-  meson compile -C build
+  cd build
+  ZFS=/usr/bin/zfs ZPOOL=/usr/bin/zpool \
+  "../$pkgname-$pkgver/configure" \
+    --prefix=/usr \
+    "--libexec=/usr/lib/$pkgname" \
+    --sbindir=/usr/bin \
+    --with-runstatedir=/run \
+    --with-qemu-group=kvm
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+  make
 }
 
 check() {
-  meson test -C build --print-errorlogs
+  cd build
+  make check
 }
 
 package_libvirt() {
   provides=('libvirt.so' 'libvirt-admin.so' 'libvirt-lxc.so' 'libvirt-qemu.so')
-  install=libvirt.install
-  DESTDIR="$pkgdir" meson install -C build
+  cd build
+  make DESTDIR="$pkgdir" install
 
   mv "$pkgdir"/etc/{sysconfig,conf.d}
   mkdir "$pkgdir"/usr/lib/{sysusers,tmpfiles}.d
@@ -184,10 +158,9 @@ package_libvirt() {
   rm -f "$pkgdir/etc/libvirt/qemu/networks/autostart/default.xml"
 
   # move split modules
-  mkdir "$srcdir"/split
-  mv "$pkgdir"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_gluster.so "$srcdir"/split
-  mv "$pkgdir"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_iscsi-direct.so "$srcdir"/split
-  mv "$pkgdir"/usr/lib/libvirt/storage-file/libvirt_storage_file_gluster.so "$srcdir"/split
+  mv "$pkgdir"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_gluster.so "$pkgdir/../"
+  mv "$pkgdir/usr/lib/libvirt/storage-backend/libvirt_storage_backend_iscsi-direct.so" "$pkgdir/../"
+  mv "$pkgdir/usr/lib/libvirt/storage-file/libvirt_storage_file_gluster.so" "$pkgdir/../"
 }
 
 package_libvirt-storage-gluster() {
@@ -196,8 +169,8 @@ package_libvirt-storage-gluster() {
   optdepends=()
   backup=()
 
-  install -Dv -t "$pkgdir/usr/lib/libvirt/storage-backend" "$srcdir/split/libvirt_storage_backend_gluster.so"
-  install -Dv -t "$pkgdir/usr/lib/libvirt/storage-file" "$srcdir/split/libvirt_storage_file_gluster.so"
+  install -Dv -t "$pkgdir/usr/lib/libvirt/storage-backend" "$pkgdir/../libvirt_storage_backend_gluster.so"
+  install -Dv -t "$pkgdir/usr/lib/libvirt/storage-file" "$pkgdir/../libvirt_storage_file_gluster.so"
 }
 
 package_libvirt-storage-iscsi-direct() {
@@ -206,5 +179,5 @@ package_libvirt-storage-iscsi-direct() {
   optdepends=()
   backup=()
 
-  install -Dv -t "$pkgdir/usr/lib/libvirt/storage-backend" "$srcdir/split/libvirt_storage_backend_iscsi-direct.so"
+  install -Dv -t "$pkgdir/usr/lib/libvirt/storage-backend" "$pkgdir/../libvirt_storage_backend_iscsi-direct.so"
 }
