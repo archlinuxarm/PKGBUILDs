@@ -1,4 +1,5 @@
 # Maintainer: Kyle Keen <keenerd@gmail.com>
+# Contributor: David Runge <dvzrv@archlinux.org>
 # Contributor: Dominik Heidler <dheidler@gmail.com>
 # Contributor:	Jonatan Sastre <jsastreh [ at ] hotmail.com>
 
@@ -8,16 +9,16 @@
 pkgbase=gnuradio
 pkgname=(gnuradio gnuradio-companion)
 pkgver=3.8.1.0
-pkgrel=3
+pkgrel=4
 pkgdesc="General purpose DSP and SDR toolkit.  With drivers for usrp and fcd."
 arch=('x86_64')
 url="https://gnuradio.org"
 license=('GPL')
-depends=('fftw' 'python-numpy' 'gsl' 'blas' 'boost-libs>=1.53'
-    'libusbx' 'portaudio' 'libuhd' 'zeromq' 'libvolk' 'log4cpp' 'python-yaml'
-    'gmp' 'gsm' 'codec2' 'python-mako' 'python-click-plugins' 'pango' 'gtk3')
-makedepends=('boost' 'cmake' 'python-lxml' 'glu' 'swig' 'python-gobject'
-    'qwt' 'python-pyqt5' 'python-cairo')
+depends=('python-numpy' 'gsl' 'blas' 'libuhd' 'libvolk' 'log4cpp' 'python-yaml'
+'gmp' 'gsm' 'codec2' 'python-mako' 'python-click-plugins')
+makedepends=('alsa-lib' 'boost' 'cmake' 'fftw' 'glu' 'gtk3' 'jack' 'pango'
+'portaudio' 'python-gobject' 'python-lxml' 'python-pyqt5' 'python-cairo' 'qwt'
+'swig' 'zeromq')
 
 # todo
 # split the gui components?
@@ -34,14 +35,18 @@ makedepends=('boost' 'cmake' 'python-lxml' 'glu' 'swig' 'python-gobject'
 #source=("http://s3-dist.gnuradio.org/gnuradio-$pkgver.tar.gz"
 # neglected official release directory
 #source=("https://gnuradio.org/releases/$pkgbase/$pkgbase-$pkgver.tar.gz"
+
+# seems upstream stopped doing signed tags/release assets > 3.8.0.0 :-/
+# https://github.com/gnuradio/gnuradio/issues/3858
 source=("https://github.com/gnuradio/gnuradio/releases/download/v$pkgver/gnuradio-$pkgver.tar.gz"
-        #"https://github.com/gnuradio/gnuradio/releases/download/v$pkgver/gnuradio-$pkgver.tar.gz.asc"
+        # "https://github.com/gnuradio/gnuradio/releases/download/v$pkgver/gnuradio-$pkgver.tar.gz.asc"
         "21-fcd.rules")
 validpgpkeys=('B90DDFAC56989BF62262EB812987C77CBB8ED9B2'  # GNU Radio Project
               'D74F9F146E7F755783583158B343B2BA293E5174') # Marcus Müller
-md5sums=('f80ff542ff4810e19393d4c7f7ab62a2'
-         #'SKIP'
-         '465e12c454c6a22ebec9849181af7bdc')
+sha512sums=('d1ada5b36c32aefd5915e4aa33beafd06aaaa00654f5a9f126bc9068f9e607580660bd5c57177503c3c29c23e9f3f4bc0f9c6c394a6f4bb003f6ffdf520eb2e0'
+            '6f02dc8e20a7a1cd11099c851a7c8427fcd21e9652e6cddd0a72ca747b0e93cd4fd1b7b7b7e426b6231348bcc34fb2417716a2f03c92ec141889edc65031c3a0')
+b2sums=('8a56d55e2880277ca32332df01b046ebbe79d2559e568bd4c957a64df64799fc58d367e8d55f03d1ffffa180942b1c5b48a0e11877a114372c3ea8ed403169f5'
+        '83657a141a7a4fc52ae62e19b480fd7b7e651efffc2186d3eb96e8612beffbbe71b434a2323ae37c74465ff6a959a4ca1f9c9db5ed02ab641f1784e704ab5f4d')
 
 prepare() {
   cd "$srcdir/$pkgbase-$pkgver"
@@ -53,10 +58,8 @@ prepare() {
 build() {
   export PYTHON=python3
   [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && NEON="-Dhave_mfpu_neon=0"
-  cd "$srcdir/$pkgbase-$pkgver"
-  mkdir -p build
-  cd build
-  cmake \
+  cd "$pkgbase-$pkgver"
+  cmake -DCMAKE_INSTALL_PREFIX=/usr \
     -DPYTHON_EXECUTABLE=$(which python3) \
     -DPYTHON_INCLUDE_DIR=/usr/include/python3.8 \
     -DPYTHON_LIBRARY=/usr/lib/libpython3.8.so \
@@ -65,27 +68,52 @@ build() {
     -DENABLE_GRC=ON \
     -DENABLE_GR_QTGUI=ON \
     -DQWT_LIBRARIES=/usr/lib/libqwt.so \
-    -DCMAKE_INSTALL_PREFIX=/usr -Wno-dev $NEON ../
-  make
+    -Wno-dev $NEON \
+    -B build \
+    -S .
+  make VERBOSE=1 -C build
 }
 
 check() {
-  cd "$srcdir/$pkgbase-$pkgver/build"
-  export PYTHON=python3
-  #make test
+  cd "$pkgbase-$pkgver"
+  # TODO: investigate zeromq related test failures
+  # export PYTHON=python3
+  # make VERBOSE=1 test -C build
 }
 
 package_gnuradio() {
+  depends+=('libasound.so' 'libboost_filesystem.so'
+  'libboost_program_options.so' 'libboost_thread.so' 'libfftw3f.so'
+  'libfftw3f_threads.so' 'libjack.so' 'libportaudio.so' 'libzmq.so')
   optdepends=('boost: gr_modtool'
               'swig: gr_modtool'
               'cmake: gr_modtool'
               'pkgconfig: libuhd')
-  cd "$srcdir"
-  install -Dm644 21-fcd.rules "$pkgdir/usr/lib/udev/rules.d/21-fcd.rules"
-  cd "$srcdir/$pkgbase-$pkgver/grc/scripts/freedesktop"
-  install -Dm644 gnuradio-grc.desktop "$pkgdir/usr/share/applications/gnuradio-grc.desktop"
-  cd "$srcdir/$pkgbase-$pkgver/build"
-  make DESTDIR="$pkgdir" install
+  provides=(
+    'libgnuradio-zeromq.so'
+    'libgnuradio-wavelet.so'
+    'libgnuradio-vocoder.so'
+    'libgnuradio-uhd.so'
+    'libgnuradio-trellis.so'
+    'libgnuradio-runtime.so'
+    'libgnuradio-qtgui.so'
+    'libgnuradio-pmt.so'
+    'libgnuradio-filter.so'
+    'libgnuradio-fft.so'
+    'libgnuradio-fec.so'
+    'libgnuradio-dtv.so'
+    'libgnuradio-digital.so'
+    'libgnuradio-channels.so'
+    'libgnuradio-blocks.so'
+    'libgnuradio-audio.so'
+    'libgnuradio-analog.so'
+  )
+
+  cd "$pkgbase-$pkgver"
+  make DESTDIR="$pkgdir" install -C build
+  install -vDm 644 ../21-fcd.rules -t "$pkgdir/usr/lib/udev/rules.d/"
+  install -vDm 644 grc/scripts/freedesktop/gnuradio-grc.desktop \
+    -t "$pkgdir/usr/share/applications/"
 }
 
 package_gnuradio-companion() {
