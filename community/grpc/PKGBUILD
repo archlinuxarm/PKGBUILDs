@@ -7,7 +7,7 @@
 
 pkgbase='grpc'
 pkgname=('grpc' 'python-grpcio' 'php-grpc' 'grpc-cli')
-pkgver=1.30.2
+pkgver=1.32.0
 _gtestver=c9ccac7cb7345901884aabf5d1a786cfa6e2f397
 _abseilcppver=20200225.2
 pkgrel=1
@@ -15,16 +15,31 @@ pkgdesc="High performance, open source, general RPC framework that puts mobile a
 arch=('x86_64')
 url='https://grpc.io'
 license=('BSD')
-makedepends=('re2c' 'protobuf' 'php' 'c-ares' 'openssl' 'chrpath' 'gflags' 'cython' 'cmake' 'benchmark')
+makedepends=('re2' 're2c' 'protobuf' 'php' 'c-ares' 'openssl' 'chrpath' 'gflags' 'cython' 'cmake' 'benchmark')
 source=("https://github.com/grpc/grpc/archive/v$pkgver/$pkgbase-$pkgver.tar.gz"
         "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
-        "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz")
-sha256sums=('ba74b97a2f1b4e22ec5fb69d639d849d2069fb58ea7d6579a31f800af6fe3b6c'
+        "https://github.com/abseil/abseil-cpp/archive/$_abseilcppver/abseil-cpp-$_abseilcppver.tar.gz"
+        "https://patch-diff.githubusercontent.com/raw/grpc/grpc/pull/24088/grpc-re2-pkgconfig.patch"
+        "grpcio-literal.patch::https://github.com/grpc/grpc/commit/9e0b427893b65b220faf8a31a6afdc67f6f41364.patch"
+        "https://patch-diff.githubusercontent.com/raw/grpc/grpc/pull/24450/grpcio-system-re2.patch"
+        "https://patch-diff.githubusercontent.com/raw/grpc/grpc/pull/24449/grpcio-no-boringssl-fix.patch"
+        "atomic.patch")
+sha256sums=('f880ebeb2ccf0e47721526c10dd97469200e40b5f101a0d9774eb69efa0bd07a'
             '443d383db648ebb8e391382c0ab63263b7091d03197f304390baac10f178a468'
-            'f41868f7a938605c92936230081175d1eae87f6ea2c248f41077c8f88316f111')
+            'f41868f7a938605c92936230081175d1eae87f6ea2c248f41077c8f88316f111'
+            '06508930d606d741849b8e39cb4ee042948a7317c8e10d4f04f517cdc95c6928'
+            '2a3049ad3aebf698f45325c5c789ed02d450d586732fd095b258b3d5b6556e54'
+            'ad771906e2f8e1e04bd9bab4f0292e14c208ca12a87817d058f6def29338ea8f'
+            'a105e796854fb726908a0b6f5501d50478f52afad6ed3e8aeffe5d30b855aead'
+            '2f1285c8874cad70a7e1800f80b1673e8a1b7e2ff11f1f3e198063988cc5ab06')
 
 prepare() {
   cd "$srcdir/$pkgbase-$pkgver"
+  patch -p1 -i ../grpc-re2-pkgconfig.patch
+  patch -p1 -i ../grpcio-literal.patch
+  patch -p1 -i ../grpcio-system-re2.patch
+  patch -p1 -i ../grpcio-no-boringssl-fix.patch
+
   ln -sf "$srcdir/googletest-$_gtestver/"{googlemock,googletest} \
     third_party/googletest
 
@@ -33,9 +48,14 @@ prepare() {
 
   sed '/TARGET gflags::gflags/i \  set(_gRPC_GFLAGS_LIBRARIES gflags)' -i cmake/gflags.cmake
 
-  [[ $CARCH == "armv6h" || $CARCH == "arm" ]] && sed -i -e "s/set(_gRPC_ALLTARGETS_LIBRARIES \${CMAKE_DL_LIBS} rt m pthread)/set(_gRPC_ALLTARGETS_LIBRARIES \${CMAKE_DL_LIBS} atomic rt m pthread)/g" CMakeLists.txt
-
   mkdir build
+
+  if [[ $CARCH == "armv6h" || $CARCH == "arm" ]]; then
+    sed -i -e "s/set(_gRPC_ALLTARGETS_LIBRARIES \${CMAKE_DL_LIBS} rt m pthread)/set(_gRPC_ALLTARGETS_LIBRARIES \${CMAKE_DL_LIBS} atomic rt m pthread)/g" CMakeLists.txt
+
+    cd "$srcdir/abseil-cpp-$_abseilcppver"
+    patch -p1 -i ../atomic.patch
+  fi
 }
 
 build() {
@@ -52,6 +72,7 @@ build() {
     -DgRPC_SSL_PROVIDER=package \
     -DgRPC_ZLIB_PROVIDER=package \
     -DgRPC_GFLAGS_PROVIDER=package \
+    -DgRPC_RE2_PROVIDER=package \
     -DgRPC_BENCHMARK_PROVIDER=package \
     ..
 
@@ -70,11 +91,13 @@ build() {
   GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
   GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1 \
   GRPC_PYTHON_BUILD_SYSTEM_CARES=1 \
+  GRPC_PYTHON_BUILD_SYSTEM_RE2=1 \
+  GRPC_BUILD_WITH_BORING_SSL_ASM=0 \
   python setup.py build
 }
 
 package_grpc() {
-  depends=('c-ares' 'protobuf' 'openssl' 'benchmark')
+  depends=('c-ares' 'protobuf' 'openssl')
 
   cd "$srcdir/$pkgbase-$pkgver/build"
   make DESTDIR="$pkgdir" install
