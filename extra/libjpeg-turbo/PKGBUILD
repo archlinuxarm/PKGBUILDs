@@ -1,60 +1,54 @@
-# Maintainer: Gaetan Bisson <bisson@archlinux.org>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Gaetan Bisson <bisson@archlinux.org>
 # Contributor: Allan McRae <allan@archlinux.org>
 # Contributor: Simone Sclavi 'Ito' <darkhado@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - removed makedepends on nasm and java, -DWITH_JAVA=0
+#  - removed makedepends on nasm and java, -DWITH_JAVA=OFF
 #  - added -DWITH_SIMD=FALSE to configure for !AArch64
 
 pkgname=libjpeg-turbo
 pkgver=2.0.5
-pkgrel=2
+pkgrel=3
 pkgdesc='JPEG image codec with accelerated baseline compression and decompression'
 url='https://libjpeg-turbo.org/'
 arch=('x86_64')
-license=('custom')
+license=('BSD')
+depends=('glibc')
 makedepends=('cmake')
-validpgpkeys=('7D6293CC6378786E1B5C496885C7044E033FDE16')
-source=("https://downloads.sourceforge.net/project/${pkgname}/${pkgver}/${pkgname}-${pkgver}.tar.gz"{,.sig})
-sha256sums=('16f8f6f2715b3a38ab562a84357c793dd56ae9899ce130563c72cd93d8357b5d'
-            'SKIP')
-
-provides=('libjpeg=8.2.2')
-
-prepare() {
-	cd "${srcdir}/${pkgname}-${pkgver}"
-	sed 's/Szathmáry/Szathmary/g' -i java/org/libjpegturbo/turbojpeg/*.java
-}
+provides=('libjpeg=8.2.2' 'libjpeg.so' 'libturbojpeg.so')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/${pkgname}/${pkgname}/archive/${pkgver}.tar.gz")
+sha512sums=('78e26d1f05b7dd9e6573b32b2324aa4b6a88a027c6b2d768aeefc46bc7780917bc850d6e77182d2ccb2cd228613a72222fbd3d1f1df0166a6e8128451ba731d2')
+b2sums=('9c0fdce1da12ec2589273e7e8cece7d9e2aa9d82a2059d7948ed51fb0999af2dd8a46fef249caa333e96bc80611c3d2f7390f882b200a79de91d979db634aaca')
 
 build() {
-	cd "${srcdir}/${pkgname}-${pkgver}"
-
-	[[ $CARCH != "aarch64" ]] && CONFIG="-DWITH_SIMD=FALSE"
-
-	cmake \
-		-DWITH_JAVA=0 \
-		-DWITH_JPEG8=1 \
-		-DCMAKE_INSTALL_PREFIX=/usr \
-		-DCMAKE_INSTALL_LIBDIR=/usr/lib \
-		$CONFIG .
-
-	make
+  cd "${pkgname}-${pkgver}"
+  [[ $CARCH != "aarch64" ]] && CONFIG="-DWITH_SIMD=FALSE"
+  cmake -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_INSTALL_LIBDIR=/usr/lib \
+        -DWITH_JAVA=OFF \
+        -DWITH_JPEG8=ON \
+        -W no-dev \
+        -B build $CONFIG \
+        -S .
+  make VERBOSE=1 -C build
 }
 
 check() {
-	cd "${srcdir}/${pkgname}-${pkgver}"
-	make test
+  cd "${pkgname}-${pkgver}"
+  make test -C build
 }
 
 package() {
-	cd "${srcdir}/${pkgname}-${pkgver}"
-	make \
-		DESTDIR="${pkgdir}" \
-		docdir="/usr/share/doc/${pkgname}" \
-		exampledir="/usr/share/doc/${pkgname}" \
-		install
+  cd "${pkgname}-${pkgver}"
+  make VERBOSE=1 DESTDIR="${pkgdir}" \
+       docdir="/usr/share/doc/${pkgname}" \
+       exampledir="/usr/share/doc/${pkgname}" \
+       install -C build
 
-	install -d "${pkgdir}/usr/share/licenses/${pkgname}"
-	ln -s ../../doc/libjpeg-turbo/LICENSE.md "${pkgdir}/usr/share/licenses/${pkgname}"
-	install -m 644 jpegint.h "${pkgdir}/usr/include" # required by other software
+  install -d "${pkgdir}/usr/share/licenses/${pkgname}"
+  ln -s ../../doc/libjpeg-turbo/LICENSE.md "${pkgdir}/usr/share/licenses/${pkgname}"
+  # header required by some dependants
+  # https://bugs.archlinux.org/task/24787
+  install -m 644 jpegint.h "${pkgdir}/usr/include"
 }
