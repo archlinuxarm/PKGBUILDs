@@ -1,0 +1,685 @@
+From: Alberts Muktupāvels <alberts.muktupavels@gmail.com>
+Date: Thu, 26 Mar 2020 18:33:32 +0200
+Subject: port to libgnome-panel
+
+---
+ Makefile.am                                        |  20 ---
+ SensorsApplet.xml                                  |  32 ++--
+ configure.ac                                       |  10 +-
+ org.gnome.applets.SensorsApplet.panel-applet.in.in |  17 ---
+ po/POTFILES.in                                     |   1 +
+ po/POTFILES.skip                                   |   1 -
+ sensors-applet/Makefile.am                         |   8 +-
+ sensors-applet/active-sensor.c                     |   9 +-
+ sensors-applet/main.c                              |  45 ------
+ sensors-applet/sensors-applet.c                    | 164 ++++++++++-----------
+ sensors-applet/sensors-applet.h                    |  11 +-
+ sensors-applet/sensors-module.c                    |  62 ++++++++
+ 12 files changed, 179 insertions(+), 201 deletions(-)
+ delete mode 100644 org.gnome.applets.SensorsApplet.panel-applet.in.in
+ delete mode 100644 sensors-applet/main.c
+ create mode 100644 sensors-applet/sensors-module.c
+
+diff --git a/Makefile.am b/Makefile.am
+index 2ff4740..fa8686b 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -2,30 +2,10 @@ ACLOCAL_AMFLAGS=-I m4
+ 
+ SUBDIRS = sensors-applet lib plugins pixmaps po help
+ 
+-appletdir = $(LIBPANEL_APPLET_DIR)
+-applet_in_files = org.gnome.applets.SensorsApplet.panel-applet.in
+-applet_DATA = $(applet_in_files:.panel-applet.in=.panel-applet)
+-
+-APPLET_LOCATION=$(pkglibdir)/$(LIBPANEL_APPLET_API_VERSION)/libsensors-applet.so
+-
+-$(applet_in_files): $(applet_in_files).in Makefile
+-	$(AM_V_GEN)sed \
+-	-e "s|\@APPLET_LOCATION\@|$(APPLET_LOCATION)|" \
+-	-e "s|\@VERSION\@|$(PACKAGE_VERSION)|" \
+-	$< > $@
+-
+-@INTLTOOL_SERVER_RULE@
+-
+ uidir 		= $(pkgdatadir)/ui
+ ui_DATA 	= SensorsApplet.xml
+ 
+-%.panel-applet: %.panel-applet.in $(INTLTOOL_MERGE) $(wildcard $(top_srcdir)/po/*po) ; $(INTLTOOL_MERGE) $(top_srcdir)/po $< $@ -d -u -c $(top_builddir)/po/.intltool-merge-cache
+-
+-CLEANFILES = $(applet_DATA) $(applet_DATA).in $(schemas_DATA)
+-
+ EXTRA_DIST 	= $(ui_DATA) \
+-		  $(applet_in_files:.panel-applet.in=.panel-applet.in.in) \
+-		  $(service_in_files) \
+ 		  intltool-merge.in intltool-extract.in intltool-update.in
+ 
+ DISTCLEANFILES	=	intltool-extract \
+diff --git a/SensorsApplet.xml b/SensorsApplet.xml
+index 41e1d1f..d90309c 100644
+--- a/SensorsApplet.xml
++++ b/SensorsApplet.xml
+@@ -1,14 +1,18 @@
+-<section>
+-       <item>
+-               <attribute name="label" translatable="yes">_Preferences</attribute>
+-               <attribute name="action">sensorsapplet.preferences</attribute>
+-       </item>
+-       <item>
+-               <attribute name="label" translatable="yes">_Help</attribute>
+-               <attribute name="action">sensorsapplet.help</attribute>
+-       </item>
+-       <item>
+-               <attribute name="label" translatable="yes">_About</attribute>
+-               <attribute name="action">sensorsapplet.about</attribute>
+-       </item>
+-</section>
++<interface>
++  <menu id="sensorsapplet-menu">
++    <section>
++      <item>
++        <attribute name="label" translatable="yes">_Preferences</attribute>
++        <attribute name="action">sensorsapplet.preferences</attribute>
++      </item>
++      <item>
++        <attribute name="label" translatable="yes">_Help</attribute>
++        <attribute name="action">sensorsapplet.help</attribute>
++      </item>
++      <item>
++        <attribute name="label" translatable="yes">_About</attribute>
++        <attribute name="action">sensorsapplet.about</attribute>
++      </item>
++    </section>
++  </menu>
++</interface>
+diff --git a/configure.ac b/configure.ac
+index 332faf1..d89a029 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -5,7 +5,7 @@
+ AC_INIT([GNOME Sensors Applet], [3.0.0], [murray.alex@gmail.com],
+ [sensors-applet])
+ 
+-AC_CONFIG_SRCDIR([sensors-applet/main.c])
++AC_CONFIG_SRCDIR([sensors-applet/sensors-module.c])
+ AM_CONFIG_HEADER([sensors-applet/config.h])
+ AC_CONFIG_MACRO_DIRS([m4])
+ AM_INIT_AUTOMAKE([ -Wno-portability])
+@@ -52,7 +52,7 @@ AC_CHECK_HEADERS(
+ 
+ GLIB_REQUIRED=2.22.0
+ GTK_REQUIRED=3.4.0
+-LIBPANEL_REQUIRED=3.0.0
++LIBGNOME_PANEL_REQUIRED=3.36.0
+ LIBNOTIFY_REQUIRED=0.3.0
+ LIBCAIRO_REQUIRED=1.0.4
+ LIBDBUSGLIB_REQUIRED=0.80
+@@ -66,12 +66,12 @@ PKG_CHECK_MODULES(GTK, gtk+-3.0 >= $GTK_REQUIRED)
+ AC_SUBST(GTK_CFLAGS)
+ AC_SUBST(GTK_LIBS)
+ 
+-PKG_CHECK_MODULES(GNOME, libpanel-applet >= $LIBPANEL_REQUIRED)
++PKG_CHECK_MODULES(GNOME, libgnome-panel >= $LIBGNOME_PANEL_REQUIRED)
+ AC_SUBST(GNOME_CFLAGS)
+ AC_SUBST(GNOME_LIBS)
+ 
+-LIBPANEL_APPLET_DIR=`$PKG_CONFIG --variable=libpanel_applet_dir libpanel-applet`
+-AC_SUBST(LIBPANEL_APPLET_DIR)
++LIBGNOME_PANEL_MODULES_DIR=`$PKG_CONFIG --variable=modulesdir libgnome-panel`
++AC_SUBST([LIBGNOME_PANEL_MODULES_DIR], [$LIBGNOME_PANEL_MODULES_DIR])
+ 
+ PKG_CHECK_MODULES(CAIRO, cairo >= $LIBCAIRO_REQUIRED)
+ AC_SUBST(CAIRO_CFLAGS)
+diff --git a/org.gnome.applets.SensorsApplet.panel-applet.in.in b/org.gnome.applets.SensorsApplet.panel-applet.in.in
+deleted file mode 100644
+index 0c101ae..0000000
+--- a/org.gnome.applets.SensorsApplet.panel-applet.in.in
++++ /dev/null
+@@ -1,17 +0,0 @@
+-[Applet Factory]
+-Id=SensorsAppletFactory
+-Location=@APPLET_LOCATION@
+-InProcess=true
+-_Name=Sensors Applet Factory
+-_Description=Sensors Applet Factory
+-
+-[SensorsApplet]
+-_Name=Hardware Sensors Monitor
+-_Description=Displays temperature, fan speed and voltage sensor readings
+-Icon=sensors-applet
+-BonoboId=OAFIID:GNOME_SensorsApplet
+-X-GNOME-Bugzilla-Bugzilla=GNOME
+-X-GNOME-Bugzilla-Product=gnome-applets
+-X-GNOME-Bugzilla-Component=geyes
+-X-GNOME-Bugzilla-Version=@VERSION@
+-X-GNOME-Bugzilla-OtherBinaries=sensors-appet
+diff --git a/po/POTFILES.in b/po/POTFILES.in
+index a0843b0..84a930e 100644
+--- a/po/POTFILES.in
++++ b/po/POTFILES.in
+@@ -17,4 +17,5 @@ sensors-applet/about-dialog.c
+ sensors-applet/sensor-config-dialog.c
+ sensors-applet/sensors-applet.c
+ sensors-applet/sensors-applet-conf.c
++sensors-applet/sensors-module.c
+ [type: gettext/glade]SensorsApplet.xml
+diff --git a/po/POTFILES.skip b/po/POTFILES.skip
+index f23af73..e69de29 100644
+--- a/po/POTFILES.skip
++++ b/po/POTFILES.skip
+@@ -1 +0,0 @@
+-SensorsApplet.server.in
+diff --git a/sensors-applet/Makefile.am b/sensors-applet/Makefile.am
+index c5712ee..ca52205 100644
+--- a/sensors-applet/Makefile.am
++++ b/sensors-applet/Makefile.am
+@@ -1,6 +1,6 @@
+ ## Process this file with automake to produce Makefile.in
+ 
+-sensors_applet_libdir=${pkglibdir}/${LIBPANEL_APPLET_API_VERSION}
++sensors_applet_libdir=$(LIBGNOME_PANEL_MODULES_DIR)
+ sensors_applet_lib_LTLIBRARIES=libsensors-applet.la
+ 
+ libsensors_applet_la_CPPFLAGS = \
+@@ -29,7 +29,7 @@ else
+ libnotify_SRC =
+ endif
+ 
+-libsensors_applet_la_SOURCES = main.c \
++libsensors_applet_la_SOURCES = \
+ 		about-dialog.c \
+ 		about-dialog.h \
+ 		active-sensor.c \
+@@ -45,6 +45,7 @@ libsensors_applet_la_SOURCES = main.c \
+ 		sensors-applet-plugins.h \
+ 		sensors-applet-conf.c \
+ 		sensors-applet-conf.h \
++		sensors-module.c \
+ 		$(libnotify_SRC)
+ 
+ libsensors_applet_la_LIBADD = \
+@@ -54,6 +55,9 @@ libsensors_applet_la_LIBADD = \
+ 	$(CAIRO_LIBS) \
+ 	$(LIBNOTIFY_LIBS) -ldl
+ 
++libsensors_applet_la_LDFLAGS = \
++	-module -avoid-version
++
+ # install headers for plugins to use
+ INST_H_FILES = sensors-applet-plugin.h sensors-applet-sensor.h
+ 
+diff --git a/sensors-applet/active-sensor.c b/sensors-applet/active-sensor.c
+index 8afb224..725e050 100644
+--- a/sensors-applet/active-sensor.c
++++ b/sensors-applet/active-sensor.c
+@@ -429,7 +429,7 @@ void active_sensor_update_graph_dimensions(ActiveSensor *as,
+ ActiveSensor *active_sensor_new(SensorsApplet *sensors_applet,
+                                 GtkTreeRowReference *sensor_row) {
+         ActiveSensor *active_sensor;
+-        PanelAppletOrient orient;
++        GtkOrientation orient;
+         gint graph_size;
+         gboolean horizontal;
+ 
+@@ -440,7 +440,7 @@ ActiveSensor *active_sensor_new(SensorsApplet *sensors_applet,
+ 
+ 	active_sensor = g_new0(ActiveSensor, 1);
+         active_sensor->sensors_applet = sensors_applet;
+-	active_sensor->sensors_applet->settings = panel_applet_settings_new (sensors_applet->applet, SENSORS_APPLET_SCHEMA);
++	active_sensor->sensors_applet->settings = gp_applet_settings_new (GP_APPLET(sensors_applet), SENSORS_APPLET_SCHEMA);
+ 
+ 	active_sensor->sensor_row = sensor_row;
+ 
+@@ -463,12 +463,11 @@ ActiveSensor *active_sensor_new(SensorsApplet *sensors_applet,
+                               GDK_ALL_EVENTS_MASK);
+ 
+         /* need to set size according to orientation */
+-        orient = panel_applet_get_orient(active_sensor->sensors_applet->applet);
++        orient = gp_applet_get_orientation(GP_APPLET(active_sensor->sensors_applet));
+         graph_size = g_settings_get_double(active_sensor->sensors_applet->settings,
+                                                 GRAPH_SIZE);
+ 
+-        horizontal = ((orient == PANEL_APPLET_ORIENT_UP) ||
+-                      (orient == PANEL_APPLET_ORIENT_DOWN));
++        horizontal = (orient == GTK_ORIENTATION_HORIZONTAL);
+ 
+         active_sensor_set_graph_dimensions(active_sensor,
+                                            (horizontal ? graph_size : sensors_applet->size),
+diff --git a/sensors-applet/main.c b/sensors-applet/main.c
+deleted file mode 100644
+index b898fd7..0000000
+--- a/sensors-applet/main.c
++++ /dev/null
+@@ -1,45 +0,0 @@
+-/*
+- * Copyright (C) 2005-2009 Alex Murray <murray.alex@gmail.com>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License along
+- * with this program; if not, write to the Free Software Foundation, Inc.,
+- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+- */
+-
+-#ifdef HAVE_CONFIG_H
+-#include "config.h"
+-#endif /* HAVE_CONFIG_H */
+-
+-#include <panel-applet.h>
+-#include <string.h>
+-#include "sensors-applet.h"
+-
+-static gboolean sensors_applet_fill(PanelApplet *applet,
+-                                    const gchar *iid,
+-                                    gpointer data) {
+-	SensorsApplet *sensors_applet;
+-	gboolean retval = FALSE;
+-
+-	if (strcmp(iid, "SensorsApplet") == 0) {
+-		sensors_applet = g_new0(SensorsApplet, 1);
+-		sensors_applet->applet = applet;
+-		sensors_applet_init(sensors_applet);
+-		retval = TRUE;
+-	}
+-	return retval;
+-}
+-
+-PANEL_APPLET_IN_PROCESS_FACTORY ("SensorsAppletFactory",
+-                                PANEL_TYPE_APPLET,
+-                                sensors_applet_fill,
+-                                NULL);
+diff --git a/sensors-applet/sensors-applet.c b/sensors-applet/sensors-applet.c
+index e96a4ef..d197a9c 100644
+--- a/sensors-applet/sensors-applet.c
++++ b/sensors-applet/sensors-applet.c
+@@ -51,6 +51,8 @@
+ #define COLUMN_SPACING 2
+ #define ROW_SPACING 1
+ 
++G_DEFINE_TYPE (SensorsApplet, sensors_applet, GP_TYPE_APPLET)
++
+ /* callbacks for panel menu */
+ static void prefs_cb(GSimpleAction *action,
+ 			GVariant *parameter,
+@@ -90,56 +92,23 @@ static void help_cb(GSimpleAction *action,
+ 	}
+ }
+ 
+-static void destroy_cb(GtkWidget *widget, gpointer data) {
+-        SensorsApplet *sensors_applet;
+-        sensors_applet = (SensorsApplet *)data;
+-
+-	/* destory dialogs, remove timeout and clear sensors tree and finally
+-         * the applet */
+-	if (sensors_applet->prefs_dialog != NULL) {
+-                // destroy's dialog too
+-                prefs_dialog_close(sensors_applet);
+-	}
+-
+-	if (sensors_applet->timeout_id) {
+-		g_source_remove(sensors_applet->timeout_id);
+-	}
+-
+-        // destroy all active sensors
+-        g_list_foreach(sensors_applet->active_sensors,
+-                       (GFunc)active_sensor_destroy,
+-                       NULL);
+-
+-	if (sensors_applet->sensors != NULL) {
+-		gtk_tree_store_clear(sensors_applet->sensors);
+-	}
+-
+-	gtk_widget_destroy(GTK_WIDGET(sensors_applet->applet));
+-
+-	g_free(sensors_applet);
+-	return;
+-}
+-
+-static void change_orient_cb (PanelApplet *applet, 
+-                              PanelAppletOrient orient, 
+-                              gpointer data) {
+-        SensorsApplet *sensors_applet;
+-        sensors_applet = (SensorsApplet *)data;
+-
++static void placement_changed_cb (GpApplet *applet,
++                                  GtkOrientation orientation,
++                                  GtkPositionType position,
++                                  SensorsApplet *sensors_applet) {
+         sensors_applet_display_layout_changed(sensors_applet);
+ }
+ 
+-static void size_allocate_cb(PanelApplet *applet, 
++static void size_allocate_cb(GtkWidget *widget,
+                              GtkAllocation *allocation, 
+                              gpointer data) {
+         SensorsApplet *sensors_applet;
+-        PanelAppletOrient orient;
++        GtkOrientation orient;
+ 
+         sensors_applet = (SensorsApplet *)data;
+-        orient = panel_applet_get_orient(sensors_applet->applet);
++        orient = gp_applet_get_orientation(GP_APPLET(sensors_applet));
+         
+-        if ((orient == PANEL_APPLET_ORIENT_LEFT) || 
+-            (orient == PANEL_APPLET_ORIENT_RIGHT)) {
++        if (orient == GTK_ORIENTATION_VERTICAL) {
+                 if (sensors_applet->size == allocation->width)
+                         return;
+                 sensors_applet->size = allocation->width;
+@@ -214,7 +183,8 @@ static void style_set_cb(GtkWidget *widget,
+ static const GActionEntry sensors_applet_menu_actions[] = {
+ 	{ "preferences", prefs_cb, NULL, NULL, NULL },
+ 	{ "help", help_cb, NULL, NULL, NULL },
+-	{ "about", about_cb, NULL, NULL, NULL }
++	{ "about", about_cb, NULL, NULL, NULL },
++	{ NULL }
+ };
+ 
+ #ifdef HAVE_LIBNOTIFY
+@@ -523,7 +493,7 @@ static void sensors_applet_pack_display(SensorsApplet *sensors_applet) {
+                         gtk_grid_set_column_spacing(GTK_GRID(sensors_applet->table), COLUMN_SPACING);
+                         gtk_grid_set_row_spacing(GTK_GRID(sensors_applet->table), ROW_SPACING);
+                         /* add table to applet */
+-                        gtk_container_add(GTK_CONTAINER(sensors_applet->applet), sensors_applet->table);
++                        gtk_container_add(GTK_CONTAINER(sensors_applet), sensors_applet->table);
+                         
+                 } else {
+                         /* destroy existing widgets - could be an
+@@ -545,7 +515,7 @@ static void sensors_applet_pack_display(SensorsApplet *sensors_applet) {
+ 				"vexpand", TRUE,
+ 				"hexpand", TRUE,
+ 				NULL);
+-                gtk_widget_show_all(GTK_WIDGET(sensors_applet->applet));
++                gtk_widget_show_all(GTK_WIDGET(sensors_applet));
+                 return;
+                 
+ 	} 
+@@ -558,8 +528,7 @@ static void sensors_applet_pack_display(SensorsApplet *sensors_applet) {
+                                                              LAYOUT_MODE);
+ 
+ 
+-        horizontal = (((panel_applet_get_orient(sensors_applet->applet) == PANEL_APPLET_ORIENT_UP) || 
+-                      (panel_applet_get_orient(sensors_applet->applet) == PANEL_APPLET_ORIENT_DOWN)));
++        horizontal = (gp_applet_get_orientation(GP_APPLET (sensors_applet)) == GTK_ORIENTATION_HORIZONTAL);
+ 
+         /* figure out num rows / cols by how high / wide sensors
+          * labels / icons are and how much size we have to put them
+@@ -736,7 +705,7 @@ static void sensors_applet_pack_display(SensorsApplet *sensors_applet) {
+ 		sensors_applet->table = gtk_grid_new();
+ 		gtk_grid_set_column_spacing(GTK_GRID(sensors_applet->table), COLUMN_SPACING);
+ 		gtk_grid_set_row_spacing(GTK_GRID(sensors_applet->table), ROW_SPACING);
+-		gtk_container_add(GTK_CONTAINER(sensors_applet->applet), sensors_applet->table);
++		gtk_container_add(GTK_CONTAINER(sensors_applet), sensors_applet->table);
+ 	} else {
+ 		/* remove all children if table already exists so we can start
+ 		 * again */
+@@ -914,7 +883,7 @@ static void sensors_applet_pack_display(SensorsApplet *sensors_applet) {
+ 				      old_table_children);
+ 		g_list_free(old_table_children);
+ 	}
+-	gtk_widget_show_all(GTK_WIDGET(sensors_applet->applet));
++	gtk_widget_show_all(GTK_WIDGET(sensors_applet));
+ 
+ }
+ 
+@@ -1294,10 +1263,8 @@ void sensors_applet_graph_size_changed(SensorsApplet *sensors_applet) {
+                 
+                 graph_size = g_settings_get_int(sensors_applet->settings,
+                                                         GRAPH_SIZE);
+-                if (panel_applet_get_orient(sensors_applet->applet) ==
+-                    PANEL_APPLET_ORIENT_UP ||
+-                    panel_applet_get_orient(sensors_applet->applet) ==
+-                    PANEL_APPLET_ORIENT_DOWN) {
++                if (gp_applet_get_orientation(GP_APPLET (sensors_applet)) ==
++                    GTK_ORIENTATION_HORIZONTAL) {
+                         /* is horizontal so set graph_size as width */
+                         dimensions[0] = graph_size;
+                         dimensions[1] = sensors_applet->size;
+@@ -1359,15 +1326,14 @@ gdouble sensors_applet_convert_temperature(gdouble value,
+         return value;
+ }
+ 
+-void sensors_applet_init(SensorsApplet *sensors_applet) {
+-
+-	GSimpleActionGroup *action_group;
++static void
++sensors_applet_setup (SensorsApplet *sensors_applet)
++{
+ 	gchar *ui_path;
+ 
+ 	g_assert(sensors_applet);
+-	g_assert(sensors_applet->applet);
+ 
+-	sensors_applet->settings = panel_applet_settings_new (sensors_applet->applet, SENSORS_APPLET_SCHEMA);
++	sensors_applet->settings = gp_applet_settings_new (GP_APPLET (sensors_applet), SENSORS_APPLET_SCHEMA);
+ 
+ 	/* plugin functions are stored as name -> get_value_function pairs so
+          * use standard string functions on hash table */
+@@ -1379,12 +1345,7 @@ void sensors_applet_init(SensorsApplet *sensors_applet) {
+ 	/* initialise size */
+ 	sensors_applet->size = DEFAULT_APPLET_SIZE;
+ 
+-	panel_applet_set_flags(sensors_applet->applet,
+-		PANEL_APPLET_EXPAND_MINOR);
+-
+-	g_signal_connect(sensors_applet->applet, "destroy",
+-		G_CALLBACK(destroy_cb), sensors_applet);
+-
++	gp_applet_set_flags (GP_APPLET (sensors_applet), GP_APPLET_FLAGS_EXPAND_MINOR);
+ 
+ 	/* if not setup, write defaults to configuration backend */
+ 	sensors_applet_conf_setup(sensors_applet);
+@@ -1397,38 +1358,23 @@ void sensors_applet_init(SensorsApplet *sensors_applet) {
+ 	if (NULL == sensors_applet->sensors) {
+ 		GtkWidget *label;
+ 		label = gtk_label_new(_("No sensors found!"));
+-		gtk_container_add(GTK_CONTAINER(sensors_applet->applet), label);
+-		gtk_widget_show_all(GTK_WIDGET(sensors_applet->applet));
++		gtk_container_add(GTK_CONTAINER(sensors_applet), label);
++		gtk_widget_show_all(GTK_WIDGET(sensors_applet));
+ 		return;
+ 	}
+ 
+ 	/* only do menu and signal connections if sensors are found */
+-	action_group = g_simple_action_group_new ();
+-	g_action_map_add_action_entries (G_ACTION_MAP (action_group),
+-		sensors_applet_menu_actions,
+-		G_N_ELEMENTS (sensors_applet_menu_actions),
+-		sensors_applet);
+ 	ui_path = g_build_filename (UIDIR, SENSORS_APPLET_MENU_FILE, NULL);
+-	panel_applet_setup_menu_from_file (sensors_applet->applet, ui_path, action_group,
+-		GETTEXT_PACKAGE);
++	gp_applet_setup_menu_from_file (GP_APPLET (sensors_applet), ui_path, sensors_applet_menu_actions);
+ 	g_free (ui_path);
+ 
+-	gtk_widget_insert_action_group (GTK_WIDGET (sensors_applet->applet), "sensorsapplet",
+-		G_ACTION_GROUP (action_group));
+-
+-//       action = g_action_map_lookup_action (G_ACTION_MAP (action_group), "dialog");
+-  //     g_object_bind_property (applet, "locked-down", action, "enabled",
+-//			+                            G_BINDING_DEFAULT|G_BINDING_INVERT_BOOLEAN|G_BINDING_SYNC_CREATE);
+-
+-	g_object_unref (action_group);
+-
+-	g_signal_connect(sensors_applet->applet, "style-set",
++	g_signal_connect(sensors_applet, "style-set",
+ 		G_CALLBACK(style_set_cb), sensors_applet);
+ 
+-	g_signal_connect(G_OBJECT(sensors_applet->applet), "change_orient",
+-		G_CALLBACK(change_orient_cb), sensors_applet);
++	g_signal_connect(G_OBJECT(sensors_applet), "placement-changed",
++		G_CALLBACK(placement_changed_cb), sensors_applet);
+ 
+-	g_signal_connect(G_OBJECT(sensors_applet->applet), "size_allocate",
++	g_signal_connect(G_OBJECT(sensors_applet), "size_allocate",
+ 		G_CALLBACK(size_allocate_cb), sensors_applet);
+ 
+ 	sensors_applet_update_active_sensors(sensors_applet);
+@@ -1438,6 +1384,52 @@ void sensors_applet_init(SensorsApplet *sensors_applet) {
+ 					g_settings_get_int(sensors_applet->settings, TIMEOUT) / 1000,
+ 					(GSourceFunc)sensors_applet_update_active_sensors,
+ 					sensors_applet);
+-	gtk_widget_show_all(GTK_WIDGET(sensors_applet->applet));
++	gtk_widget_show_all(GTK_WIDGET(sensors_applet));
++}
++
++static void
++sensors_applet_constructed (GObject *object)
++{
++  G_OBJECT_CLASS (sensors_applet_parent_class)->constructed (object);
++  sensors_applet_setup (SENSORS_APPLET (object));
+ }
+ 
++static void
++sensors_applet_finalize (GObject *object)
++{
++  SensorsApplet *self;
++
++  self = SENSORS_APPLET (object);
++
++  /* destory dialogs, remove timeout and clear sensors tree */
++
++  if (self->prefs_dialog != NULL)
++    prefs_dialog_close (self);
++
++  if (self->timeout_id)
++    g_source_remove (self->timeout_id);
++
++  // destroy all active sensors
++  g_list_foreach (self->active_sensors, (GFunc) active_sensor_destroy, NULL);
++
++  if (self->sensors != NULL)
++    gtk_tree_store_clear (self->sensors);
++
++  G_OBJECT_CLASS (sensors_applet_parent_class)->finalize (object);
++}
++
++static void
++sensors_applet_class_init (SensorsAppletClass *self_class)
++{
++  GObjectClass *object_class;
++
++  object_class = G_OBJECT_CLASS (self_class);
++
++  object_class->constructed = sensors_applet_constructed;
++  object_class->finalize = sensors_applet_finalize;
++}
++
++static void
++sensors_applet_init (SensorsApplet *self)
++{
++}
+diff --git a/sensors-applet/sensors-applet.h b/sensors-applet/sensors-applet.h
+index e740a42..2c218f4 100644
+--- a/sensors-applet/sensors-applet.h
++++ b/sensors-applet/sensors-applet.h
+@@ -20,7 +20,7 @@
+ #define SENSORS_APPLET_H
+ 
+ #include <gtk/gtk.h>
+-#include <panel-applet.h>
++#include <libgnome-panel/gp-applet.h>
+ #include "sensors-applet-sensor.h"
+ 
+ #ifdef HAVE_CONFIG_H
+@@ -118,9 +118,11 @@ typedef enum {
+ /* only always two type of alarms - may have more notif types */
+ #define NUM_ALARMS 2
+ 
++#define SENSORS_TYPE_APPLET (sensors_applet_get_type ())
++G_DECLARE_FINAL_TYPE (SensorsApplet, sensors_applet, SENSORS, APPLET, GpApplet)
++
+ struct _SensorsApplet {
+-	/* the actual applet for this instance */
+-	PanelApplet* applet;
++	GpApplet parent;
+         gint size;
+ 
+ 	GtkTreeStore *sensors;
+@@ -143,10 +145,7 @@ struct _SensorsApplet {
+ #endif // HAVE_LIBNOTIFY
+ };
+ 
+-
+-
+ /* non-static function prototypes */
+-void sensors_applet_init(SensorsApplet *sensors_applet);
+ void sensors_applet_sensor_enabled(SensorsApplet *sensors_applet,
+                                    GtkTreePath *path);
+ void sensors_applet_sensor_disabled(SensorsApplet *sensors_applet,
+diff --git a/sensors-applet/sensors-module.c b/sensors-applet/sensors-module.c
+new file mode 100644
+index 0000000..ab6283d
+--- /dev/null
++++ b/sensors-applet/sensors-module.c
+@@ -0,0 +1,62 @@
++/*
++ * Copyright (C) 2005-2009 Alex Murray <murray.alex@gmail.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include "config.h"
++
++#include "config.h"
++
++#include <glib/gi18n-lib.h>
++#include <libgnome-panel/gp-module.h>
++
++#include "sensors-applet.h"
++
++static GpAppletInfo *
++get_applet_info (const gchar *id)
++{
++  return gp_applet_info_new (sensors_applet_get_type,
++                             _("Hardware Sensors Monitor"),
++                             _("Displays temperature, fan speed and voltage sensor readings"),
++                             "sensors-applet");
++}
++
++static const gchar *
++get_applet_id_from_iid (const gchar *iid)
++{
++  if (g_strcmp0 (iid, "SensorsAppletFactory::SensorsApplet") == 0)
++    return "sensorsapplet";
++
++  return NULL;
++}
++
++void
++gp_module_load (GpModule *module)
++{
++  bindtextdomain (GETTEXT_PACKAGE, GNOMELOCALEDIR);
++  bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");
++  gp_module_set_gettext_domain (module, GETTEXT_PACKAGE);
++
++  gp_module_set_abi_version (module, GP_MODULE_ABI_VERSION);
++
++  gp_module_set_id (module, "net.sourceforge.sensors-applet");
++  gp_module_set_version (module, PACKAGE_VERSION);
++
++  gp_module_set_applet_ids (module, "sensorsapplet", NULL);
++
++  gp_module_set_get_applet_info (module, get_applet_info);
++  gp_module_set_compatibility (module, get_applet_id_from_iid);
++}
