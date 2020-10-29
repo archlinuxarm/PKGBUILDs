@@ -6,54 +6,54 @@
 #  - disable lto via -DPYBIND11_LTO_CXX_FLAGS=""
 
 pkgname=pybind11
-pkgver=2.5.0
+pkgver=2.6.0
 pkgrel=1
 pkgdesc='A lightweight header-only library that exposes C++ types in Python and vice versa'
 arch=('any')
 url='https://pybind11.readthedocs.org/'
 license=('BSD')
 optdepends=('python: for python bindings')
-makedepends=('cmake' 'boost' 'eigen' 'python' 'python-setuptools' 'python-pytest'
-             'python-sphinx' 'python-sphinx_rtd_theme' 'python-breathe')
-checkdepends=('python-py' 'python-pluggy' 'python-hypothesis' 'python-numpy' 'python-scipy')
-source=("${pkgname}-${pkgver}.tar.gz"::"https://github.com/pybind/pybind11/archive/v${pkgver}.tar.gz")
-sha256sums=('97504db65640570f32d3fdf701c25a340c8643037c3b69aec469c10c93dc8504')
-
-prepare() {
-    mkdir -p "${pkgname}-${pkgver}/build-cmake"
-}
+makedepends=('cmake' 'boost' 'eigen' 'python' 'python-setuptools' 'python-pytest')
+             #'python-sphinx' 'python-sphinx_rtd_theme' 'python-breathe')
+source=("https://github.com/pybind/pybind11/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha256sums=('90b705137b69ee3b5fc655eaca66d0dc9862ea1759226f7ccd3098425ae69571')
 
 build () {
-    # python modules
     cd "${pkgname}-${pkgver}"
     python setup.py build
     
-    # cmake files and tests
-    cd build-cmake
-    cmake -DCMAKE_INSTALL_PREFIX:PATH='/usr' -DPYBIND11_LTO_CXX_FLAGS="" -Wno-dev ..
-    make all mock_install
+    # tests
+    cmake \
+        -B "${srcdir}/build-cmake" \
+        -S "${srcdir}/${pkgname}-${pkgver}" \
+        -DCMAKE_BUILD_TYPE:STRING='None' \
+        -DCMAKE_INSTALL_PREFIX:PATH='/usr' \
+        -DPYBIND11_LTO_CXX_FLAGS="" \
+        -Wno-dev
+    make -C "${srcdir}/build-cmake" all mock_install
     
-    # manpage
-    make -C "${srcdir}/${pkgname}-${pkgver}/docs" man
+    # manpage (needs python-sphinxcontrib-svg2pdfconverter - currently on AUR)
+    # make -C "${srcdir}/${pkgname}-${pkgver}/docs" man
 }
 
 check() {
-    make -C "${pkgname}-${pkgver}/build-cmake" check
+    make -C build-cmake check
 }
 
 package() {
     cd "${pkgname}-${pkgver}"
+    python setup.py install --root="$pkgdir" --skip-build --optimize='1'
     
-    # python modules
-    python setup.py install --root="$pkgdir" --install-headers='/usr/include/pybind11' --skip-build --optimize='1'
-    
-    # cmake files
-    mkdir -p "${pkgdir}/usr/share/cmake/${pkgname}"
-    install -m644 build-cmake/mock_install/share/cmake/pybind11/*.cmake -t "${pkgdir}/usr/share/cmake/${pkgname}"
+    # symlinks
+    local _pyver
+    _pyver="$(python -c 'import sys; print("%s.%s" %sys.version_info[0:2])')"
+    mkdir -p "${pkgdir}/usr"/{include,share/cmake}
+    ln -s "../lib/python${_pyver}/site-packages/pybind11/include/pybind11" "${pkgdir}/usr/include/pybind11"
+    ln -s "../../lib/python${_pyver}/site-packages/pybind11/share/cmake/pybind11" "${pkgdir}/usr/share/cmake/pybind11"
     
     # man page
-    install -D -m644 "docs/.build/man/${pkgname}.1" "${pkgdir}/usr/share/man/man7/${pkgname}.7"
-    sed -i '/^\.TH/s/"1"/"7"/' "${pkgdir}/usr/share/man/man7/${pkgname}.7"
+    # install -D -m644 "docs/.build/man/${pkgname}.1" "${pkgdir}/usr/share/man/man7/${pkgname}.7"
+    # sed -i '/^\.TH/s/"1"/"7"/' "${pkgdir}/usr/share/man/man7/${pkgname}.7"
     
     # license
     install -D -m644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
