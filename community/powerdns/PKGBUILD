@@ -9,20 +9,20 @@
 #  - explicitly link v5/v6 with libatomic
 
 pkgname=powerdns
-pkgver=4.2.3
+pkgver=4.3.1
 pkgrel=1
 pkgdesc='Authoritative DNS server'
 url='https://www.powerdns.com/'
 arch=('x86_64')
 license=('GPL2')
-depends=('boost-libs' 'botan>=2.7.0' 'libsodium' 'luajit' 'openssl' 'protobuf'
-         'sqlite' 'systemd' 'lua' 'curl' 'libcurl.so')
-makedepends=('boost' 'geoip' 'libldap' 'mariadb-libs' 'opendbx'
-             'postgresql-libs' 'tinycdb' 'unixodbc' 'yaml-cpp')
+depends=('boost-libs' 'libcurl.so' 'libsodium' 'lmdb' 'luajit' 'openssl' 'protobuf'
+         'sqlite' 'systemd-libs')
+makedepends=('boost' 'geoip' 'libldap' 'mariadb-libs' 'curl' 'libmaxminddb'
+             'postgresql-libs' 'systemd' 'tinycdb' 'unixodbc' 'yaml-cpp')
 optdepends=('geoip: GeoIP backend'
             'mariadb-libs: MariaDB/MySQL and MyDNS backend'
             'libldap: LDAP backend'
-            'opendbx: OpenDBX backend'
+            'libmaxminddb: MaxMindDB GeoIP2 database for the GeoIP backend'
             'postgresql-libs: PostgreSQL backend'
             'unixodbc: ODBC backend'
             'tinycdb: TinyDNS backend'
@@ -32,7 +32,7 @@ conflicts=('pdns')
 backup=('etc/powerdns/pdns.conf')
 source=(https://downloads.powerdns.com/releases/pdns-${pkgver}.tar.bz2{,.asc}
         sysusers.conf)
-sha512sums=('7db21bee087ca97ae02a276f53c98ed2e06645d8785ad7fcc765dfed01a2ec9c3a603c2d7135a6ca79affb5f00f262b9f0d0462870a35e5d8f267926693c8273'
+sha512sums=('e61e23544f1e57c1ec3a85b4edbc3ff3e8e831410237afdc8896e9f34602774c1dc8bd02eb7440e765262fcc988f98e47b6f1b7945427b1f4a59dd6b84b9437e'
             'SKIP'
             '522bde8b76367db6edd461fca8f81d50304a4d764addf33774b3e2c5c93a9e72d93993f54ddd4ee887ceeccf70280aceea3ffaf6370d26310e0a7ebbbf61f26a')
 validpgpkeys=('B76CD4671C0968BAA87DE61C5E50715BF2FFE1A7'   # Winkels, Erik <erik.winkels@open-xchange.com>
@@ -54,16 +54,18 @@ build() {
     --sysconfdir=/etc/powerdns \
     --sbindir=/usr/bin \
     --with-modules='' \
-    --with-dynmodules="bind geoip gmysql godbc gpgsql gsqlite3 ldap lua mydns opendbx pipe random remote tinydns" \
+    --with-dynmodules="bind geoip gmysql godbc gpgsql gsqlite3 ldap lmdb lua2 pipe random remote tinydns" \
     --docdir=/usr/share/doc/powerdns \
-    --enable-libsodium \
-    --enable-botan \
+    --with-libsodium \
     --enable-tools \
+    --enable-ixfrdist \
     --disable-dependency-tracking \
     --disable-silent-rules \
     --enable-reproducible \
     --enable-unit-tests \
-    --enable-systemd
+    --enable-systemd \
+    --with-service-user=powerdns \
+    --with-service-group=powerdns
   make
 }
 
@@ -73,7 +75,7 @@ check() {
 
 package() {
   make -C pdns-${pkgver} DESTDIR="${pkgdir}" install
-  install -D -m644 sysusers.conf "${pkgdir}/usr/lib/sysusers.d/${pkgname}.conf"
+  install -Dm 644 sysusers.conf "${pkgdir}/usr/lib/sysusers.d/${pkgname}.conf"
   mv "${pkgdir}/etc/powerdns/pdns.conf"{-dist,}
   # Ensure we run as the powerdns user
   sed -i "s,^# \(set.id=\),\1${pkgname}," "${pkgdir}/etc/powerdns/pdns.conf"
