@@ -13,25 +13,46 @@ buildarch=12
 highmem=1
 
 pkgname=thunderbird
-pkgver=68.12.0
+pkgver=78.4.3
 pkgrel=1
 pkgdesc='Standalone mail and news reader from mozilla.org'
 url='https://www.mozilla.org/thunderbird/'
 arch=(x86_64)
 license=(MPL GPL LGPL)
-depends=(gtk3 libxt startup-notification mime-types dbus-glib alsa-lib
-         nss hunspell sqlite ttf-font icu) # libvpx
-makedepends=(unzip zip diffutils python python2 yasm nasm mesa imake libpulse inetutils xorg-server-xvfb
-             autoconf2.13 rust clang llvm gtk2 cbindgen nodejs)
+depends=(
+  glibc gtk3 libgdk-3.so mime-types dbus libdbus-1.so dbus-glib alsa-lib nss
+  hunspell sqlite ttf-font libvpx libvpx.so zlib bzip2 botan libwebp libevent
+  libjpeg-turbo libffi nspr gcc-libs libx11 libxrender libxfixes libxext
+  libxcomposite libxdamage pango libpango-1.0.so cairo gdk-pixbuf2 icu
+  libicui18n.so libicuuc.so freetype2 libfreetype.so fontconfig
+  libfontconfig.so glib2 libglib-2.0.so pixman libpixman-1.so gnupg
+)
+makedepends=(
+  unzip zip diffutils python python-setuptools yasm nasm mesa imake libpulse
+  inetutils xorg-server-xvfb autoconf2.13 rust clang llvm gtk2 cbindgen nodejs
+  gawk perl findutils
+)
 optdepends=('libcanberra: sound support')
 options=(!emptydirs !makeflags)
 source=(https://ftp.mozilla.org/pub/mozilla.org/thunderbird/releases/$pkgver/source/thunderbird-$pkgver.source.tar.xz{,.asc}
-        $pkgname.desktop
+        thunderbird.desktop
+        vendor-prefs.js
+        distribution.ini
+        mozconfig.cfg
+        configure-fix-passing-system-bzip2-ldflags.patch
+        thunderbird-rust-1.47.patch::https://src.fedoraproject.org/rpms/thunderbird/raw/86967ddc206310ba7bb9eb57a933031909288ce2/f/rust-1.47.patch
+        thunderbird-78.4.3-gpgme-double-armored-fix.patch
         arm.patch
         Bug-1238661---fix-mozillaSignalTrampoline-to-work-.patch)
-sha512sums=('e7559536a9e024747e3ac7c20e4ffde5adf57657d02109ea32c39bf736ad03707fc7a14a0d3f1c91fa6fd69ead3c38d6c32ce78bd468834d9ba7f77f728332c6'
+sha512sums=('0c441f5a55301f4d012caff111d6a882205048e4adf301ff3cfa553e1665e47a1fd835a926bd97c61e543a79465c5ada73ae699fc56425dec3dbc40f17b75620'
             'SKIP'
             'a0061fcb2a7f66061e336a8d95948592f56f4752e56467f14ba63846720ebf845cce7511d1a2637e3b80d5a1ffdaa2fb783fa37195103425ef65222d45372012'
+            '6918c0de63deeddc6f53b9ba331390556c12e0d649cf54587dfaabb98b32d6a597b63cf02809c7c58b15501720455a724d527375a8fb9d757ccca57460320734'
+            '5cd3ac4c94ef6dcce72fba02bc18b771a2f67906ff795e0e3d71ce7db6d8a41165bd5443908470915bdbdb98dddd9cf3f837c4ba3a36413f55ec570e6efdbb9f'
+            '71032d834e3e764b8aa44d0af5caab3a343adf6439e522a024d147fef9ea260ffbe28cfcc465b432601df3527074631c9458e1ca67316e7922c362fd54a85a8e'
+            'e3ed2708b8354015cb3d2c81048d1ce4932d1effbe2b40efa7cf9b45c1b923b9fd708645e2f8aa0136a485a3f7ce6b396b85721aaf535a4a764fd5005fb7e222'
+            'd337a77104d411df219f3ae1c7d136ae92f944a18969cc92e6257b4f909204677a58df43187d41f53d4c36c29f57f53bdbad90d8263e6a9b0781640944895cad'
+            '92f4c5946f288b30728382830b99b91980ecd845d1606ab251bbdde5cf53387e966727a23f35a3bf7756ee77e72e478f3fb468668e8c412f552547eeb3408299'
             'c25883c4860e511a99d9fbfba5b824145c0862729101721605725f609ca2a41848b741dd100eff390f57031dc5f14af3ea30133de30f75cb20197c420ae20972'
             '8ca4f72f1fc0a7fc128f05112d8f77be5350826010069ee3b787989131f02b82d014a4781e97ebe5694852c4bb5e87bb5313e562cfb7cb2afb6f904124027e13')
 validpgpkeys=(14F26682D0916CDD81E37B6D61B7B526D98F0353) # Mozilla Software Releases <release@mozilla.com>
@@ -51,59 +72,19 @@ _mozilla_api_key=16674381-f021-49de-8622-3021c5942aff
 prepare() {
   cd $pkgname-$pkgver
 
-  echo -n "$_google_api_key" >google-api-key
-  echo -n "$_mozilla_api_key" >mozilla-api-key
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    [[ $src = *.patch ]] || continue
+    echo "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
 
-  cat >.mozconfig <<END
-ac_add_options --enable-application=comm/mail
-ac_add_options --enable-calendar
-
-ac_add_options --prefix=/usr
-ac_add_options --enable-release
-#ac_add_options --enable-linker=gold
-#ac_add_options --enable-hardening
-#ac_add_options --enable-optimize
-# https://bugzilla.mozilla.org/show_bug.cgi?id=1521249
-#ac_add_options --enable-rust-simd
-# https://bugzilla.mozilla.org/show_bug.cgi?id=1423822
-#ac_add_options --disable-elf-hack
-
-# Branding
-ac_add_options --enable-official-branding
-ac_add_options --enable-update-channel=release
-ac_add_options --with-distribution-id=org.archlinux
-export BUILD_OFFICIAL=1
-export MOZILLA_OFFICIAL=1
-mk_add_options BUILD_OFFICIAL=1
-mk_add_options MOZILLA_OFFICIAL=1
-
-# Keys
-ac_add_options --with-google-location-service-api-keyfile=${PWD@Q}/google-api-key
-ac_add_options --with-google-safebrowsing-api-keyfile=${PWD@Q}/google-api-key
-ac_add_options --with-mozilla-api-keyfile=${PWD@Q}/mozilla-api-key
-
-# ALARM
-ac_add_options --disable-webrtc
-
-# System libraries
-ac_add_options --with-system-zlib
-ac_add_options --with-system-bz2
-ac_add_options --with-system-icu
-ac_add_options --with-system-jpeg
-# ac_add_options --with-system-libvpx
-ac_add_options --with-system-nspr
-ac_add_options --with-system-nss
-ac_add_options --enable-system-sqlite
-ac_add_options --enable-system-ffi
-
-# Features
-ac_add_options --enable-alsa
-ac_add_options --disable-jack
-ac_add_options --enable-startup-notification
-ac_add_options --disable-crashreporter
-ac_add_options --disable-updater
-ac_add_options --disable-gconf
-END
+  printf "%s" "$_google_api_key" >google-api-key
+  printf "%s" "$_mozilla_api_key" >mozilla-api-key
+  cp ../mozconfig.cfg .mozconfig
+  sed "s|@PWD@|${PWD@Q}|g" -i .mozconfig
 
   if [[ $CARCH == "armv7h" ]]; then
     echo "ac_add_options --disable-elf-hack" >> .mozconfig
@@ -118,13 +99,13 @@ END
   export CXXFLAGS+=" -g0"
   export LDFLAGS+=" -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
   export RUSTFLAGS="-Cdebuginfo=0"
-
-  patch -p1 -i ../arm.patch
-  patch -p1 -i ../Bug-1238661---fix-mozillaSignalTrampoline-to-work-.patch
 }
 
 build() {
   cd $pkgname-$pkgver
+  if [[ -n "${SOURCE_DATE_EPOCH}" ]]; then
+    export MOZ_BUILD_DATE=$(date --date "@${SOURCE_DATE_EPOCH}" "%Y%m%d%H%M%S")
+  fi
   ./mach configure
   ./mach build
   ./mach buildsymbols
@@ -134,34 +115,9 @@ package() {
   cd $pkgname-$pkgver
   DESTDIR="$pkgdir" ./mach install
 
-  _vendorjs="$pkgdir/usr/lib/$pkgname/defaults/preferences/vendor.js"
-  install -Dm644 /dev/stdin "$_vendorjs" <<END
-// Use LANG environment variable to choose locale
-pref("intl.locale.requested", "");
-
-// Use system-provided dictionaries
-pref("spellchecker.dictionary_path", "/usr/share/hunspell");
-
-// Disable default mailer checking.
-pref("mail.shell.checkDefaultMail", false);
-
-// Don't disable our bundled extensions in the application directory
-pref("extensions.autoDisableScopes", 11);
-pref("extensions.shownSelectionUI", true);
-END
-
-  _distini="$pkgdir/usr/lib/$pkgname/distribution/distribution.ini"
-  install -Dm644 /dev/stdin "$_distini" <<END
-[Global]
-id=archlinux
-version=1.0
-about=Mozilla Thunderbird for Arch Linux
-
-[Preferences]
-app.distributor=archlinux
-app.distributor.channel=$pkgname
-app.partner.archlinux=archlinux
-END
+  install -Dm 644 ../vendor-prefs.js -t "$pkgdir/usr/lib/$pkgname/defaults/pref"
+  install -Dm 644 ../distribution.ini -t "$pkgdir/usr/lib/$pkgname/distribution"
+  install -Dm 644 ../thunderbird.desktop -t "$pkgdir/usr/share/applications"
 
   for i in 16 22 24 32 48 64 128 256; do
     install -Dm644 comm/mail/branding/thunderbird/default${i}.png \
@@ -169,9 +125,6 @@ END
   done
   install -Dm644 comm/mail/branding/thunderbird/TB-symbolic.svg \
     "$pkgdir/usr/share/icons/hicolor/symbolic/apps/thunderbird-symbolic.svg"
-
-  install -Dm644 ../$pkgname.desktop \
-    "$pkgdir/usr/share/applications/$pkgname.desktop"
 
   # Use system-provided dictionaries
   ln -Ts /usr/share/hunspell "$pkgdir/usr/lib/$pkgname/dictionaries"
