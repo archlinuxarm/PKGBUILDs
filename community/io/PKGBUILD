@@ -1,40 +1,53 @@
 # Maintainer: Alexander F Rødseth <xyproto@archlinux.org>
+# Contributor: loqs
+# Contributor: Mark E.A.
 # Contributor: Gergely Imreh <imrehg@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - remove -msse2
+#  - remove -msse2 from CMakeLists
 
 pkgname=io
-pkgver=2017.06.08
-pkgrel=7
+pkgver=2017.09.06
+pkgrel=1
 pkgdesc='IO programming language'
-arch=('x86_64')
-url='http://iolanguage.com/'
-license=('BSD')
-depends=('pcre' 'libsndfile' 'libxmu' 'freetype2' 'libedit' 'libxml2' 'libtiff' 'libevent' 'yajl' 'mariadb-libs' 'lzo' 'libpng' 'util-linux' 'freeglut' 'libjpeg-turbo' 'libtheora' 'python')
-makedepends=('cmake' 'git')
-options=('!makeflags' '!buildflags')
-source=("git+https://github.com/stevedekorte/io#commit=5fffec7cbe9679632ff793befacedd92f79d7f0f"
-        '0001-remove-msse2.patch')
+arch=(x86_64)
+url='https://iolanguage.com/'
+license=(BSD)
+depends=(freeglut freetype2 libedit libevent libjpeg-turbo libpng libsndfile libtheora libtiff libxml2 libxmu lzo mariadb-libs pcre python sqlite util-linux yajl)
+makedepends=(cmake git)
+options=(!makeflags)
+source=("git+https://github.com/stevedekorte/io#commit=b8a18fc199758ed09cd2f199a9bc821f6821072a" # tag: 2017.09.06
+        'noexec.patch::https://github.com/IoLanguage/io/commit/5b88e9769c1d4629e9a4a01c78b57c0d80c7a70c.patch')
 sha256sums=('SKIP'
-            '3b34ae67b11c64c9633a70506551e8021fedb17c91eb3f9f5e4c8e78711708a3')
+            '4f322ddbb6427d8b3ddc9d34786b9676b3cec26c867040626b6246d03e9dad24')
 
 prepare() {
-  sed -i "s:20151111:${pkgver//./}:" io/libs/iovm/source/IoVersion.h
-  cd io
-  git apply ../0001-remove-msse2.patch
+  cd $pkgname
+  sed -i 's,sys/sysctl.h,linux/sysctl.h,g' libs/iovm/source/IoSystem.c
+  sed -ri "s,20[0-9]+,$pkgver," libs/iovm/source/IoVersion.h
+  git submodule update --init
+  sed -i '/-msse2/d' CMakeLists.txt
 }
 
 build() {
-  mkdir -p build
-  cd build
-  cmake ../io -DCMAKE_INSTALL_PREFIX=/usr
+   cmake \
+    -B build \
+    -S $pkgname \
+    -D CMAKE_BUILD_TYPE=Release \
+    -D CMAKE_INSTALL_PREFIX=/usr \
+    -D CMAKE_SKIP_RPATH=1
+  make -C build
 }
 
 package() {
   DESTDIR="$pkgdir" make -C build install
-  install -Dm644 io/license/bsd_license.txt \
-    "$pkgdir/usr/share/licenses/$pkgname/bsd_license.txt"
-}
 
-# vim: ts=2 sw=2 et:
+  # The dynamically linked io executable does not work, see FS#68674. The error is:
+  # Relink `/usr/lib/libbasekit.so' with `/usr/lib/libm.so.6' for IFUNC symbol `ceil'
+  # Use the statically linked executable instead.
+  mv -f "$pkgdir/usr/bin/io_static" "$pkgdir/usr/bin/io"
+
+  # In the next version of io, it's just $pkgname/LICENSE.txt
+  install -Dm644 $pkgname/license/bsd_license.txt \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
