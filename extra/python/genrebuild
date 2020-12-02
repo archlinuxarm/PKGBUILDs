@@ -1,7 +1,14 @@
 #!/bin/bash
-(
-_pyver=$(expac %v python | grep -oP '^[0-9]+\.[0-9]+')
-pacman -Fq /usr/lib/python${_pyver}/ | grep -v archlinuxcn | cut -d / -f 2
-sogrep all libpython${_pyver}m.so
-printf "%s\n" boost vim
-) | sort -u
+
+pyver=$(pacman -S --print-format %v python | grep -oP '^[0-9]+\.[0-9]+')
+exclude=('python2' 'python2-.*' 'pypy3\?' 'cython2' 'cuda' 'metasploit'
+         'mysql-workbench' 'ntop' 'dia' 'ghidra' 'kross-interpreters'
+         'kodi-gbm' 'kodi-wayland' 'kodi-x11')
+
+{
+pacman -Fq /usr/lib/python${pyver}/ | grep -v archlinuxcn | cut -d / -f 2
+pacman -Fxq "\.cpython-${pyver/.}.pyc$" | grep -v archlinuxcn | cut -d / -f 2
+sogrep all libpython${pyver}.so
+ssh dragon.archlinux.org "parallel \"zstdgrep -q 'Py_Initialize\|PyInit_\|PyModule_Create2' {} && pacman -Qpq {}\" ::: /srv/ftp/pool/*/*.zst"
+ssh dragon.archlinux.org "parallel \"xzgrep -q 'Py_Initialize\|PyInit_\|PyModule_Create2' {} && pacman -Qpq {}\" ::: /srv/ftp/pool/*/*.xz"
+} | grep -xvf <(printf "%s\n" "${exclude[@]}") | sort -u
