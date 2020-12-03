@@ -5,17 +5,18 @@
 #  - remove makedepend on valgrind
 
 pkgbase=pipewire
-pkgname=(pipewire pipewire-docs pipewire-jack pipewire-pulse pipewire-alsa)
-pkgver=0.3.15
-pkgrel=2
+pkgname=(pipewire pipewire-docs pipewire-jack pipewire-pulse pipewire-alsa
+         gst-plugin-pipewire)
+pkgver=0.3.17
+pkgrel=1
 pkgdesc="Server and user space API to deal with multimedia pipelines"
 url="https://pipewire.org"
 license=(LGPL2.1)
 arch=(x86_64)
 makedepends=(git meson doxygen graphviz xmltoman jack2 libpulse
-             alsa-lib gstreamer gst-plugins-base sbc rtkit vulkan-icd-loader
-             dbus libsndfile bluez-libs vulkan-headers)
-_commit=16872549e3a2433f49f27c1875dfd432377ca0be  # tags/0.3.15
+             alsa-lib gst-plugins-base sbc rtkit vulkan-icd-loader dbus
+             libsndfile bluez-libs vulkan-headers)
+_commit=f5f5beb0ece64c7d08edb5413dde537ec5b6c3e2  # tags/0.3.17
 source=("git+https://github.com/PipeWire/pipewire#commit=$_commit")
 sha256sums=('SKIP')
 
@@ -27,8 +28,8 @@ pkgver() {
 prepare() {
   cd $pkgbase
 
-  # Fix Chrome
-  git cherry-pick -n b8c7b36d3b8be16593f554964cf2f852c21b5c2c
+  # fix kwin
+  git cherry-pick -n fc2b0b20ad4271b0c6f258451a82311b792b7a57
 }
 
 build() {
@@ -55,10 +56,8 @@ _pick() {
 _ver=${pkgver:0:3}
 
 package_pipewire() {
-  depends=(gstreamer gst-plugins-base sbc rtkit vulkan-icd-loader bluez-libs
-           alsa-card-profiles
-           libdbus-1.so libsndfile.so libudev.so libasound.so libsystemd.so
-           libglib-2.0.so libgobject-2.0.so)
+  depends=(sbc rtkit vulkan-icd-loader bluez-libs alsa-card-profiles
+           libdbus-1.so libsndfile.so libudev.so libasound.so libsystemd.so)
   optdepends=('pipewire-docs: Documentation'
               'pipewire-jack: JACK support'
               'pipewire-pulse: PulseAudio support')
@@ -75,13 +74,14 @@ package_pipewire() {
 
   _pick docs usr/share/doc
 
-  _pick pulse usr/bin/pw-pulse usr/lib/pipewire-$_ver/pulse
-  _pick pulse usr/lib/pipewire-$_ver/libpipewire-module-protocol-pulse.so
-  _pick pulse usr/share/man/man1/pw-pulse.1
-
+  _pick jack etc/pipewire/media-session.d/with-jack
   _pick jack usr/bin/pw-jack usr/lib/pipewire-$_ver/jack
   _pick jack usr/lib/spa-0.2/jack
   _pick jack usr/share/man/man1/pw-jack.1
+
+  _pick pulse etc/pipewire/media-session.d/with-pulseaudio
+
+  _pick gst usr/lib/gstreamer-1.0
 
   # Use alsa-card-profiles built with Pulseaudio
   rm -rv "$pkgdir"/usr/share/alsa-card-profile
@@ -94,20 +94,30 @@ package_pipewire-docs() {
 
 package_pipewire-jack() {
   pkgdesc+=" (JACK support)"
-  depends=(libpipewire-$_ver.so libjack.so)
+  depends=(pipewire libpipewire-$_ver.so libjack.so)
   mv jack/* "$pkgdir"
 }
 
 package_pipewire-pulse() {
-  pkgdesc+=" (PulseAudio support)"
-  depends=(libpipewire-$_ver.so libglib-2.0.so)
+  pkgdesc+=" (PulseAudio replacement)"
+  depends=(pipewire libpulse)
+  provides=(pulseaudio pulseaudio-bluetooth)
+  conflicts=(pulseaudio pulseaudio-bluetooth)
+  install=pipewire-pulse.install
   mv pulse/* "$pkgdir"
 }
 
 package_pipewire-alsa() {
   pkgdesc="ALSA Configuration for PipeWire"
-  depends=(libpipewire-$_ver.so)
+  depends=(pipewire libpipewire-$_ver.so)
+  provides=(pulseaudio-alsa)
 
   mkdir -p "$pkgdir/etc/alsa/conf.d"
   ln -st "$pkgdir/etc/alsa/conf.d" /usr/share/alsa/alsa.conf.d/99-pipewire-default.conf
+}
+
+package_gst-plugin-pipewire() {
+  pkgdesc="Multimedia graph framework - pipewire plugin"
+  depends=(pipewire libpipewire-$_ver.so gst-plugins-base-libs)
+  mv gst/* "$pkgdir"
 }
