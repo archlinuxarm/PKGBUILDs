@@ -1,0 +1,60 @@
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Andrea Scarpino <andrea@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - explicitly link v5/v6 with libatomic
+
+pkgname=qt6-base
+_qtver=6.0.0
+pkgver=${_qtver/-/}
+pkgrel=1
+arch=(x86_64)
+url='https://www.qt.io'
+license=(GPL3 LGPL3 FDL custom)
+pkgdesc='A cross-platform application and UI framework'
+depends=(libjpeg-turbo xcb-util-keysyms xcb-util-cursor libgl fontconfig xdg-utils
+         shared-mime-info xcb-util-wm libxrender libxi sqlite mesa
+         tslib libinput libxkbcommon-x11 libproxy libcups double-conversion brotli libb2) # md4c - not supported yet
+makedepends=(cmake libfbclient mariadb-libs unixodbc postgresql alsa-lib gst-plugins-base-libs
+             gtk3 libpulse cups freetds vulkan-headers xmlstarlet)
+optdepends=('postgresql-libs: PostgreSQL driver'
+            'mariadb-libs: MariaDB driver'
+            'unixodbc: ODBC driver'
+            'libfbclient: Firebird/iBase driver'
+            'freetds: MS SQL driver'
+            'gtk3: GTK platform plugin'
+            'perl: for syncqt')
+groups=(qt6)
+_pkgfn="${pkgname/6-/}-everywhere-src-${_qtver}"
+source=("https://download.qt.io/official_releases/qt/${pkgver%.*}/$_qtver/submodules/$_pkgfn.tar.xz")
+sha256sums=('ae227180272d199cbb15318e3353716afada5c57fd5185b812ae26912c958656')
+
+build() {
+  [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && echo "target_link_libraries(Core PRIVATE atomic)" >> ${_pkgfn}/src/corelib/CMakeLists.txt
+  [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && echo "target_link_libraries(Gui PRIVATE atomic)" >> ${_pkgfn}/src/gui/CMakeLists.txt
+  cmake -B build -S $_pkgfn \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DINSTALL_BINDIR=lib/qt6/bin \
+    -DINSTALL_DOCDIR=share/doc/qt6 \
+    -DINSTALL_ARCHDATADIR=lib/qt6 \
+    -DINSTALL_DATADIR=share/qt6 \
+    -DINSTALL_INCLUDEDIR=include/qt6 \
+    -DINSTALL_MKSPECSDIR=lib/qt6/mkspecs \
+    -DINSTALL_EXAMPLESDIR=share/doc/qt6/examples \
+    -DQT_FEATURE_journald=ON \
+    -DQT_FEATURE_openssl_linked=ON
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  install -Dm644 $_pkgfn/LICENSE* -t "$pkgdir"/usr/share/licenses/$pkgbase
+
+  # Symlinks for backwards compatibility
+  mkdir -p "$pkgdir"/usr/bin
+  for _b in $(ls "$pkgdir"/usr/lib/qt6/bin); do
+    ln -rs "$pkgdir"/usr/lib/qt6/bin/$_b "$pkgdir"/usr/bin/$_b-qt6
+  done
+}
