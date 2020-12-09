@@ -14,17 +14,17 @@
 
 pkgbase=boost
 pkgname=('boost-libs' 'boost')
-pkgver=1.72.0
+pkgver=1.74.0
 _boostver=${pkgver//./_}
-pkgrel=4
+pkgrel=1
 pkgdesc='Free peer-reviewed portable C++ source libraries'
 url='https://www.boost.org/'
 arch=('x86_64')
 license=('custom')
-makedepends=('icu' 'python' 'python2' 'python-numpy' 'python2-numpy' 'bzip2' 'zlib' 'openmpi' 'zstd' 'findutils')
+makedepends=('icu' 'python' 'python-numpy' 'bzip2' 'zlib' 'openmpi' 'zstd' 'findutils')
 source=(https://dl.bintray.com/boostorg/release/${pkgver}/source/boost_${_boostver}.tar.bz2)
-sha256sums=('59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722')
-b2sums=('ab270a0e3cb24da687d86785e2d2e6d7731b4dbc07bd839eadb642dfa5a428ad584acb1f3529661a8de9a986008ff3427491041059ea2b742348d02e00761cd8')
+sha256sums=('83bfc1507731a0906e387fc28b7ef5417d591429e51e788417fe9ff025e116b1')
+b2sums=('2982f64fccf6fdb3b4b74452e603f459242d7abb42df4162278d9b558b637786a2eb97442126967b19088d591777c64ced8f60a23e71eaa0b7545e80f800de63')
 
 build() {
    CFLAGS=`echo $CFLAGS | sed -e 's/armv6/armv6k/'` && CXXFLAGS="$CFLAGS"
@@ -33,7 +33,10 @@ build() {
 
    cd ${pkgbase}_${_boostver}
 
-   ./bootstrap.sh --with-toolset=gcc --with-icu --with-python=/usr/bin/python2
+   ./bootstrap.sh \
+     --with-toolset=gcc \
+     --with-icu \
+     --with-python=/usr/bin/python3 \
 
    install -Dm755 tools/build/src/engine/b2 "${_stagedir}"/bin/b2
 
@@ -58,7 +61,7 @@ build() {
       runtime-link=shared \
       link=shared,static \
       toolset=gcc \
-      python=2.7 \
+      python=3.9 \
       cflags="${CPPFLAGS} ${CFLAGS} -fPIC -O3" \
       cxxflags="${CPPFLAGS} ${CXXFLAGS} -std=c++14 -fPIC -O3" \
       linkflags="${LDFLAGS}" \
@@ -67,41 +70,12 @@ build() {
       \
       --prefix="${_stagedir}" \
       install
-
-   # because b2 in boost 1.62.0 doesn't seem to respect python parameter, we
-   # need another run for liboost_python3.so
-
-   ./bootstrap.sh \
-     --with-toolset=gcc \
-     --with-icu \
-     --with-python=/usr/bin/python3 \
-     --with-libraries=python
-
-   "${_stagedir}"/bin/b2 clean
-   "${_stagedir}"/bin/b2 \
-      variant=release \
-      debug-symbols=off \
-      threading=multi \
-      runtime-link=shared \
-      link=shared,static \
-      toolset=gcc \
-      python=3.9 \
-      cflags="${CPPFLAGS} ${CFLAGS} -fPIC -O3" \
-      cxxflags="${CPPFLAGS} ${CXXFLAGS} -std=c++14 -fPIC -O3" \
-      linkflags="${LDFLAGS}" \
-      --layout=system \
-      ${JOBS} \
-      \
-      --prefix="${_stagedir}/python3" \
-      --with-python \
-      install
 }
 
 package_boost() {
    pkgdesc+=' - development headers'
    depends=("boost-libs=${pkgver}")
-   optdepends=('python: for python bindings'
-               'python2: for python2 bindings')
+   optdepends=('python: for python bindings')
    options=('staticlibs')
 
    install -dm755 "${pkgdir}"/usr
@@ -113,10 +87,6 @@ package_boost() {
 
    install -Dm644 "${srcdir}/"${pkgbase}_${_boostver}/LICENSE_1_0.txt \
       "${pkgdir}"/usr/share/licenses/boost/LICENSE_1_0.txt
-
-   install -Dm644 "${_stagedir}"/python3/lib/libboost_*.a \
-      "${pkgdir}"/usr/lib/
-   cp -a "${_stagedir}"/python3/lib/cmake/* "${pkgdir}"/usr/lib/cmake/
 
    ln -s /usr/bin/b2 "$pkgdir"/usr/bin/bjam
 }
@@ -132,9 +102,9 @@ package_boost-libs() {
      libboost_locale.so libboost_log.so libboost_log_setup.so
      libboost_math_c99.so libboost_math_c99f.so libboost_math_c99l.so
      libboost_math_tr1.so libboost_math_tr1f.so libboost_math_tr1l.so
-     libboost_mpi.so libboost_numpy27.so libboost_numpy39.so
+     libboost_mpi.so libboost_numpy39.so
      libboost_prg_exec_monitor.so libboost_program_options.so
-     libboost_python27.so libboost_python39.so libboost_random.so
+     libboost_python39.so libboost_random.so
      libboost_regex.so libboost_serialization.so
      libboost_stacktrace_addr2line.so libboost_stacktrace_basic.so
      libboost_stacktrace_noop.so libboost_system.so libboost_thread.so
@@ -143,13 +113,18 @@ package_boost-libs() {
 
    install -dm755 "${pkgdir}"/usr
    cp -a "${_stagedir}"/lib "${pkgdir}"/usr
-   cp -a "${_stagedir}"/python3/lib/libboost_* "${pkgdir}"/usr/lib
    rm "${pkgdir}"/usr/lib/*.a
    rm -r "${pkgdir}"/usr/lib/cmake
 
+   # https://github.com/boostorg/mpi/issues/112
+   install -d "${pkgdir}/usr/lib/python3.9/site-packages/boost"
+   touch "${pkgdir}/usr/lib/python3.9/site-packages/boost/__init__.py"
+   python -m compileall -o 0 -o 1 -o 2 "${pkgdir}/usr/lib/python3.9/site-packages/boost"
+   mv "${pkgdir}"/usr/lib/boost-python3.9/mpi.so \
+      "${pkgdir}/usr/lib/python3.9/site-packages/boost/mpi.so"
+
    # https://github.com/boostorg/python/issues/203#issuecomment-391477685
    for _lib in python numpy; do
-     ln -srL "${pkgdir}"/usr/lib/libboost_${_lib}{27,}.so
      ln -srL "${pkgdir}"/usr/lib/libboost_${_lib}3{9,}.so
    done
 
