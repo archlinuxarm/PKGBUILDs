@@ -3,7 +3,7 @@
 # Maintainer: Oleg Rakhmanov <oleg@archlinuxarm.org>
 # Maintainer: graysky <graysky@archlinux.us>
 
-buildarch=4
+buildarch=12
 
 pkgbase=linux-raspberrypi4
 _commit=ffb90a8b06e5ebd6a918c56b44260c3dae8f3348
@@ -11,37 +11,47 @@ _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="Raspberry Pi 4"
 pkgver=5.4.81
-pkgrel=1
-arch=('armv7h')
+pkgrel=2
+arch=('armv7h' 'aarch64')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://github.com/raspberrypi/linux/archive/${_commit}.tar.gz"
-        'config.txt'
         'cmdline.txt'
-        'config'
         'linux.preset'
         '60-linux.hook'
-        '90-linux.hook')
+        '90-linux.hook'
+        0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch)
+source_armv7h=('config' 'config.txt')
+source_aarch64=('config8' 'config8.txt')
 md5sums=('67d627bf708d9e04d6adbf712a651e71'
-         '7c6b37a1353caccf6d3786bb4161c218'
          '60bc3624123c183305677097bcd56212'
-         '0fc39bc5d19ba8503011ab5e033de67d'
          '86d4a35722b5410e3b29fc92dae15d4b'
          'ce6c81ad1ad1f8b333fd6077d47abdaf'
-         '69e1db90d78f691dc446fe2ab94727eb')
+         '69e1db90d78f691dc446fe2ab94727eb'
+         'f66a7ea3feb708d398ef57e4da4815e9')
+md5sums_armv7h=('fd469cad3472549e5a4b2cde99285d8d'
+                '7c6b37a1353caccf6d3786bb4161c218')
+md5sums_aarch64=('80fb4289dfeca2f541416e5cf0dd3a81'
+                 '1cac5b1e040fd4bd6535cb6d0ffe487c')
+
+# setup vars
+[[ $CARCH == "armv7h" ]] && _kernel=kernel7.img KARCH=arm _image=zImage _config=config _bconfig=config.txt
+[[ $CARCH == "aarch64" ]] && _kernel=kernel8.img KARCH=arm64 _image=Image _config=config8 _bconfig=config8.txt
 
 prepare() {
   cd "${srcdir}/${_srcname}"
 
-  cat "${srcdir}/config" > ./.config
+  cat "${srcdir}/$_config" > ./.config
 
   # add pkgrel to extraversion
   sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
+
+  patch -Np1 -i ../0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
 }
 
 build() {
@@ -71,7 +81,7 @@ build() {
 
   #yes "" | make config
 
-  make ${MAKEFLAGS} zImage modules dtbs
+  make ${MAKEFLAGS} $_image modules dtbs
 }
 
 _package() {
@@ -79,14 +89,12 @@ _package() {
   depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7' 'firmware-raspberrypi')
   optdepends=('crda: to set the correct wireless channels of your country')
   provides=('kernel26' "linux=${pkgver}")
-  conflicts=('kernel26' 'linux')
+  conflicts=('kernel26' 'linux' 'uboot-raspberrypi')
   install=${pkgname}.install
   backup=('boot/config.txt' 'boot/cmdline.txt')
   replaces=('linux-raspberrypi-latest')
 
   cd "${srcdir}/${_srcname}"
-
-  KARCH=arm
 
   # get kernel version
   _kernver="$(make kernelrelease)"
@@ -97,7 +105,8 @@ _package() {
   make INSTALL_MOD_PATH="${pkgdir}/usr" modules_install
   make INSTALL_DTBS_PATH="${pkgdir}/boot" dtbs_install
 
-  cp arch/$KARCH/boot/zImage "${pkgdir}/boot/kernel7.img"
+  cp arch/$KARCH/boot/$_image "${pkgdir}/boot/$_kernel"
+
   cp arch/$KARCH/boot/dts/overlays/README "${pkgdir}/boot/overlays"
 
   # make room for external modules
@@ -132,7 +141,8 @@ _package() {
     install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
 
   # install boot files
-  install -m644 ../config.txt ../cmdline.txt "${pkgdir}/boot"
+  install -m644 ../$_bconfig "${pkgdir}/boot/config.txt"
+  install -m644 ../cmdline.txt "${pkgdir}/boot"
 }
 
 _package-headers() {
@@ -153,6 +163,7 @@ _package-headers() {
 
   install -Dt "${_builddir}/arch/${KARCH}" -m644 arch/${KARCH}/Makefile
   install -Dt "${_builddir}/arch/${KARCH}/kernel" -m644 arch/${KARCH}/kernel/asm-offsets.s arch/$KARCH/kernel/module.lds
+  #install -Dt "${_builddir}/arch/${KARCH}/kernel" -m644 arch/${KARCH}/kernel/asm-offsets.s
 
   cp -t "${_builddir}/arch/${KARCH}" -a arch/${KARCH}/include
 
