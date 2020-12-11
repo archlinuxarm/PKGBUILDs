@@ -5,67 +5,59 @@
 buildarch=28
 
 pkgname=raspberrypi-firmware
-pkgver=20201210
-pkgrel=3
-# userland commit for all
-_commit=093b30bbc2fd083d68cc3ee07e6e555c6e592d11
-# firmware commit for cherrypick bins
-_cherrypick=919aee0ed75f7db48a38b8b96c13228a7584cfd7
+pkgver=20201211
+pkgrel=1
+_commitfirmware=919aee0ed75f7db48a38b8b96c13228a7584cfd7
+_commituserland=093b30bbc2fd083d68cc3ee07e6e555c6e592d11
 pkgdesc="Firmware tools, libraries, and headers for Raspberry Pi"
 arch=('armv6h' 'armv7h' 'aarch64')
-url="https://github.com/raspberrypi/userland"
+url="https://github.com/raspberrypi/firmware"
 license=('custom')
-makedepends=('cmake')
+makedepends_aarch64=('cmake')
 replaces=('raspberrypi-firmware-tools')
 provides=('raspberrypi-firmware-tools')
 options=(!strip)
-source=("https://github.com/raspberrypi/userland/archive/$_commit.tar.gz"
-        "https://raw.githubusercontent.com/raspberrypi/firmware/master/opt/vc/LICENCE"
-        '00-raspberrypi-firmware.conf'
-        # for armv6h and armv7h only
-        "https://github.com/raspberrypi/firmware/raw/$_cherrypick/opt/vc/bin/edidparser"
-        "https://github.com/raspberrypi/firmware/raw/$_cherrypick/opt/vc/bin/vcdbg"
-        # required for vcdbg
-        "https://github.com/raspberrypi/firmware/raw/$_cherrypick/opt/vc/lib/libelftoolchain.so")
-md5sums=('b4b3ef6a5c9ecbf11a517e29db97fd1b'
-         '86e53f5f5909ee66900418028de11780'
-         '72e0d5818fc513ece1b964f25f7e7882'
-         'e13306773ae7d2cc835072c51a83c56d'
-         '6941e32c25e5534b2a84045004743f4c'
-         '755e48f5bb62b6c7c664cfed2b6c763d')
+source=('00-raspberrypi-firmware.conf')
+source_armv6h=("https://github.com/raspberrypi/firmware/archive/$_commitfirmware.tar.gz")
+source_armv7h=("https://github.com/raspberrypi/userland/archive/$_commitfirmware.tar.gz")
+source_aarch64=("https://github.com/raspberrypi/userland/archive/$_commituserland.tar.gz"
+                "https://raw.githubusercontent.com/raspberrypi/firmware/master/opt/vc/LICENCE")
+md5sums=('72e0d5818fc513ece1b964f25f7e7882')
+md5sums_armv6h=('d3407d589999647ad1dc481dfae70549')
+md5sums_armv7h=('d3407d589999647ad1dc481dfae70549')
+md5sums_aarch64=('b4b3ef6a5c9ecbf11a517e29db97fd1b'
+                 '86e53f5f5909ee66900418028de11780')
 
 build() {
-  cd ${srcdir}/userland-${_commit}
-
   if [[ "${CARCH}" = 'aarch64' ]]; then
+    cd ${srcdir}/userland-${_commituserland}
     cmake -DCMAKE_BUILD_TYPE=Release -DARM64=ON
-  else
-    cmake -DCMAKE_BUILD_TYPE=Release
+    make
   fi
-
-  make
 }
 
 package() {
-  mkdir -p "${pkgdir}"/opt/vc
+  if [[ "${CARCH}" = 'aarch64' ]]; then
+    mkdir -p "${pkgdir}"/opt/vc
 
-  cd ${srcdir}/userland-${_commit}
-  make install DESTDIR="${pkgdir}"
-  install -m644 ../LICENCE "${pkgdir}"/opt/vc/LICENCE
-  rm -rf "${pkgdir}"/opt/vc/src
+    cd ${srcdir}/userland-${_commituserland}
+    make install DESTDIR="${pkgdir}"
+    install -m644 ../LICENCE "${pkgdir}"/opt/vc/LICENCE
+    rm -rf "${pkgdir}"/opt/vc/src
 
-  # Remove executable flag on shared objects
-  find "${pkgdir}" -type f -name '*.so' -print0 | xargs -0 chmod -x
+    # Remove executable flag on shared objects
+    find "${pkgdir}" -type f -name '*.so' -print0 | xargs -0 chmod -x
 
-  # Create lib links
-  mkdir -p "${pkgdir}"/etc/ld.so.conf.d/
-  install -m644 ../00-raspberrypi-firmware.conf "${pkgdir}"/etc/ld.so.conf.d/00-raspberrypi-firmware.conf
+    # Create lib links
+    mkdir -p "${pkgdir}"/etc/ld.so.conf.d/
+    install -m644 ../00-raspberrypi-firmware.conf "${pkgdir}"/etc/ld.so.conf.d/00-raspberrypi-firmware.conf
+  else
+    mkdir -p "${pkgdir}"/opt/vc
 
-  if [[ "${CARCH}" != 'aarch64' ]]; then
-    install -m755 "${srcdir}"/edidparser "${pkgdir}"/opt/vc/bin/edidparser
-    install -m755 "${srcdir}"/vcdbg "${pkgdir}"/opt/vc/bin/vcdbg
-    install -m644 "${srcdir}"/libelftoolchain.so "${pkgdir}"/opt/vc/lib/libelftoolchain.so
-    cd "${pkgdir}"/opt/vc/lib
-    ln -s libGLESv2.so libGLESv1_CM.so
+    cp -R "${srcdir}"/firmware-${_commitfirmware}/hardfp/opt/vc/{bin,include,lib,LICENCE} "${pkgdir}"/opt/vc
+
+    # Create lib links
+    mkdir -p "${pkgdir}"/etc/ld.so.conf.d/
+    cp "${srcdir}/00-raspberrypi-firmware.conf" "${pkgdir}"/etc/ld.so.conf.d/
   fi
 }
