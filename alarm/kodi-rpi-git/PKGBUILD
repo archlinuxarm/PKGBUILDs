@@ -17,9 +17,9 @@ _commitnumber=56808
 _commit=0f75c910145f31dcb48219bc6174b0a15156ceaa
 
 pkgver="19.0b2.$_commitnumber.${_commit:0:10}"
-pkgrel=3
+pkgrel=4
 arch=('armv7h')
-url="http://kodi.tv"
+url="https://github.com/popcornmix/xbmc/tree/gbm"
 license=('GPL2')
 makedepends=(
   'afpfs-ng' 'bluez-libs' 'cmake' 'curl' 'dav1d' 'doxygen' 'glew'
@@ -72,6 +72,8 @@ source=(
   "http://mirrors.kodi.tv/build-deps/sources/spdlog-$_spdlog_version.tar.gz"
   sysusers.conf
   tmpfiles.conf
+  0000-use-mcpu-avoiding-march-and-mtune.patch
+  0001-mcpu-cortex-a72-for-RPi4-application-to-ffmpeg.patch
 )
 backup=(boot/kodi.config.txt)
 noextract=(
@@ -86,7 +88,7 @@ noextract=(
   "spdlog-$_spdlog_version.tar.gz"
 )
 sha256sums=('561a6d316fffa6d6559f7172d96f19e7c9159e5a14f139b86014140b306e7adb'
-            '91dd278d46eed0cb05ba733647c99379330f197daa87d33bf2b18032e5af5055'
+            'c37fe409b348e13eafad2745a5044dee5ea96c3a297921411b57953a8db966b2'
             '61a0648d4a5086f560ceb4e020f82472d00b99398f2cacba94fad3e96c4c362a'
             '5d38a895ee7b93689fab79124a3aad23a5e3e643abd08878d778d04066c8d26f'
             '2a36ee05a8e023d2ba4bbe36f66768e5a9f3982582e0266103f95e117c1d684a'
@@ -101,17 +103,25 @@ sha256sums=('561a6d316fffa6d6559f7172d96f19e7c9159e5a14f139b86014140b306e7adb'
             '1789b97e790da8f2cb5ff827d15580878c8629fd889f5f038d7524dca43eacc9'
             'b38e0bbef7faac2b82fed550a0c19b0d4e7f6737d5321d4fd8f216b80f8aee8a'
             'f521b98232e5035b7cada46cf03975b8d753e93d0802bf22913fceed769f9d96'
-            '9c5e79ed8719cd032a3b17dac585aeff28a198e37af1da9af68ef1b86bab4d18')
+            '9c5e79ed8719cd032a3b17dac585aeff28a198e37af1da9af68ef1b86bab4d18'
+            '39a54a2d9c429c27ed2a369568043a1e3c86e2fe6bf931932984a0ce7aee7391'
+            '05a140fa6da5ba0576611e31f2ed2e5d56255c480e58be4854db154d611b29da')
 prepare() {
   cd "xbmc-$_commit"
 
   [[ -d kodi-build ]] && rm -rf kodi-build
   mkdir "$srcdir"/kodi-build
+  
+  # put patch in source tree so kodi build system can pick it up
+  cp ../0000-use-mcpu-avoiding-march-and-mtune.patch \
+    tools/depends/target/ffmpeg/0002-use-mcpu-avoiding-march-and-mtune.patch
+  
+  # patch kodi build system to apply the patch we just copied over
+  patch -Np1 -i ../0001-mcpu-cortex-a72-for-RPi4-application-to-ffmpeg.patch
 }
 
 build() {
   cd kodi-build
-
   # the build system expects to find /usr/include/drm/drm_fourcc.h however we provide this
   # in /usr/lib/modules/x.y.z-1-ARCH/build/include/uapi/drm/drm_fourcc.h
   #
@@ -119,33 +129,59 @@ build() {
 
   _kernel_release="$(pacman -Q linux-raspberrypi4-headers | grep -Eo "[^\ ]+$")-ARCH"
   mkdir -p "$srcdir/uapi/drm"
-  ln -s /usr/lib/modules/$_kernel_release/build/include/uapi/drm/drm_fourcc.h "$srcdir/uapi/drm"
+  ln -s /usr/lib/modules/${_kernel_release/.rc/-rc}/build/include/uapi/drm/drm_fourcc.h "$srcdir/uapi/drm"
   export CPPFLAGS+=" -I$srcdir/uapi"
 
-  cmake -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_LIBDIR=/usr/lib \
-    -DCMAKE_EXE_LINKER_FLAGS_INIT="-L/opt/vc/lib -lvcsm" \
-    -DCMAKE_EXE_LINKER_FLAGS="-L/opt/vc/lib -lvcsm" \
-    -DCMAKE_CXX_FLAGS="-Wl,-L/opt/vc/lib -Wl,-lvcsm" \
-    -DENABLE_EVENTCLIENTS=ON \
-    -DENABLE_INTERNAL_FFMPEG=ON \
-    -DENABLE_INTERNAL_FMT=ON \
-    -DENABLE_INTERNAL_CROSSGUID=ON \
-    -DENABLE_INTERNAL_FSTRCMP=ON \
-    -DENABLE_INTERNAL_FLATBUFFERS=ON \
-    -DENABLE_INTERNAL_SPDLOG=ON \
-    -DCORE_PLATFORM_NAME=gbm \
-    -DAPP_RENDER_SYSTEM=gles \
-    -Dlibdvdcss_URL="$srcdir/libdvdcss-$_libdvdcss_version.tar.gz" \
-    -Dlibdvdnav_URL="$srcdir/libdvdnav-$_libdvdnav_version.tar.gz" \
-    -Dlibdvdread_URL="$srcdir/libdvdread-$_libdvdread_version.tar.gz" \
-    -DFFMPEG_URL="$srcdir/ffmpeg-$_ffmpeg_version.tar.gz" \
-    -DFMT_URL="$srcdir/fmt-$_fmt_version.tar.gz" \
-    -DCROSSGUID_URL="$srcdir/crossguid-$_crossguid_version.tar.gz" \
-    -DFSTRCMP_URL="$srcdir/fstrcmp-$_fstrcmp_version.tar.gz" \
-    -DFLATBUFFERS_URL="$srcdir/flatbuffers-$_flatbuffers_version.tar.gz" \
-    -DSPDLOG_URL="$srcdir/spdlog-$_spdlog_version.tar.gz" \
-    ../"xbmc-$_commit"
+  # -march= defined in /etc/makepkg.conf will override the value for -mcpu we
+  # uses here so unset them and redefine below
+  unset CFLAGS CXXFLAGS
+
+  CFLAGS="-O2 -pipe -fstack-protector-strong -fno-plt -mtune=cortex-a72"
+  CXXFLAGS="${CFLAGS}"
+
+  if [[ $CARCH = "armv7h" ]]; then
+    export CFLAGS+=" -mcpu=cortex-a72 -mfpu=neon-fp-armv8 -mfloat-abi=hard"
+    export CXXFLAGS="${CFLAGS}"
+  elif [[ $CARCH = "aarch64" ]]; then
+    export CFLAGS+=" -mcpu=cortex-a72+crc"
+    export CXXFLAGS="${CFLAGS}"
+  fi
+
+  _args=(
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_INSTALL_LIBDIR=/usr/lib
+    -DVERBOSE=ON
+    -DENABLE_EVENTCLIENTS=ON
+    -DENABLE_INTERNAL_FFMPEG=ON
+    -DENABLE_INTERNAL_FMT=ON
+    -DENABLE_INTERNAL_CROSSGUID=ON
+    -DENABLE_INTERNAL_FSTRCMP=ON
+    -DENABLE_INTERNAL_FLATBUFFERS=ON
+    -DENABLE_INTERNAL_SPDLOG=ON
+    -DCORE_PLATFORM_NAME=gbm
+    -DAPP_RENDER_SYSTEM=gles
+    -Dlibdvdcss_URL="$srcdir/libdvdcss-$_libdvdcss_version.tar.gz"
+    -Dlibdvdnav_URL="$srcdir/libdvdnav-$_libdvdnav_version.tar.gz"
+    -Dlibdvdread_URL="$srcdir/libdvdread-$_libdvdread_version.tar.gz"
+    -DFFMPEG_URL="$srcdir/ffmpeg-$_ffmpeg_version.tar.gz"
+    -DFMT_URL="$srcdir/fmt-$_fmt_version.tar.gz"
+    -DCROSSGUID_URL="$srcdir/crossguid-$_crossguid_version.tar.gz"
+    -DFSTRCMP_URL="$srcdir/fstrcmp-$_fstrcmp_version.tar.gz"
+    -DFLATBUFFERS_URL="$srcdir/flatbuffers-$_flatbuffers_version.tar.gz"
+    -DSPDLOG_URL="$srcdir/spdlog-$_spdlog_version.tar.gz"
+  )
+
+  if [[ $CARCH = "armv7h" ]]; then
+    # this is only needed if the kernel version is <5.10.0
+    # can be removed once 5.10.y goes gold
+    _args+=(
+    -DCMAKE_EXE_LINKER_FLAGS_INIT="-L/opt/vc/lib -lvcsm"
+    -DCMAKE_EXE_LINKER_FLAGS="-L/opt/vc/lib -lvcsm"
+    -DCMAKE_CXX_FLAGS="-Wl,-L/opt/vc/lib -Wl,-lvcsm"
+    )
+  fi
+
+  cmake "${_args[@]}" ../"xbmc-$_commit"
   make
   make preinstall
 }
