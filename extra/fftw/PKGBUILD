@@ -9,8 +9,8 @@
 #  - removed quad precision variant
 
 pkgname=fftw
-pkgver=3.3.8
-pkgrel=3
+pkgver=3.3.9
+pkgrel=1
 pkgdesc="A library for computing the discrete Fourier transform (DFT)"
 arch=('x86_64')
 license=('GPL2')
@@ -21,19 +21,11 @@ provides=('libfftw3q_threads.so' 'libfftw3q_omp.so' 'libfftw3q.so'
 'libfftw3l_threads.so' 'libfftw3l_omp.so' 'libfftw3l_mpi.so' 'libfftw3l.so'
 'libfftw3f_threads.so' 'libfftw3f_omp.so' 'libfftw3f_mpi.so' 'libfftw3f.so'
 'libfftw3_threads.so' 'libfftw3_omp.so' 'libfftw3_mpi.so' 'libfftw3.so')
-# makedepends=('gcc-fortran' 'ocaml' 'ocaml-num' 'ocamlbuild')
 source=("http://www.fftw.org/${pkgname}-${pkgver}.tar.gz")
-# source=("https://github.com/${pkgname}/fftw3/archive/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('ab918b742a7c7dcb56390a0a0014f517a6dff9a2e4b4591060deeb2c652bf3c6868aa74559a422a276b853289b4b701bdcbd3d4d8c08943acf29167a7be81a38')
+sha512sums=('52ebc2a33063a41fd478f6ea2acbf3b511867f736591d273dd57f9dfca5d3e0b0c73157921b3a36f1a7cfd741a8a6bde0fd80de578040ae730ea168b5ba466cf')
+b2sums=('6ea6966f3c5056102e6c3e4628b072c7e9832e3250b292808ed934b3a82515fd77658cbaff50d7b1268fb8c9444b10e39b22d100b7c31ea2452f3cee59c9f280')
 
 prepare() {
-# issue with ocaml-num
-#  mv -v "fftw3-${pkgname}-${pkgver}" "${pkgname}-${pkgver}"
-#  (
-#    cd "$pkgname-$pkgver"
-#    cp -v NEWS ChangeLog
-#    autoreconf -vfi
-#  )
   cp -av "${pkgname}-${pkgver}" "${pkgname}-${pkgver}-double"
   cp -av "${pkgname}-${pkgver}" "${pkgname}-${pkgver}-long-double"
   cp -av "${pkgname}-${pkgver}" "${pkgname}-${pkgver}-quad"
@@ -50,30 +42,91 @@ build() {
   (
     cd "${pkgname}-${pkgver}"
     ${_default_configure} --enable-single
+    # NOTE: fix overlinking
+    sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   )
 
   # configure double precision
   (
     cd "${pkgname}-${pkgver}-double"
     ${_default_configure}
+    # NOTE: fix overlinking
+    sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   )
 
   # configure long-double precission
   (
     cd "${pkgname}-${pkgver}-long-double"
     ${_default_configure} --enable-long-double
+    # NOTE: fix overlinking
+    sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   )
 
   make -C "${pkgname}-${pkgver}"
   make -C "${pkgname}-${pkgver}-double"
   make -C "${pkgname}-${pkgver}-long-double"
+
+# NOTE: cmake setup still missing MPI integration and needs patch for libquadmath
+#  _default_options=(
+#    -DCMAKE_INSTALL_PREFIX=/usr
+#    -DCMAKE_BUILD_TYPE='None'
+#    -DBUILD_SHARED_LIBS=ON
+#    -DENABLE_THREADS=ON
+#    -DENABLE_OPENMP=ON
+#    -Wno-dev
+#  )
+#
+#  cmake "${_default_options[@]}" \
+#        -DENABLE_SSE2=ON \
+#        -DENABLE_AVX=ON \
+#        -B "${pkgname}-${pkgver}/build" \
+#        -S "${pkgname}-${pkgver}"
+#  make VERBOSE=1 -C "${pkgname}-${pkgver}/build"
+#
+#  cmake "${_default_options[@]}" \
+#        -DENABLE_FLOAT=ON \
+#        -DENABLE_SSE=ON \
+#        -DENABLE_AVX=ON \
+#        -B "${pkgname}-${pkgver}/build-float" \
+#        -S "${pkgname}-${pkgver}"
+#  make VERBOSE=1 -C "${pkgname}-${pkgver}/build-float"
+#
+#  cmake "${_default_options[@]}" \
+#        -DENABLE_LONG_DOUBLE=ON \
+#        -B "${pkgname}-${pkgver}/build-long-double" \
+#        -S "${pkgname}-${pkgver}"
+#  make VERBOSE=1 -C "${pkgname}-${pkgver}/build-long-double"
+#
+#  cmake "${_default_options[@]}" \
+#        -DENABLE_QUAD_PRECISION=ON \
+#        -B "${pkgname}-${pkgver}/build-quad" \
+#        -S "${pkgname}-${pkgver}"
+#  make VERBOSE=1 -C "${pkgname}-${pkgver}/build-quad"
+}
+
+check() {
+  make check -C "${pkgname}-${pkgver}"
+  make check -C "${pkgname}-${pkgver}-double"
+  make check -C "${pkgname}-${pkgver}-long-double"
+  make check -C "${pkgname}-${pkgver}-quad"
+
+#  cd "${pkgname}-${pkgver}"
+#  make VERBOSE=1 -C build test
+#  make VERBOSE=1 -C build-float test
+#  make VERBOSE=1 -C build-long-double test
+#  make VERBOSE=1 -C build-quad test
 }
 
 package() {
   make DESTDIR="${pkgdir}" install -C "${pkgname}-${pkgver}"
   make DESTDIR="${pkgdir}" install -C "${pkgname}-${pkgver}-double"
   make DESTDIR="${pkgdir}" install -C "${pkgname}-${pkgver}-long-double"
+
   cd "${pkgname}-${pkgver}"
+#  make VERBOSE=1 DESTDIR="${pkgdir}" -C build install
+#  make VERBOSE=1 DESTDIR="${pkgdir}" -C build-float install
+#  make VERBOSE=1 DESTDIR="${pkgdir}" -C build-long-double install
+#  make VERBOSE=1 DESTDIR="${pkgdir}" -C build-quad install
   install -vDm 644 {AUTHORS,ChangeLog,NEWS,README,TODO} \
     -t "${pkgdir}/usr/share/doc/${pkgname}"
 }
