@@ -1,31 +1,34 @@
 # Maintainer: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - drop numactl makedepend, don't build with NUMA
 #  - disable epoll on aarch64
 #  - patch to fix padding calculation
 
 pkgbase=percona-server
 pkgname=('libperconaserverclient' 'percona-server-clients' 'percona-server')
-pkgver=8.0.21_12
-_boost_ver=1.72.0
+pkgver=8.0.22_13
+_boost_ver=1.73.0
 _pkgver=${pkgver/_/-}
 _myver=${pkgver/_rel*}
 pkgrel=1
 arch=('x86_64')
-makedepends=('cmake' 'zlib' 'lz4' 'zstd' 'libaio' 'systemd-tools' 'pam' 'jemalloc' 'openssl' 'rpcsvc-proto' 'boost' 'doxygen' 'graphviz')
+makedepends=('cmake' 'zlib' 'lz4' 'zstd' 'libaio' 'systemd-tools' 'pam' 'numactl' 'jemalloc' 'openssl' 'rpcsvc-proto' 'boost' 'doxygen' 'graphviz')
 license=('GPL')
 url="https://www.percona.com/software/mysql-database/percona-server"
 source=("https://www.percona.com/downloads/Percona-Server-${pkgver%.*_*}/Percona-Server-$_pkgver/source/tarball/percona-server-$_pkgver.tar.gz"
-#        "https://dl.bintray.com/boostorg/release/$_boost_ver/source/boost_${_boost_ver//./_}.tar.gz"
+        "https://dl.bintray.com/boostorg/release/$_boost_ver/source/boost_${_boost_ver//./_}.tar.gz"
         'my.cnf'
         'mysql-user.conf'
+        'mysqlrouter-user.conf'
         'build-hostname.patch'
         'no-werror.patch'
         'rocksdb-make.patch'
         '0001-fix-LF_PINS-padding-calculation.patch')
-sha256sums=('2dcf0ea54776ba587c6a1813d91e3f4155f285c71032049acc84089049d26dd3'
-            'e638a2657085f15b6728f43c1fd6aa551b27608fbf6b435e33afd3606a0cfb0e'
+sha256sums=('614249dc7790e82cabf22fdb20492be7ec5b8e98550f662204a17e0e8797cc9a'
+            '9995e192e68528793755692917f9eb6422f3052a53c5e13ba278a228af6c7acf'
+            'b467b04d6d06152b2abc33f2a6de63fef0fc922dd5119d2ee1d07d3c1a489731'
+            '5d7710fe88ec6d298175a309c0b776142397b119c468830b2865980292ed5da6'
+            '4ca7ffdcb2d1716d4f31e4c7dd314e5d76e64f13fdc67c5d81c53650b793f5e0'
             '1537fdbb92dd1c135c1eb9f4d10c44fd02e652db66c933d731990a1196f1397c'
             '2343a191c452b91caa458b03b0c1ef3f5afb0e7031816c68467af5c6a6ffe253'
             '2ff495d271f99c4d0dba89e8ccde7e6b9789a4ea6b55034de9b9217b47e32c03'
@@ -39,10 +42,17 @@ prepare() {
 	patch -p1 -i "$srcdir"/no-werror.patch
 	patch -p1 -i "$srcdir"/rocksdb-make.patch
 
+	sed -r -e s@/var/run/mysqlrouter@/run/mysqlrouter@ \
+	       -e s@lib64/mysql@lib/mysql@ \
+	       -i cmake/install_layout.cmake
+
 	for svcfile in mysqld{,@}.service.in; do
-		echo StateDirectory=mysql mysql-files >> scripts/systemd/$svcfile
-		echo RuntimeDirectory=mysqld >> scripts/systemd/$svcfile
+		sed '/^PrivateTmp=/ a StateDirectory=mysql mysql-files\nRuntimeDirectory=mysqld' \
+			-i scripts/systemd/$svcfile
 	done
+
+	sed '/^PrivateTmp=/ a StateDirectory=mysqlrouter\nRuntimeDirectory=mysqlrouter' \
+		-i scripts/systemd/mysqlrouter.service.in
 
 	patch -p1 -i "$srcdir"/0001-fix-LF_PINS-padding-calculation.patch
 }
@@ -54,9 +64,11 @@ build() {
 
 	[[ $CARCH == "aarch64" ]] && CONFIG="-DHAVE_SYS_EPOLL_H=0"
 
-	cmake ../$pkgbase-$_pkgver \
+	cmake ../$pkgbase-$_pkgver $CONFIG \
 		-Wno-dev \
+		-DCMAKE_BUILD_TYPE=Release \
 		-DBUILD_CONFIG=mysql_release \
+		-DFEATURE_SET=community \
 		-DREPRODUCIBLE_BUILD=ON \
 		-DCMAKE_INSTALL_PREFIX=/usr \
 		-DSYSCONFDIR=/etc/mysql \
@@ -65,12 +77,15 @@ build() {
 		-DDEFAULT_CHARSET=utf8mb4 \
 		-DDEFAULT_COLLATION=utf8mb4_general_ci \
 		-DENABLED_LOCAL_INFILE=ON \
+		-DINSTALL_LAYOUT=RPM \
+		-DINSTALL_SBINDIR=bin \
+		-DINSTALL_LIBDIR=lib \
+		-DINSTALL_PLUGINDIR=lib/perconaserver/plugin \
+		-DINSTALL_INCLUDEDIR=include/perconaserver \
 		-DINSTALL_INFODIR=share/doc/percona-server \
 		-DINSTALL_DOCREADMEDIR=share/doc/percona-server \
 		-DINSTALL_DOCDIR=share/doc/percona-server \
 		-DINSTALL_MANDIR=share/man \
-		-DINSTALL_PLUGINDIR=lib/perconaserver/plugin \
-		-DINSTALL_INCLUDEDIR=include/perconaserver \
 		-DINSTALL_SUPPORTFILESDIR=share/mysql \
 		-DINSTALL_MYSQLSHAREDIR=share/mysql \
 		-DINSTALL_STATIC_LIBRARIES=OFF \
@@ -100,28 +115,28 @@ build() {
 		-DTOKUDB_BACKUP_PLUGIN_VERSION=$_pkgver \
 		-DWITH_SYSTEMD=1 \
 		-DCMAKE_EXE_LINKER_FLAGS='-ljemalloc' \
-		-DWITH_BOOST=system \
-		-DWITH_NUMA=OFF \
-		$CONFIG
-		# -DWITH_BOOST="../boost_${_boost_ver//./_}"
+		-DWITH_NUMA=ON \
+		-DWITH_BOOST="../boost_${_boost_ver//./_}"
+		# -DWITH_BOOST=system
 
 	make
 }
 
 package_libperconaserverclient() {
 	pkgdesc='Percona Server client libraries'
-	depends=('zlib' 'openssl')
+	depends=('zlib' 'zstd' 'openssl')
+	optdepends=('libsasl: authentication_ldap_sasl_client plugin')
 
 	cd build
 	for dir in include libmysql libservices; do
 		make -C $dir DESTDIR="$pkgdir" install
 	done
 
-	# Conflicting files with mariadb-libs
-	rm -rf "$pkgdir"/usr/lib/{libmysqld.so.*,libmysqlclient{,_r}.so*,perconaserver}
+	rm -vrf "$pkgdir"/usr/lib/perconaserver/plugin/debug
 
 	install -Dm755 scripts/mysql_config "$pkgdir"/usr/bin/perconaserver_config
 	install -Dm644 "$srcdir"/$pkgbase-$_pkgver/man/mysql_config.1 "$pkgdir"/usr/share/man/man1/perconaserver_config.1
+	sed s@/lib64@/lib@ -i "$pkgdir"/usr/bin/perconaserver_config
 
 	install -D -m0644 scripts/perconaserverclient.pc "$pkgdir"/usr/lib/pkgconfig/perconaserverclient.pc
 	install -D -m0644 "$srcdir"/$pkgbase-$_pkgver/support-files/mysql.m4 "$pkgdir"/usr/share/aclocal/perconaserverclient.m4
@@ -129,7 +144,7 @@ package_libperconaserverclient() {
 
 package_percona-server-clients() {
 	pkgdesc='Percona Server client tools'
-	depends=('libperconaserverclient' 'zlib' 'lz4' 'jemalloc' 'readline')
+	depends=('libperconaserverclient' 'zlib' 'zstd' 'lz4' 'openssl' 'jemalloc' 'readline')
 	conflicts=('mysql-clients')
 	provides=("mysql-clients=$_myver" "mariadb-clients=$_myver")
 
@@ -148,8 +163,8 @@ package_percona-server-clients() {
 
 package_percona-server() {
 	pkgdesc='Drop-in replacement for MySQL that provides improved performance, diagnostics, instrumentation and MyRocks storage engine'
-	backup=('etc/mysql/my.cnf')
-	depends=('libaio' 'systemd-tools' 'pam' 'jemalloc' 'lz4' 'zstd' 'openssl' 'libtirpc' 'curl' 'boost-libs')
+	backup=('etc/mysql/my.cnf' 'etc/mysqlrouter/mysqlrouter.conf')
+	depends=('libaio' 'systemd-tools' 'pam' 'jemalloc' 'numactl' 'lz4' 'zstd' 'openssl' 'libtirpc' 'curl' 'boost-libs')
 	optdepends=('perl-dbd-mysql')
 	conflicts=('mysql')
 	provides=("mysql=$_myver" "mariadb=$_myver")
@@ -158,18 +173,24 @@ package_percona-server() {
 	cd build
 	make DESTDIR="$pkgdir" install
 
-	install -Dm644 ../my.cnf "$pkgdir"/etc/mysql/my.cnf
-	install -Dm644 ../mysql-user.conf "$pkgdir"/usr/lib/sysusers.d/mysql.conf
-
 	cd "$pkgdir"
+	install -Dm644 "$srcdir"/my.cnf etc/mysql/my.cnf
+	install -Dm644 "$srcdir"/mysql-user.conf usr/lib/sysusers.d/mysql.conf
+
+	install -dm755 etc/mysqlrouter
+	sed -e 's:@ROUTER_RUNTIMEDIR@:/run/mysqlrouter:' \
+		-e 's:^logging_folder.*:logging_folder =:' \
+		"$srcdir"/$pkgbase-$_pkgver/packaging/rpm-common/mysqlrouter.conf.in \
+		> etc/mysqlrouter/mysqlrouter.conf
+	install -Dm644 "$srcdir"/mysqlrouter-user.conf usr/lib/sysusers.d/mysqlrouter.conf
+
 	chmod 755 usr
-	mv usr/usr/lib/* usr/lib
-	rm -rf usr/{usr,data,run,lib/perconaserver/plugin/debug,lib/tmpfiles.d/mysql.conf}
+	rm -vrf usr/{cmake,lib/perconaserver/plugin/debug,lib/tmpfiles.d/mysql{,router}.conf}
 
 	# Move documentation
 	if [ -f usr/PATENTS ]; then
 		mv usr/{PATENTS,README.md} usr/share/doc/$pkgname/
-		rm usr/COPYING.* usr/{LICENSE,README}.router
+		rm usr/COPYING.*
 	fi
 
 	# provided by libperconaserverclient
@@ -181,9 +202,10 @@ package_percona-server() {
 
 	# provided by percona-server-clients
 	rm usr/bin/mysql{,admin,check,dump,import,show,slap,pump,binlog,test,_upgrade}
+	rm usr/lib/perconaserver/plugin/authentication_*_client.so
 	rm usr/share/man/man1/mysql{,admin,check,dump,import,show,slap,pump,binlog,_upgrade}.1
 
 	# not needed
-	rm -r usr/mysql-test
-	rm usr/share/doc/percona-server/{INFO_*,mysql.info,*-test}
+	rm -r usr/share/mysql-test
+	rm usr/share/doc/percona-server/mysql.info
 }
