@@ -145,7 +145,7 @@ package_vulkan-radeon() {
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
 
-ackage_vulkan-swrast() {
+package_vulkan-swrast() {
   pkgdesc="Vulkan software rasteriser driver"
   depends=('wayland' 'libx11' 'libxshmfence' 'libdrm' 'zstd' 'llvm-libs')
   optdepends=('vulkan-mesa-layers: additional vulkan layers')
