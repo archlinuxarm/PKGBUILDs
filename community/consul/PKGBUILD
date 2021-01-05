@@ -1,0 +1,100 @@
+# Maintainer: Thore Bödecker <foxxx0@archlinux.org>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+# ALARM: Tyler Langlois <ty@tjll.net>
+#  - comment out GOOS and XC_OSARCH
+#  - change makedepends s/nodejs-lts-dubnium/nodejs-lts-fermium/ (dubnium not available on armv6)
+
+# PKGBUILD untested on armv5
+buildarch=28
+
+pkgname=consul
+pkgver=1.9.1
+pkgrel=1
+pkgdesc="A tool for service discovery, monitoring and configuration."
+arch=('x86_64')
+url="https://www.consul.io"
+license=('MPL2')
+depends=('glibc')
+makedepends=('git' 'go' 'go-bindata-assetfs' 'go-bindata-hashicorp' 'procps-ng' 'zip' 'yarn' 'bower' 'nodejs-lts-fermium' 'npm' 'zip' 'gox' 'go-tools')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/hashicorp/consul/archive/v${pkgver}.tar.gz"
+        'consul.service'
+        'consul.default'
+        'consul.sysusers'
+        'example.json'
+        # 'fix-build-version-info.patch'
+        # 'unparallelize-or-disable-flaky-tests.patch'
+        )
+install=consul.install
+backup=('etc/default/consul')
+sha512sums=('9b983fed98499f642ac1bd8d183c2d76cbe321b8d1f7d318257c392185654e4037f7d80d39935011c0d97eb45c6686bd7c34c08908d5ad23d2c99bcee5e1fa74'
+            'c70b9d1556f6c7ecb2e915ab685f289cef0e31198bd2e50c74a0483bbfb387beec67334f539a90adbf68b61b07946e98b300ab8a8e26e53b35f4ab4894adeb04'
+            'ec5a800529a297c709fa383c094ecf106351cf0f8ac7b613b972d415d77fe001088902d7ab805e63e78a8e6360323fec1b795db5a4446df1e21b9b4ed31e7079'
+            'ef872aedb2bc022a29292b7972a792b22e684c1ccb904a2b2cfec6d8966c28fb19be1452ce060821c419f1b646b236ba2e783175595e4bb6926d164c27a15c87'
+            'c4292b8f56ee955ed7385a49843fd90d6434029891b3e1e724cb2fc841514c06e2554a26d3937c114371b18c2168c4e64319eb2cbd726ee8b35870df19089348')
+
+export CGO_LDFLAGS="${LDFLAGS}"
+export CGO_CFLAGS="${CFLAGS}"
+export CGO_CPPFLAGS="${CPPFLAGS}"
+export CGO_CXXFLAGS="${CXXFLAGS}"
+# consul is incompatible with -buildmode=pie
+export GOFLAGS="-trimpath -mod=readonly -modcacherw"
+
+export GOOS='linux'
+# export GOARCH='amd64'
+# export XC_OSARCH='linux/amd64'
+
+prepare() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+
+  local filename
+  for filename in "${source[@]}"; do
+    if [[ "$filename" =~ \.patch$ ]]; then
+      patch -p1 -N -l -i "$srcdir/${filename##*/}"
+    fi
+  done
+
+  mkdir -p build
+}
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  go build -o build './...'
+}
+
+##############################################################################
+####
+#### test suite is currently broken and fails horribly
+#### upstream is not interested in helping to debug failures downstream
+####
+#### therefore the testsuite is disabled for the time being
+####
+##############################################################################
+# check() {
+#   cd "${srcdir}/${pkgname}-${pkgver}"
+# 
+#   # prevent e.g. syslog tests
+#   export TRAVIS='true'
+# 
+#   # some tests need the built `consul` binary in $PATH
+#   export PATH="${PWD}/build:${PATH}"
+# 
+#   # weird race conditions when being run overparallelized
+#   go test -v -p 2 -parallel 2 './...'
+# }
+
+package() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+
+  install -D -d -m750 -o 208 -g 208 "${pkgdir}/var/lib/consul"
+  install -D -d -m750 -o   0 -g 208 "${pkgdir}/etc/consul.d"
+
+  install -D -m644 "${srcdir}/consul.default" "${pkgdir}/etc/default/consul"
+  install -D -m644 -o 0 -g 0 "${srcdir}/example.json" "${pkgdir}/usr/share/doc/consul/config.example.json"
+  install -Dm755 "build/consul" "${pkgdir}/usr/bin/consul"
+
+  install -Dm644 "${srcdir}/consul.service" "${pkgdir}/usr/lib/systemd/system/consul.service"
+  install -Dm644 "${srcdir}/consul.sysusers" "${pkgdir}/usr/lib/sysusers.d/consul.conf"
+}
+
+# vim:set ts=2 sw=2 et:
