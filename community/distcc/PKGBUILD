@@ -11,30 +11,35 @@
 
 pkgname=distcc
 pkgver=3.3.5
-pkgrel=1
+pkgrel=2
 _gccver=10.2.0 # Current GCC version, used for symlinks. See FS#69044
 pkgdesc='Distributed compilation service for C, C++ and Objective-C'
 arch=(x86_64)
 url='https://github.com/distcc/distcc'
 license=(GPL)
 depends=(popt)
-makedepends=(git python)
-optdepends=("gcc=$_gccver" python)
+makedepends=(git python gtk3)
+optdepends=("gcc=$_gccver"
+            "python: for python bindings"
+            "gtk3: for distccmon")
 backup=(etc/conf.d/distccd
         etc/distcc/hosts)
 source=("git+$url#commit=8d2a5709d249949e8177dcf08b56dbe7857daa7f" # tag: v3.3.5
         distccd.conf.d
         distccd.service
         sysusers.conf
+        gtk3.patch::https://github.com/distcc/distcc/commit/ff0a09f9e335d26265d8955176df1009ce40f518.patch
         allow-zero-timeout.patch)
 sha256sums=('SKIP'
             '43e02b461841ca2976816c244a0eca8b24820ca143f73cc0924403d75a8c012f'
             '360493245590d8c1480ff93cd30c9e81cb86efebacd78e45f37e7d6cdbcc2136'
             '4e037a6225f498b51d6902d117be979454ac78ec5fd2f65f1d5a38e10859612a'
+            'fa931b9e0356878469a10c647573d8b20ce45a21d77cffbdd56a36983923bcb5'
             '73ac95393ee94bcb28f49499e8eec61bfd29a7de38889eaebd237fbbcba6e2c6')
 
 prepare() {
   cd $pkgname
+  patch -p1 -i "$srcdir/gtk3.patch"
   patch -p1 -i ../allow-zero-timeout.patch
   ./autogen.sh
   sed -i 's/ install-gnome-data//g' Makefile.in
@@ -44,7 +49,6 @@ prepare() {
 
 build() {
   cd $pkgname
-
   export CFLAGS+=' -fcommon'
   ./configure \
     --enable-rfc2553 \
@@ -52,7 +56,8 @@ build() {
     --prefix=/usr \
     --sbindir=/usr/bin \
     --sysconfdir=/etc \
-    --without-avahi
+    --without-avahi \
+    --with-gtk
   make WERROR_CFLAGS= INCLUDESERVER_PYTHON=/usr/bin/python
 }
 
@@ -62,14 +67,13 @@ package() {
     INCLUDESERVER_PYTHON=/usr/bin/python \
     install
 
-  # Configuration
   install -Dm644 distccd.conf.d "$pkgdir/etc/conf.d/distccd"
   install -Dm644 distccd.service \
     "$pkgdir/usr/lib/systemd/system/distccd.service"
 
-  # Symlinks
-  install -d "$pkgdir/usr/lib/$pkgname/bin"
+  # Package symlinks
   _targets=(c++ c89 c99 cc clang clang++ cpp g++ gcc)
+  install -d "$pkgdir/usr/lib/$pkgname/bin"
   for bin in "${_targets[@]}"; do
     # For whitelist since version 3.3, see FS#57978
     ln -sf ../../bin/$pkgname "$pkgdir/usr/lib/$pkgname/$bin"
