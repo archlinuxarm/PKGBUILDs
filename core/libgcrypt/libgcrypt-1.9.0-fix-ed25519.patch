@@ -1,0 +1,95 @@
+diff --git a/cipher/ecc-curves.c b/cipher/ecc-curves.c
+index 26006d6c..900b668a 100644
+--- a/cipher/ecc-curves.c
++++ b/cipher/ecc-curves.c
+@@ -1200,13 +1200,18 @@ mpi_ec_setup_elliptic_curve (mpi_ec_t ec, int flags,
+ 
+           if ((n+7)/8 != len)
+             {
+-              if ((n+7)/8 < len && ec->dialect == ECC_DIALECT_ED25519)
++              if (ec->dialect == ECC_DIALECT_ED25519)
+                 {
+                   /*
+                    * GnuPG (<= 2.2) or OpenPGP implementations with no
+                    * SOS support may remove zeros at the beginning.
+                    * Recover those zeros.
+                    */
++                  /*
++                   * Also, GnuPG (<= 2.2) may add additional zero at
++                   * the beginning, when private key is moved from
++                   * OpenPGP to gpg-agent.  Remove such a zero-prefix.
++                   */
+                   const unsigned char *buf;
+                   unsigned char *value;
+ 
+@@ -1214,13 +1219,26 @@ mpi_ec_setup_elliptic_curve (mpi_ec_t ec, int flags,
+                   if (!buf)
+                     return GPG_ERR_INV_OBJ;
+ 
+-                  value = xtrycalloc_secure (1, len);
++                  value = xtrymalloc_secure (len);
+                   if (!value)
+                     return gpg_err_code_from_syserror ();
+ 
+-                  memset (value, 0, len - (n+7)/8);
+-                  memcpy (value + len - (n+7)/8, buf, (n+7)/8);
+-                  mpi_set_opaque (ec->d, value, len);
++                  if ((n+7)/8 < len)
++                    /* Recover zeros.  */
++                    {
++                      memset (value, 0, len - (n+7)/8);
++                      memcpy (value + len - (n+7)/8, buf, (n+7)/8);
++                    }
++                  else if ((n+7)/8 == len + 1)
++                    /* Remove a zero.  */
++                    memcpy (value, buf+1, len);
++                  else
++                    {
++                      xfree (value);
++                      return GPG_ERR_INV_OBJ;
++                    }
++
++                  mpi_set_opaque (ec->d, value, len*8);
+                 }
+               else
+                 {
+diff --git a/cipher/ecc.c b/cipher/ecc.c
+index b4672d3d..5d8c7607 100644
+--- a/cipher/ecc.c
++++ b/cipher/ecc.c
+@@ -688,6 +688,8 @@ ecc_sign (gcry_sexp_t *r_sig, gcry_sexp_t s_data, gcry_sexp_t keyparms)
+   mpi_ec_t ec = NULL;
+   int flags = 0;
+ 
++  _gcry_pk_util_init_encoding_ctx (&ctx, PUBKEY_OP_SIGN, 0);
++
+   /*
+    * Extract the key.
+    */
+@@ -700,7 +702,6 @@ ecc_sign (gcry_sexp_t *r_sig, gcry_sexp_t s_data, gcry_sexp_t keyparms)
+       goto leave;
+     }
+ 
+-  _gcry_pk_util_init_encoding_ctx (&ctx, PUBKEY_OP_SIGN, 0);
+   ctx.flags |= flags;
+   if (ec->model == MPI_EC_EDWARDS && ec->dialect == ECC_DIALECT_SAFECURVE)
+     ctx.flags |= PUBKEY_FLAG_EDDSA;
+@@ -783,6 +784,9 @@ ecc_verify (gcry_sexp_t s_sig, gcry_sexp_t s_data, gcry_sexp_t s_keyparms)
+   mpi_ec_t ec = NULL;
+   int flags = 0;
+ 
++  _gcry_pk_util_init_encoding_ctx (&ctx, PUBKEY_OP_VERIFY,
++                                   ecc_get_nbits (s_keyparms));
++
+   /*
+    * Extract the key.
+    */
+@@ -804,8 +808,6 @@ ecc_verify (gcry_sexp_t s_sig, gcry_sexp_t s_data, gcry_sexp_t s_keyparms)
+       goto leave;
+     }
+ 
+-  _gcry_pk_util_init_encoding_ctx (&ctx, PUBKEY_OP_VERIFY,
+-                                   ecc_get_nbits (s_keyparms));
+   ctx.flags |= flags;
+   if (ec->model == MPI_EC_EDWARDS && ec->dialect == ECC_DIALECT_SAFECURVE)
+     ctx.flags |= PUBKEY_FLAG_EDDSA;
