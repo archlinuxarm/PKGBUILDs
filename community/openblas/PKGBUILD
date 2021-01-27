@@ -1,5 +1,6 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 # Contributor: Giuseppe Borzi <gborzi _AT_ ieee _DOT_ org>
+# Contributor: Feakster <feakster at posteo dot eu>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - set build targets
@@ -8,47 +9,88 @@
 pkgname=openblas
 _pkgname=OpenBLAS
 pkgver=0.3.13
-pkgrel=2.1
-pkgdesc="An optimized BLAS library based on GotoBLAS2 1.13 BSD"
-arch=('x86_64')
-url="https://www.openblas.net/"
-license=('BSD')
-depends=('gcc-libs')
-makedepends=('perl' 'gcc-fortran')
-provides=('blas=3.8.0')
+pkgrel=2.2
+pkgdesc='An optimized BLAS library based on GotoBLAS2 1.13 BSD'
+arch=('arm' 'armv6h' 'armv7h' 'aarch64')
+url='https://www.openblas.net/'
+license=('BSD') # BSD 3-clause license
+depends=('gcc-libs' 'openmp')
+makedepends=('gcc-fortran')
+provides=('blas')
 conflicts=('blas')
-source=(${_pkgname}-v${pkgver}.tar.gz::https://github.com/xianyi/OpenBLAS/archive/v${pkgver}.tar.gz)
+source=("${_pkgname}-v${pkgver}.tar.gz::https://github.com/xianyi/${_pkgname}/archive/v${pkgver}.tar.gz")
 sha512sums=('86e7f496587cc35d7feede99cbe3cf627ef690dd7489bb03b95f7d15ed758e32baf17d79f17b1de187184394233f60a8249a64dd53c3d59a9540db92269b7ee4')
 
+prepare() {
+    # Change Directory
+    cd "$srcdir"/$_pkgname-$pkgver
+
+    # Wipe 32-Bit ARM Makefile Contents
+    truncate -s 0 Makefile.arm # See 'ALARM'.
+
+    # Manually Set CONFIG Target & Opts
+    if [ $CARCH = arm ]; then
+        _CONFIG='TARGET=ARMV5'
+    elif [ $CARCH = armv6h ]; then
+        _CONFIG='TARGET=ARMV6'
+    elif [ $CARCH = armv7h ]; then
+        _CONFIG='TARGET=ARMV7'
+        CFLAGS=`echo $CFLAGS | sed 's/vfpv3-d16/neon/'` # See 'ALARM'.
+        CXXFLAGS="$CFLAGS" # See 'ALARM'.
+    elif [ $CARCH = aarch64 ]; then
+        _CONFIG='TARGET=ARMV8 DYNAMIC_ARCH=1'
+    else
+        echo 'CPU architecture not supported'
+        exit 1
+    fi
+}
+
 build() {
-  cd "$srcdir/$_pkgname-$pkgver"
+    # Change Directory
+    cd "$srcdir"/$_pkgname-$pkgver
 
-  truncate -s 0 Makefile.arm
-  [[ $CARCH == "aarch64" ]] && CONFIG="TARGET=ARMV8"
-  [[ $CARCH == "armv7h" ]] && CONFIG="TARGET=ARMV7" && CFLAGS=`echo $CFLAGS | sed -e 's/vfpv3-d16/neon/'` && CXXFLAGS="$CFLAGS"
-  [[ $CARCH == "armv6h" ]] && CONFIG="TARGET=ARMV6"
-  [[ $CARCH == "arm" ]] && CONFIG="TARGET=ARMV5"
-
-  make NO_STATIC=1 NO_LAPACK=1 NO_LAPACKE=1 NO_CBLAS=1 NO_AFFINITY=1 USE_OPENMP=1 \
-       CFLAGS="$CPPFLAGS $CFLAGS" $CONFIG \
-       NUM_THREADS=64 MAJOR_VERSION=3 libs shared
+    # Build Libs
+    make \
+    NO_STATIC=1 NO_LAPACK=1 NO_LAPACKE=1 NO_CBLAS=1 NO_AFFINITY=1 USE_OPENMP=1 \
+    CFLAGS="$CPPFLAGS $CFLAGS" $_CONFIG \
+    NUM_THREADS=64 MAJOR_VERSION=3 \
+    libs shared
 }
 
 package() {
-  cd "$srcdir/$_pkgname-$pkgver"
+    # Change Directory
+    cd "$srcdir"/$_pkgname-$pkgver
 
-  make PREFIX="$pkgdir"/usr NUM_THREADS=64 MAJOR_VERSION=3 install
-  rm -f "$pkgdir"/usr/include/cblas.h "$pkgdir"/usr/include/lapack*
-  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+    # Install
+    make install \
+    PREFIX="$pkgdir"/usr
 
-  cd "$pkgdir"/usr/lib/
-  ln -s libopenblasp-r$pkgver.so libblas.so
-  ln -s libopenblasp-r$pkgver.so libblas.so.3
-  sed -i -e "s%$pkgdir%%" "$pkgdir"/usr/lib/cmake/openblas/OpenBLASConfig.cmake
-  sed -i -e "s%$pkgdir%%" "$pkgdir"/usr/lib/pkgconfig/openblas.pc
-  ln -s openblas.pc "$pkgdir"/usr/lib/pkgconfig/blas.pc
+    # Remove Crud
+    rm -f "$pkgdir"/usr/include/cblas.h "$pkgdir"/usr/include/lapack*
+    rmdir "$pkgdir"/usr/bin
 
-  rmdir "$pkgdir"/usr/bin
+    # Install License
+    install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+    # Change Directory
+    cd "$pkgdir"/usr/lib
+
+    # Fix File Naming
+    find . -maxdepth 1 -type f -name 'libopenblas*.so*' -exec mv {} libopenblas.so.${pkgver} \;
+    find . -maxdepth 1 -type f -name 'libopenblas*.a' -exec mv {} libopenblas.${pkgver}.a \;
+
+    # Regenerate Symlinks
+    find . -maxdepth 1 -type l -name 'lib*.so*' -delete
+    ln -frs libopenblas.${pkgver}.a libopenblas.a
+    for LIB in libblas.so libblas.so.3 libopenblas.so libopenblas.so.3
+    do
+        ln -frs libopenblas.so.${pkgver} $LIB
+    done
+
+    # Mod Ancillary Files
+    ln -rs "$pkgdir"/usr/lib/pkgconfig/openblas.pc "$pkgdir"/usr/lib/pkgconfig/blas.pc
+    sed -i "s|$pkgdir||" "$pkgdir"/usr/lib/pkgconfig/openblas.pc
+    sed -i "s|$pkgdir||" "$pkgdir"/usr/lib/cmake/openblas/OpenBLASConfig.cmake
 }
 
 # vim:set ts=2 sw=2 et:
