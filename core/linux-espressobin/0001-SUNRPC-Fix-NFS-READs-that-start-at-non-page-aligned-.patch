@@ -1,0 +1,51 @@
+From 7dc7170b1314236f54ccef07b1a0f356ad594d04 Mon Sep 17 00:00:00 2001
+From: Chuck Lever <chuck.lever@oracle.com>
+Date: Sun, 31 Jan 2021 16:16:23 -0500
+Subject: [PATCH] SUNRPC: Fix NFS READs that start at non-page-aligned offsets
+
+Anj Duvnjak reports that the Kodi.tv NFS client is not able to read
+video files from a v5.10.11 Linux NFS server.
+
+The new sendpage-based TCP sendto logic was not attentive to non-
+zero page_base values. nfsd_splice_read() sets that field when a
+READ payload starts in the middle of a page.
+
+The Linux NFS client rarely emits an NFS READ that is not page-
+aligned. All of my testing so far has been with Linux clients, so I
+missed this one.
+
+Reported-by: A. Duvnjak <avian@extremenerds.net>
+BugLink: https://bugzilla.kernel.org/show_bug.cgi?id=211471
+Fixes: 4a85a6a3320b ("SUNRPC: Handle TCP socket sends with kernel_sendpage() again")
+Signed-off-by: Chuck Lever <chuck.lever@oracle.com>
+Tested-by: A. Duvnjak <avian@extremenerds.net>
+---
+ net/sunrpc/svcsock.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/net/sunrpc/svcsock.c b/net/sunrpc/svcsock.c
+index 4404c491eb38..fa7b7ae2c2c5 100644
+--- a/net/sunrpc/svcsock.c
++++ b/net/sunrpc/svcsock.c
+@@ -1113,14 +1113,15 @@ static int svc_tcp_sendmsg(struct socket *sock, struct msghdr *msg,
+ 		unsigned int offset, len, remaining;
+ 		struct bio_vec *bvec;
+ 
+-		bvec = xdr->bvec;
+-		offset = xdr->page_base;
++		bvec = xdr->bvec + (xdr->page_base >> PAGE_SHIFT);
++		offset = offset_in_page(xdr->page_base);
+ 		remaining = xdr->page_len;
+ 		flags = MSG_MORE | MSG_SENDPAGE_NOTLAST;
+ 		while (remaining > 0) {
+ 			if (remaining <= PAGE_SIZE && tail->iov_len == 0)
+ 				flags = 0;
+-			len = min(remaining, bvec->bv_len);
++
++			len = min(remaining, bvec->bv_len - offset);
+ 			ret = kernel_sendpage(sock, bvec->bv_page,
+ 					      bvec->bv_offset + offset,
+ 					      len, flags);
+-- 
+2.30.0
+
