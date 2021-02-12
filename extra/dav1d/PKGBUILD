@@ -3,28 +3,36 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - disable assembly on v5/v6
 
-pkgname=dav1d
+pkgbase=dav1d
+pkgname=(dav1d dav1d-doc)
 pkgver=0.8.1
-pkgrel=1
+pkgrel=2
+_dav1d_test_data_commit=0b1ae65ec0c949bb1aac496d1b3f8bde5ffb10b8
 pkgdesc='AV1 cross-platform decoder focused on speed and correctness'
 url='https://code.videolan.org/videolan/dav1d/'
 arch=('x86_64')
 license=('BSD')
-depends=('glibc' 'vulkan-icd-loader')
-makedepends=('meson' 'ninja' 'nasm' 'doxygen' 'vulkan-headers' 'graphviz')
-provides=('libdav1d.so')
-source=(https://downloads.videolan.org/pub/videolan/${pkgname}/${pkgver}/${pkgname}-${pkgver}.tar.xz{,.asc})
+makedepends=('git' 'meson' 'ninja' 'nasm' 'doxygen' 'graphviz')
+source=(https://downloads.videolan.org/pub/videolan/${pkgname}/${pkgver}/${pkgname}-${pkgver}.tar.xz{,.asc}
+        "git+https://code.videolan.org/videolan/dav1d-test-data.git#commit=${_dav1d_test_data_commit}")
 sha512sums=('ee087768f3afcca76b3db7fc6c528d471891f65295b7e0981922cdbdfe26e919c94144dc395cc697035c1200f4baed9fc233666b5ecf0a2281e869b9f1e3a1b5'
+            'SKIP'
             'SKIP')
 b2sums=('4be5c666c2212b36e532c77a1bba235d44260723bf398be1e856095def1b123cb964599f75f83717601c8428294a3c3a2bf10d81c1e63134a2e995ee9d0d2655'
+        'SKIP'
         'SKIP')
 validpgpkeys=('65F7C6B4206BD057A7EB73787180713BE58D1ADC') # VideoLAN Release Signing Key
+
+prepare() {
+  cd ${pkgbase}-${pkgver}
+  ln -s "${srcdir}/dav1d-test-data" tests/dav1d-test-data
+}
 
 build() {
   cd ${pkgbase}-${pkgver}
   [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && meson_options="-Dbuild_asm=false"
-  arch-meson build $meson_options
-  ninja -C build
+  arch-meson -Dtestdata_tests=true $meson_options build
+  ninja -C build all doc/html
 }
 
 check() {
@@ -32,10 +40,23 @@ check() {
   meson test
 }
 
-package() {
+package_dav1d() {
+  depends=('glibc')
+  provides=('libdav1d.so')
+  optdepends=('dav1d-doc: HTML documentation')
+
   cd ${pkgbase}-${pkgver}
   DESTDIR="${pkgdir}" ninja -C build install
-  install -Dm 644 README.md -t "${pkgdir}/usr/share/doc/${pkgname}"
+  install -Dm 644 README.md CONTRIBUTING.md NEWS -t "${pkgdir}/usr/share/doc/${pkgname}"
+  install -Dm 644 COPYING -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+package_dav1d-doc() {
+  pkgdesc+=" (documentation)"
+
+  cd ${pkgbase}-${pkgver}
+  install -d "${pkgdir}/usr/share/doc/${pkgbase}"
+  cp -r build/doc/html -t "${pkgdir}/usr/share/doc/${pkgbase}"
   install -Dm 644 COPYING -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
