@@ -12,7 +12,7 @@ pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=20.3.4
-pkgrel=2
+pkgrel=2.1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
@@ -45,7 +45,7 @@ build() {
   case "${CARCH}" in
     armv6h)  GALLIUM=",vc4" ;;
     armv7h)  GALLIUM=",etnaviv,kmsro,lima,panfrost,tegra,v3d,vc4" ;;
-    aarch64) GALLIUM=",kmsro,lima,panfrost,v3d,vc4" ;;
+    aarch64) GALLIUM=",etnaviv,kmsro,lima,panfrost,v3d,vc4" ;;
   esac
 
   arch-meson mesa-$pkgver build \
