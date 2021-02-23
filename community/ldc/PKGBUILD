@@ -10,31 +10,29 @@ buildarch=12
 
 pkgname=('ldc' 'liblphobos')
 groups=('dlang' 'dlang-ldc')
-pkgver=1.24.0
-_pkgcommit=7b306c5ed148e39bcbd7143ca32416afe1a9ee5f
-_dversion=2.094.1
+pkgver=1.25.0
+_pkgcommit=72535b1713fca845e664924ee1333fdc9bb83528
+_dversion=2.095.1
 _clangversion=11.1.0 # related to where ldc2 looks for compiler-rt sanitizers
 epoch=2
-pkgrel=4
+pkgrel=1
 pkgdesc="A D Compiler based on the LLVM Compiler Infrastructure including D runtime and libphobos2"
 arch=('x86_64')
 url="https://github.com/ldc-developers/ldc"
 license=('BSD')
-makedepends=('git' 'cmake' 'llvm' 'ldc')
+makedepends=('git' 'cmake' 'llvm' 'ldc' 'ninja')
 
 source=(
     "git+https://github.com/ldc-developers/ldc#commit=$_pkgcommit"
     "ldc-druntime::git+https://github.com/ldc-developers/druntime.git"
     "ldc-phobos::git+https://github.com/ldc-developers/phobos.git"
     "ldc-testsuite::git+https://github.com/ldc-developers/dmd-testsuite.git"
-    "llvm-11.1.0.patch"
 )
 
 sha256sums=('SKIP'
             'SKIP'
             'SKIP'
-            'SKIP'
-            'a26958fbfb958d055d02db4695ace6ce225f42e218a9bcb6e17452e06a717550')
+            'SKIP')
 
 prepare() {
     cd "$srcdir/ldc"
@@ -47,10 +45,6 @@ prepare() {
 
     # Set version used for path construction in getFullClangCompilerRTLibPath()
     sed -i "s/ldc::llvm_version_base/\"$_clangversion\"/" driver/linker-gcc.cpp
-
-    # Fix build with LLVM 11.1.0
-    patch -Np1 -d runtime/druntime <../llvm-11.1.0.patch
-    cp -v tools/ldc-profdata/llvm-profdata-11.{0,1}.cpp
 }
 
 build() {
@@ -58,7 +52,7 @@ build() {
 
     mkdir -p build && cd build
 
-    cmake \
+    cmake -GNinja \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_SKIP_RPATH=ON \
@@ -69,12 +63,12 @@ build() {
     -DD_COMPILER_FLAGS="-link-defaultlib-shared=false" \
     -DADDITIONAL_DEFAULT_LDC_SWITCHES="\"-link-defaultlib-shared\"" \
     ..
-    make
+    ninja
 }
 
 check() {
     cd "$srcdir/ldc/build"
-    make all-test-runners
+    ninja all-test-runners
 }
 
 package_ldc() {
@@ -83,7 +77,7 @@ package_ldc() {
     provides=("d-compiler=$_dversion")
 
     cd "$srcdir/ldc/build"
-    make install DESTDIR="$pkgdir"
+    DESTDIR="$pkgdir" ninja install
 
     # move bash-completion
     mkdir -p "$pkgdir/usr/share/bash-completion/completions/"
@@ -109,7 +103,7 @@ package_liblphobos() {
     options=('staticlibs' '!strip')
 
     cd "$srcdir/ldc/build"
-    make install DESTDIR="$pkgdir"
+    DESTDIR="$pkgdir" ninja install
 
     # remove ldc files
     rm -rf "$pkgdir/usr/bin/"
