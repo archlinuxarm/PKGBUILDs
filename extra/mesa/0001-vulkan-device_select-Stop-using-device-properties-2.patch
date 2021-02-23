@@ -1,0 +1,109 @@
+From ccacfc317e4fac62052a22e2d092d15541e2877e Mon Sep 17 00:00:00 2001
+From: Bas Nieuwenhuizen <bas@basnieuwenhuizen.nl>
+Date: Mon, 11 Jan 2021 15:20:40 +0100
+Subject: [PATCH] vulkan/device_select: Stop using device properties 2.
+
+We have to choose between:
+1) Stop handling two identical GPUs
+2) Stop having crashes with other layers active.
+3) Fix the Vulkan Loader.
+
+Since nobody seems to want to spend enough effort to do 3 the
+effective choice is between 1 and 2. This is choosing 2, as
+two identical GPUs is pretty uncommon since crossfire doesn't
+work on Linux anyway.
+
+(And it would only work sporadically as the game needs to enable the
+ extension)
+
+CC: mesa-stable
+Closes: https://gitlab.freedesktop.org/mesa/mesa/-/issues/3801
+Reviewed-by: Dave Airlie <airlied@redhat.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/8414>
+(cherry picked from commit 38ce8d4d00c2b0e567b6dd36876cf171acb1dbc7)
+Signed-off-by: Laurent Carlier <lordheavym@gmail.com>
+---
+ .../device-select-layer/device_select_layer.c | 30 +++++++++++--------
+ 1 file changed, 18 insertions(+), 12 deletions(-)
+
+diff --git a/src/vulkan/device-select-layer/device_select_layer.c b/src/vulkan/device-select-layer/device_select_layer.c
+index c381ac33fd1..134a3bd22dd 100644
+--- a/src/vulkan/device-select-layer/device_select_layer.c
++++ b/src/vulkan/device-select-layer/device_select_layer.c
+@@ -51,8 +51,8 @@ struct instance_info {
+    PFN_GetPhysicalDeviceProcAddr  GetPhysicalDeviceProcAddr;
+    PFN_vkEnumerateDeviceExtensionProperties EnumerateDeviceExtensionProperties;
+    PFN_vkGetPhysicalDeviceProperties GetPhysicalDeviceProperties;
+-   PFN_vkGetPhysicalDeviceProperties2KHR GetPhysicalDeviceProperties2KHR;
+-   bool has_props2, has_pci_bus;
++   PFN_vkGetPhysicalDeviceProperties2 GetPhysicalDeviceProperties2;
++   bool has_pci_bus, has_vulkan11;
+    bool has_wayland, has_xcb;
+ };
+ 
+@@ -150,8 +150,6 @@ static VkResult device_select_CreateInstance(const VkInstanceCreateInfo *pCreate
+    }
+ 
+    for (unsigned i = 0; i < pCreateInfo->enabledExtensionCount; i++) {
+-      if (!strcmp(pCreateInfo->ppEnabledExtensionNames[i], VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
+-         info->has_props2 = true;
+ #ifdef VK_USE_PLATFORM_WAYLAND_KHR
+       if (!strcmp(pCreateInfo->ppEnabledExtensionNames[i], VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME))
+          info->has_wayland = true;
+@@ -162,6 +160,14 @@ static VkResult device_select_CreateInstance(const VkInstanceCreateInfo *pCreate
+ #endif
+    }
+ 
++   /*
++    * The loader is currently not able to handle GetPhysicalDeviceProperties2KHR calls in
++    * EnumeratePhysicalDevices when there are other layers present. To avoid mysterious crashes
++    * for users just use only the vulkan version for now.
++    */
++   info->has_vulkan11 = pCreateInfo->pApplicationInfo &&
++                        pCreateInfo->pApplicationInfo->apiVersion >= VK_MAKE_VERSION(1, 1, 0);
++
+    info->GetPhysicalDeviceProcAddr = (PFN_GetPhysicalDeviceProcAddr)info->GetInstanceProcAddr(*pInstance, "vk_layerGetPhysicalDeviceProcAddr");
+ #define DEVSEL_GET_CB(func) info->func = (PFN_vk##func)info->GetInstanceProcAddr(*pInstance, "vk" #func)
+    DEVSEL_GET_CB(DestroyInstance);
+@@ -169,8 +175,8 @@ static VkResult device_select_CreateInstance(const VkInstanceCreateInfo *pCreate
+    DEVSEL_GET_CB(EnumeratePhysicalDeviceGroups);
+    DEVSEL_GET_CB(GetPhysicalDeviceProperties);
+    DEVSEL_GET_CB(EnumerateDeviceExtensionProperties);
+-   if (info->has_props2)
+-      DEVSEL_GET_CB(GetPhysicalDeviceProperties2KHR);
++   if (info->has_vulkan11)
++      DEVSEL_GET_CB(GetPhysicalDeviceProperties2);
+ #undef DEVSEL_GET_CB
+ 
+    device_select_layer_add_instance(*pInstance, info);
+@@ -197,10 +203,10 @@ static void print_gpu(const struct instance_info *info, unsigned index, VkPhysic
+    VkPhysicalDeviceProperties2KHR properties = (VkPhysicalDeviceProperties2KHR){
+       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR
+    };
+-   if (info->has_props2 && info->has_pci_bus)
++   if (info->has_vulkan11 && info->has_pci_bus)
+       properties.pNext = &ext_pci_properties;
+-   if (info->GetPhysicalDeviceProperties2KHR)
+-      info->GetPhysicalDeviceProperties2KHR(device, &properties);
++   if (info->GetPhysicalDeviceProperties2)
++      info->GetPhysicalDeviceProperties2(device, &properties);
+    else
+       info->GetPhysicalDeviceProperties(device, &properties.properties);
+ 
+@@ -243,10 +249,10 @@ static bool fill_drm_device_info(const struct instance_info *info,
+       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR
+    };
+ 
+-   if (info->has_props2 && info->has_pci_bus)
++   if (info->has_vulkan11 && info->has_pci_bus)
+       properties.pNext = &ext_pci_properties;
+-   if (info->GetPhysicalDeviceProperties2KHR)
+-     info->GetPhysicalDeviceProperties2KHR(device, &properties);
++   if (info->GetPhysicalDeviceProperties2)
++     info->GetPhysicalDeviceProperties2(device, &properties);
+    else
+      info->GetPhysicalDeviceProperties(device, &properties.properties);
+ 
+-- 
+2.30.1
+
