@@ -7,56 +7,36 @@
 
 pkgbase=gap
 pkgname=(gap gap-doc gap-packages)
-pkgver=4.11.0
-pkgrel=9
+pkgver=4.11.1
+pkgrel=1
 pkgdesc="Groups, Algorithms, Programming: a system for computational discrete algebra"
 arch=(x86_64)
 url="https://www.gap-system.org/"
 license=(GPL)
-source=("https://files.gap-system.org/gap-${pkgver%.*}/tar.gz/gap-$pkgver.tar.gz" gap.sh
-         git+https://github.com/gap-packages/NormalizInterface#commit=cd69a42
-         gap-polymake-4.0.patch
-         gap-cddlib-0.94k.patch
-         gap-normaliz-3.8.8.patch
-         gap-libsemigroups-1.3.patch
-         gap-libsemigroups-1.3.4.patch)
-sha256sums=('6fda7af23394708aeb3b4bca8885f5fdcb7c3ae4419639dfb2d9f67d3f590abb'
+source=(https://github.com/gap-system/gap/releases/download/v$pkgver/$pkgbase-$pkgver.tar.gz
+        gap.sh
+        gap-libsemigroups-1.3.4.patch)
+sha256sums=('6635c5da7d82755f8339486b9cac33766f58712f297e8234fba40818902ea304'
             '143fb8a79a52c007903cce13407850df309ef803a9b00398d05169355917de46'
-            'SKIP'
-            'e3f6d671c8df9acb6143a7c279391957967cd44f0a00b949323401d5b54ed685'
-            '151ddbd7cf234158c8bd79153ac0ded3076f103859a65b238dd5c86084be3d98'
-            '4023aaf1617d653f84d711d5642485984395a01464d64ded0a7e884c48b2a332'
-            'c69c35293c194528a0beeeea533d3bae93208cc6a6bed9ffab2c2ebdb1c6d444'
-            'e4024342332fd583967b2797627dfae61eb6ebcb5b73baced1e2a464be4d679b')
-makedepends=(libxaw givaro mpfi normaliz polymake boost libsemigroups c-xsc zeromq fplll wget chrpath fmt git)
+            'b24cda7763bbdf249f4693c22231c17a682aacdc4bc5754e88e0ace9700af7e7')
+makedepends=(libxaw givaro mpfi cddlib boost libsemigroups c-xsc zeromq fplll wget chrpath fmt)
+# TODO: unbundle normaliz
 
 prepare() {
   cd gap-$pkgver
 
-# Use system normaliz
-  sed -e '/build-normaliz.sh/d' -i bin/BuildPackages.sh
 # Use system libsemigroups
   sed -e 's|test "$with_external_libsemigroups" = yes|true|' -i pkg/semigroups-*/configure
 # Fix https://bugs.archlinux.org/task/55174
   sed -e '/xgap/d' -i pkg/sonata-*/PackageInfo.g
   sed -e '/XGAP/d' -i pkg/cryst/PackageInfo.g
 
-# Update NormalizInterface to support recent normaliz
-  rm -r pkg/NormalizInterface-1.1.0
-  cp -r ../NormalizInterface pkg
-
   cd pkg/semigroups-* 
-  patch -p1 -i "$srcdir"/gap-libsemigroups-1.3.patch # Fix build with libsemigroups 1.3
   patch -p1 -i "$srcdir"/gap-libsemigroups-1.3.4.patch # Fix build with libsemigroups 1.3.4
 
-  cd ../PolymakeInterface-*
-  patch -p2 -i "$srcdir"/gap-polymake-4.0.patch # Fix build with polymake 4.0
-
   cd ../CddInterface-*
-  patch -p1 -i "$srcdir"/gap-cddlib-0.94k.patch # Fix build with cddlib 0.94k
-
-  cd ../NormalizInterface
-  patch -p1 -i "$srcdir"/gap-normaliz-3.8.8.patch # Fix build with normaliz 3.8.8
+  sed -e 's|/usr/include/cdd|/usr/include/cddlib|' -i configure.ac # Fix build with cddlib 0.94k
+  rm configure
 }
 
 build() {
@@ -72,17 +52,17 @@ build() {
   # Install libgap so we can link packages against it
   mkdir -p tmp-install
   libtool --mode=install install libgap.la "$srcdir"/gap-$pkgver/tmp-install
+  rm "$srcdir"/gap-$pkgver/tmp-install/libgap.la
 
   cd pkg
   export CFLAGS+=" -fcommon" # Fix anupq and cohomolo build with GCC 10
   export CXXFLAGS+=" -I/usr/include/cxsc" # Find c-xsc headers
   export LDFLAGS+=" -L$srcdir/gap-$pkgver/tmp-install -lgap" # See https://trac.sagemath.org/ticket/27372
   export LD_LIBRARY_PATH="$srcdir"/gap-$pkgver/tmp-install
-  export MAKEFLAGS="-j1"
   ../bin/BuildPackages.sh
 }
 
-_standardpkgs=(GAPDoc-* primgrp-* SmallGrp-* transgrp atlasrep autpgrp-* alnuth-* crisp-* ctbllib FactInt-* fga irredsol-* laguna-*
+_standardpkgs=(GAPDoc-* primgrp-* SmallGrp-* transgrp atlasrep autpgrp-* alnuth-* crisp-* ctbllib-* FactInt-* fga irredsol-* laguna-*
                polenta-* polycyclic-* resclasses-* sophus-* tomlib-*)
 
 package_gap() {
@@ -125,9 +105,9 @@ package_gap-doc() {
 package_gap-packages() {
   depends=(gap)
   replaces=(gap-4.8-packages)
-  optdepends=('normaliz: Normaliz interface package' 'libxaw: xgap package' 'c-xsc: float package' 'mpfi: float package'
+  optdepends=('libxaw: xgap package' 'c-xsc: float package' 'mpfi: float package'
               'libmpc: float package' 'fplll: float package' 'zeromq: ZeroMQ interface package' 'planarity: digraph package'
-              'curl: curl interface package' 'libsemigroups: semigroups package' 'polymake: Polymake interface package')
+              'curl: curl interface package' 'libsemigroups: semigroups package' 'cddlib: CddLib interface package')
   pkgdesc="Extra packages for GAP"
   cd gap-$pkgver
 
@@ -156,6 +136,5 @@ package_gap-packages() {
   find "$pkgdir"/usr/lib/gap/pkg -type d -name src | xargs rm -fr
   rm -r "$pkgdir"/usr/lib/gap/pkg/digraphs*/extern
   rm -r "$pkgdir"/usr/lib/gap/pkg/semigroups*/libsemigroups
-  rm -r "$pkgdir"/usr/lib/gap/pkg/NormalizInterface/{.git*,.release,.c*,.t*,autom4te.cache}
   rm -r "$pkgdir"/usr/lib/gap/pkg/log
 }
