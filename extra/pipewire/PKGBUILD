@@ -5,20 +5,20 @@
 #  - remove makedepend on valgrind
 
 pkgbase=pipewire
-pkgname=(pipewire alsa-card-profiles pipewire-docs pipewire-alsa pipewire-jack
-         pipewire-pulse gst-plugin-pipewire)
-pkgver=0.3.22
-pkgrel=2
+pkgname=(pipewire alsa-card-profiles pipewire-docs pipewire-media-session
+         pipewire-alsa pipewire-jack pipewire-pulse gst-plugin-pipewire)
+pkgver=0.3.23
+pkgrel=1
 epoch=1
 pkgdesc="Low-latency audio/video router and processor"
 url="https://pipewire.org"
 license=(LGPL)
 arch=(x86_64)
-makedepends=(git meson doxygen graphviz xmltoman jack2 libpulse
-             alsa-lib gst-plugins-base rtkit dbus sdl2 ncurses libsndfile 
-             bluez-libs sbc libldac libopenaptx libfdk-aac)
+makedepends=(git meson doxygen graphviz xmltoman libpulse alsa-lib
+             gst-plugins-base rtkit dbus sdl2 ncurses libsndfile bluez-libs sbc
+             libldac libopenaptx libfdk-aac)
 checkdepends=(desktop-file-utils)
-_commit=22d563720a7f6ba7bdf59950f8c14488d80dfa95  # tags/0.3.22
+_commit=68f6c75caed047af32320ab4de0c06457457be54  # tags/0.3.23
 source=("git+https://github.com/PipeWire/pipewire#commit=$_commit")
 sha256sums=('SKIP')
 
@@ -29,14 +29,12 @@ pkgver() {
 
 prepare() {
   cd $pkgbase
-
-  # https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/3810#note_1048367
-  git cherry-pick -n 3673265ae20d7b59e89cad6c5238c232796731b2
 }
 
 build() {
   arch-meson $pkgbase build \
     -D docs=true \
+    -D jack=false \
     -D udevrulesdir=/usr/lib/udev/rules.d
   meson compile -C build
 }
@@ -62,14 +60,13 @@ package_pipewire() {
            libudev.so libasound.so libsystemd.so libbluetooth.so libsbc.so
            libldacBT_enc.so libopenaptx.so libfdk-aac.so)
   optdepends=('pipewire-docs: Documentation'
+              'pipewire-media-session: Default session manager'
               'pipewire-alsa: ALSA configuration'
               'pipewire-jack: JACK support'
               'pipewire-pulse: PulseAudio replacement'
               'gst-plugin-pipewire: GStreamer support')
   provides=(libpipewire-$_ver.so)
-  backup=(etc/pipewire/{pipewire{,-pulse},client{,-rt}}.conf
-          etc/pipewire/media-session.d/media-session.conf
-          etc/pipewire/media-session.d/{alsa,bluez,v4l2}-monitor.conf)
+  backup=(etc/pipewire/{pipewire{,-pulse},client{,-rt}}.conf)
   install=pipewire.install
 
   DESTDIR="$pkgdir" meson install -C build
@@ -81,9 +78,12 @@ package_pipewire() {
 
   _pick docs usr/share/doc
 
+  _pick pms etc/pipewire/media-session.d/*.conf
+  _pick pms usr/bin/pipewire-media-session
+  _pick pms usr/lib/systemd/user/pipewire-media-session.service
+
   _pick jack etc/pipewire/{jack.conf,media-session.d/with-jack}
   _pick jack usr/bin/pw-jack usr/lib/pipewire-$_ver/jack
-  _pick jack usr/lib/spa-0.2/jack
   _pick jack usr/share/man/man1/pw-jack.1
 
   _pick pulse etc/pipewire/media-session.d/with-pulseaudio
@@ -101,9 +101,18 @@ package_pipewire-docs() {
   mv docs/* "$pkgdir"
 }
 
+package_pipewire-media-session() {
+  pkgdesc+=" - Session manager"
+  depends=(pipewire libpipewire-$_ver.so)
+  backup=(etc/pipewire/media-session.d/media-session.conf
+          etc/pipewire/media-session.d/{alsa,bluez,v4l2}-monitor.conf)
+  install=pipewire-media-session.install
+  mv pms/* "$pkgdir"
+}
+
 package_pipewire-alsa() {
   pkgdesc+=" - ALSA configuration"
-  depends=(pipewire)
+  depends=(pipewire-media-session)
   provides=(pulseaudio-alsa)
 
   mkdir -p "$pkgdir/etc/alsa/conf.d"
@@ -114,14 +123,14 @@ package_pipewire-alsa() {
 
 package_pipewire-jack() {
   pkgdesc+=" - JACK support"
-  depends=(pipewire libpipewire-$_ver.so libjack.so)
+  depends=(pipewire-media-session libpipewire-$_ver.so)
   backup=(etc/pipewire/jack.conf)
   mv jack/* "$pkgdir"
 }
 
 package_pipewire-pulse() {
   pkgdesc+=" - PulseAudio replacement"
-  depends=(pipewire libpulse)
+  depends=(pipewire-media-session libpulse)
   provides=(pulseaudio pulseaudio-bluetooth)
   conflicts=(pulseaudio pulseaudio-bluetooth)
   install=pipewire-pulse.install
@@ -130,7 +139,7 @@ package_pipewire-pulse() {
 
 package_gst-plugin-pipewire() {
   pkgdesc="Multimedia graph framework - pipewire plugin"
-  depends=(pipewire libpipewire-$_ver.so gst-plugins-base-libs)
+  depends=(pipewire-media-session libpipewire-$_ver.so gst-plugins-base-libs)
   mv gst/* "$pkgdir"
 }
 
