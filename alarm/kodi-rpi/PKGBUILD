@@ -15,7 +15,7 @@ pkgname=(
   'kodi-rpi-eventclients' 'kodi-rpi-tools-texturepacker' 'kodi-rpi-dev'
 )
 pkgver=19.0
-pkgrel=6
+pkgrel=7
 arch=('armv7h' 'aarch64')
 url="https://github.com/popcornmix/xbmc/tree/gbm"
 license=('GPL2')
@@ -31,17 +31,7 @@ makedepends=(
   'libinput' 'libxkbcommon' 'linux-raspberrypi4-headers'
 )
 _codename=Matrix
-# Found on their respective github release pages. One can check them against
-# what is pulled down when not specifying them in the cmake step.
-# $CHROOT/build/kodi-git/src/kodi-build/build/download
-#
-# https://github.com/xbmc/FFmpeg/tags
-# https://github.com/xbmc/libdvdcss/tags
-# https://github.com/xbmc/libdvdnav/tags
-# https://github.com/xbmc/libdvdread/tags
-#
-# fmt and crossguid can be found http://mirrors.kodi.tv/build-deps/sources/
-#
+_init_version=1.126
 _libdvdcss_version="1.4.2-Leia-Beta-5"
 _libdvdnav_version="6.0.0-Leia-Alpha-3"
 _libdvdread_version="6.0.0-Leia-Alpha-3"
@@ -65,12 +55,8 @@ source=(
   "http://mirrors.kodi.tv/build-deps/sources/flatbuffers-$_flatbuffers_version.tar.gz"
   "http://mirrors.kodi.tv/build-deps/sources/spdlog-$_spdlog_version.tar.gz"
   "http://mirrors.kodi.tv/build-deps/sources/libudfread-$_libudfread_version.tar.gz"
-  kodi.service
-  99-kodi.rules
-  polkit.rules
+  "ArchARM-kodi-init-v$_init_version.tar.gz::https://github.com/graysky2/kodi-standalone-service/archive/v$_init_version.tar.gz"
   kodi.config.txt
-  sysusers.conf
-  tmpfiles.conf
   use-mcpu-avoiding-march-and-mtune.patch
   0001-mcpu-cortex-application-to-ffmpeg.patch
 )
@@ -98,12 +84,8 @@ sha256sums=('92adf716d9d42b9b8cb86b997fb7a98a95fbb782f2db218cba54c4cd3c759527'
             '1789b97e790da8f2cb5ff827d15580878c8629fd889f5f038d7524dca43eacc9'
             'b38e0bbef7faac2b82fed550a0c19b0d4e7f6737d5321d4fd8f216b80f8aee8a'
             '5ad9f95c53e8f29853c1fefa0a20a301be4045e2c7ae49d1164bc74d94155627'
-            'bb8f0c0fd03ff7c13c0503f2c96f86772d8bbd05adbc97d5b383f603a98456c0'
-            '61a0648d4a5086f560ceb4e020f82472d00b99398f2cacba94fad3e96c4c362a'
-            '5d38a895ee7b93689fab79124a3aad23a5e3e643abd08878d778d04066c8d26f'
+            '7bc26a77a06c45b740e840f14414c5d4588b323280a8a238c6a6d7a5498adb05'
             'ca91d35bf6d87ed6e43f366a87babf26eed9f186ca362edb59ae242fc62b3692'
-            'f521b98232e5035b7cada46cf03975b8d753e93d0802bf22913fceed769f9d96'
-            '9c5e79ed8719cd032a3b17dac585aeff28a198e37af1da9af68ef1b86bab4d18'
             '16d6c79ff3a3d3653f21d77a36326a0335c8cec49a9c06dbc2de0ed143e50a9f'
             '76eafede11af936bb554932b2be71ce91d4bf1c07107d847500ebbf3ff7d7245')
 
@@ -220,23 +202,28 @@ package_kodi-rpi() {
      -P cmake_install.cmake
   done
 
-  # fix permissions necessary for accelerated video playback
-  install -Dm0644 "$srcdir/99-kodi.rules" "$pkgdir/usr/lib/udev/rules.d/99-kodi.rules"
-
-  # systemd manages kodi user
-  install -Dm644 "$srcdir"/sysusers.conf "$pkgdir/usr/lib/sysusers.d/kodi.conf"
-  install -Dm644 "$srcdir"/tmpfiles.conf "$pkgdir/usr/lib/tmpfiles.d/kodi.conf"
-
-  # systemd service and polkit rules
-  install -Dm0644 "$srcdir/kodi.service" "$pkgdir/usr/lib/systemd/system/kodi.service"
-  install -Dm0644 "$srcdir/polkit.rules" "$pkgdir/usr/share/polkit-1/rules.d/10-kodi.rules"
-  chmod 0750 "$pkgdir/usr/share/polkit-1/rules.d/"
-
   # setup video drivers for kodi-gbm
   install -Dm0644 "$srcdir/kodi.config.txt" "$pkgdir/boot/kodi.config.txt"
-
+  
   # rpi4 wants 512 MB of memory
   sed -i 's/@@@/512/' "$pkgdir/boot/kodi.config.txt"
+
+  _initshit="$srcdir/kodi-standalone-service-$_init_version/arm"
+
+  # fix permissions necessary for accelerated video playback
+  install -Dm0644 "$_initshit/udev/99-kodi.rules" "$pkgdir/usr/lib/udev/rules.d/99-kodi.rules"
+
+  # systemd manages kodi user
+  install -Dm644 "$_initshit"/init/sysusers.conf "$pkgdir/usr/lib/sysusers.d/kodi.conf"
+  install -Dm644 "$_initshit"/init/tmpfiles.conf "$pkgdir/usr/lib/tmpfiles.d/kodi.conf"
+
+  # systemd service and polkit rules
+  install -Dm0644 "$_initshit/init/kodi.service" "$pkgdir/usr/lib/systemd/system/kodi.service"
+  install -Dm0644 "$_initshit/polkit/polkit.rules" "$pkgdir/usr/share/polkit-1/rules.d/10-kodi.rules"
+  chmod 0750 "$pkgdir/usr/share/polkit-1/rules.d/"
+
+  # man page
+  install -Dm0644 "$_initshit/doc/kodi.service.1" "$pkgdir/usr/share/man/man1/kodi.service.1"
 }
 
 package_kodi-rpi-eventclients() {
