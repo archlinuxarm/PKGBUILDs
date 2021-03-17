@@ -1,7 +1,9 @@
 #!/bin/bash
 
-srcdir=$1
-read -r -d '' dt_list
+image=$1
+arch=$2
+compression=$3
+read -a dtb_list
 
 cat <<-ITS_HEADER_END
 /dts-v1/;
@@ -11,34 +13,30 @@ cat <<-ITS_HEADER_END
     images {
         kernel@1{
             description = "kernel";
-            data = /incbin/("arch/arm64/boot/Image");
+            data = /incbin/("${image}");
             type = "kernel_noload";
-            arch = "arm64";
+            arch = "${arch}";
             os = "linux";
-            compression = "none";
+            compression = "${compression}";
             load = <0>;
             entry = <0>;
         };
 ITS_HEADER_END
 
-its_entry_count=1
-for dt in ${dt_list}; do
-	dts_path=${srcdir}/*/arch/arm64/boot/dts/*/${dt}.dts
-	! ls $dts_path >/dev/null && { echo "Error: dt not found $dt" >&2; exit 1; }
-	dt_dir=$(basename $(dirname ${dts_path}))
+for i in ${!dtb_list[@]}; do
+	dtb=${dtb_list[${i}]}
 	cat <<-FDT_END
-	        fdt@${its_entry_count}{
-	            description = "${dt}.dtb";
-	            data = /incbin/("arch/arm64/boot/dts/${dt_dir}/${dt}.dtb");
+	        fdt@$(expr ${i} + 1){
+	            description = "$(basename ${dtb})";
+	            data = /incbin/("${dtb}");
 	            type = "flat_dt";
-	            arch = "arm64";
-	            compression = "none";
+	            arch = "${arch}";
+	            compression = "${compression}";
 	            hash@1{
 	                algo = "sha1";
 	            };
 	        };
 	FDT_END
-	let its_entry_count=${its_entry_count}+1
 done
 
 cat <<-ITS_MIDDLE_END
@@ -47,11 +45,17 @@ cat <<-ITS_MIDDLE_END
         default = "conf@1";
 ITS_MIDDLE_END
 
-for((i=1;i<${its_entry_count};i++)); do
+for i in "${!dtb_list[@]}"; do
+	compat_line=""
+	dtb_uncompressed=$(echo ${dtb_list[${i}]} | sed "s/\(\.dtb\).*/\1/g")
+	for compat in $(fdtget "${dtb_uncompressed}" / compatible); do
+		compat_line+="\"${compat}\","
+	done
 	cat <<-ITS_CONF_END
-	        conf@${i}{
+	        conf@$(expr ${i} + 1){
 	            kernel = "kernel@1";
-	            fdt = "fdt@${i}";
+	            fdt = "fdt@$(expr ${i} + 1)";
+	            compatible = ${compat_line%,};
 	        };
 	ITS_CONF_END
 done
