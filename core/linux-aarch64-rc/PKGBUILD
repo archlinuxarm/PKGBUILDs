@@ -11,7 +11,7 @@ _srcname=linux-${_rcver}-rc${_rcrel}
 _kernelname=${pkgbase#linux}
 _desc="AArch64 multi-platform (release candidate)"
 pkgver=${_rcver}.rc${_rcrel}
-pkgrel=2
+pkgrel=3
 arch=('aarch64')
 url="http://www.kernel.org/"
 license=('GPL2')
@@ -35,7 +35,7 @@ md5sums=('dc4fe4b1427b7223386205250988f55a'
          '1553fe4abbe675ed8abd4644561d8e8c'
          '9844db3484f4d4fa3e63c7e083f656f7'
          '47c62c814000ad515ab71213c00734bf'
-         'beb35c282bbdadc0aab851d0ad4efd22'
+         'cb97c1ab32e0165cde8fb5eb68302225'
          '61c5ff73c136ed07a7aadbf58db3d96a'
          '584777ae88bce2c5659960151b64c7d8'
          '41cb5fef62715ead2dd109dbea8413d6'
@@ -230,19 +230,23 @@ _package-chromebook() {
 
   mkdir -p "${pkgdir}/boot"
 
-  ../generate_chromebook_its.sh ${srcdir} > kernel.its << DT_END
-    rk3399-gru-bob
-    rk3399-gru-kevin
-    rk3399-gru-scarlet-inx
-    rk3399-gru-scarlet-kd
-    sc7180-trogdor-lazor-r0
-    sc7180-trogdor-lazor-r1
-    sc7180-trogdor-lazor-r1-kb
-    sc7180-trogdor-lazor-r1-lte
-    sc7180-trogdor-lazor-r3
-    sc7180-trogdor-lazor-r3-kb
-    sc7180-trogdor-lazor-r3-lte
-DT_END
+  KARCH=arm64
+  image=arch/${KARCH}/boot/Image
+
+  chromeos_boards=(
+    'elm'
+    'gru'
+    'kukui'
+    'trogdor'
+    'asurada'
+  )
+  chromebook_dtbs=($(for b in ${chromeos_boards[@]}; do find arch/${KARCH}/boot -name "*${b}*.dtb" | LC_COLLATE=C sort; done))
+
+  for to_compress in ${chromebook_dtbs[@]} ${image}; do
+    #lzma -9 -z -f -k ${to_compress} # This is 40% smaller but takes ~1 sec longer to boot
+    lz4 -20 -z -f ${to_compress}
+  done
+  echo ${chromebook_dtbs[@]/%/.lz4} | ../generate_chromebook_its.sh ${image}.lz4 ${KARCH} lz4 > kernel.its
 
   mkimage -D "-I dts -O dtb -p 2048" -f kernel.its vmlinux.uimg
   dd if=/dev/zero of=bootloader.bin bs=512 count=1
