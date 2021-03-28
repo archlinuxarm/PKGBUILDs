@@ -11,24 +11,22 @@
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=20.3.4
-pkgrel=3
+pkgver=21.0.1
+pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
              'libomxil-bellagio' 'libclc' 'clang' 'libglvnd' 'libunwind' 'lm_sensors' 'libxrandr'
-             'glslang' 'vulkan-icd-loader' 'meson')
+             'glslang' 'vulkan-icd-loader' 'cmake' 'meson')
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-Rip-out-VC4-forced-NEON.patch
-        LICENSE
-        0001-vulkan-device_select-Stop-using-device-properties-2.patch)
-sha512sums=('81c4d032213b4aef842f1594e0e89bc0045f7ca7ce5f267b62a0f8236eb12ab09c1f780d8b3776b3072f37cd0bd8829f8a1330a749ccf462471b262ef8097477'
+        LICENSE)
+sha512sums=('b31b78778b6092dfaf0712f90de3074217574389c4236f8379c127739874f6bd1b47883140a26445d25e58df87e6207278efd048453096ee710d334b1dcfe419'
             'SKIP'
-            'ba55fd9816ebd9147be120da1fd4fa0364d19967a11570e6d5dd9d8b4f7971df46ced8b151ee07afaaa98043e131eed14918ec25f8c9b0f7e5c53f452674ee5c'
-            'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7'
-            '73a923dac10616ab46b825cd45f73ca849ddad69432dbf680c1129cc9a92004218affa33bd1a6ee185fa0143ccd3d3622ba40512ec049a160a61cc13fe92da0a')
+            '57e23d911d3de9bb4021d3d417270483d6edd53a81ad2d59b4e9cf2a9970901cde582b4a2167ee6d9ed47bd9ca90c3abd4e7cee38c028ad5ad183493560e7faf'
+            'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
               'E3E8F480C52ADD73B278EE78E1ECBE07D7D70895'  # Juan Antonio Suárez Romero (Igalia, S.L.) <jasuarez@igalia.com>
@@ -38,9 +36,6 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 
 prepare() {
   cd mesa-$pkgver
-
-  # FS#69744
-  patch -Np1 -i ../0001-vulkan-device_select-Stop-using-device-properties-2.patch
 
   [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i ../0001-Rip-out-VC4-forced-NEON.patch || true
 }
@@ -80,8 +75,9 @@ build() {
     -D libunwind=disabled \
     -D llvm=enabled \
     -D lmsensors=enabled \
-    -D osmesa=gallium \
+    -D osmesa=true \
     -D shared-glapi=enabled \
+    -D microsoft-clc=disabled \
     -D valgrind=disabled $MESON_OPT
 
   # Print config
