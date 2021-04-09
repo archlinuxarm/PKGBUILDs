@@ -1,0 +1,50 @@
+From 1e495c5e8b14d55b9773f864bdf600f5c8ab5317 Mon Sep 17 00:00:00 2001
+From: Zdenek Dohnal <zdohnal@redhat.com>
+Date: Wed, 24 Mar 2021 13:22:11 +0100
+Subject: [PATCH] Some older USB devices (Samsung ML series) are not capable of
+ sending
+
+USB bulks within reading timeout (250ms) when `usb` backend is reading
+data from back-channel. The transaction ends with timeout, the whole
+job ends garbled and the device prints out 'INTERNAL ERROR - Incomplete
+Session by time out'.
+
+This behavior is a regression introduced by commit db53b49265ba, which
+simplified the read loop, but put a 250ms timeout instead of the
+original 60s in `libusb_bulk_transfer()`.
+
+The timeout used in this PR is tested by two Fedora users
+([Samsung ML-2240](https://bugzilla.redhat.com/show_bug.cgi?id=1942326),
+[Samsung ML-1665](https://bugzilla.redhat.com/show_bug.cgi?id=1935318))
+and works for them.
+---
+ backend/usb-libusb.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/backend/usb-libusb.c b/backend/usb-libusb.c
+index d6b0eb423..06e420fbd 100644
+--- a/backend/usb-libusb.c
++++ b/backend/usb-libusb.c
+@@ -1704,7 +1704,7 @@ static void *read_thread(void *reference)
+     readstatus = libusb_bulk_transfer(g.printer->handle,
+ 				      g.printer->read_endp,
+ 				      readbuffer, rbytes,
+-				      &rbytes, 250);
++				      &rbytes, 2000);
+     if (readstatus == LIBUSB_SUCCESS && rbytes > 0)
+     {
+       fprintf(stderr, "DEBUG: Read %d bytes of back-channel data...\n", (int)rbytes);
+@@ -1718,11 +1718,11 @@ static void *read_thread(void *reference)
+       fputs("DEBUG: Got USB return aborted during read.\n", stderr);
+ 
+    /*
+-    * Make sure this loop executes no more than once every 250 miliseconds...
++    * Make sure this loop executes no more than once every 2 seconds...
+     */
+ 
+     if ((g.wait_eof || !g.read_thread_stop))
+-      usleep(250000);
++      sleep(2);
+   }
+   while (g.wait_eof || !g.read_thread_stop);
+ 
