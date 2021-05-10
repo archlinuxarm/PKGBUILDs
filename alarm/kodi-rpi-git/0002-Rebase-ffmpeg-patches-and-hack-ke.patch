@@ -1,0 +1,216 @@
+commit 8667f0d03fb1a5da47491b231d803192c47d8e4b
+Author: Dobroslaw Kijowski <dobo90@gmail.com>
+Date:   Mon May 10 14:39:27 2021 +0200
+
+    Rebase ffmpeg patches and hack kernel defines
+
+    * Rebase ffmpeg patches on top 4.3.2-Matrix-19.1
+    * Define V4L2_PIX_FMT_NV12_10_COL128 and V4L2_PIX_FMT_NV12_COL128
+
+diff --git a/tools/depends/target/ffmpeg/0001-rpi-Add-hevc-acceleration.patch b/tools/depends/target/ffmpeg/0001-rpi-Add-hevc-acceleration.patch
+index efb0748d38..30eb3a6aef 100644
+--- a/tools/depends/target/ffmpeg/0001-rpi-Add-hevc-acceleration.patch
++++ b/tools/depends/target/ffmpeg/0001-rpi-Add-hevc-acceleration.patch
+@@ -20,7 +20,7 @@ index 2450ee8fc5..4bcc3ae643 100644
+  /ffprobe
+ diff --git a/BUILD.txt b/BUILD.txt
+ new file mode 100644
+-index 0000000000..92bc13a3df
++index 0000000000..76ef041ea2
+ --- /dev/null
+ +++ b/BUILD.txt
+ @@ -0,0 +1,82 @@
+@@ -107,7 +107,7 @@ index 0000000000..92bc13a3df
+ +
+ +
+ diff --git a/configure b/configure
+-index 8569a60bf8..277d36cf9a 100755
++index 36713ab658..33013a4c31 100755
+ --- a/configure
+ +++ b/configure
+ @@ -274,6 +274,7 @@ External library support:
+@@ -634,7 +634,7 @@ index 5a6ea59715..5d18240d4c 100644
+ +$(SUBDIR)rpi_hevcdec.o $(SUBDIR)rpi_shader_template.o $(SUBDIR)rpi_qpu.o: $(SUBDIR)rpi_hevc_shader.h
+ +endif
+ diff --git a/libavcodec/allcodecs.c b/libavcodec/allcodecs.c
+-index 80f128cade..ac4cf9a90e 100644
++index fa0c08d42e..89a25a398d 100644
+ --- a/libavcodec/allcodecs.c
+ +++ b/libavcodec/allcodecs.c
+ @@ -149,6 +149,7 @@ extern AVCodec ff_hap_decoder;
+@@ -15788,7 +15788,7 @@ index 0000000000..ec47991544
+ +
+ +#endif
+ diff --git a/libavcodec/h264_slice.c b/libavcodec/h264_slice.c
+-index db8363e4cc..39ae8fabfd 100644
++index 111e1dfe7f..8d79d254e0 100644
+ --- a/libavcodec/h264_slice.c
+ +++ b/libavcodec/h264_slice.c
+ @@ -759,6 +759,7 @@ static enum AVPixelFormat get_pixel_format(H264Context *h, int force_callback)
+@@ -16181,7 +16181,7 @@ index 5af4b788d5..c7314a6af8 100644
+          num = ps->vps->vps_num_units_in_tick;
+          den = ps->vps->vps_time_scale;
+ diff --git a/libavcodec/hevcdec.c b/libavcodec/hevcdec.c
+-index 0772608a30..ddebbdeafa 100644
++index 1eaeaf72f1..58860acfde 100644
+ --- a/libavcodec/hevcdec.c
+ +++ b/libavcodec/hevcdec.c
+ @@ -332,6 +332,19 @@ static void export_stream_params(HEVCContext *s, const HEVCSPS *sps)
+@@ -16251,7 +16251,7 @@ index 0772608a30..ddebbdeafa 100644
+  #endif
+          break;
+      case AV_PIX_FMT_YUV444P:
+-@@ -3225,7 +3253,14 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
++@@ -3230,7 +3258,14 @@ static int hevc_decode_frame(AVCodecContext *avctx, void *data, int *got_output,
+      s->ref = NULL;
+      ret    = decode_nal_units(s, avpkt->data, avpkt->size);
+      if (ret < 0)
+@@ -16266,7 +16266,7 @@ index 0772608a30..ddebbdeafa 100644
+
+      if (avctx->hwaccel) {
+          if (s->ref && (ret = avctx->hwaccel->end_frame(avctx)) < 0) {
+-@@ -3588,6 +3623,15 @@ AVCodec ff_hevc_decoder = {
++@@ -3593,6 +3628,15 @@ AVCodec ff_hevc_decoder = {
+  #endif
+  #if CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL
+                                 HWACCEL_VIDEOTOOLBOX(hevc),
+@@ -52220,10 +52220,10 @@ index 0000000000..9724a6c987
+ +
+ diff --git a/libavcodec/v4l2_request.c b/libavcodec/v4l2_request.c
+ new file mode 100644
+-index 0000000000..e8678065c8
++index 0000000000..eb25ab4706
+ --- /dev/null
+ +++ b/libavcodec/v4l2_request.c
+-@@ -0,0 +1,1101 @@
++@@ -0,0 +1,1109 @@
+ +/*
+ + * This file is part of FFmpeg.
+ + *
+@@ -52279,6 +52279,14 @@ index 0000000000..e8678065c8
+ +#define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
+ +#endif
+ +
+++#ifndef V4L2_PIX_FMT_NV12_10_COL128
+++#define V4L2_PIX_FMT_NV12_10_COL128 v4l2_fourcc('N', 'C', '3', '0')
+++#endif
+++
+++#ifndef V4L2_PIX_FMT_NV12_COL128
+++#define V4L2_PIX_FMT_NV12_COL128 v4l2_fourcc('N', 'C', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
+++#endif
+++
+ +uint64_t ff_v4l2_request_get_capture_timestamp(AVFrame *frame)
+ +{
+ +    V4L2RequestDescriptor *req = (V4L2RequestDescriptor*)frame->data[0];
+@@ -53897,10 +53905,10 @@ index 0000000000..d6332c01c7
+ +};
+ diff --git a/libavcodec/v4l2_request_hevc.c b/libavcodec/v4l2_request_hevc.c
+ new file mode 100644
+-index 0000000000..dc4ff84168
++index 0000000000..755097e60b
+ --- /dev/null
+ +++ b/libavcodec/v4l2_request_hevc.c
+-@@ -0,0 +1,1183 @@
++@@ -0,0 +1,1190 @@
+ +/*
+ + * This file is part of FFmpeg.
+ + *
+@@ -53958,6 +53966,13 @@ index 0000000000..dc4ff84168
+ +#define DRM_FORMAT_NV20 fourcc_code('N', 'V', '2', '0')
+ +#endif
+ +
+++#ifndef V4L2_PIX_FMT_NV12_10_COL128
+++#define V4L2_PIX_FMT_NV12_10_COL128 v4l2_fourcc('N', 'C', '3', '0')
+++#endif
+++
+++#ifndef V4L2_PIX_FMT_NV12_COL128
+++#define V4L2_PIX_FMT_NV12_COL128 v4l2_fourcc('N', 'C', '1', '2') /* 12  Y/CbCr 4:2:0 128 pixel wide column */
+++#endif
+ +
+ +// Attached to buf[0] in frame
+ +// Pooled in hwcontext so generally create once - 1/frame
+@@ -55910,7 +55925,7 @@ index 0000000000..53cba826e4
+ +
+ +#endif
+ diff --git a/libavcodec/vp8.c b/libavcodec/vp8.c
+-index bab4223aca..0e1edb46fb 100644
++index e84fcdeaa1..0608d9e4e1 100644
+ --- a/libavcodec/vp8.c
+ +++ b/libavcodec/vp8.c
+ @@ -175,6 +175,9 @@ static enum AVPixelFormat get_pixel_format(VP8Context *s)
+@@ -59067,7 +59082,7 @@ index 0000000000..fbea56dd09
+ +};
+ +
+ diff --git a/libavformat/mpegts.c b/libavformat/mpegts.c
+-index 1da81a0fe6..089ace9f36 100644
++index bc24d89cd0..701a092c1b 100644
+ --- a/libavformat/mpegts.c
+ +++ b/libavformat/mpegts.c
+ @@ -2352,7 +2352,7 @@ static void pmt_cb(MpegTSFilter *filter, const uint8_t *section, int section_len
+@@ -59091,10 +59106,10 @@ index 1da81a0fe6..089ace9f36 100644
+       * Sometimes we receive EPG packets but SDT table do not have
+       * eit_pres_following or eit_sched turned on, so we open EPG
+ diff --git a/libavformat/utils.c b/libavformat/utils.c
+-index ba8aaebfb7..4c7bd7f5e1 100644
++index 7185fbfd71..c7b0553903 100644
+ --- a/libavformat/utils.c
+ +++ b/libavformat/utils.c
+-@@ -3044,6 +3044,40 @@ static int has_codec_parameters(AVStream *st, const char **errmsg_ptr)
++@@ -3048,6 +3048,40 @@ static int has_codec_parameters(AVStream *st, const char **errmsg_ptr)
+      return 1;
+  }
+
+@@ -59135,7 +59150,7 @@ index ba8aaebfb7..4c7bd7f5e1 100644
+  /* returns 1 or 0 if or if not decoded data was returned, or a negative error */
+  static int try_decode_frame(AVFormatContext *s, AVStream *st,
+                              const AVPacket *avpkt, AVDictionary **options)
+-@@ -3078,7 +3112,11 @@ static int try_decode_frame(AVFormatContext *s, AVStream *st,
++@@ -3082,7 +3116,11 @@ static int try_decode_frame(AVFormatContext *s, AVStream *st,
+          av_dict_set(options ? options : &thread_opt, "threads", "1", 0);
+          if (s->codec_whitelist)
+              av_dict_set(options ? options : &thread_opt, "codec_whitelist", s->codec_whitelist, 0);
+@@ -59148,7 +59163,7 @@ index ba8aaebfb7..4c7bd7f5e1 100644
+          if (!options)
+              av_dict_free(&thread_opt);
+          if (ret < 0) {
+-@@ -3109,6 +3147,14 @@ static int try_decode_frame(AVFormatContext *s, AVStream *st,
++@@ -3113,6 +3151,14 @@ static int try_decode_frame(AVFormatContext *s, AVStream *st,
+          if (avctx->codec_type == AVMEDIA_TYPE_VIDEO ||
+              avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
+              ret = avcodec_send_packet(avctx, &pkt);
+@@ -59163,7 +59178,7 @@ index ba8aaebfb7..4c7bd7f5e1 100644
+              if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
+                  break;
+              if (ret >= 0)
+-@@ -3719,9 +3765,20 @@ FF_ENABLE_DEPRECATION_WARNINGS
++@@ -3723,9 +3769,20 @@ FF_ENABLE_DEPRECATION_WARNINGS
+          // Try to just open decoders, in case this is enough to get parameters.
+          if (!has_codec_parameters(st, NULL) && st->request_probe <= 0) {
+              if (codec && !avctx->codec)
+@@ -62253,7 +62268,7 @@ index 0000000000..9e3bbfa190
+ +# -Wa,-ahls
+ diff --git a/pi-util/conf_h265.2016.csv b/pi-util/conf_h265.2016.csv
+ new file mode 100644
+-index 0000000000..4efd5d1c67
++index 0000000000..d4a9fa3668
+ --- /dev/null
+ +++ b/pi-util/conf_h265.2016.csv
+ @@ -0,0 +1,195 @@
+@@ -62454,7 +62469,7 @@ index 0000000000..4efd5d1c67
+ +1,local/intra_pred_21_laps,intra_pred_21_laps.265,intra_pred_21_laps.md5,8
+ diff --git a/pi-util/conf_h265.2016_HEVC_v1.csv b/pi-util/conf_h265.2016_HEVC_v1.csv
+ new file mode 100644
+-index 0000000000..6082641271
++index 0000000000..b482907fcb
+ --- /dev/null
+ +++ b/pi-util/conf_h265.2016_HEVC_v1.csv
+ @@ -0,0 +1,147 @@
+@@ -62607,7 +62622,7 @@ index 0000000000..6082641271
+ +1,WPP_F_ericsson_MAIN_2,WPP_F_ericsson_MAIN_2.bit,WPP_F_ericsson_MAIN_2_yuv.md5
+ diff --git a/pi-util/conf_h265.csv b/pi-util/conf_h265.csv
+ new file mode 100644
+-index 0000000000..fc14f2a3c2
++index 0000000000..113528cfb0
+ --- /dev/null
+ +++ b/pi-util/conf_h265.csv
+ @@ -0,0 +1,144 @@
