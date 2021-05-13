@@ -4,23 +4,25 @@
 buildarch=4
 
 pkgbase=linux-odroid-xu3
-_commit=7a87c7a444ab5e0a93314d1d311e5cc1ca358274
+_commit=864c4519b77763274b61a035b33bc92f71084b59
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _desc="ODROID-XU3/XU4/HC1"
 pkgver=4.14.180
-pkgrel=1
+pkgrel=2
 arch=('armv7h')
 url="https://github.com/hardkernel/linux"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git')
 options=('!strip')
 source=("https://github.com/hardkernel/linux/archive/${_commit}.tar.gz"
+        '0001-rtl8812au-sprintf-fix-gcc10.patch'
         'config'
         'linux.preset'
         '99-linux.hook')
-md5sums=('916ab700e0e1eb773745715f99258d6f'
-         '170cdff5ddd12492e205c61261e9ff74'
+md5sums=('249d4767373ab56ae16a0a23a69c61a2'
+         '20bf3136f2725be5b6a2eb7a5a8682bf'
+         '52c34a510c9d93755d6fb1f93ea5b574'
          'a84976d500db50cee07177eccfe2f455'
          '79fa396e3f9a09a85156d6d7c2d34b58')
 
@@ -28,6 +30,8 @@ prepare() {
   cd "${srcdir}/${_srcname}"
 
   cat "${srcdir}/config" > ./.config
+
+  patch -Np1 -i ../0001-rtl8812au-sprintf-fix-gcc10.patch
 
   # add pkgrel to extraversion
   sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
