@@ -5,7 +5,7 @@
 #  - explicitly link v5/v6 with libatomic
 
 pkgname=haproxy
-pkgver=2.3.10
+pkgver=2.4.0
 pkgrel=1
 
 pkgdesc='Reliable, high performance TCP/HTTP load balancer'
@@ -23,38 +23,46 @@ install=haproxy.install
 source=(https://www.haproxy.org/download/${pkgver%.*}/src/haproxy-$pkgver.tar.gz
         haproxy.cfg
         haproxy.sysusers
-        0001-Use-CFLAGS-and-LDFLAGS-when-building-contrib.patch)
+        0001-Use-CFLAGS-and-LDFLAGS-when-building-admin.patch)
 
-sha256sums=('9946e0cfc83f29072b3431e37246221cf9d4a9d28a158c075714d345266f4f35'
+sha256sums=('0a6962adaf5a1291db87e3eb4ddf906a72fed535dbd2255b164b7d8394a53640'
             'e88edeb2fe23508565e46ff485c93cfb7c2e9c64f231538452ec7ecd7ec37a42'
             'b02b4088205039f0979aef0ef3e22957f493dd54eabefaee7011f2d795303b3e'
-            '81c03ef5d69f4f2ef2c7caa6722c82cda4a53b65f788a46e668ec2faa3abd8f5')
+            '8cdbb8be7a712f7b2c7f4823a96d2d2926d96b57632e9669069354d7f2df9fd2')
 
 prepare() {
   cd haproxy-$pkgver
 
-  patch -p1 <"$srcdir"/0001-Use-CFLAGS-and-LDFLAGS-when-building-contrib.patch
+  patch -p1 <"$srcdir"/0001-Use-CFLAGS-and-LDFLAGS-when-building-admin.patch
 }
 
 build() {
   cd haproxy-$pkgver
 
   [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && ADDLIB="-latomic"
-  make CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" \
+  make \
     ADDLIB=$ADDLIB \
+    CFLAGS="$CFLAGS" \
+    LDFLAGS="$LDFLAGS" \
     CPU=generic \
     TARGET=linux-glibc \
     USE_GETADDRINFO=1 \
+    USE_LUA=1 \
     USE_OPENSSL=1 \
     USE_PCRE=1 USE_PCRE_JIT=1 \
-    USE_ZLIB=1 \
-    USE_LUA=1 \
+    USE_PROMEX=1 \
     USE_SYSTEMD=1 \
-    EXTRA_OBJS="contrib/prometheus-exporter/service-prometheus.o"
+    USE_ZLIB=1
 
-  for contrib in halog iprange ip6range systemd; do
-    make -C contrib/$contrib SBINDIR=/usr/bin OPTIMIZE= CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"
-  done
+    make \
+      SBINDIR=/usr/bin \
+      OPTIMIZE= \
+      CFLAGS="$CFLAGS" \
+      LDFLAGS="$LDFLAGS" \
+      admin/{halog/halog,iprange/ip{,6}range}
+    make \
+      SBINDIR=/usr/bin \
+      -C admin/systemd/
 }
 
 package() {
@@ -65,13 +73,13 @@ package() {
     DOCDIR="$pkgdir"/usr/share/$pkgname \
     install
 
-  for contrib in halog iprange ip6range; do
-    install -Dm755 contrib/$contrib/$contrib "$pkgdir"/usr/bin/$contrib
+  for admin in admin/{halog/halog,iprange/ip{,6}range}; do
+    install -D -m0755 $admin "$pkgdir"/usr/bin/$(basename $admin)
   done
 
-  install -Dm644 ../haproxy.sysusers "$pkgdir"/usr/lib/sysusers.d/haproxy.conf
-  install -Dm644 ../haproxy.cfg "$pkgdir"/etc/haproxy/haproxy.cfg
-  install -Dm644 contrib/systemd/haproxy.service \
+  install -D -m0644 ../haproxy.sysusers "$pkgdir"/usr/lib/sysusers.d/haproxy.conf
+  install -D -m0644 ../haproxy.cfg "$pkgdir"/etc/haproxy/haproxy.cfg
+  install -D -m0644 admin/systemd/haproxy.service \
     "$pkgdir"/usr/lib/systemd/system/haproxy.service
   cp -r examples "$pkgdir"/usr/share/haproxy/examples
 }
