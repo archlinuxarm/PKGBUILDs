@@ -10,8 +10,8 @@
 #  - patch to fix application/gzip change in file 5.37
 
 pkgname=pacman
-pkgver=5.2.2
-pkgrel=4
+pkgver=6.0.0
+pkgrel=2
 pkgdesc="A library-based package manager with dependency support"
 arch=('x86_64')
 url="https://www.archlinux.org/pacman/"
@@ -19,7 +19,7 @@ license=('GPL')
 groups=('base-devel')
 depends=('bash' 'glibc' 'libarchive' 'curl'
          'gpgme' 'pacman-mirrorlist' 'archlinuxarm-keyring')
-makedepends=('asciidoc')
+makedepends=('meson' 'asciidoc' 'doxygen')
 checkdepends=('python' 'fakechroot')
 optdepends=('perl-locale-gettext: translation support in makepkg-template')
 provides=('libalpm.so')
@@ -28,29 +28,22 @@ backup=(etc/pacman.conf
 options=('strip' 'debug')
 validpgpkeys=('6645B0A8C7005E78DB1D7864F99FFE0FEAE999BD'  # Allan McRae <allan@archlinux.org>
               'B8151B117037781095514CA7BBDFFC92306B1121') # Andrew Gregory (pacman) <andrew@archlinux.org>
-source=(https://sources.archlinux.org/other/pacman/$pkgname-$pkgver.tar.gz{,.sig}
+source=(https://sources.archlinux.org/other/pacman/$pkgname-$pkgver.tar.xz{,.sig}
         0001-Sychronize-filesystem.patch
         0002-Revert-close-stdin-before-running-install-scripts.patch
         0003-Revert-alpm_run_chroot-always-connect-parent2child-p.patch
         pacman.conf
-        makepkg.conf
-        pacman-5.2.2-fix-strip-messing-up-file-attributes.patch::'https://git.archlinux.org/pacman.git/patch/?id=88d054093c1c99a697d95b26bd9aad5bc4d8e170'
-	pacman-5.2.2-fix-debug-packages-with-gcc11.patch::'https://git.archlinux.org/pacman.git/patch/?id=bdf6aa3fb757a2363a4e708174b7d23a4997763d')  
-sha256sums=('bb201a9f2fb53c28d011f661d50028efce6eef2c1d2a36728bdd0130189349a0'
+        makepkg.conf)
+sha256sums=('004448085a7747bdc7a0a4dd5d1fb7556c6b890111a06e029ab088f9905d4808'
             'SKIP'
             '187bef40b14461ef7caba83e8124b6725e0cc9d46fa84353dae3b2afdc013589'
             '83597d3092edb2414d3b1a3e2e7337c0edcf102636a5884f3d3f3755fdceb2b0'
             '6e6434d123dd57961922627b39d967de384e3902a041e12dfc077081552fec28'
-            '7210ba34cc95650425b9be1e9f87f77637348b8bd77c8cb68ab293ac08871aee'
-            '636ed8abfb219770251df5fb46cf6e7717aec9329526c5a13cbf223ad9950878'
-            '871fd97b3f13f1718358e4b8e046a56c0262c9042b5e3b5d60835606735798bd'
-            '6be31dd7f4e1645e58c26fafaf1d9df4ba5e31b629fc3e8f4070d771571d0011')
+            '19f189accab294af7085cb709417eb41784d21aa8da07a8aa24bf7591ec3ce94'
+            '5db3f78ca0c3afa0678d5df83df810c202ce1fbdc82f8f73d90515929c0eb4ce')
 
 prepare() {
   cd "$pkgname-$pkgver"
-
-  patch -Np1 < "$srcdir"/pacman-5.2.2-fix-strip-messing-up-file-attributes.patch
-  patch -Np1 < "$srcdir"/pacman-5.2.2-fix-debug-packages-with-gcc11.patch
 
   patch -p1 -i ../0001-Sychronize-filesystem.patch
   patch -p1 -i ../0002-Revert-close-stdin-before-running-install-scripts.patch
@@ -60,21 +53,27 @@ prepare() {
 build() {
   cd "$pkgname-$pkgver"
 
-  ./configure --prefix=/usr --sysconfdir=/etc \
-    --localstatedir=/var --enable-doc \
-    --with-scriptlet-shell=/usr/bin/bash \
-    --with-ldconfig=/usr/bin/ldconfig
-  make V=1
+  meson --prefix=/usr \
+        --buildtype=plain \
+        -Ddoc=enabled \
+        -Ddoxygen=enabled \
+        -Dscriptlet-shell=/usr/bin/bash \
+        -Dldconfig=/usr/bin/ldconfig \
+        build
+
+  meson compile -C build
 }
 
 check() {
-  make -C "$pkgname-$pkgver" check
+  cd "$pkgname-$pkgver"
+
+  meson test -C build
 }
 
 package() {
   cd "$pkgname-$pkgver"
 
-  make DESTDIR="$pkgdir" install
+  DESTDIR="$pkgdir" meson install -C build
 
   # install Arch specific stuff
   install -dm755 "$pkgdir/etc"
