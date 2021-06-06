@@ -1,0 +1,85 @@
+commit b08a140a8fe8d0b0d16a93042b4952d6e34ab913
+Author: Piotr Sobczak <Piotr.Sobczak@amd.com>
+Date:   Wed Jan 27 16:02:49 2021 +0100
+
+    [AMDGPU] Avoid an illegal operand in si-shrink-instructions
+    
+    Before the patch it was possible to trigger a constant bus
+    violation when folding immediates into a shrunk instruction.
+    
+    The patch adds a check to enforce the legality of the new operand.
+    
+    Differential Revision: https://reviews.llvm.org/D95527
+
+diff --git a/llvm/lib/Target/AMDGPU/SIShrinkInstructions.cpp b/llvm/lib/Target/AMDGPU/SIShrinkInstructions.cpp
+index 9c6833a7dab6..6c1b16eddc84 100644
+--- a/llvm/lib/Target/AMDGPU/SIShrinkInstructions.cpp
++++ b/llvm/lib/Target/AMDGPU/SIShrinkInstructions.cpp
+@@ -84,21 +84,23 @@ static bool foldImmediates(MachineInstr &MI, const SIInstrInfo *TII,
+         MachineOperand &MovSrc = Def->getOperand(1);
+         bool ConstantFolded = false;
+ 
+-        if (MovSrc.isImm() && (isInt<32>(MovSrc.getImm()) ||
+-                               isUInt<32>(MovSrc.getImm()))) {
+-          // It's possible to have only one component of a super-reg defined by
+-          // a single mov, so we need to clear any subregister flag.
+-          Src0.setSubReg(0);
+-          Src0.ChangeToImmediate(MovSrc.getImm());
+-          ConstantFolded = true;
+-        } else if (MovSrc.isFI()) {
+-          Src0.setSubReg(0);
+-          Src0.ChangeToFrameIndex(MovSrc.getIndex());
+-          ConstantFolded = true;
+-        } else if (MovSrc.isGlobal()) {
+-          Src0.ChangeToGA(MovSrc.getGlobal(), MovSrc.getOffset(),
+-                          MovSrc.getTargetFlags());
+-          ConstantFolded = true;
++        if (TII->isOperandLegal(MI, Src0Idx, &MovSrc)) {
++          if (MovSrc.isImm() &&
++              (isInt<32>(MovSrc.getImm()) || isUInt<32>(MovSrc.getImm()))) {
++            // It's possible to have only one component of a super-reg defined
++            // by a single mov, so we need to clear any subregister flag.
++            Src0.setSubReg(0);
++            Src0.ChangeToImmediate(MovSrc.getImm());
++            ConstantFolded = true;
++          } else if (MovSrc.isFI()) {
++            Src0.setSubReg(0);
++            Src0.ChangeToFrameIndex(MovSrc.getIndex());
++            ConstantFolded = true;
++          } else if (MovSrc.isGlobal()) {
++            Src0.ChangeToGA(MovSrc.getGlobal(), MovSrc.getOffset(),
++                            MovSrc.getTargetFlags());
++            ConstantFolded = true;
++          }
+         }
+ 
+         if (ConstantFolded) {
+diff --git a/llvm/test/CodeGen/AMDGPU/shrink-instructions-illegal-fold.mir b/llvm/test/CodeGen/AMDGPU/shrink-instructions-illegal-fold.mir
+new file mode 100644
+index 000000000000..7889f437facf
+--- /dev/null
++++ b/llvm/test/CodeGen/AMDGPU/shrink-instructions-illegal-fold.mir
+@@ -0,0 +1,23 @@
++# RUN: llc -march=amdgcn -mcpu=gfx900 -run-pass=si-shrink-instructions --verify-machineinstrs %s -o - | FileCheck %s
++
++# Make sure immediate folding into V_CNDMASK respects constant bus restrictions.
++---
++
++name:            shrink_cndmask_illegal_imm_folding
++tracksRegLiveness: true
++body:             |
++  bb.0:
++    liveins: $vgpr0, $vgpr1
++    ; CHECK-LABEL: name: shrink_cndmask_illegal_imm_folding
++    ; CHECK: [[COPY:%[0-9]+]]:vgpr_32 = COPY $vgpr0
++    ; CHECK: [[MOV:%[0-9]+]]:vgpr_32 = V_MOV_B32_e32 32768, implicit $exec
++    ; CHECK: V_CMP_EQ_U32_e32 0, [[COPY]], implicit-def $vcc, implicit $exec
++    ; CHECK: V_CNDMASK_B32_e32 [[MOV]], killed [[COPY]], implicit $vcc, implicit $exec
++
++    %0:vgpr_32 = COPY $vgpr0
++    %1:vgpr_32 = V_MOV_B32_e32 32768, implicit $exec
++    V_CMP_EQ_U32_e32 0, %0:vgpr_32, implicit-def $vcc, implicit $exec
++    %2:vgpr_32 = V_CNDMASK_B32_e64 0, %1:vgpr_32, 0, killed %0:vgpr_32, $vcc, implicit $exec
++    S_NOP 0
++
++...
