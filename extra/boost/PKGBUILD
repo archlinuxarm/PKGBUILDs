@@ -16,24 +16,33 @@ pkgbase=boost
 pkgname=('boost-libs' 'boost')
 pkgver=1.75.0
 _boostver=${pkgver//./_}
-pkgrel=3
+pkgrel=5
 pkgdesc='Free peer-reviewed portable C++ source libraries'
 url='https://www.boost.org/'
 arch=('x86_64')
 license=('custom')
 makedepends=('icu' 'python' 'python-numpy' 'bzip2' 'zlib' 'openmpi' 'zstd' 'findutils')
-source=(https://dl.bintray.com/boostorg/release/${pkgver}/source/boost_${_boostver}.tar.bz2
-        ${pkgbase}-ublas-c++20-iterator.patch::https://github.com/boostorg/ublas/commit/a31e5cffa85f.patch)
-sha256sums=('953db31e016db7bb207f11432bef7df100516eeb746843fa0486a222e3fd49cb'
-            'aa38addb40d5f44b4a8472029b475e7e6aef1c460509eb7d8edf03491dc1b5ee')
-b2sums=('ce7ecd8bcee518ce54f7e5302f202acbea60cedd6ae9248708c0bb5bbc2713607b2e1967a9e6f77cc20a4c008c1ee4db651def55937efc80407487a7a44fa8d6'
-        'e5f6d4884eaa557d5547e7e079c2edb4ed9f2f4cd8579aa32a2150f824a5d04413f2a91e79b3139d5b915da6a46f7835f1438ad53f33096973f1a99f378ec1d3')
+source=(https://boostorg.jfrog.io/artifactory/main/release/$pkgver/source/boost_$_boostver.tar.gz
+        ${pkgbase}-ublas-c++20-iterator.patch::https://github.com/boostorg/ublas/commit/a31e5cffa85f.patch
+        5bd5bfb9.patch
+        b29603fa.patch)
+sha256sums=('aeb26f80e80945e82ee93e5939baebdca47b9dee80a07d3144be1e1a6a66dd6a'
+            'aa38addb40d5f44b4a8472029b475e7e6aef1c460509eb7d8edf03491dc1b5ee'
+            'fbb27a583a6c61c4fe50621d08a8b4fd5b4a0563a48f47185fc462cb29a38540'
+            '3e431e5f7f023feb8e7c4d64e8d9989315dfcd4e36cdb965043ac5221497746c')
+b2sums=('98f8bb2d3198a74044e7db1549f6f2e68a9f381febac36aa976f7ed4d1cc7be47e79f86cde0b13e3b5d1109fc1792408c9dc78b01198b53690449d5842f1fe2d'
+        'e5f6d4884eaa557d5547e7e079c2edb4ed9f2f4cd8579aa32a2150f824a5d04413f2a91e79b3139d5b915da6a46f7835f1438ad53f33096973f1a99f378ec1d3'
+        'e54c2939c8f965294c4d3726c97965725890cabd09d25cfc177c316c8a072bbc1e272ce127f1352be83c668116d70992e52ab24b41d19aaccd89fb1701235c48'
+        '9b336d8726e2636112724f19510cf1fe02c8306854d386308b77dd2c318f78e0c6cb4412a916e2e69544b218e9e455d50550c086c88c49736c5f551bda777132')
 
 prepare() {
    cd ${pkgbase}_${_boostver}
 
    # https://github.com/boostorg/ublas/pull/97
    patch -Np2 -i ../${pkgbase}-ublas-c++20-iterator.patch
+
+   patch -p1 < ../5bd5bfb9.patch # https://github.com/boostorg/histogram/pull/302
+   patch -d tools/build -p1 < ../b29603fa.patch # https://github.com/boostorg/build/issues/650
 }
 
 build() {
@@ -41,14 +50,17 @@ build() {
    export _stagedir="${srcdir}/stagedir"
    local JOBS="$(sed -e 's/.*\(-j *[0-9]\+\).*/\1/' <<< ${MAKEFLAGS})"
 
+   pushd ${pkgbase}_${_boostver}/tools/build
+   ./bootstrap.sh
+   ./b2 install --prefix="${_stagedir}"
+   popd
+
    cd ${pkgbase}_${_boostver}
 
    ./bootstrap.sh \
      --with-toolset=gcc \
      --with-icu \
      --with-python=/usr/bin/python3 \
-
-   install -Dm755 tools/build/src/engine/b2 "${_stagedir}"/bin/b2
 
    # Support for OpenMPI
    echo "using mpi ;" >> project-config.jam
