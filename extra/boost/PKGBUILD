@@ -1,4 +1,5 @@
-# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Evangelos Foutras <evangelos@foutrelis.com>
+# Contributor: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Marius Knaust <marius.knaust@gmail.com>
 # Contributor: Ionut Biru <ibiru@archlinux.org>
@@ -12,146 +13,116 @@
 #  - build armv6h with -march=armv6k
 #  - specify arm architecture to b2 for aarch64
 
-pkgbase=boost
-pkgname=('boost-libs' 'boost')
-pkgver=1.75.0
-_boostver=${pkgver//./_}
-pkgrel=5
-pkgdesc='Free peer-reviewed portable C++ source libraries'
-url='https://www.boost.org/'
+pkgname=('boost' 'boost-libs')
+pkgver=1.76.0
+pkgrel=1
+_srcname=boost_${pkgver//./_}
+pkgdesc="Free peer-reviewed portable C++ source libraries"
 arch=('x86_64')
+url="https://www.boost.org/"
 license=('custom')
-makedepends=('icu' 'python' 'python-numpy' 'bzip2' 'zlib' 'openmpi' 'zstd' 'findutils')
-source=(https://boostorg.jfrog.io/artifactory/main/release/$pkgver/source/boost_$_boostver.tar.gz
-        ${pkgbase}-ublas-c++20-iterator.patch::https://github.com/boostorg/ublas/commit/a31e5cffa85f.patch
-        5bd5bfb9.patch
-        b29603fa.patch)
-sha256sums=('aeb26f80e80945e82ee93e5939baebdca47b9dee80a07d3144be1e1a6a66dd6a'
-            'aa38addb40d5f44b4a8472029b475e7e6aef1c460509eb7d8edf03491dc1b5ee'
-            'fbb27a583a6c61c4fe50621d08a8b4fd5b4a0563a48f47185fc462cb29a38540'
-            '3e431e5f7f023feb8e7c4d64e8d9989315dfcd4e36cdb965043ac5221497746c')
-b2sums=('98f8bb2d3198a74044e7db1549f6f2e68a9f381febac36aa976f7ed4d1cc7be47e79f86cde0b13e3b5d1109fc1792408c9dc78b01198b53690449d5842f1fe2d'
-        'e5f6d4884eaa557d5547e7e079c2edb4ed9f2f4cd8579aa32a2150f824a5d04413f2a91e79b3139d5b915da6a46f7835f1438ad53f33096973f1a99f378ec1d3'
-        'e54c2939c8f965294c4d3726c97965725890cabd09d25cfc177c316c8a072bbc1e272ce127f1352be83c668116d70992e52ab24b41d19aaccd89fb1701235c48'
-        '9b336d8726e2636112724f19510cf1fe02c8306854d386308b77dd2c318f78e0c6cb4412a916e2e69544b218e9e455d50550c086c88c49736c5f551bda777132')
+makedepends=('icu' 'python' 'python-numpy' 'bzip2' 'zlib' 'openmpi' 'zstd')
+source=(https://boostorg.jfrog.io/artifactory/main/release/$pkgver/source/$_srcname.tar.gz
+        $pkgname-ublas-c++20-iterator.patch::https://github.com/boostorg/ublas/commit/a31e5cffa85f.patch)
+sha256sums=('7bd7ddceec1a1dfdcbdb3e609b60d01739c38390a5f956385a12f3122049f0ca'
+            'aa38addb40d5f44b4a8472029b475e7e6aef1c460509eb7d8edf03491dc1b5ee')
 
 prepare() {
-   cd ${pkgbase}_${_boostver}
+  cd $_srcname
 
-   # https://github.com/boostorg/ublas/pull/97
-   patch -Np2 -i ../${pkgbase}-ublas-c++20-iterator.patch
-
-   patch -p1 < ../5bd5bfb9.patch # https://github.com/boostorg/histogram/pull/302
-   patch -d tools/build -p1 < ../b29603fa.patch # https://github.com/boostorg/build/issues/650
+  # https://github.com/boostorg/ublas/pull/97
+  patch -Np2 -i ../$pkgname-ublas-c++20-iterator.patch
 }
 
 build() {
-   CFLAGS=`echo $CFLAGS | sed -e 's/armv6/armv6k/'` && CXXFLAGS="$CFLAGS"
-   export _stagedir="${srcdir}/stagedir"
-   local JOBS="$(sed -e 's/.*\(-j *[0-9]\+\).*/\1/' <<< ${MAKEFLAGS})"
+  CFLAGS=`echo $CFLAGS | sed -e 's/armv6/armv6k/'` && CXXFLAGS="$CFLAGS"
+  local JOBS="$(sed 's/.*\(-j *[0-9]\+\).*/\1/' <<<$MAKEFLAGS)"
 
-   pushd ${pkgbase}_${_boostver}/tools/build
-   ./bootstrap.sh
-   ./b2 install --prefix="${_stagedir}"
-   popd
+  pushd $_srcname/tools/build
+  ./bootstrap.sh --cxxflags="$CXXFLAGS $LDFLAGS"
+  ./b2 install --prefix="$srcdir"/fakeinstall
+  ln -s b2 "$srcdir"/fakeinstall/bin/bjam
+  popd
 
-   cd ${pkgbase}_${_boostver}
+  cd $_srcname
+  ./bootstrap.sh --with-toolset=gcc --with-icu --with-python=python3
 
-   ./bootstrap.sh \
-     --with-toolset=gcc \
-     --with-icu \
-     --with-python=/usr/bin/python3 \
+  # support for OpenMPI
+  echo "using mpi ;" >>project-config.jam
 
-   # Support for OpenMPI
-   echo "using mpi ;" >> project-config.jam
+  # boostbook is needed by quickbook
+  install -dm755 "$srcdir"/fakeinstall/share/boostbook
+  cp -a tools/boostbook/{xsl,dtd} "$srcdir"/fakeinstall/share/boostbook/
 
-   # boostbook is needed by quickbook
-   install -dm755 "${_stagedir}"/share/boostbook
-   cp -a tools/boostbook/{xsl,dtd} "${_stagedir}"/share/boostbook/
-
-   # default "minimal" install: "release link=shared,static
-   # runtime-link=shared threading=single,multi"
-   # --layout=tagged will add the "-mt" suffix for multithreaded libraries
-   # and installs includes in /usr/include/boost.
-   # --layout=system no longer adds the -mt suffix for multi-threaded libs.
-   # install to ${_stagedir} in preparation for split packaging
-   "${_stagedir}"/bin/b2 \
-      architecture=arm \
-      variant=release \
-      debug-symbols=off \
-      threading=multi \
-      runtime-link=shared \
-      link=shared,static \
-      toolset=gcc \
-      python=3.9 \
-      cflags="${CPPFLAGS} ${CFLAGS} -fPIC -O3" \
-      cxxflags="${CPPFLAGS} ${CXXFLAGS} -std=c++14 -fPIC -O3" \
-      linkflags="${LDFLAGS}" \
-      --layout=system \
-      ${JOBS} \
-      \
-      --prefix="${_stagedir}" \
-      install
+  # install to $srcdir/fakeinstall in preparation for split packaging
+  ./b2 install \
+    architecture=arm \
+    variant=release \
+    debug-symbols=off \
+    threading=multi \
+    runtime-link=shared \
+    link=shared,static \
+    toolset=gcc \
+    python=3.9 \
+    cflags="$CPPFLAGS $CFLAGS -fPIC -O3" \
+    cxxflags="$CPPFLAGS $CXXFLAGS -fPIC -O3" \
+    linkflags="$LDFLAGS" \
+    --layout=system \
+    $JOBS \
+    \
+    --prefix="$srcdir"/fakeinstall
 }
 
 package_boost() {
-   pkgdesc+=' - development headers'
-   depends=("boost-libs=${pkgver}")
-   optdepends=('python: for python bindings')
-   options=('staticlibs')
+  pkgdesc+=' (development headers)'
+  depends=("boost-libs=$pkgver")
+  optdepends=('python: for python bindings')
+  options=('staticlibs')
 
-   install -dm755 "${pkgdir}"/usr
-   cp -a "${_stagedir}"/{bin,include,share} "${pkgdir}"/usr
+  install -d "$pkgdir"/usr/lib
+  cp -a fakeinstall/lib/*.a "$pkgdir"/usr/lib/
+  cp -a fakeinstall/lib/cmake "$pkgdir"/usr/lib/
+  cp -a fakeinstall/{bin,include,share} "$pkgdir"/usr/
 
-   install -d "${pkgdir}"/usr/lib
-   cp -a "${_stagedir}"/lib/*.a "${pkgdir}"/usr/lib/
-   cp -a "${_stagedir}"/lib/cmake "${pkgdir}"/usr/lib/
-
-   install -Dm644 "${srcdir}/"${pkgbase}_${_boostver}/LICENSE_1_0.txt \
-      "${pkgdir}"/usr/share/licenses/boost/LICENSE_1_0.txt
-
-   ln -s /usr/bin/b2 "$pkgdir"/usr/bin/bjam
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" $_srcname/LICENSE_1_0.txt
 }
 
 package_boost-libs() {
-   pkgdesc+=' - runtime libraries'
-   depends=('bzip2' 'zlib' 'icu' 'zstd')
-   optdepends=('openmpi: for mpi support')
-   provides=(libboost_atomic.so libboost_chrono.so libboost_container.so
-     libboost_context.so libboost_contract.so libboost_coroutine.so
-     libboost_date_time.so libboost_fiber.so libboost_filesystem.so
-     libboost_graph.so libboost_graph_parallel.so libboost_iostreams.so
-     libboost_locale.so libboost_log.so libboost_log_setup.so
-     libboost_math_c99.so libboost_math_c99f.so libboost_math_c99l.so
-     libboost_math_tr1.so libboost_math_tr1f.so libboost_math_tr1l.so
-     libboost_mpi.so libboost_numpy39.so
-     libboost_prg_exec_monitor.so libboost_program_options.so
-     libboost_python39.so libboost_random.so
-     libboost_regex.so libboost_serialization.so
-     libboost_stacktrace_addr2line.so libboost_stacktrace_basic.so
-     libboost_stacktrace_noop.so libboost_system.so libboost_thread.so
-     libboost_timer.so libboost_type_erasure.so libboost_unit_test_framework.so
-     libboost_wave.so libboost_wserialization.so)
+  pkgdesc+=' (runtime libraries)'
+  depends=('bzip2' 'zlib' 'icu' 'zstd')
+  optdepends=('openmpi: for mpi support')
+  provides=(libboost_atomic.so libboost_chrono.so libboost_container.so
+    libboost_context.so libboost_contract.so libboost_coroutine.so
+    libboost_date_time.so libboost_fiber.so libboost_filesystem.so
+    libboost_graph.so libboost_graph_parallel.so libboost_iostreams.so
+    libboost_json.so libboost_locale.so libboost_log.so libboost_log_setup.so
+    libboost_math_c99.so libboost_math_c99f.so libboost_math_c99l.so
+    libboost_math_tr1.so libboost_math_tr1f.so libboost_math_tr1l.so
+    libboost_mpi.so libboost_numpy39.so
+    libboost_prg_exec_monitor.so libboost_program_options.so
+    libboost_python39.so libboost_random.so
+    libboost_regex.so libboost_serialization.so
+    libboost_stacktrace_addr2line.so libboost_stacktrace_basic.so
+    libboost_stacktrace_noop.so libboost_system.so libboost_thread.so
+    libboost_timer.so libboost_type_erasure.so libboost_unit_test_framework.so
+    libboost_wave.so libboost_wserialization.so)
 
-   install -dm755 "${pkgdir}"/usr
-   cp -a "${_stagedir}"/lib "${pkgdir}"/usr
-   rm "${pkgdir}"/usr/lib/*.a
-   rm -r "${pkgdir}"/usr/lib/cmake
+  install -dm755 "$pkgdir"/usr/lib
+  cp -a fakeinstall/lib/*.so* "$pkgdir"/usr/lib/
 
-   # https://github.com/boostorg/mpi/issues/112
-   install -d "${pkgdir}/usr/lib/python3.9/site-packages/boost"
-   touch "${pkgdir}/usr/lib/python3.9/site-packages/boost/__init__.py"
-   python -m compileall -o 0 -o 1 -o 2 "${pkgdir}/usr/lib/python3.9/site-packages/boost"
-   mv "${pkgdir}"/usr/lib/boost-python3.9/mpi.so \
-      "${pkgdir}/usr/lib/python3.9/site-packages/boost/mpi.so"
+  # https://github.com/boostorg/mpi/issues/112
+  install -d "$pkgdir"/usr/lib/python3.9/site-packages/boost
+  touch "$pkgdir"/usr/lib/python3.9/site-packages/boost/__init__.py
+  python -m compileall -o 0 -o 1 -o 2 "$pkgdir"/usr/lib/python3.9/site-packages/boost
+  cp fakeinstall/lib/boost-python3.9/mpi.so \
+    "$pkgdir"/usr/lib/python3.9/site-packages/boost/mpi.so
 
-   # https://github.com/boostorg/python/issues/203#issuecomment-391477685
-   for _lib in python numpy; do
-     ln -srL "${pkgdir}"/usr/lib/libboost_${_lib}3{9,}.so
-   done
+  # https://github.com/boostorg/python/issues/203#issuecomment-391477685
+  for _lib in python numpy; do
+    ln -srL "$pkgdir"/usr/lib/libboost_${_lib}3{9,}.so
+  done
 
-   install -Dm644 "${srcdir}/"${pkgbase}_${_boostver}/LICENSE_1_0.txt \
-      "${pkgdir}"/usr/share/licenses/boost-libs/LICENSE_1_0.txt
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" $_srcname/LICENSE_1_0.txt
 }
 
-# vim: ts=2 sw=2 et:
+# vim:set ts=2 sw=2 et:
