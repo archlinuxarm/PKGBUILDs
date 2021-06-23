@@ -1,0 +1,125 @@
+# Maintainer: Johannes Löthberg <johannes@kyriasis.com>
+# Maintainer: Thore Bödecker <foxxx0@archlinux.org>
+# Contributor:  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Andreas Radke <andyrtr@archlinux.org>
+# Contributor: Paul Mattal <paul@mattal.com>
+# Contributor: Federico Quagliata (quaqo) <quaqo@despammed.com>
+# Contributor: GARETTE Emmanuel <gnunux at laposte dot net>
+# Contributor: Phillip Schichtel <phillip@schich.tel>
+
+# --->>> remember to rebuild/bump pigeonhole AND dovecot-fts-elastic in one step <<<---
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - makedepend on systemd to build service and socket files, reported upstream FS#71342
+
+pkgname=dovecot
+pkgver=2.3.15
+pkgrel=1.1
+
+pkgdesc="An IMAP and POP3 server written with security primarily in mind"
+url="https://dovecot.org/"
+arch=('x86_64')
+license=("LGPL")
+
+depends=('krb5' 'openssl' 'sqlite' 'mariadb-libs' 'libsodium'
+         'postgresql-libs' 'bzip2' 'lz4' 'expat' 'curl' 'pam')
+makedepends=('libcap' 'libldap' 'lua53' 'xz' 'clucene' 'systemd')
+optdepends=('libldap: ldap plugin'
+            'lua53: LUA auth and push support'
+            'clucene: alternative FTS indexer')
+
+provides=('imap-server' 'pop3-server')
+
+backup=('etc/pam.d/dovecot')
+
+options=('!emptydirs')
+
+source=("https://dovecot.org/releases/2.3/${pkgname}-${pkgver}.tar.gz"{,.sig}
+        'dovecot.sysusersd'
+        'dovecot.tmpfilesd'
+        'dovecot.ld.so.conf'
+        'dovecot.pam')
+
+sha256sums=('21bbdd5d45957a99133de8b7e71813ecb73d9476c89dfc63479e9102b3553590'
+            'SKIP'
+            'c5e3a8ffe23e5deb4f7893d9877d972347c2ee45c4ebf713de85c537e47cfcaf'
+            '0b0625b1e66ca6a95d506fd00d6a68e70620c8ea28606e2528953ffb1806b08e'
+            'a457a1691cfa82495fc0503bfa4b61e54b149e63400fe0f568dff2c24a3f7858'
+            'ad9245f5e916480edd67139603cbe52e7a868233075f900ab63a0ce58f03741a')
+
+validpgpkeys=(
+  'E643F0BDFDCD04D9FFCB6279C948525140558AC9' # Timo Sirainen <tss@iki.fi>
+  '2BE74AAB3EE754DFB9C80D3318A348AEED409DA1' # Dovecot Community Edition
+)
+
+prepare() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+
+  # fix path in helper script
+  sed -i 's:OPENSSLCONFIG=${OPENSSLCONFIG-dovecot-openssl.cnf}:OPENSSLCONFIG=${OPENSSLCONFIG- /etc/ssl/dovecot-openssl.cnf}:' doc/mkcert.sh
+}
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+
+  ./configure \
+    --prefix=/usr \
+    --sbindir=/usr/bin \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --libexecdir=/usr/lib \
+    --with-rundir=/run/dovecot \
+    --with-moduledir=/usr/lib/dovecot/modules \
+    --with-systemdsystemunitdir=/usr/lib/systemd/system \
+    --disable-static \
+    --with-nss \
+    --with-pam \
+    --with-sqlite \
+    --with-pgsql \
+    --with-mysql \
+    --with-ssl=openssl \
+    --with-ssldir=/etc/ssl \
+    --with-gssapi \
+    --with-ldap=plugin \
+    --with-lua=plugin \
+    --with-zlib \
+    --with-bzlib \
+    --with-lzma \
+    --with-lz4 \
+    --with-zstd \
+    --with-lucene \
+    --with-solr \
+    --with-sodium \
+    --with-libcap \
+    --with-docs
+
+  make
+}
+
+check() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  make check
+}
+
+package() {
+  # system user/group dovenull - 74
+  # system user/group dovecot  - 76
+
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  make DESTDIR="$pkgdir" install
+  install -Dm644 "${srcdir}/dovecot.sysusersd" \
+    "${pkgdir}/usr/lib/sysusers.d/dovecot.conf"
+  install -Dm644 "${srcdir}/dovecot.tmpfilesd" \
+    "${pkgdir}/usr/lib/tmpfiles.d/dovecot.conf"
+  install -d -m755 "${pkgdir}/etc/dovecot/conf.d"
+  rm -f "${pkgdir}/etc/dovecot/README"
+
+  # install mkcert helper script
+  install -m 755  doc/mkcert.sh "${pkgdir}/usr/lib/dovecot/mkcert.sh"
+
+  # add dovecot libdir
+  install -Dm644 "${srcdir}/dovecot.ld.so.conf" "${pkgdir}/etc/ld.so.conf.d/dovecot.conf"
+
+  # install PAM snippet for dovecot
+  install -Dm644 "${srcdir}/dovecot.pam" "${pkgdir}/etc/pam.d/dovecot"
+}
