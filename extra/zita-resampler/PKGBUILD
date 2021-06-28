@@ -1,0 +1,60 @@
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: speps <speps at aur dot archlinux dot org>
+# Contributor: Philipp Überbacher <murks at lavabit dot com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - disable SSE
+
+pkgname=zita-resampler
+pkgver=1.8.0
+pkgrel=1
+pkgdesc="A C++ library for resampling audio signals"
+url="https://kokkinizita.linuxaudio.org/linuxaudio/"
+arch=('x86_64')
+license=('GPL3')
+depends=('gcc-libs' 'glibc')
+makedepends=('libsndfile')
+optdepends=('libsndfile: for zresample and zretune')
+provides=('libzita-resampler.so')
+source=("https://kokkinizita.linuxaudio.org/linuxaudio/downloads/${pkgname}-${pkgver}.tar.bz2")
+sha512sums=('adf1f465ac09104be5a02c1cf0f052a44b4c1a448312f3aca016a889e98cfcdebfded38f60300ad85d18ae03eadca7e8e95efb2875267bc36435ccfac881a8e7')
+b2sums=('1ba5d255fff9c66e18e6177bc7e48a4710fdf54f58c07f162f8c8801f4f449b22dea9922645e7e33b70e07739c2b381176714e704f9840305f194f3c23d66de2')
+
+prepare() {
+  cd "${pkgname}-${pkgver}"
+  # FS#36248 - strip march=native
+  sed -e '/native/d' \
+      -i {source,apps}/Makefile
+  # removing local call to ldconfig
+  sed -e 's/ldconfig/& -N $(DESTDIR)\/$(LIBDIR)/' \
+      -i source/Makefile
+  # fix use of BINDIR without preceeding DESTDIR
+  # fix use of MANDIR without preceeding DESTDIR
+  sed -e 's/\ $(BINDIR)/\ $(DESTDIR)$(BINDIR)/' \
+      -e 's/\ $(MANDIR)/\ $(DESTDIR)$(MANDIR)/' \
+      -i apps/Makefile
+  # disable SSE
+  sed -e '/ENABLE_SSE2/d' \
+      -i source/Makefile
+}
+
+build() {
+  cd "${pkgname}-${pkgver}"
+  # libs
+  make -C source
+  # create lib link for building apps
+  ln -sv "lib${pkgname}.so.${pkgver}" "source/lib${pkgname}.so"
+  # apps
+  make LDFLAGS+=" -L../source" CXXFLAGS+=" -I../source" -C apps
+  # cleanup link
+  rm -rv "source/lib${pkgname}.so"
+}
+
+package() {
+  cd "${pkgname}-${pkgver}"
+  make -C source DESTDIR="$pkgdir/" PREFIX=/usr SUFFIX="" install
+  make -C apps DESTDIR="$pkgdir/" PREFIX=/usr install
+  # docs
+  install -vDm 644 {AUTHORS,README} docs/* \
+    -t "${pkgdir}/usr/share/doc/${pkgname}"
+}
