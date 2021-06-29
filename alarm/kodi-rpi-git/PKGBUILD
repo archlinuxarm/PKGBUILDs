@@ -15,8 +15,12 @@ pkgname=(
   'kodi-rpi-git-eventclients' 'kodi-rpi-git-tools-texturepacker' 'kodi-rpi-git-dev'
 )
 
-_commitnumber=57325
-_commit=402c0448948c3b433582478ba58f273fdf971ed9
+_commitnumber=57336
+_commit=a561c219c76b71cebeec07e5abc6d9b64e379489
+
+# set this to anything to build with clang
+# recommend manually setting -DUSE_LTO=OFF to -DUSE_LTO=$(nproc) in build()
+_clangbuild=
 
 pkgver="19.x.$_commitnumber.${_commit:0:10}"
 pkgrel=1
@@ -34,6 +38,8 @@ makedepends=(
   'upower' 'giflib' 'rapidjson' 'ghostscript' 'meson' 'gtest' 'graphviz'
   'libinput' 'libxkbcommon'
 )
+[[ -n "$_clangbuild" ]] && makedepends+=('clang' 'lld' 'llvm')
+
 _codename=Matrix
 _init_version=1.130
 _libdvdcss_version="1.4.2-Leia-Beta-5"
@@ -63,6 +69,8 @@ source=(
   kodi.config.txt
   use-mcpu-avoiding-march-and-mtune.patch
   0001-mcpu-cortex-application-to-ffmpeg.patch
+  0002-PR19891.patch::https://patch-diff.githubusercontent.com/raw/xbmc/xbmc/pull/19891.patch
+  0003-PR19892.patch::https://patch-diff.githubusercontent.com/raw/xbmc/xbmc/pull/19892.patch
 )
 backup=(boot/kodi.config.txt etc/conf.d/kodi-standalone)
 noextract=(
@@ -77,7 +85,7 @@ noextract=(
   "flatbuffers-$_flatbuffers_version.tar.gz"
   "libudfread-$_libudfread_version.tar.gz"
 )
-sha256sums=('471fbbc9fd54c525888798e501b910de13b51a7fa2e1ee23b22c540e08f032c3'
+sha256sums=('1e23983a66d14448338e6470f3de0da7d2f89b557e34e9e5fc553d33b1e0038e'
             '38816f8373e243bc5950449b4f3b18938c4e1c59348e3411e23f31db4072e40d'
             '071e414e61b795f2ff9015b21a85fc009dde967f27780d23092643916538a57a'
             'a30b6aa0aad0f2c505bc77948af2d5531a80b6e68112addb4c123fca24d5d3bf'
@@ -89,9 +97,11 @@ sha256sums=('471fbbc9fd54c525888798e501b910de13b51a7fa2e1ee23b22c540e08f032c3'
             'b38e0bbef7faac2b82fed550a0c19b0d4e7f6737d5321d4fd8f216b80f8aee8a'
             '5ad9f95c53e8f29853c1fefa0a20a301be4045e2c7ae49d1164bc74d94155627'
             '41bc9a846de2468a1cb90485b7d02dc7a761a65a2e82c36e64876812573fa64e'
-            '04cd3a4290ebd6584535cd107aaf9c2d0effa3e8713cf1d6abd6fe74fc142dad'
+            '33916114f9c73d113cf8835775220aeef6089329c76dee07750eba9bbd5b29aa'
             '16d6c79ff3a3d3653f21d77a36326a0335c8cec49a9c06dbc2de0ed143e50a9f'
-            '76eafede11af936bb554932b2be71ce91d4bf1c07107d847500ebbf3ff7d7245')
+            '76eafede11af936bb554932b2be71ce91d4bf1c07107d847500ebbf3ff7d7245'
+            '4f639508d1d9e7467aa37008ee2ceb71784b1dec4859bdb750a2066f5328cbde'
+            '6233ef319e08a3cb64fa3c989e7b13b794849aef261473d7ff14681996f94acc')
 
 prepare() {
   [[ -d kodi-build ]] && rm -rf kodi-build
@@ -105,6 +115,10 @@ prepare() {
 
   # patch kodi build system to apply the patch we just copied over
   patch -Np1 -i ../0001-mcpu-cortex-application-to-ffmpeg.patch
+
+  # fix for java >=9 and clang support
+  patch -Np1 -i ../0002-PR19891.patch
+  patch -Np1 -i ../0003-PR19892.patch
 }
 
 build() {
@@ -130,9 +144,18 @@ build() {
     export CXXFLAGS="${CFLAGS}"
   fi
 
+  if [[ -n "$_clangbuild" ]]; then
+    export CC=clang CXX=clang++
+    # depending on your build system, optionally redefine DISTCC_HOSTS
+    # since current toolchain does not include clang support x86_64 volunteers
+    #unset DISTCC_HOSTS
+    #export DISTCC_HOSTS="localhost/5 10.0.1.103/5:3636"
+  fi
+
   _args=(
     -DCORE_PLATFORM_NAME="x11 gbm"
     -DAPP_RENDER_SYSTEM=gles
+    -DVERBOSE=ON
     -DCMAKE_INSTALL_PREFIX=/usr
     -DCMAKE_INSTALL_LIBDIR=/usr/lib
     -DUSE_LTO=OFF
@@ -174,6 +197,8 @@ package_kodi-rpi-git() {
     'shairplay' 'smbclient' 'sqlite' 'taglib' 'tinyxml'
     'libinput' 'libxkbcommon' 'polkit' 'linux>=5.4.35'
   )
+  [[ -n "$_clangbuild" ]] && depends+=('glu')
+
   optdepends=(
     'afpfs-ng: Apple shares support'
     'bluez: Blutooth support'
