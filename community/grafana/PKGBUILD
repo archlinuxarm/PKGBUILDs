@@ -10,18 +10,20 @@ url='https://grafana.com/'
 arch=('x86_64')
 license=('Apache')
 depends=('glibc' 'freetype2' 'fontconfig' 'gsfonts')
-makedepends=('git' 'go' 'npm' 'grunt-cli' 'python' 'nodejs' 'yarn')
+makedepends=('git' 'go')
 backup=('etc/grafana.ini')
 source=("git+https://github.com/grafana/grafana.git#tag=v$pkgver"
         'grafana.service'
         'grafana.sysusers'
         'grafana.tmpfiles'
+        "grafana_x86_64.tar.zst::https://archive.archlinux.org/packages/g/grafana/grafana-$pkgver-$pkgrel-x86_64.pkg.tar.zst"
        )
 install=$pkgname.install
 sha512sums=('SKIP'
             '02a597225ee6ba8da9491a94daa33fe681846e2140e02fbb461ff7d39acd4cf99694dc03fb5f2c5ecfd180b09c44a41fe639b121499b4222b67ada57dc60d850'
             '38b46d953837a7afa5a654dfeef163b210d56cad57d937018531d00cd63b5341d6f9cd777299bdc7a994d0cb7df09b8157aad0f166e76ad47564e1ad6d5441d4'
-            'c1724bfc7cbd6a406f17acb661efca0f1e57e2c30cc1841f4cb7ccfc420adc40cc61cb1c023d00444827b2c40e9caa4c2fefbfd503419848c74a0b455b2375ab')
+            'c1724bfc7cbd6a406f17acb661efca0f1e57e2c30cc1841f4cb7ccfc420adc40cc61cb1c023d00444827b2c40e9caa4c2fefbfd503419848c74a0b455b2375ab'
+            '7a750264f9affcadc48dc9ba93b65f7aaf3bf202247b68e249f6d7f9401d112a9941fc97de203c73e54a389d99299796ad0721feff3ae84ac4d129d507085114')
 validpgpkeys=("D45B6DC53E9057C46487E25CE17E9ABACEFA59EB"
               "43511C6A68C9A1DE451EF51890AA4FDC4D63CBEA"
               "AA70DF6234FBF96AB9101D09E6D5D452E87026E9"  # https://github.com/aknuds1.gpg
@@ -52,6 +54,9 @@ prepare() {
 }
 
 build() {
+  mkdir "$srcdir/gotmp"
+  export GOTMPDIR="$srcdir/gotmp"
+
   echo 'GOPATH setup'
   export GOPATH="$srcdir/gopath"
   export PATH+=":$GOPATH/bin"
@@ -67,30 +72,31 @@ build() {
   export GOFLAGS="-buildmode=pie -trimpath -modcacherw"
   go run build.go setup
   go run build.go build
-
-  echo 'building the frontend'
-  export NPM_CONFIG_PREFIX="$srcdir/npm"
-  export PATH+=":$NPM_CONFIG_PREFIX/bin"
-  yarn install --pure-lockfile --no-progress
-  NODE_ENV=production yarn run build
 }
 
 package() {
+  case "$CARCH" in
+    x86_64) GOARCH=amd64 ;;
+    arm) GOARCH=arm ;;
+    armv6h) GOARCH=arm ;;
+    armv7h) GOARCH=arm ;;
+    aarch64) GOARCH=arm64 ;;
+  esac
+
   install -Dm644 grafana.tmpfiles "$pkgdir/usr/lib/tmpfiles.d/grafana.conf"
   install -Dm644 grafana.sysusers "$pkgdir/usr/lib/sysusers.d/grafana.conf"
   install -Dm644 grafana.service "$pkgdir/usr/lib/systemd/system/grafana.service"
   cd $pkgname
-  install -Dsm755 bin/linux-amd64/grafana-server "$pkgdir/usr/bin/grafana-server"
-  install -Dsm755 bin/linux-amd64/grafana-cli "$pkgdir/usr/bin/grafana-cli"
+  install -Dsm755 bin/linux-$GOARCH/grafana-server "$pkgdir/usr/bin/grafana-server"
+  install -Dsm755 bin/linux-$GOARCH/grafana-cli "$pkgdir/usr/bin/grafana-cli"
   install -Dm640 -o207 -g207 conf/sample.ini "$pkgdir/etc/$pkgname.ini"
   install -Dm644 conf/defaults.ini "$pkgdir/usr/share/$pkgname/conf/defaults.ini"
   install -dm755 "$pkgdir/usr/share/grafana/"
+
+  cd "$srcdir/usr/share/grafana"
   for i in public tools; do
     cp -r "$i" "$pkgdir/usr/share/grafana/$i"
   done
-
-  # Remove unit tests
-  rm -r "$pkgdir/usr/share/grafana/public/test"
 }
 
 # vim:set ts=2 sw=2 et:
