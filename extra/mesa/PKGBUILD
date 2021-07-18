@@ -11,7 +11,7 @@
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=21.1.4
+pkgver=21.1.5
 pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
@@ -23,7 +23,7 @@ license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-Rip-out-VC4-forced-NEON.patch
         LICENSE)
-sha512sums=('1f4e2d8ba2c3c02bad5468687752d7e87d6e79c4a0e6ec4b2741a57fb270d18ae4712aaa07a9e09a2d3348540f5a26cdbe05464cd52adb8df1e2e28a581b2b53'
+sha512sums=('d9e0e1b6a1d717febee2aa67b06620c9a21e061ea7e594be5b4c382db1ed6f5acf5d13a75a9f2bba9c32621466ebc816708606e16e8b34700d987158fd8f0b7b'
             'SKIP'
             '57e23d911d3de9bb4021d3d417270483d6edd53a81ad2d59b4e9cf2a9970901cde582b4a2167ee6d9ed47bd9ca90c3abd4e7cee38c028ad5ad183493560e7faf'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
