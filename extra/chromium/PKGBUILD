@@ -10,6 +10,7 @@
 #  - is_cfi=false, use_gold=false
 #  - clang_use_default_sample_profile=false, AFDO breaks distcc
 #  - use_allocator="none", tcmalloc breaks ARM
+#  - patch and rebuild bundled eu-strip
 
 buildarch=12
 highmem=1
@@ -27,7 +28,7 @@ depends=('gtk3' 'nss' 'alsa-lib' 'xdg-utils' 'libxss' 'libcups' 'libgcrypt'
          'ttf-liberation' 'systemd' 'dbus' 'libpulse' 'pciutils' 'libva'
          'desktop-file-utils' 'hicolor-icon-theme')
 makedepends=('python' 'gn' 'ninja' 'clang' 'lld' 'gperf' 'nodejs' 'pipewire'
-             'java-runtime-headless' 'python2')
+             'java-runtime-headless' 'python2' 'git')
 optdepends=('pipewire: WebRTC desktop sharing under Wayland'
             'kdialog: support for native dialogs in Plasma'
             'org.freedesktop.secrets: password storage backend on GNOME / Xfce'
@@ -42,7 +43,8 @@ source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgn
         sql-make-VirtualCursor-standard-layout-type.patch
         use-oauth2-client-switches-as-default.patch
         0001-widevine-support-for-arm.patch
-        0002-Run-blink-bindings-generation-single-threaded.patch)
+        0002-Run-blink-bindings-generation-single-threaded.patch
+        0003-Fix-eu-strip-build-for-newer-GCC.patch)
 sha256sums=('6e51ac6512a4e95018eefc9fef1d2e7597f28a1c45c763b3a8eb7dde5f557012'
             '86859c11cfc8ba106a3826479c0bc759324a62150b271dd35d1a0f96e890f52f'
             '53a2cbb1b58d652d5424ff9040b6a51b9dc6348ce3edc68344cd0d25f1f4beb2'
@@ -52,8 +54,9 @@ sha256sums=('6e51ac6512a4e95018eefc9fef1d2e7597f28a1c45c763b3a8eb7dde5f557012'
             '4489e5e7854a7dcd9464133eb4664250ce7149ac1714a0bf10ca0d82d8806568'
             'dd317f85e5abfdcfc89c6f23f4c8edbcdebdd5e083dcec770e5da49ee647d150'
             'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
-            '0014f33d92c514ff9160f1a82e9aa65f8b92d77574433ff5535ab078a6b23b4e'
-            'c6c586a0098ef22334081e7e1a36dc8efa866e32587fed79df9d3c9afb7b237f')
+            '1e6675897762250dd96054d13e35939e7d9e93a812c909ba95966c86d5a3a284'
+            'a07c2c855e7e1eba9c07c5f998f5dddd41286dca1764837abd3fc476e5fc0992'
+            '3c5c6b2034847d735e4e170af30a5af38202b2ed193210d49dc148b2e7c9572c')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
@@ -100,6 +103,7 @@ prepare() {
   # Arch Linux ARM fixes
   patch -p1 -i ../0001-widevine-support-for-arm.patch
   patch -p1 -i ../0002-Run-blink-bindings-generation-single-threaded.patch
+  patch -p1 -i ../0003-Fix-eu-strip-build-for-newer-GCC.patch
 
   # Build ARMv7 with NEON
   [[ $CARCH == "armv7h" ]] && MAKEFLAGS="-j4" && CFLAGS=`echo $CFLAGS | sed -e 's/vfpv3-d16/neon/'` && CXXFLAGS="$CFLAGS"
@@ -156,6 +160,11 @@ build() {
   make -C chromium-launcher-$_launcher_ver
 
   cd "$srcdir/$pkgname-$pkgver"
+
+  # Rebuild eu-strip
+  pushd buildtools/third_party/eu-strip
+  ./build.sh
+  popd
 
   export CC=clang
   export CXX=clang++

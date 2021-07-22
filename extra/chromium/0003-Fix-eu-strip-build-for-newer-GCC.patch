@@ -1,0 +1,212 @@
+From b003f9962b249cede54be9744fd8b6319cb5d321 Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Wed, 21 Jul 2021 21:37:31 -0600
+Subject: [PATCH 3/3] Fix eu-strip build for newer GCC
+
+---
+ buildtools/third_party/eu-strip/build.sh      |   3 +-
+ .../third_party/eu-strip/gcc-fixes.patch      | 171 ++++++++++++++++++
+ 2 files changed, 173 insertions(+), 1 deletion(-)
+ create mode 100644 buildtools/third_party/eu-strip/gcc-fixes.patch
+
+diff --git a/buildtools/third_party/eu-strip/build.sh b/buildtools/third_party/eu-strip/build.sh
+index 86f2b67f6bbd..722ebcf46f06 100755
+--- a/buildtools/third_party/eu-strip/build.sh
++++ b/buildtools/third_party/eu-strip/build.sh
+@@ -1,7 +1,7 @@
+ #!/bin/sh -xe
+ 
+ rm -rf elfutils
+-git clone git://sourceware.org/git/elfutils.git
++git clone https://sourceware.org/git/elfutils.git
+ cd elfutils
+ git checkout elfutils-0.170
+ autoheader
+@@ -9,6 +9,7 @@ aclocal
+ autoconf
+ automake --add-missing
+ patch -p1 < ../fix-elf-size.patch
++patch -p1 < ../gcc-fixes.patch
+ mkdir build
+ cd build
+ ../configure --enable-maintainer-mode
+diff --git a/buildtools/third_party/eu-strip/gcc-fixes.patch b/buildtools/third_party/eu-strip/gcc-fixes.patch
+new file mode 100644
+index 000000000000..fdb84dffd936
+--- /dev/null
++++ b/buildtools/third_party/eu-strip/gcc-fixes.patch
+@@ -0,0 +1,171 @@
++diff --git a/backends/linux-core-note.c b/backends/linux-core-note.c
++index 67638d70..08282ba4 100644
++--- a/backends/linux-core-note.c
+++++ b/backends/linux-core-note.c
++@@ -111,7 +111,7 @@ struct EBLHOOK(prstatus)
++   FIELD (INT, pr_fpvalid);
++ }
++ #ifdef ALIGN_PRSTATUS
++-  __attribute__ ((packed, aligned (ALIGN_PRSTATUS)))
+++  attribute_packed __attribute__ ((aligned (ALIGN_PRSTATUS)))
++ #endif
++ ;
++ 
++diff --git a/libelf/libelfP.h b/libelf/libelfP.h
++index 7ee6625a..4007301b 100644
++--- a/libelf/libelfP.h
+++++ b/libelf/libelfP.h
++@@ -463,9 +463,9 @@ extern Elf_Type __libelf_data_type (Elf *elf, int sh_type) internal_function;
++    These functions cannot be marked internal since they are aliases
++    of the export elfXX_fsize functions.*/
++ extern size_t __elf32_msize (Elf_Type __type, size_t __count,
++-			     unsigned int __version);
+++			     unsigned int __version) __const_attribute__;
++ extern size_t __elf64_msize (Elf_Type __type, size_t __count,
++-			     unsigned int __version);
+++			     unsigned int __version) __const_attribute__;
++ 
++ 
++ /* Create Elf descriptor from memory image.  */
++diff --git a/src/ar.c b/src/ar.c
++index ec32cee59..818115bd9 100644
++--- a/src/ar.c
+++++ b/src/ar.c
++@@ -1,5 +1,5 @@
++ /* Create, modify, and extract from archives.
++-   Copyright (C) 2005-2012, 2016 Red Hat, Inc.
+++   Copyright (C) 2005-2012, 2016, 2017 Red Hat, Inc.
++    This file is part of elfutils.
++    Written by Ulrich Drepper <drepper@redhat.com>, 2005.
++ 
++@@ -442,7 +442,7 @@ static int
++ do_oper_extract (int oper, const char *arfname, char **argv, int argc,
++ 		 long int instance)
++ {
++-  bool found[argc];
+++  bool found[argc > 0 ? argc : 1];
++   memset (found, '\0', sizeof (found));
++ 
++   size_t name_max = 0;
++@@ -1056,13 +1056,11 @@ do_oper_delete (const char *arfname, char **argv, int argc,
++     goto nonew_unlink;
++ 
++  errout:
++-#ifdef DEBUG
++   elf_end (elf);
++ 
++   arlib_fini ();
++ 
++   close (fd);
++-#endif
++ 
++   not_found (argc, argv, found);
++ 
++@@ -1070,12 +1068,18 @@ do_oper_delete (const char *arfname, char **argv, int argc,
++ }
++ 
++ 
++-static void
+++/* Prints the given value in the given buffer without a trailing zero char.
+++   Returns false if the given value doesn't fit in the given buffer.  */
+++static bool
++ no0print (bool ofmt, char *buf, int bufsize, long int val)
++ {
++   char tmpbuf[bufsize + 1];
++-  snprintf (tmpbuf, sizeof (tmpbuf), ofmt ? "%-*lo" : "%-*ld", bufsize, val);
+++  int ret = snprintf (tmpbuf, sizeof (tmpbuf), ofmt ? "%-*lo" : "%-*ld",
+++		      bufsize, val);
+++  if (ret >= (int) sizeof (tmpbuf))
+++    return false;
++   memcpy (buf, tmpbuf, bufsize);
+++  return true;
++ }
++ 
++ 
++@@ -1084,7 +1088,7 @@ do_oper_insert (int oper, const char *arfname, char **argv, int argc,
++ 		const char *member)
++ {
++   int status = 0;
++-  Elf *elf;
+++  Elf *elf = NULL;
++   struct stat st;
++   int fd = open_archive (arfname, O_RDONLY, 0, &elf, &st, oper != oper_move);
++ 
++@@ -1303,13 +1307,11 @@ do_oper_insert (int oper, const char *arfname, char **argv, int argc,
++ 
++   if (status != 0)
++     {
++-#ifdef DEBUG
++       elf_end (elf);
++ 
++       arlib_fini ();
++ 
++       close (fd);
++-#endif
++ 
++       return status;
++     }
++@@ -1463,14 +1465,36 @@ do_oper_insert (int oper, const char *arfname, char **argv, int argc,
++ 		  memcpy (arhdr.ar_name, tmpbuf, sizeof (arhdr.ar_name));
++ 		}
++ 
++-	      no0print (false, arhdr.ar_date, sizeof (arhdr.ar_date),
++-			all->sec);
++-	      no0print (false, arhdr.ar_uid, sizeof (arhdr.ar_uid), all->uid);
++-	      no0print (false, arhdr.ar_gid, sizeof (arhdr.ar_gid), all->gid);
++-	      no0print (true, arhdr.ar_mode, sizeof (arhdr.ar_mode),
++-			all->mode);
++-	      no0print (false, arhdr.ar_size, sizeof (arhdr.ar_size),
++-			all->size);
+++	      if (! no0print (false, arhdr.ar_date, sizeof (arhdr.ar_date),
+++			      all->sec))
+++		{
+++		  error (0, errno, gettext ("cannot represent ar_date"));
+++		  goto nonew_unlink;
+++		}
+++	      if (! no0print (false, arhdr.ar_uid, sizeof (arhdr.ar_uid),
+++			      all->uid))
+++		{
+++		  error (0, errno, gettext ("cannot represent ar_uid"));
+++		  goto nonew_unlink;
+++		}
+++	      if (! no0print (false, arhdr.ar_gid, sizeof (arhdr.ar_gid),
+++			      all->gid))
+++		{
+++		  error (0, errno, gettext ("cannot represent ar_gid"));
+++		  goto nonew_unlink;
+++		}
+++	      if (! no0print (true, arhdr.ar_mode, sizeof (arhdr.ar_mode),
+++			all->mode))
+++		{
+++		  error (0, errno, gettext ("cannot represent ar_mode"));
+++		  goto nonew_unlink;
+++		}
+++	      if (! no0print (false, arhdr.ar_size, sizeof (arhdr.ar_size),
+++			all->size))
+++		{
+++		  error (0, errno, gettext ("cannot represent ar_size"));
+++		  goto nonew_unlink;
+++		}
++ 	      memcpy (arhdr.ar_fmag, ARFMAG, sizeof (arhdr.ar_fmag));
++ 
++ 	      if (unlikely (write_retry (newfd, &arhdr, sizeof (arhdr))
++@@ -1514,13 +1538,15 @@ do_oper_insert (int oper, const char *arfname, char **argv, int argc,
++       goto nonew_unlink;
++ 
++  errout:
++-#ifdef DEBUG
+++  for (int cnt = 0; cnt < argc; ++cnt)
+++    elf_end (found[cnt]->elf);
+++
++   elf_end (elf);
++ 
++   arlib_fini ();
++ 
++-  close (fd);
++-#endif
+++  if (fd != -1)
+++    close (fd);
++ 
++   return status;
++ }
+-- 
+2.32.0
+
