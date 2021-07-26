@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nirbheek Chauhan <nirbheek@centricular.com>
+Date: Wed, 14 Jul 2021 17:37:39 +0530
+Subject: [PATCH] gnome: Always pass absolute -L paths to g-ir-scanner
+
+g-ir-scanner does not convert relative -L paths to runtime paths which
+are added to -Wl,-rpath and LD_LIBRARY_PATH / DYLD_LIBRARY_PATH
+/ PATH. This means that the local library will either not be found at
+runtime (while building introspection data), or the system-wide
+library will be picked instead.
+
+See: giscanner/ccompiler.py:get_internal_link_flags() in
+gobject-introspection for more details.
+---
+ mesonbuild/modules/gnome.py | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/mesonbuild/modules/gnome.py b/mesonbuild/modules/gnome.py
+index 1b68f6ccd..3cc8ebdc8 100644
+--- a/mesonbuild/modules/gnome.py
++++ b/mesonbuild/modules/gnome.py
+@@ -640,14 +640,18 @@ class GnomeModule(ExtensionModule):
+                 # Because of https://gitlab.gnome.org/GNOME/gobject-introspection/merge_requests/72
+                 # we can't use the full path until this is merged.
+                 libpath = os.path.join(girtarget.get_subdir(), girtarget.get_filename())
++                # Must use absolute paths here because g-ir-scanner will not
++                # add them to the runtime path list if they're relative. This
++                # means we cannot use @BUILD_ROOT@
++                build_root = state.environment.get_build_dir()
+                 if isinstance(girtarget, build.SharedLibrary):
+                     # need to put our output directory first as we need to use the
+                     # generated libraries instead of any possibly installed system/prefix
+                     # ones.
+-                    ret += ["-L@BUILD_ROOT@/{}".format(os.path.dirname(libpath))]
++                    ret += ["-L{}/{}".format(build_root, os.path.dirname(libpath))]
+                     libname = girtarget.get_basename()
+                 else:
+-                    libname = os.path.join(f"@BUILD_ROOT@/{libpath}")
++                    libname = os.path.join(f"{build_root}/{libpath}")
+                 ret += ['--library', libname]
+                 # Needed for the following binutils bug:
+                 # https://github.com/mesonbuild/meson/issues/1911
