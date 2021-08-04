@@ -5,77 +5,55 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - build v5 with -DCMAKE_CXX_FLAGS=-std=c++11 -DWITH_BOOST_THREAD=1 to fix FTBFS
 
-pkgbase=vigra
-pkgname=(vigra vigra-doc)
-pkgver=1.11.1
-pkgrel=35
+pkgname=vigra
+pkgver=1.11.1.r45+g8acd73a5
+pkgrel=2
 pkgdesc="Computer vision library"
 arch=(x86_64)
 url="https://ukoethe.github.io/vigra/"
 license=(custom:MIT)
-makedepends=(# runtime deps
-             libpng libtiff openexr gcc-libs sh hdf5 fftw
-             # additional makedeps
-             cmake boost python-numpy)
+depends=(libpng libtiff openexr gcc-libs sh hdf5 fftw)
+makedepends=(git cmake boost python-numpy)
 checkdepends=(python-nose)
-source=("https://github.com/ukoethe/vigra/releases/download/Version-${pkgver//./-}/vigra-${pkgver}-src.tar.gz"
-        fix-incorrect-template-parameter-type.patch py3.7.diff
+optdepends=('python: for python bindings'
+            'boost-libs: for python bindings')
+source=(git+https://github.com/ukoethe/vigra#commit=8acd73a5e0408326e2a3c1ed1c2c70ffe2b954d0
         vigra-openexr3.patch)
-sha256sums=('a5564e1083f6af6a885431c1ee718bad77d11f117198b277557f8558fa461aaf'
-            'f151f902483dfa2b1f3d431f54bb161300cf184158c9f416fa653d19ab363cc4'
-            '8fcdcce50c377be44387cbd4a001dadf5e03b32483de55c05a359c887e95a05b'
-            '2572717e39f916c7c463b8f49306b683c5923906be2721f7da181c58b3a2b34b')
+sha256sums=(SKIP
+            2572717e39f916c7c463b8f49306b683c5923906be2721f7da181c58b3a2b34b)
+
+pkgver() {
+  cd ${pkgname}
+  git describe --long --tags | sed 's/^Version-//;s/\([^-]*-g\)/r\1/;s/-/./g;s/\.g/+g/'
+}
 
 prepare() {
-  cd ${pkgbase}-${pkgver}
-  # https://github.com/ukoethe/vigra/issues/414
-  patch -Np1 -i ../fix-incorrect-template-parameter-type.patch
-  # python 3.7 compat
-  patch -Np1 -i ../py3.7.diff
-  patch -p1 < ../vigra-openexr3.patch # Fix build with openexr 3
+  cd ${pkgbase}
+  # Fix build with openexr 3
+  patch -p1 < ../vigra-openexr3.patch
 }
 
 build() {
-  cmake -B build -S ${pkgbase}-${pkgver} \
-      -DCMAKE_INSTALL_PREFIX=/usr \
-      -DPYTHON_EXECUTABLE=/usr/bin/python \
-      -DWITH_OPENEXR=true \
-      -DWITH_VIGRANUMPY=1 \
-      -DDOCINSTALL=share/doc \
-      -DCMAKE_C_FLAGS="-DH5_USE_110_API" \
-      -DCMAKE_CXX_FLAGS="-DH5_USE_110_API" \
-      $([ $CARCH == arm ] && echo "-DCMAKE_CXX_FLAGS=-std=c++11 -DWITH_BOOST_THREAD=1")
+  cmake -B build -S ${pkgbase} \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DPYTHON_EXECUTABLE=/usr/bin/python \
+    -DWITH_OPENEXR=true \
+    -DWITH_VIGRANUMPY=1 \
+    -DDOCINSTALL=share/doc \
+    -DCMAKE_C_FLAGS="-DH5_USE_110_API" \
+    -DCMAKE_CXX_FLAGS="-DH5_USE_110_API" \
+    $([ $CARCH == arm ] && echo "-DCMAKE_CXX_FLAGS=-std=c++11 -DWITH_BOOST_THREAD=1")
   make -C build
 }
 
-check() {
-  make -C build -j1 -k check || echo "Tests failed" # https://github.com/ukoethe/vigra/issues/409
-}
+# Numerous failures, upstream almost dead
+# https://github.com/ukoethe/vigra/issues/409
+# https://github.com/ukoethe/vigra/issues/491
+#check() {
+#  make -C build -j1 -k check
+#}
 
-package_vigra() {
-  pkgdesc="Computer vision library"
-  depends=(libpng libtiff openexr gcc-libs sh hdf5 fftw)
-  optdepends=('python: for python bindings'
-              'boost-libs: for python bindings')
-
+package() {
   make -C build DESTDIR="${pkgdir}" install
-
-  install -Dm644 ${pkgbase}-${pkgver}/LICENSE.txt -t "${pkgdir}"/usr/share/licenses/${pkgname}/
-  
-  # Remove doc
-  rm -r "${pkgdir}"/usr/share/doc
-}
-
-package_vigra-doc() {
-  pkgdesc="Computer vision library - documentation and examples"
-  #arch=('any') # Not supported for now, maybe later
-
-  make -C build DESTDIR="${pkgdir}" install
-
-  # Remove vigra package content
-  rm -r "${pkgdir}"/usr/{bin,include,lib}
-  # Remove doctrees https://github.com/ukoethe/vigra/pull/477
-  rm -r "${pkgdir}"/usr/share/doc/vigranumpy/doctrees/
-
-  install -Dm644 ${pkgbase}-${pkgver}/LICENSE.txt -t "${pkgdir}"/usr/share/licenses/${pkgname}/
+  install -Dm644 ${pkgbase}/LICENSE.txt -t "${pkgdir}"/usr/share/licenses/${pkgname}/
 }
