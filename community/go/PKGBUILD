@@ -13,11 +13,10 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - added switches for our architectures
-#  - don't build stdlib with race detector for 32-bit ARM (not supported)
 
 pkgname=go
 epoch=2
-pkgver=1.16.7
+pkgver=1.17
 pkgrel=1
 pkgdesc='Core compiler tools for the Go programming language'
 arch=(x86_64)
@@ -29,7 +28,7 @@ provides=(go-pie)
 options=(!strip staticlibs)
 source=(https://storage.googleapis.com/golang/go$pkgver.src.tar.gz{,.asc})
 validpgpkeys=('EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796')
-sha256sums=('1a9f2894d3d878729f7045072f30becebe243524cf2fce4e0a7b248b1e0654ac'
+sha256sums=('3a70e5055509f347c0fb831ca07a2bf3b531068f349b14a3c652e9b5b67beb5d'
             'SKIP')
 
 case "$CARCH" in
@@ -50,8 +49,7 @@ build() {
   cd "$pkgname/src"
   ./make.bash --no-clean -v
 
-  [[ $CARCH == "aarch64" ]] && PATH="$GOBIN:$PATH" go install -v -race std
-  PATH="$GOBIN:$PATH" go install -v -buildmode=shared std
+  PATH="$GOBIN:$PATH" go install -v std
 }
 
 check() {
@@ -60,20 +58,23 @@ check() {
   export GOROOT="$srcdir/$pkgname"
   export GOBIN="$GOROOT/bin"
   export PATH="$srcdir/$pkgname/bin:$PATH"
-  export GO_TEST_TIMEOUT_SCALE=2
+  export GO_TEST_TIMEOUT_SCALE=3
 
   cd $pkgname/src
-  # rm os/signal/signal_cgo_test.go  # TODO: There is a bug somewhere.
-  #                                  # Should only affect containers
-  #                                  # so lets just say No.
   ./run.bash --no-rebuild -v -v -v -k
 }
 
 package() {
   cd "$pkgname"
 
-  install -d "$pkgdir/usr/bin" "$pkgdir/usr/lib/go" "$pkgdir/usr/share/doc/go"
-  cp -a bin pkg src lib misc api test "$pkgdir/usr/lib/go"
+  install -d "$pkgdir/usr/bin" "$pkgdir/usr/lib/go" "$pkgdir/usr/share/doc/go" \
+    "$pkgdir/usr/lib/go/pkg/linux_amd64_"{dynlink,race}
+
+  # TODO: Make split package for source files?
+  # This saves around 100 MB.
+  # Rest of the size is from the duplicate _race and _dynlib .a files
+  # cp -a bin pkg src lib misc api test "$pkgdir/usr/lib/go"
+  cp -a bin pkg src lib "$pkgdir/usr/lib/go"
   cp -r doc/* "$pkgdir/usr/share/doc/go"
 
   ln -sf /usr/lib/go/bin/go "$pkgdir/usr/bin/go"
@@ -86,6 +87,8 @@ package() {
 
   # TODO: Figure out if really needed
   rm -rf "$pkgdir"/usr/lib/go/pkg/obj/go-build/*
+  find "$pkgdir/usr/lib/go" -name "testdata" -type d -prune -exec rm -rf "{}" \;
+  find "$pkgdir/usr/lib/go" -name "*_test.go" -exec rm -rf "{}" \;
 
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
