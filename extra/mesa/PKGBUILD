@@ -27,7 +27,7 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE)
 sha512sums=('d4056287ec86f7a95ce534a251a1ccbc3a3b08a2f7112152def2f054fc8a9424501d5883c463554ee95fe2dafb832613efd7145e989ee8281948233942730c2c'
             'SKIP'
-            '57e23d911d3de9bb4021d3d417270483d6edd53a81ad2d59b4e9cf2a9970901cde582b4a2167ee6d9ed47bd9ca90c3abd4e7cee38c028ad5ad183493560e7faf'
+            '4cd472e3db19b658265cbbeae6b23be6b5bbf54380c64963f867aa3991de4700b48aae23718283aae4608e8e73627a0103862adbbae9ce17a00a266e425e948c'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -39,11 +39,13 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 prepare() {
   cd mesa-$pkgver
 
-  [[ $CARCH == "armv6h" || $CARCH == "armv7h" ]] && patch -p1 -i ../0001-Rip-out-VC4-forced-NEON.patch || true
+  if [[ $CARCH != "aarch64" ]]; then
+    patch -p1 -i ../0001-Rip-out-VC4-forced-NEON.patch
+    CPPFLAGS+=" -DNO_FORMAT_ASM"
+  fi
 }
 
 build() {
-  MESON_OPT="-D asm=false"
   case "${CARCH}" in
     armv6h)  GALLIUM=",vc4" ;;
     armv7h)  GALLIUM=",etnaviv,kmsro,lima,panfrost,tegra,v3d,vc4" ;;
@@ -79,7 +81,7 @@ build() {
     -D osmesa=true \
     -D shared-glapi=enabled \
     -D microsoft-clc=disabled \
-    -D valgrind=disabled $MESON_OPT
+    -D valgrind=disabled
 
   # Print config
   meson configure build
