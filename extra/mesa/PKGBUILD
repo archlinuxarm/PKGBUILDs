@@ -2,17 +2,19 @@
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
 # Maintainer: Jan de Groot <jgc@archlinux.org>
 # Contributor: Andreas Radke <andyrtr@archlinux.org>
+# Contributor: Dan Johansen <strit@manjaro.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, VMware svga).
 #  - disable assembly and rip out VC4 forced NEON for v6/v7
 #  - remove makedepend on valgrind, -Dvalgrind=false
+#  - add PanVK driver
 
 pkgbase=mesa
-pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
+pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=21.2.1
-pkgrel=1
+pkgrel=1.1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
@@ -54,7 +56,7 @@ build() {
     -D platforms=x11,wayland \
     -D dri-drivers=r100,r200,nouveau \
     -D gallium-drivers=r300,r600,radeonsi,freedreno,nouveau,swrast,virgl,zink${GALLIUM} \
-    -D vulkan-drivers=amd,swrast,broadcom \
+    -D vulkan-drivers=amd,swrast,broadcom,panfrost \
     -D vulkan-layers=device-select,overlay \
     -D dri3=enabled \
     -D egl=enabled \
@@ -161,6 +163,18 @@ package_vulkan-broadcom() {
 
   _install fakeinstall/usr/share/vulkan/icd.d/broadcom_icd*.json
   _install fakeinstall/usr/lib/libvulkan_broadcom.so
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+}
+
+package_vulkan-panfrost() {
+  pkgdesc="Panfrost Vulkan mesa driver"
+  depends=('wayland' 'libx11' 'libxshmfence' 'libdrm')
+  optdepends=('vulkan-mesa-layers: additional vulkan layers')
+  provides=('vulkan-driver')
+
+  _install fakeinstall/usr/share/vulkan/icd.d/panfrost_icd*.json
+  _install fakeinstall/usr/lib/libvulkan_panfrost.so
 
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
