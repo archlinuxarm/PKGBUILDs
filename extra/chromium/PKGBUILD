@@ -16,10 +16,10 @@ buildarch=12
 highmem=1
 
 pkgname=chromium
-pkgver=93.0.4577.82
-pkgrel=2
+pkgver=94.0.4606.54
+pkgrel=1
 _launcher_ver=8
-_gcc_patchset=6
+_gcc_patchset=3
 pkgdesc="A web browser built for speed, simplicity, and security"
 arch=('x86_64')
 url="https://www.chromium.org/Home"
@@ -36,31 +36,31 @@ optdepends=('pipewire: WebRTC desktop sharing under Wayland'
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/$pkgname-$pkgver.tar.xz
         https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver/chromium-launcher-$_launcher_ver.tar.gz
         https://github.com/stha09/chromium-patches/releases/download/chromium-${pkgver%%.*}-patchset-$_gcc_patchset/chromium-${pkgver%%.*}-patchset-$_gcc_patchset.tar.xz
-        linux-sandbox-syscall-broker-use-struct-kernel_stat.patch
-        linux-sandbox-fix-fstatat-crash.patch
         replace-blacklist-with-ignorelist.patch
+        add-a-TODO-about-a-missing-pnacl-flag.patch
+        use-ffile-compilation-dir.patch
         sql-make-VirtualCursor-standard-layout-type.patch
         chromium-93-ffmpeg-4.4.patch
-        chromium-harfbuzz-3.0.0.patch
-        skia-harfbuzz-3.0.0.patch
+        chromium-94-ffmpeg-roll.patch
+        unexpire-accelerated-video-decode-flag.patch
         use-oauth2-client-switches-as-default.patch
         0001-widevine-support-for-arm.patch
         0002-Run-blink-bindings-generation-single-threaded.patch
         0003-Fix-eu-strip-build-for-newer-GCC.patch)
-sha256sums=('5d66214858fcba11a8f733d7a6fab61ed10e13e7df4ed37e63b66a0370fb2853'
+sha256sums=('033d9461e24251b790da17e64471eb22e3dfb09090744d3d0b7b4d0fbd75135d'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
-            'a44ffd9e25fcbd8b3cc778871890e4da6fe12600ad549c807e1d03f61f0cdf73'
-            '268e18ad56e5970157b51ec9fc8eb58ba93e313ea1e49c842a1ed0820d9c1fa3'
-            '253348550d54b8ae317fd250f772f506d2bae49fb5dc75fe15d872ea3d0e04a5'
+            '22692bddaf2761c6ddf9ff0bc4722972bca4d4c5b2fd3e5dbdac7eb60d914320'
             'd3344ba39b8c6ed202334ba7f441c70d81ddf8cdb15af1aa8c16e9a3a75fbb35'
+            'd53da216538f2e741a6e048ed103964a91a98e9a3c10c27fdfa34d4692fdc455'
+            '921010cd8fab5f30be76c68b68c9b39fac9e21f4c4133bb709879592bbdf606e'
             'dd317f85e5abfdcfc89c6f23f4c8edbcdebdd5e083dcec770e5da49ee647d150'
             '1a9e074f417f8ffd78bcd6874d8e2e74a239905bf662f76a7755fa40dc476b57'
-            '7ce947944a139e66774dfc7249bf7c3069f07f83a0f1b2c1a1b14287a7e15928'
-            'dae11dec5088eb1b14045d8c9862801a342609c15701d7c371e1caccf46e1ffd'
+            '56acb6e743d2ab1ed9f3eb01700ade02521769978d03ac43226dec94659b3ace'
+            '2a97b26c3d6821b15ef4ef1369905c6fa3e9c8da4877eb9af4361452a425290b'
             'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
-            '88bece386073d5a2e970eefcd910010bdc5be2107bdad57bbfc005a4091112f6'
-            '9b385876b5da4e639a1a016213858a514c016cea657a24825223563683dba27f'
-            'f574f1d703baf4e39a70bed96aec0e9ebe04a304a3ba355ecaa8a93639c104e9')
+            'fa20edc66efbb4d172a028a1851bcbb635372ce56c81c0b434bf4e211a6ca728'
+            '85c7fd0fc70d3bce1a6949fd1062c6d5bc62507636e50200432cfb7b22cbef47'
+            '30f670b9ca3e5783aa5029f4d0407cec5f6d5bef7c41303b50b6fb312559bc65')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
@@ -129,28 +129,29 @@ prepare() {
   # Fix build with older ffmpeg
   patch -Np1 -i ../chromium-93-ffmpeg-4.4.patch
 
-  # Fix build with harfbuzz 3.0.0
-  patch -Np1 -i ../chromium-harfbuzz-3.0.0.patch
-  patch -Np1 -d third_party/skia <../skia-harfbuzz-3.0.0.patch
+  # Revert change to custom function av_stream_get_first_dts; will need to
+  # switch to bundled ffmpeg when we're no longer using ffmpeg 4.4 in Arch
+  # Upstream commit that made first_dts internal causing Chromium to add a
+  # custom function: https://github.com/FFmpeg/FFmpeg/commit/591b88e6787c4
+  # https://crbug.com/1251779
+  patch -Rp1 -i ../chromium-94-ffmpeg-roll.patch
+
+  # https://crbug.com/1207478
+  patch -Np0 -i ../unexpire-accelerated-video-decode-flag.patch
 
   # Revert transition to -fsanitize-ignorelist (needs newer clang)
   patch -Rp1 -i ../replace-blacklist-with-ignorelist.patch
 
-  # Upstream fixes
-  patch -Np1 -i ../linux-sandbox-syscall-broker-use-struct-kernel_stat.patch
-  patch -Np1 -i ../linux-sandbox-fix-fstatat-crash.patch
+  # Revert addition of -ffile-compilation-dir= (needs newer clang)
+  patch -Rp1 -i ../add-a-TODO-about-a-missing-pnacl-flag.patch
+  patch -Rp1 -i ../use-ffile-compilation-dir.patch
 
   # https://chromium-review.googlesource.com/c/chromium/src/+/2862724
   patch -Np1 -i ../sql-make-VirtualCursor-standard-layout-type.patch
 
   # Fixes for building with libstdc++ instead of libc++
-  patch -Np1 -i ../patches/chromium-93-pdfium-include.patch
   patch -Np1 -i ../patches/chromium-90-ruy-include.patch
-  patch -Np1 -i ../patches/chromium-93-HashPasswordManager-include.patch
-  patch -Np1 -i ../patches/chromium-93-BluetoothLowEnergyScanFilter-include.patch
-  patch -Np1 -i ../patches/chromium-93-ClassProperty-include.patch
-  patch -Np1 -i ../patches/chromium-93-DevToolsEmbedderMessageDispatcher-include.patch
-  patch -Np1 -i ../patches/chromium-93-ScopedTestDialogAutoConfirm-include.patch
+  patch -Np1 -i ../patches/chromium-94-CustomSpaces-include.patch
 
   # Link to system tools required by the build
   mkdir -p third_party/node/linux/node-linux-x64/bin
@@ -199,7 +200,7 @@ build() {
     'is_cfi=false'
     'chrome_pgo_phase=0'
     'treat_warnings_as_errors=false'
-    'fieldtrial_testing_like_official_build=true'
+    'disable_fieldtrial_testing_config=true'
     'blink_enable_generated_code_formatting=false'
     'ffmpeg_branding="Chrome"'
     'proprietary_codecs=true'
@@ -279,7 +280,7 @@ package() {
     libGLESv2.so
 
     chromedriver
-    crashpad_handler
+    chrome_crashpad_handler
   )
 
   if [[ -z ${_system_libs[icu]+set} ]]; then
