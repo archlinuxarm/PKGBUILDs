@@ -1,0 +1,59 @@
+From 07595622bd09e5b09720ccd717d2d862703a95fe Mon Sep 17 00:00:00 2001
+From: Christos Zoulas <christos@zoulas.com>
+Date: Mon, 19 Apr 2021 16:47:13 +0000
+Subject: PR/259: aleksandr.v.novichkov: mime printing through indirect magic
+ is not taken into account, use match directly so that it does.
+
+---
+ src/softmagic.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/src/softmagic.c b/src/softmagic.c
+index 1ec3e604..2eb5b630 100644
+--- a/src/softmagic.c
++++ b/src/softmagic.c
+@@ -1559,7 +1559,7 @@ mget(struct magic_set *ms, struct magic *m, const struct buffer *b,
+ 	int rv, oneed_separator, in_type, nfound_match;
+ 	char *rbuf;
+ 	union VALUETYPE *p = &ms->ms_value;
+-	struct mlist ml;
++	struct mlist ml, *mlp;
+ 	struct cont c;
+ 
+ 	if (*indir_count >= ms->indir_max) {
+@@ -1829,8 +1829,15 @@ mget(struct magic_set *ms, struct magic *m, const struct buffer *b,
+ 		bb = *b;
+ 		bb.fbuf = s + offset;
+ 		bb.flen = nbytes - offset;
+-		rv = file_softmagic(ms, &bb,
+-		    indir_count, name_count, BINTEST, text);
++		for (mlp = ms->mlist[0]->next; mlp != ms->mlist[0];
++		    mlp = mlp->next)
++		{
++			if ((rv = match(ms, mlp->magic, mlp->nmagic, &bb, 0,
++			    BINTEST, text, 0, indir_count, name_count,
++			    printed_something, need_separator, NULL,
++			    NULL)) != 0)
++				break;
++		}
+ 
+ 		if ((ms->flags & MAGIC_DEBUG) != 0)
+ 			fprintf(stderr, "indirect @offs=%u[%d]\n", offset, rv);
+From aba3766ef6fddc67e12514293be3f1f4180ee5ab Mon Sep 17 00:00:00 2001
+From: Christos Zoulas <christos@zoulas.com>
+Date: Mon, 19 Apr 2021 20:35:30 +0000
+Subject: fix tests
+
+---
+ tests/JW07022A.mp3.result  | 2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/tests/JW07022A.mp3.result b/tests/JW07022A.mp3.result
+index 8a3e1195..f5911910 100644
+--- a/tests/JW07022A.mp3.result
++++ b/tests/JW07022A.mp3.result
+@@ -1 +1 @@
+-Audio file with ID3 version 2.2.0, contains:MPEG ADTS, layer III, v1, 96 kbps, 44.1 kHz, Monaural
+\ No newline at end of file
++Audio file with ID3 version 2.2.0, contains: MPEG ADTS, layer III, v1, 96 kbps, 44.1 kHz, Monaural
+\ No newline at end of file
