@@ -11,7 +11,7 @@ cat <<-ITS_HEADER_END
 / {
     description = "Chrome OS kernel image with one or more FDT blobs";
     images {
-        kernel@1{
+        kernel {
             description = "kernel";
             data = /incbin/("${image}");
             type = "kernel_noload";
@@ -26,13 +26,13 @@ ITS_HEADER_END
 for i in ${!dtb_list[@]}; do
 	dtb=${dtb_list[${i}]}
 	cat <<-FDT_END
-	        fdt@$(expr ${i} + 1){
+	        fdt-$(expr ${i} + 1) {
 	            description = "$(basename ${dtb})";
 	            data = /incbin/("${dtb}");
 	            type = "flat_dt";
 	            arch = "${arch}";
 	            compression = "${compression}";
-	            hash@1{
+	            hash {
 	                algo = "sha1";
 	            };
 	        };
@@ -42,7 +42,7 @@ done
 cat <<-ITS_MIDDLE_END
     };
     configurations {
-        default = "conf@1";
+        default = "conf-1";
 ITS_MIDDLE_END
 
 for i in "${!dtb_list[@]}"; do
@@ -52,9 +52,9 @@ for i in "${!dtb_list[@]}"; do
 		compat_line+="\"${compat}\","
 	done
 	cat <<-ITS_CONF_END
-	        conf@$(expr ${i} + 1){
-	            kernel = "kernel@1";
-	            fdt = "fdt@$(expr ${i} + 1)";
+	        conf-$(expr ${i} + 1) {
+	            kernel = "kernel";
+	            fdt = "fdt-$(expr ${i} + 1)";
 	            compatible = ${compat_line%,};
 	        };
 	ITS_CONF_END
