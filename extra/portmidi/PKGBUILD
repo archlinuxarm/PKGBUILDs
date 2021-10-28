@@ -5,59 +5,42 @@
 #  - set !makeflags - parallel builds fail
 
 pkgname=portmidi
-pkgver=217
-pkgrel=9
-pkgdesc="Platform independent library for real-time MIDI input/output"
+pkgver=236
+pkgrel=1
+pkgdesc="Cross platform library for interfacing with OS MIDI I/O APIs"
 arch=('x86_64')
-url="http://portmedia.sourceforge.net/"
+url="https://github.com/mixxxdj/portmidi"
 license=('MIT')
-depends=('alsa-lib')
-makedepends=('cmake' 'java-environment=13')
-optdepends=('java-runtime=13: for using pmdefaults'
-            'sh: for using pmdefaults')
-provides=('libpmjni.so' 'libportmidi.so' 'libporttime.so')
+depends=('glibc')
+makedepends=('alsa-lib' 'cmake')
+provides=('libportmidi.so' 'libporttime.so')
 options=('!makeflags')
-source=("https://downloads.sourceforge.net/project/portmedia/${pkgname}/${pkgver}/${pkgname}-src-${pkgver}.zip"
-        'pmdefaults.sh'
-        'portmidi-217-build-fix.patch')
-sha512sums=('d08d4d57429d26d292b5fe6868b7c7a32f2f1d2428f6695cd403a697e2d91629bd4380242ab2720e8f21c895bb75cb56b709fb663a20e8e623120e50bfc5d90b'
-            '4f9bd7f2f3bc31f989c8981b6e32dab8371f6365fbc98f728bc0881a0433220529296ec364a7c5a53ee61dc3f09bb6ec057f7a6385d9fbc79bf1419bea87848d'
-            '643d249d53780519c9773c88974a34127ba64982ed75d2d0f55e99faf3bb7c8c97ba185412e70794319c8253de659b8658de95a8eb6fbfa3648c1be384bafbc1')
-
-prepare() {
-  mv -v "${pkgname}" "${pkgname}-${pkgver}"
-  cd "${pkgname}-${pkgver}"
-  mkdir -vp pm_java/Release
-  # fix hardcoding of output directories
-  sed -e "s|/usr/local|/usr|g" \
-      -i */CMakeLists.txt pm_python/setup.py
-  # build fix for "pm_java/CMakeLists.txt" (FS#27118)
-  patch -Np1 -i "../${pkgname}-217-build-fix.patch"
-}
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/mixxxdj/portmidi/archive/refs/tags/${pkgver}.tar.gz")
+sha512sums=('901729440c4b8c654ab17c4c4f1e3986813bf1e4ad1a874f46e7b1ee0c9ef4ee9f1ecfdf71012fb56b055a6185194dd22c520ae87b9f2259c18af5d189ca57da')
+b2sums=('618c3778b8b2170a145ec956cd4721e731cc135d0192e4b1c35b2c93b6b0f0e74085d044beafe2095b3d8e02e1776f442ae174d342c3f391d04a2aab378b547a')
 
 build() {
   cd "${pkgname}-${pkgver}"
   cmake -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=Release \
-        -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=Release \
-        -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=Release \
-        .
-  make VERBOSE=1
+        -DCMAKE_BUILD_TYPE='None' \
+        -DBUILD_TESTING=ON \
+        -Wno-dev \
+        -B build \
+        -S .
+  make VERBOSE=1 -C build
+}
+
+check() {
+  cd "${pkgname}-${pkgver}"
+  make VERBOSE=1 test -C build
 }
 
 package() {
+  depends+=('libasound.so')
+
   cd "${pkgname}-${pkgver}"
-  make DESTDIR="${pkgdir}" install
-
-  # install custom launcher script, so java-runtime can be pinned
-  install -vDm 755 ../pmdefaults.sh "${pkgdir}/usr/bin/pmdefaults"
-
-  # Fix missing symlink for libporttime.so (FS#21528).
-  ln -sv libportmidi.so "${pkgdir}/usr/lib/libporttime.so"
-
+  make DESTDIR="${pkgdir}" install -C build
   install -vDm 644 license.txt -t "${pkgdir}/usr/share/licenses/${pkgname}"
   install -vDm 644 {CHANGELOG,README}.txt \
     -t "${pkgdir}/usr/share/doc/${pkgname}"
-  install -vDm 644 pm_java/README.txt \
-    "${pkgdir}/usr/share/doc/${pkgname}/README_JAVA.txt"
 }
