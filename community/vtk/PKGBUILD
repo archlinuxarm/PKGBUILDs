@@ -1,0 +1,143 @@
+# Maintainer: Evgeniy Alekseev <arcanis at archlinux dot org>
+# Maintainer: Bruno Pagani <archange at archlinux dot org>
+# Contributor: Michael Migliore <mcmigliore+aur@gmail.com>
+# Contributor: Ray Rashif <schiv at archlinux dot org>
+# Contributor: Andrzej Giniewicz <gginiu at gmail dot com>
+# Contributor: Thomas Dziedzic <gostrc at gmail>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove make/optdepends on adios2, openimagedenoise, ospray
+#  - add makedepend on tbb, previously pulled in by ospray
+#  - explicitly disable the adios2 module due to -DVTK_BUILD_ALL_MODULES=ON
+#  - generalize moving .so files in install
+
+pkgname=vtk
+pkgver=9.0.3
+pkgrel=3
+pkgdesc="Software system for 3D computer graphics, image processing, and visualization"
+arch=(x86_64)
+url="https://www.vtk.org/"
+license=(BSD)
+depends=(gcc-libs double-conversion)
+makedepends=(cmake boost doxygen ffmpeg gdal git gnuplot java-environment=11
+             liblas libxt openmpi openvr pdal postgresql
+             python-matplotlib qt5-base qt5-tools qt5-webkit qt5-x11extras tk
+             unixodbc wget
+             double-conversion eigen expat freetype2 gl2ps glew hdf5 libjpeg
+             jsoncpp libharu proj libxml2 lz4 xz python-mpi4py netcdf libogg
+             libpng pugixml sqlite libtheora libtiff utf8cpp zlib tbb)
+# pegtl https://gitlab.kitware.com/vtk/vtk/-/issues/18151
+optdepends=('gnuplot: plotting tools'
+            'graphviz: drawing tools'
+            'java-runtime=11: java bindings'
+            'python: python bindings'
+            'python-mpi4py: OpenMPI python support'
+            'python-matplotlib: for Matplotlib rendering'
+            'openmpi: OpenMPI support'
+            'qt5-x11extras'
+            'qt5-webkit: WebKit support'
+            'tk: tcl bindings'
+            ffmpeg
+            gdal
+            gl2ps
+            glew
+            hdf5
+            jsoncpp
+            libarchive
+            libharu
+            liblas
+            lz4
+            netcdf
+            openvr
+            pdal
+            postgresql
+            pugixml
+            proj
+            sqlite
+            unixodbc)
+source=(${url}/files/release/${pkgver%.*}/VTK-${pkgver}.tar.gz
+        vtk-gcc11.patch::https://gitlab.kitware.com/vtk/vtk/-/merge_requests/7554.patch
+        vtk-proj8-pre.patch::https://gitlab.kitware.com/vtk/vtk/-/merge_requests/7299.patch
+        vtk-proj8.patch::https://gitlab.kitware.com/vtk/vtk/-/merge_requests/7731.patch
+        vtk-xutil.patch::https://gitlab.kitware.com/vtk/vtk/-/merge_requests/8219.patch
+        vtk-hdf5-1.10-api.patch::https://gitlab.kitware.com/vtk/vtk/-/commit/2f4246682eb9545fd738a0f765bec8d50730e905.patch)
+options=(staticlibs)
+sha256sums=('bc3eb9625b2b8dbfecb6052a2ab091fc91405de4333b0ec68f3323815154ed8a'
+            'c9959adcb59e2f2657f0144b0b68239d4174947fb2ab8051f2575241281e4d68'
+            '745b9e1523e2eb3f4f6366504d2436242300cc5bcdd2251a3434cbe53eb0bad9'
+            '2d3535827d1a6eeb20e16f4986f973a25dabf68b0139516bd2c7a0313901d06c'
+            '8c000357c31ede09b831186ee772cddf357e4badb2ba72edcd55fe569712ca4a'
+            '743c0e17d7ccd3dde869ed349c4a5bd3d7a08316ce5735dd0d1c11a4b92e62f3')
+
+prepare() {
+  cd VTK-${pkgver}
+  # We have a patched libharu
+  sed -i "s|2.4.0|2.3.0|" ThirdParty/libharu/CMakeLists.txt
+  # Missing includes with GCC11
+  patch -p1 < ../vtk-gcc11.patch
+  # Fix build with proj 8.x
+  patch -p1 < ../vtk-proj8-pre.patch
+  patch -p1 < ../vtk-proj8.patch
+  # Fix building opencascade
+  patch -p1 < ../vtk-xutil.patch
+  # Fix build with HDF5 1.12.1, https://gitlab.kitware.com/vtk/vtk/-/issues/18265
+  patch -p1 < ../vtk-hdf5-1.10-api.patch
+  sed -i 's/typedef int hid_t;/typedef int64_t hid_t;/' ThirdParty/xdmf3/vtkxdmf3/core/XdmfHDF5Controller.hpp
+  # https://gitlab.kitware.com/vtk/vtk/-/merge_requests/8546
+  sed -i 's/CACHE PATH "License files/CACHE STRING "License files/' CMakeLists.txt
+}
+
+build() {
+  # To help cmake find java
+  export JAVA_HOME=/usr/lib/jvm/default
+  # To set tcl lib path
+  local _tkver=$(echo 'puts $tcl_version' | tclsh)
+
+  cmake -B build -S VTK-${pkgver} \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LICENSEDIR=share/licenses/vtk \
+    -DCMAKE_SKIP_RPATH=OFF \
+    -DCMAKE_SKIP_INSTALL_RPATH=ON \
+    -DBUILD_SHARED_LIBS=ON \
+    -DVTK_BUILD_ALL_MODULES=ON \
+    -DVTK_MODULE_ENABLE_VTK_IOADIOS2:STRING=NO \
+    -DVTK_INSTALL_TCL_DIR=/usr/lib/tcl${_tkver}/vtk/ \
+    -DVTK_LEGACY_REMOVE=ON \
+    -DVTK_SMP_IMPLEMENTATION_TYPE=TBB \
+    -DVTK_PYTHON_VERSION=3 \
+    -DVTK_USE_FFMPEG_ENCODER=ON \
+    -DVTK_USE_MPI=ON \
+    -DVTK_USE_OGGTHEORA_ENCODER=ON \
+    -DVTK_USE_TK=ON \
+    -DVTK_VERSIONED_INSTALL=OFF \
+    -DVTK_WRAP_JAVA=ON \
+    -DVTK_WRAP_PYTHON=ON \
+    -DVTK_USE_EXTERNAL=ON \
+    -DVTK_MODULE_USE_EXTERNAL_VTK_pegtl=OFF \
+    -DOpenVR_INCLUDE_DIR=/usr/include/openvr/ \
+    -DOpenVR_LIBRARY=/usr/lib/libopenvr_api.so \
+    -DVTK_ENABLE_OSPRAY=OFF \
+    -DVTK_MODULE_ENABLE_VTK_DomainsMicroscopy=NO \
+    -DVTK_MODULE_ENABLE_VTK_FiltersOpenTURNS=NO \
+    -Wno-dev
+# OSPRAY 2.7 not supported
+#    -DVTKOSPRAY_ENABLE_DENOISER=ON \
+  make -C build
+}
+
+package() {
+  make -C build DESTDIR="${pkgdir}" install
+
+  # Move the vtk.jar to the arch-specific location…
+  install -dv "${pkgdir}"/usr/share/java/vtk
+  mv -v "${pkgdir}"/usr/lib/java/vtk.jar "${pkgdir}"/usr/share/java/vtk
+  # …and the libs to the proper place
+  mv "${pkgdir}"/usr/lib/java/vtk-Linux-*/*.so "${pkgdir}"/usr/lib/
+  rmdir "${pkgdir}"/usr/lib/java/{vtk-Linux-*/,}
+
+  # Remove third party CMake patching for older versions than ours
+  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/patches/3.1{3,6,8}
+  # … as well as duplicate copies
+  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/vtkm/cmake/Find*.cmake
+}
