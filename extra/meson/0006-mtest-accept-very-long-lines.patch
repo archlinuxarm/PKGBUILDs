@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Wed, 27 Oct 2021 23:38:32 +0200
+Subject: [PATCH] mtest: accept very long lines
+
+Unless parsing TAP output, there is no strict requirement for
+"meson test" to process test output one line at a time; it simply
+looks nicer to not print a partial line if it can be avoided.
+
+However, in the case of extremely long lines StreamReader.readline
+can fail with a ValueError.  Use readuntil('\n') instead and
+just process whatever pieces of the line it returns.
+
+Fixes: #8591
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+---
+ mesonbuild/mtest.py | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/mesonbuild/mtest.py b/mesonbuild/mtest.py
+index 74d7d8bf1ca7..8faf98955fae 100644
+--- a/mesonbuild/mtest.py
++++ b/mesonbuild/mtest.py
+@@ -1092,7 +1092,14 @@ async def read_decode(reader: asyncio.StreamReader, console_mode: ConsoleUser) -
+     stdo_lines = []
+     try:
+         while not reader.at_eof():
+-            line = decode(await reader.readline())
++            # Prefer splitting by line, as that produces nicer output
++            try:
++                line_bytes = await reader.readuntil(b'\n')
++            except asyncio.IncompleteReadError as e:
++                line_bytes = e.partial
++            except asyncio.LimitOverrunError as e:
++                line_bytes = await reader.readexactly(e.consumed)
++            line = decode(line_bytes)
+             stdo_lines.append(line)
+             if console_mode is ConsoleUser.STDOUT:
+                 print(line, end='', flush=True)
