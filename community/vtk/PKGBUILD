@@ -13,20 +13,20 @@
 #  - explicitly link v5/v6 with libatomic
 
 pkgname=vtk
-pkgver=9.0.3
-pkgrel=3
+pkgver=9.1.0
+pkgrel=1
 pkgdesc="Software system for 3D computer graphics, image processing, and visualization"
 arch=(x86_64)
 url="https://www.vtk.org/"
 license=(BSD)
 depends=(gcc-libs double-conversion)
 makedepends=(cmake boost doxygen ffmpeg gdal git gnuplot java-environment=11
-             liblas libxt openmpi openvr pdal postgresql
-             python-matplotlib qt5-base qt5-tools qt5-webkit qt5-x11extras tk
-             unixodbc wget
-             double-conversion eigen expat freetype2 gl2ps glew hdf5 libjpeg
+             liblas libxt openmp openmpi openvdb openvr pdal
+             postgresql python-matplotlib qt5-base qt5-tools qt5-webkit
+             qt5-x11extras tk unixodbc wget
+             cgns double-conversion eigen expat fmt freetype2 gl2ps glew hdf5 libjpeg
              jsoncpp libharu proj libxml2 lz4 xz python-mpi4py netcdf libogg
-             libpng pugixml sqlite libtheora libtiff utf8cpp zlib tbb)
+             libpng pugixml rapidjson sqlite libtheora libtiff utf8cpp zfp zlib)
 # pegtl https://gitlab.kitware.com/vtk/vtk/-/issues/18151
 optdepends=('gnuplot: plotting tools'
             'graphviz: drawing tools'
@@ -38,6 +38,7 @@ optdepends=('gnuplot: plotting tools'
             'qt5-x11extras'
             'qt5-webkit: WebKit support'
             'tk: tcl bindings'
+            cgns
             ffmpeg
             gdal
             gl2ps
@@ -49,6 +50,7 @@ optdepends=('gnuplot: plotting tools'
             liblas
             lz4
             netcdf
+            openvdb
             openvr
             pdal
             postgresql
@@ -56,36 +58,16 @@ optdepends=('gnuplot: plotting tools'
             proj
             sqlite
             unixodbc)
-source=(${url}/files/release/${pkgver%.*}/VTK-${pkgver}.tar.gz
-        vtk-gcc11.patch::https://gitlab.kitware.com/vtk/vtk/-/merge_requests/7554.patch
-        vtk-proj8-pre.patch::https://gitlab.kitware.com/vtk/vtk/-/merge_requests/7299.patch
-        vtk-proj8.patch::https://gitlab.kitware.com/vtk/vtk/-/merge_requests/7731.patch
-        vtk-xutil.patch::https://gitlab.kitware.com/vtk/vtk/-/merge_requests/8219.patch
-        vtk-hdf5-1.10-api.patch::https://gitlab.kitware.com/vtk/vtk/-/commit/2f4246682eb9545fd738a0f765bec8d50730e905.patch)
+source=(${url}/files/release/${pkgver%.*}/VTK-${pkgver}.tar.gz)
 options=(staticlibs)
-sha256sums=('bc3eb9625b2b8dbfecb6052a2ab091fc91405de4333b0ec68f3323815154ed8a'
-            'c9959adcb59e2f2657f0144b0b68239d4174947fb2ab8051f2575241281e4d68'
-            '745b9e1523e2eb3f4f6366504d2436242300cc5bcdd2251a3434cbe53eb0bad9'
-            '2d3535827d1a6eeb20e16f4986f973a25dabf68b0139516bd2c7a0313901d06c'
-            '8c000357c31ede09b831186ee772cddf357e4badb2ba72edcd55fe569712ca4a'
-            '743c0e17d7ccd3dde869ed349c4a5bd3d7a08316ce5735dd0d1c11a4b92e62f3')
+sha256sums=('8fed42f4f8f1eb8083107b68eaa9ad71da07110161a3116ad807f43e5ca5ce96')
 
 prepare() {
   cd VTK-${pkgver}
   # We have a patched libharu
   sed -i "s|2.4.0|2.3.0|" ThirdParty/libharu/CMakeLists.txt
-  # Missing includes with GCC11
-  patch -p1 < ../vtk-gcc11.patch
-  # Fix build with proj 8.x
-  patch -p1 < ../vtk-proj8-pre.patch
-  patch -p1 < ../vtk-proj8.patch
-  # Fix building opencascade
-  patch -p1 < ../vtk-xutil.patch
-  # Fix build with HDF5 1.12.1, https://gitlab.kitware.com/vtk/vtk/-/issues/18265
-  patch -p1 < ../vtk-hdf5-1.10-api.patch
-  sed -i 's/typedef int hid_t;/typedef int64_t hid_t;/' ThirdParty/xdmf3/vtkxdmf3/core/XdmfHDF5Controller.hpp
-  # https://gitlab.kitware.com/vtk/vtk/-/merge_requests/8546
-  sed -i 's/CACHE PATH "License files/CACHE STRING "License files/' CMakeLists.txt
+  # We have a patched fmt
+  sed -i "s|8.1.0|8.0.1|" ThirdParty/fmt/CMakeLists.txt
   # explicitly link with libatomic
   if [[ $CARCH == "arm" || $CARCH == "armv6h" ]]; then
     echo "vtk_module_link(VTK::CommonDataModel PUBLIC atomic)" >> Common/DataModel/CMakeLists.txt
@@ -97,7 +79,7 @@ build() {
   export JAVA_HOME=/usr/lib/jvm/default
   # To set tcl lib path
   local _tkver=$(echo 'puts $tcl_version' | tclsh)
-
+  # We do not have packages for cli11, exprtk, ioss
   cmake -B build -S VTK-${pkgver} \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
@@ -109,25 +91,28 @@ build() {
     -DVTK_MODULE_ENABLE_VTK_IOADIOS2:STRING=NO \
     -DVTK_INSTALL_TCL_DIR=/usr/lib/tcl${_tkver}/vtk/ \
     -DVTK_LEGACY_REMOVE=ON \
+    -DVTK_SMP_ENABLE_OPENMP=ON \
     -DVTK_SMP_IMPLEMENTATION_TYPE=TBB \
     -DVTK_PYTHON_VERSION=3 \
-    -DVTK_USE_FFMPEG_ENCODER=ON \
     -DVTK_USE_MPI=ON \
-    -DVTK_USE_OGGTHEORA_ENCODER=ON \
     -DVTK_USE_TK=ON \
     -DVTK_VERSIONED_INSTALL=OFF \
     -DVTK_WRAP_JAVA=ON \
     -DVTK_WRAP_PYTHON=ON \
+    -DVTKOSPRAY_ENABLE_DENOISER=OFF \
+    -DVTKm_ENABLE_HDF5_IO=ON \
+    -DVTKm_ENABLE_MPI=ON \
+    -DVTKm_ENABLE_OPENMP=ON \
     -DVTK_USE_EXTERNAL=ON \
+    -DVTK_MODULE_USE_EXTERNAL_VTK_cli11=OFF \
+    -DVTK_MODULE_USE_EXTERNAL_VTK_exprtk=OFF \
+    -DVTK_MODULE_USE_EXTERNAL_VTK_ioss=OFF \
     -DVTK_MODULE_USE_EXTERNAL_VTK_pegtl=OFF \
-    -DOpenVR_INCLUDE_DIR=/usr/include/openvr/ \
-    -DOpenVR_LIBRARY=/usr/lib/libopenvr_api.so \
-    -DVTK_ENABLE_OSPRAY=OFF \
     -DVTK_MODULE_ENABLE_VTK_DomainsMicroscopy=NO \
     -DVTK_MODULE_ENABLE_VTK_FiltersOpenTURNS=NO \
+    -DOpenVDB_CMAKE_PATH=/usr/lib/cmake/OpenVDB \
     -Wno-dev
-# OSPRAY 2.7 not supported
-#    -DVTKOSPRAY_ENABLE_DENOISER=ON \
+#    -DFIDES_USE_EXTERNAL_RAPIDJSON=ON \
   make -C build
 }
 
@@ -142,7 +127,7 @@ package() {
   rmdir "${pkgdir}"/usr/lib/java/{vtk-Linux-*/,}
 
   # Remove third party CMake patching for older versions than ours
-  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/patches/3.1{3,6,8}
+  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/patches/3.{1{3,6,8,9},20}
   # … as well as duplicate copies
-  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/vtkm/cmake/Find*.cmake
+  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/vtkm/cmake/{Find*.cmake,3.15}
 }
