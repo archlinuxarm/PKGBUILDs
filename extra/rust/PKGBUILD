@@ -5,7 +5,7 @@
 # Contributor: userwithuid <userwithuid@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - remove lib32 package and related bits
+#  - remove lib32, musl, and wasm packages and related bits
 #  - add a link to g++ to compensate for broken cross-compiler decisions
 #  - build v6/v7 with -j2 - RAM constraints
 #  - set llvm-config in config.toml for ARM architectures
@@ -14,52 +14,54 @@
 buildarch=28
 highmem=1
 
-pkgname=('rust' 'rust-docs')
+pkgbase=rust
+pkgname=(rust rust-src)
 epoch=1
-pkgver=1.56.0
-pkgrel=1
-
-_llvm_ver=12.0.1
-
-pkgdesc='Systems programming language focused on safety, speed and concurrency'
-url='https://www.rust-lang.org/'
-arch=('x86_64')
-license=('MIT' 'Apache')
-
-makedepends=('rust' "llvm=$_llvm_ver" 'libffi' 'perl' 'python'
-             'curl' 'cmake' 'ninja')
-checkdepends=('procps-ng' 'gdb')
-
-options=('!emptydirs' '!strip')
-
+pkgver=1.56.1
+pkgrel=3
+pkgdesc="Systems programming language focused on safety, speed and concurrency"
+url=https://www.rust-lang.org/
+arch=(x86_64)
+license=(MIT Apache)
+options=(!emptydirs !strip)
+_llvm_ver=13.0.0
+depends=(gcc-libs llvm-libs curl libssh2 gcc)
+makedepends=(rust "llvm=$_llvm_ver" libffi perl python cmake
+             ninja lld)
+checkdepends=(procps-ng gdb)
 source=(
   "https://static.rust-lang.org/dist/rustc-$pkgver-src.tar.gz"{,.asc}
   "https://github.com/llvm/llvm-project/releases/download/llvmorg-$_llvm_ver/compiler-rt-$_llvm_ver.src.tar.xz"{,.sig}
-  0001-bootstrap-Change-libexec-dir.patch
   0001-cargo-Change-libexec-dir.patch
+  0001-bootstrap-Change-libexec-dir.patch
   0002-compiler-Change-LLVM-targets.patch
+  0003-compiler-Use-wasm-ld-for-wasm-targets.patch
 )
-sha256sums=('cd0fd72d698deb3001c18e0f4bf8261d8f86420097eef94ca3a1fe047f2df43f'
+sha256sums=('c3898dfaadaa193dc88ddbc5345946a163211b58621df1cfff70186b4fc79511'
             'SKIP'
-            'b4c8d5f2a802332987c1c0a95b5afb35b1a66a96fe44add4e4ed4792c4cba0a4'
+            '4c3602d76c7868a96b30c36165c4b7643e2a20173fced7e071b4baeb2d74db3f'
             'SKIP'
-            'a2a8a7c6a5732f79cc92f81d3c8380589c4e2b9a996fb565bbefe42f66b62597'
             '0f8cfbe0387dd62909fe9cb9523223ae1c2319494e2caf5fa4d0592198631b3e'
-            '977da945985dce4484ace8794cbc91241b1f3c27311c1a8b201231db6e1d19e5')
-validpgpkeys=('108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE'  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
-              '474E22316ABF4785A88C6E8EA2C794A986419D8A'  # Tom Stellard <tstellar@redhat.com>
-              'B6C8F98282B944E3B0D5C2530FC3042E345AD05D') # Hans Wennborg <hans@chromium.org>
+            'a2a8a7c6a5732f79cc92f81d3c8380589c4e2b9a996fb565bbefe42f66b62597'
+            '977da945985dce4484ace8794cbc91241b1f3c27311c1a8b201231db6e1d19e5'
+            'fcf3c4442ba6a9e59415652ce8514428b2e37b80c5fe7d07fb44259ad37abafb')
+validpgpkeys=(108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
+              474E22316ABF4785A88C6E8EA2C794A986419D8A  # Tom Stellard <tstellar@redhat.com>
+              B6C8F98282B944E3B0D5C2530FC3042E345AD05D) # Hans Wennborg <hans@chromium.org>
 
 prepare() {
-  cd "rustc-$pkgver-src"
+  cd rustc-$pkgver-src
 
   # Patch bootstrap and cargo so credential helpers
   # are in /usr/lib instead of /usr/libexec
-  patch -Np1 -i ../0001-bootstrap-Change-libexec-dir.patch
   patch -d src/tools/cargo -Np1 < ../0001-cargo-Change-libexec-dir.patch
+  patch -Np1 -i ../0001-bootstrap-Change-libexec-dir.patch
 
   # Use our *-pc-linux-gnu targets, making LTO with clang simpler
   patch -Np1 -i ../0002-compiler-Change-LLVM-targets.patch
+
+  # Use our wasm-ld
+  patch -Np1 -i ../0003-compiler-Use-wasm-ld-for-wasm-targets.patch
 
   cat >config.toml <<END
 changelog-seen = 2
@@ -72,24 +74,35 @@ link-shared = true
 cargo = "/usr/bin/cargo"
 rustc = "/usr/bin/rustc"
 rustfmt = "/usr/bin/rustfmt"
+locked-deps = true
 vendor = true
 tools = ["cargo", "rls", "clippy", "rustfmt", "analysis", "src", "rust-demangler"]
 sanitizers = false
 profiler = true
 
+# Generating docs fails with the wasm32-* targets
+docs = false
+
 [install]
 prefix = "/usr"
 
 [rust]
+debuginfo-level-std = 0
+channel = "stable"
+description = "Arch Linux $pkgbase $epoch:$pkgver-$pkgrel"
+rpath = false
+backtrace-on-ice = true
+remap-debuginfo = true
+jemalloc = true
+
 # LLVM crashes when passing an object through ThinLTO twice.  This is triggered
 # when using rust code in cross-language LTO if libstd was built using ThinLTO.
 # http://blog.llvm.org/2019/09/closing-gap-cross-language-lto-between.html
 # https://github.com/rust-lang/rust/issues/54872
 codegen-units-std = 1
 
-debuginfo-level-std = 0
-channel = "stable"
-rpath = false
+[dist]
+compression-formats = ["gz"]
 
 [target.x86_64-unknown-linux-gnu]
 llvm-config = "/usr/bin/llvm-config"
@@ -114,64 +127,67 @@ END
   fi
 }
 
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/$f"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
 build() {
-  cd "rustc-$pkgver-src"
+  cd rustc-$pkgver-src
 
   export RUST_BACKTRACE=1
   export RUST_COMPILER_RT_ROOT="$srcdir/compiler-rt-$_llvm_ver.src"
   [[ -d $RUST_COMPILER_RT_ROOT ]]
 
-  DESTDIR="$PWD"/dest-rust python ./x.py install -j "$(nproc)"
+  DESTDIR="$srcdir/dest-rust" python ./x.py install -j "$(nproc)"
 
-  # Remove analysis data for libs that weren't installed
-  # TODO: Find out where these come from
-  local file lib
-  while read -rd '' file; do
-    lib="${file%.json}.rlib"
-    lib="${lib/\/analysis\///lib/}"
-    if [[ ! -e $lib ]]; then
-      echo "missing '$lib'"
-      rm -v "$file"
-    fi
-  done < <(find "dest-rust/usr/lib/rustlib"  -path '*/analysis/*.json' -print0)
+  cd ../dest-rust
 
-  # move docs and cross targets out of the way for splitting
-  mv dest-rust/usr/share/doc dest-doc
-}
-
-package_rust() {
-  depends=('gcc-libs' 'llvm-libs' 'curl' 'libssh2')
-  optdepends=('lldb: rust-lldb script'
-              'gdb: rust-gdb script')
-  provides=('cargo' 'rustfmt')
-  conflicts=('cargo' 'rustfmt')
-  replaces=('cargo' 'rustfmt' 'cargo-tree')
-
-  cd "rustc-$pkgver-src"
-
-  cp -a dest-rust/* "$pkgdir"
-  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE*
-
-  # delete unnecesary files, e.g. components and manifest files only used for the uninstall script
-  cd "$pkgdir"/usr/lib/rustlib
-  rm components install.log manifest-* rust-installer-version uninstall.sh
+  # delete unnecessary files, e.g. files only used for the uninstall script
+  rm usr/lib/rustlib/{components,install.log,rust-installer-version,uninstall.sh}
+  rm usr/lib/rustlib/manifest-*
 
   # rustbuild always installs copies of the shared libraries to /usr/lib,
   # overwrite them with symlinks to the per-architecture versions
-  ln -srft "$pkgdir"/usr/lib x86_64-unknown-linux-gnu/lib/*.so
+  #mkdir -p usr/lib32
+  #ln -srft usr/lib   usr/lib/rustlib/x86_64-unknown-linux-gnu/lib/*.so
+  #ln -srft usr/lib32 usr/lib/rustlib/i686-unknown-linux-gnu/lib/*.so
 
-  install -d "$pkgdir"/usr/share/bash-completion/
-  mv "$pkgdir"/etc/bash_completion.d "$pkgdir"/usr/share/bash-completion/completions
+  mkdir -p usr/share/bash-completion
+  mv etc/bash_completion.d usr/share/bash-completion/completions
+
+  mkdir -p usr/share/licenses/rust
+  mv -t usr/share/licenses/rust usr/share/doc/rust/{COPYRIGHT,LICENSE*}
+
+  #_pick dest-i686 usr/lib/rustlib/i686-unknown-linux-gnu usr/lib32
+  #_pick dest-musl usr/lib/rustlib/x86_64-unknown-linux-musl
+  #_pick dest-wasm usr/lib/rustlib/wasm32-*
+  _pick dest-src  usr/lib/rustlib/src
 }
 
-package_rust-docs() {
-  pkgdesc='Documentation for the Rust programming language'
+package_rust() {
+  optdepends=('lldb: rust-lldb script'
+              'gdb: rust-gdb script')
+  provides=(cargo rustfmt)
+  conflicts=(cargo rustfmt 'rust-docs<1:1.56.1-3')
+  replaces=(cargo rustfmt cargo-tree 'rust-docs<1:1.56.1-3')
 
-  cd "rustc-$pkgver-src"
-  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE*
+  cp -a dest-rust/* "$pkgdir"
+}
 
-  install -d "$pkgdir"/usr/share/
-  cp -a dest-doc "$pkgdir"/usr/share/doc
+package_rust-src() {
+  pkgdesc="Source code for the Rust standard library"
+  depends=(rust)
+
+  cp -a dest-src/* "$pkgdir"
+
+  mkdir -p "$pkgdir/usr/share/licenses"
+  ln -s rust "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 # vim:set ts=2 sw=2 et:
