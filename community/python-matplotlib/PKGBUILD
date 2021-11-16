@@ -10,19 +10,22 @@
 #  - disable lto via setup.cfg
 
 pkgname=python-matplotlib
-pkgver=3.4.3
+pkgver=3.5.0
 pkgrel=1
 pkgdesc="A python plotting library, making publication quality plots"
 arch=(x86_64)
 url="https://matplotlib.org"
 license=(custom)
-depends=(freetype2 python-cycler python-dateutil python-kiwisolver python-numpy python-pillow python-pyparsing qhull)
+depends=(freetype2 python-cycler python-dateutil python-fonttools python-kiwisolver python-numpy
+         python-packaging python-pillow python-pyparsing qhull)
 optdepends=('tk: Tk{Agg,Cairo} backends'
             'pyside2: alternative for Qt5{Agg,Cairo} backends'
+            'pyside6: alternative for Qt6{Agg,Cairo} backends'
             'python-pyqt5: Qt5{Agg,Cairo} backends'
-            'python-gobject: for GTK3{Agg,Cairo} backend'
-            'python-wxpython: WX{,Agg,Cairo} backend'
-            'python-cairo: {GTK3,Qt5,Tk,WX}Cairo backends'
+            'python-pyqt6: Qt6{Agg,Cairo} backends'
+            'python-gobject: for GTK{3,4}{Agg,Cairo} backend'
+            'python-wxpython: WX{Agg,Cairo} backend'
+            'python-cairo: {GTK{3,4},Qt{5,6},Tk,WX}Cairo backends'
             'python-tornado: WebAgg backend'
             'ffmpeg: for saving movies'
             'imagemagick: for saving animated gifs'
@@ -30,24 +33,40 @@ optdepends=('tk: Tk{Agg,Cairo} backends'
             'texlive-bin: usetex dependencies'
             'texlive-latexextra: usetex usage with pdflatex'
             'python-certifi: https support')
-makedepends=(git rsync python-setuptools
-             tk python-pyqt5 python-gobject
-             python-wxpython python-cairo
-             python-certifi python-tornado
-             ghostscript texlive-bin)
-             # agg missing some non-upstreamed patches?
-checkdepends=(python-pytest python-pytest-xdist python-pytest-runner xorg-server-xvfb
-              texlive-core texlive-latexextra ghostscript inkscape mencoder
-              ffmpeg imagemagick python-pandas)
-_tag=42d40d388ef326b4dd913f17864cc8cf60c0fef8 # git rev-parse v${pkgver}
-source=(git+https://github.com/matplotlib/matplotlib.git#tag=${_tag}?signed)
-sha512sums=(SKIP)
+makedepends=(git python-setuptools-scm-git-archive python-certifi)
+checkdepends=(python-pytest python-pytest-xdist python-pytest-runner python-pytest-rerunfailures xorg-server-xvfb
+              texlive-bin texlive-core texlive-latexextra texlive-pictures ghostscript inkscape ffmpeg imagemagick
+              gtk4 python-cairo python-gobject python-pyqt5 pyside2 python-pyqt6 pyside6 python-tornado python-wxpython tk
+              jupyter-nbconvert jupyter-nbformat python-ipykernel python-pandas python-pikepdf python-pytz)
+_tag=7a9ee717ecfa24ae4029abac0c7939076c2b0eb7 # git rev-parse v${pkgver}
+_ftver=2.11.0
+source=(git+https://github.com/matplotlib/matplotlib.git#tag=${_tag}?signed
+        https://github.com/QuLogic/mpl-images/archive/v${pkgver}rc1-with-freetype-${_ftver}/mpl-images-${pkgver}rc1-ft${_ftver}.tar.gz
+        freetype.patch)
+b2sums=(SKIP
+        29e87a2dd2fc37c3d33e7e0463ca02b468953abe896ac658a6764e78f61a56bb486f5fec51403b2bda726031c5352b4270049256ac8f630eef56ffb3071b870a
+        514324b3e17e832d5199eaa6592c05ca662b1164ddc95f16ea076d6a1063b06e6a8fa4eac7740e5f73afbcc9d17244c5cc41373d5787f62cd58eab10249302c9)
 validpgpkeys=(23CAB59E3332F94D26BEF0378D86E7FAE5EB0C10) # Elliott Sales de Andrade <quantum.analyst@gmail.com>
 
 prepare() {
   cd matplotlib
-# Use system freetype and qhull, disable LTO
+  # Fix SCM detected version
+  rm -r .git
+  echo "Version: ${pkgver}" > PKG-INFO
+  # Use system freetype and qhull, disable LTO
   sed -e 's|#system_freetype = False|system_freetype = True|' -e 's|#system_qhull = False|system_qhull = True|' -e 's|#enable_lto = True|enable_lto = False|' setup.cfg.template > setup.cfg
+  patch -p1 < ../freetype.patch # From Fedora/upstream
+  # Install tests for check()
+  sed -i 's|#tests = False|tests = True|' mplsetup.cfg
+  # Use appropriate baseline images for tests
+  cp lib/matplotlib/tests/baseline_images/test_image/uint16.tif .
+  for _module in matplotlib mpl_toolkits
+  do
+    rm -r lib/${_module}/tests/baseline_images/test*
+    mv ../mpl-images-${pkgver}rc1-with-freetype-${_ftver}/${_module}/* lib/${_module}/tests/baseline_images/
+  done
+  # https://github.com/QuLogic/mpl-images/issues/1
+  cp uint16.tif lib/matplotlib/tests/baseline_images/test_image/
 }
 
 build() {
@@ -57,15 +76,17 @@ build() {
 
 check() {
   cd matplotlib
-  xvfb-run -a -s "+extension GLX +extension RANDR +render -screen 0 1280x1024x24" \
-    python setup.py pytest --addopts="-n auto" || echo "Tests failed" # Different font rendering details
+  python -m venv --system-site-packages test-env
+  test-env/bin/python setup.py install --skip-build
+  # https://github.com/matplotlib/matplotlib/issues/21654
+  xvfb-run -a -s "-screen 0 640x480x24" \
+    test-env/bin/python -m pytest -ra -n auto -v --color=yes --pyargs matplotlib mpl_toolkits.tests -k 'not test_ipynb'
 }
 
-package_python-matplotlib() {
+package() {
   cd matplotlib
-  export PYTHONHASHSEED=0
   python setup.py install --root "${pkgdir}" --prefix=/usr --optimize=1 --skip-build
-  install -Dm644 doc/users/license.rst -t "${pkgdir}"/usr/share/licenses/${pkgname}/
-  # Needed since https://github.com/matplotlib/matplotlib/pull/14170
+  install -Dm644 doc/users/project/license.rst -t "${pkgdir}"/usr/share/licenses/${pkgname}/
+  # Remove tests
   rm -r "${pkgdir}"$(python -c "import site; print(site.getsitepackages()[0])")/{matplotlib,mpl_toolkits}/tests/
 }
