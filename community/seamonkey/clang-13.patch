@@ -1,0 +1,112 @@
+From 3dc54332dbaf1db6cf58d9c605f405f22d2e0d11 Mon Sep 17 00:00:00 2001
+From: Andi-Bogdan Postelnicu <andi@mozilla.com>
+Date: Wed, 2 Jun 2021 14:38:01 +0000
+Subject: [PATCH] Bug 1707096 - fix the build for `clang-trunk`. r=jfkthame
+
+With D100581 LLVM added support for -Wunused-but-set-parameter and -Wunused-but-set-variable.
+1. we shouldn't treat these warning as errors
+2. for harfbuzz we apply a patch that has also been upstreamed, #2995, since pragma directives are somehow borken in clang vs gcc.
+
+Differential Revision: https://phabricator.services.mozilla.com/D116604
+---
+ build/moz.configure/warnings.configure                  | 3 +++
+ gfx/harfbuzz/README-mozilla                             | 6 ++++++
+ gfx/harfbuzz/src/hb-ot-shape-complex-myanmar-machine.hh | 3 +--
+ gfx/harfbuzz/src/hb-ot-shape-complex-myanmar-machine.rl | 2 +-
+ gfx/harfbuzz/src/hb-subset-cff1.cc                      | 4 +---
+ 5 files changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/build/moz.configure/warnings.configure b/build/moz.configure/warnings.configure
+index f15ed78b154..a79cc9b2493 100644
+--- a/build/moz.configure/warnings.configure
++++ b/build/moz.configure/warnings.configure
+@@ -102,6 +102,9 @@ check_and_add_gcc_warning('-Wno-error=free-nonheap-object')
+ # Would be a pain to fix all occurrences, for very little gain
+ check_and_add_gcc_warning('-Wno-error=multistatement-macros')
+ 
++# new in clang-trunk/13, turned on by -Wall, but we have many occurances of this in our code.
++check_and_add_gcc_warning("-Wno-error=unused-but-set-variable")
++
+ # catches format/argument mismatches with printf
+ c_format_warning, cxx_format_warning = check_and_add_gcc_warning(
+     '-Wformat', when=depends(target)(lambda t: t.kernel != 'WINNT'))
+diff --git a/gfx/harfbuzz/README-mozilla b/gfx/harfbuzz/README-mozilla
+index 0f271a834ae..c668c9877fd 100644
+--- a/gfx/harfbuzz/README-mozilla
++++ b/gfx/harfbuzz/README-mozilla
+@@ -3,6 +3,12 @@ https://github.com/harfbuzz/harfbuzz
+ 
+ Current version: 2.4.0 [commit d6fc1d49aa099104a889c96bc9087c21d8fc0960]
+ 
++!!!Please Note!!!
++Because LLVM added in D100581 support for -Wunused-but-set-parameter and -Wunused-but-set-variable
++and clang doesn't cope well with `#pragma GCC diagnostic warning` vs gcc we had to patch this version up.
++The same patch was upstream in #2995 so, starting with the next version, the current patch will no longer
++be needed.
++
+ UPDATING:
+ 
+ Our in-tree copy of HarfBuzz does not depend on any generated files from the
+diff --git a/gfx/harfbuzz/src/hb-ot-shape-complex-myanmar-machine.hh b/gfx/harfbuzz/src/hb-ot-shape-complex-myanmar-machine.hh
+index 0c19e4f687f..f9696c52259 100644
+--- a/gfx/harfbuzz/src/hb-ot-shape-complex-myanmar-machine.hh
++++ b/gfx/harfbuzz/src/hb-ot-shape-complex-myanmar-machine.hh
+@@ -293,7 +293,7 @@ static const int myanmar_syllable_machine_en_main = 0;
+ static void
+ find_syllables (hb_buffer_t *buffer)
+ {
+-  unsigned int p, pe, eof, ts, te, act HB_UNUSED;
++  unsigned int p, pe, eof, ts, te HB_UNUSED;
+   int cs;
+   hb_glyph_info_t *info = buffer->info;
+   
+@@ -302,7 +302,6 @@ find_syllables (hb_buffer_t *buffer)
+ 	cs = myanmar_syllable_machine_start;
+ 	ts = 0;
+ 	te = 0;
+-	act = 0;
+ 	}
+ 
+ #line 114 "hb-ot-shape-complex-myanmar-machine.rl"
+diff --git a/gfx/harfbuzz/src/hb-ot-shape-complex-myanmar-machine.rl b/gfx/harfbuzz/src/hb-ot-shape-complex-myanmar-machine.rl
+index 7845a86d41f..bc2607ba527 100644
+--- a/gfx/harfbuzz/src/hb-ot-shape-complex-myanmar-machine.rl
++++ b/gfx/harfbuzz/src/hb-ot-shape-complex-myanmar-machine.rl
+@@ -105,7 +105,7 @@ main := |*
+ static void
+ find_syllables (hb_buffer_t *buffer)
+ {
+-  unsigned int p, pe, eof, ts, te, act HB_UNUSED;
++  unsigned int p, pe, eof, ts, te HB_UNUSED;
+   int cs;
+   hb_glyph_info_t *info = buffer->info;
+   %%{
+diff --git a/gfx/harfbuzz/src/hb-subset-cff1.cc b/gfx/harfbuzz/src/hb-subset-cff1.cc
+index 49ac0bf4299..d51842e2971 100644
+--- a/gfx/harfbuzz/src/hb-subset-cff1.cc
++++ b/gfx/harfbuzz/src/hb-subset-cff1.cc
+@@ -464,12 +464,11 @@ struct cff_subset_plan {
+   unsigned int plan_subset_encoding (const OT::cff1::accelerator_subset_t &acc, hb_subset_plan_t *plan)
+   {
+     const Encoding *encoding = acc.encoding;
+-    unsigned int  size0, size1, supp_size;
++    unsigned int  size0, size1;
+     hb_codepoint_t  code, last_code = CFF_UNDEF_CODE;
+     hb_vector_t<hb_codepoint_t> supp_codes;
+ 
+     subset_enc_code_ranges.resize (0);
+-    supp_size = 0;
+     supp_codes.init ();
+ 
+     subset_enc_num_codes = plan->num_output_glyphs () - 1;
+@@ -505,7 +504,6 @@ struct cff_subset_plan {
+ 	  code_pair_t pair = { supp_codes[i], sid };
+ 	  subset_enc_supp_codes.push (pair);
+ 	}
+-	supp_size += SuppEncoding::static_size * supp_codes.length;
+       }
+     }
+     supp_codes.fini ();
+-- 
+GitLab
+
