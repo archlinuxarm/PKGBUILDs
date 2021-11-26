@@ -1,0 +1,50 @@
+disable_cma() {
+  if [[ -f /boot/config.txt && $(grep '^cma' /boot/config.txt) != '' ]]; then
+    echo ">>> You appear to have dynamic memory (CMA) enabled, which is currently broken"
+    echo ">>>   in newer kernels and will cause many issues if left enabled."
+    echo ">>> Disabling that for you now."
+    sed -i 's/^cma_/#cma_/g' /boot/config.txt
+  fi
+}
+
+correct_fstab() {
+  # starting with v5.10.y, fstab requires a padded zero in the path to /boot
+  if [[ -f /etc/fstab ]]; then
+    if grep -q mmcblk1p1 /etc/fstab; then
+      sed -i 's/mmcblk1p1/mmcblk01p1/' /etc/fstab
+    fi
+  fi
+}
+
+post_install () {
+  disable_cma
+}
+
+post_upgrade() {
+  if grep "^[^#]*[[:space:]]/boot" etc/fstab 2>&1 >/dev/null; then
+    if ! grep "[[:space:]]/boot" etc/mtab 2>&1 >/dev/null; then
+      echo "WARNING: /boot appears to be a separate partition but is not mounted."
+      echo "         You probably just broke your system. Congratulations."
+    fi
+  fi
+
+  disable_cma
+
+  if [ "$(vercmp $2 3.18.3)" -lt 0 ]; then
+    echo "________________________________________________________________________________"
+    echo ""
+    echo "WARNING: This kernel provides updated config.txt and cmdline.txt files."
+    echo "         Check for pacnew files in /boot and merge or replace the existing files"
+    echo "         with the new versions."
+    echo "________________________________________________________________________________"
+    echo ""
+  fi
+
+  if [ "$(vercmp $2 5.10.0)" -lt 0 ]; then
+    correct_fstab
+  fi
+}
+
+post_remove() {
+  rm -f boot/initramfs-linux.img
+}
