@@ -1,48 +1,5 @@
 #!/bin/bash
 
-# This is in 'udev' and 'systemd' hook... Let's hope we have
-# it in mkinitcpio soon.
-# https://github.com/archlinux/mkinitcpio/pull/54
-add_udev_rule() {
-    # Add an udev rules file to the initcpio image. Dependencies on binaries
-    # will be discovered and added.
-    #   $1: path to rules file (or name of rules file)
-
-    local rules="$1" rule= key= value= binary=
-
-    if [[ ${rules:0:1} != '/' ]]; then
-        rules=$(PATH=/usr/lib/udev/rules.d:/lib/udev/rules.d type -P "$1")
-    fi
-    if [[ -z $rules ]]; then
-        # complain about not found rules
-        return 1
-    fi
-
-    add_file "$rules" /usr/lib/udev/rules.d/"${rules##*/}"
-
-    while IFS=, read -ra rule; do
-        # skip empty lines, comments
-        [[ -z $rule || $rule = @(+([[:space:]])|#*) ]] && continue
-
-        for pair in "${rule[@]}"; do
-            IFS=' =' read -r key value <<< "$pair"
-            case $key in
-                RUN@({program}|+)|IMPORT{program}|ENV{REMOVE_CMD})
-                    # strip quotes
-                    binary=${value//[\"\']/}
-                    # just take the first word as the binary name
-                    binary=${binary%% *}
-                    [[ ${binary:0:1} == '$' ]] && continue
-                    if [[ ${binary:0:1} != '/' ]]; then
-                        binary=$(PATH=/usr/lib/udev:/lib/udev type -P "$binary")
-                    fi
-                    add_binary "$binary"
-                    ;;
-            esac
-        done
-    done <"$rules"
-}
-
 build() {
     local rules tool
 
