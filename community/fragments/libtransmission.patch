@@ -1,0 +1,240 @@
+From 1665c64164f4c865239742948a11797ed0f79836 Mon Sep 17 00:00:00 2001
+From: Bilal Elmoussaoui <bil.elmoussaoui@gmail.com>
+Date: Thu, 30 May 2019 22:06:21 +0000
+Subject: [PATCH] Bundle libtranmission in the flatpak manifest
+
+---
+ .gitmodules                        |  3 --
+ build-aux/build_libtransmission.sh | 10 ----
+ de.haeckerfelix.Fragments.json     | 76 ++++++++++++++++++++++++++++--
+ meson.build                        | 28 +++++++----
+ src/vapis/transmission.vapi        | 32 ++++++-------
+ submodules/meson.build             | 16 -------
+ submodules/transmission            |  1 -
+ 7 files changed, 105 insertions(+), 61 deletions(-)
+ delete mode 100644 .gitmodules
+ delete mode 100644 build-aux/build_libtransmission.sh
+ delete mode 100644 submodules/meson.build
+ delete mode 160000 submodules/transmission
+
+diff --git a/build-aux/build_libtransmission.sh b/build-aux/build_libtransmission.sh
+deleted file mode 100644
+index c0ce8a2..0000000
+--- a/build-aux/build_libtransmission.sh
++++ /dev/null
+@@ -1,10 +0,0 @@
+-#!/bin/bash
+-
+-cd submodules
+-
+-echo "Generate libtransmission build files..."
+-cmake -Blibtransmission -Htransmission -DINSTALL_LIB=ON -DENABLE_DAEMON=OFF -DENABLE_UTILS=OFF -DENABLE_TESTS=OFF -DENABLE_GTK=OFF -DENABLE_QT=OFF -DINSTALL_DOC=OFF
+-
+-echo "Build libtransmission..."
+-cd libtransmission
+-make
+\ No newline at end of file
+diff --git a/meson.build b/meson.build
+index c4ee69e..c25a84d 100644
+--- a/meson.build
++++ b/meson.build
+@@ -5,15 +5,6 @@ project(
+   meson_version: '>= 0.40.0'
+ )
+ 
+-message('Build libtransmission. Please wait, this will take a moment…')
+-build = run_command('sh', 'build-aux/build_libtransmission.sh')
+-if build.returncode() != 0
+-  message('Build of libtransmission failed. Make sure you have cloned all GIT submodules recursively with \"git clone --recurse-submodules\"')
+-  error(build.stderr())
+-else
+-  message(build.stdout())
+-  message('Build libtransmission - OK!')
+-endif
+ 
+ gnome = import('gnome')
+ i18n = import('i18n')
+@@ -31,8 +22,25 @@ gio_dep = dependency('gio-2.0')
+ gio_unix_dep = dependency('gio-unix-2.0')
+ gtk_dep = dependency('gtk+-3.0', version : '>=3.20.10')
+ handy_dep = dependency('libhandy-1')
++transmission_lib = meson.get_compiler('c').find_library('transmission')
++transmission_vapi = meson.get_compiler('vala').find_library('transmission', dirs: vapi_dir)
++transmission_dep = declare_dependency(
++			dependencies: [
++				meson.get_compiler('c').find_library('b64'),
++				meson.get_compiler('c').find_library('utp'),
++				meson.get_compiler('c').find_library('miniupnpc'),
++				meson.get_compiler('c').find_library('dht'),
++				meson.get_compiler('c').find_library('natpmp'),
++				meson.get_compiler('c').find_library('event'),
++				meson.get_compiler('c').find_library('libcurl'),
++				meson.get_compiler('c').find_library('libcrypto'),
++				meson.get_compiler('c').find_library('libpthread'),
++				meson.get_compiler('c').find_library('libz'),
++				transmission_vapi,
++				transmission_lib
++			])
++
+ 
+-subdir('submodules')
+ subdir('data')
+ subdir('po')
+ subdir('src')
+diff --git a/src/vapis/transmission.vapi b/src/vapis/transmission.vapi
+index 0934f22..deaf388 100644
+--- a/src/vapis/transmission.vapi
++++ b/src/vapis/transmission.vapi
+@@ -9,7 +9,7 @@
+ // + Torrent queue support
+ //
+ 
+-[CCode (cheader_filename = "libtransmission/transmission.h", lower_case_cprefix = "tr_", cprefix = "TR_")]
++[CCode (cheader_filename = "transmission/transmission.h", lower_case_cprefix = "tr_", cprefix = "TR_")]
+ namespace Transmission {
+ 
+ 	[CCode (cname = "TR_SHA_DIGEST_LENGTH")]
+@@ -473,14 +473,14 @@ namespace Transmission {
+ 	[CCode (cname = "tr_sessionLoadSettings")]
+ 	public bool load_default_settings (ref variant_dict dictionary, string config_dir, string app_name);
+ 
+-	[CCode (cheader_filename = "libtransmission/transmission.h,libtransmission/variant.h", cprefix = "TR_VARIANT_FMT_", cname = "tr_variant_fmt", has_type_id = false)]
++	[CCode (cheader_filename = "transmission/transmission.h,transmission/variant.h", cprefix = "TR_VARIANT_FMT_", cname = "tr_variant_fmt", has_type_id = false)]
+ 	public enum VariantFormat {
+ 		BENC,
+ 		JSON,
+ 		JSON_LEAN
+ 	}
+ 
+-	[CCode (cheader_filename = "libtransmission/transmission.h,libtransmission/error.h", cname = "tr_error", free_function = "tr_errorFree", has_type_id = false)]
++	[CCode (cheader_filename = "transmission/transmission.h,transmission/error.h", cname = "tr_error", free_function = "tr_errorFree", has_type_id = false)]
+ 	public struct Error {
+ 		int code;
+ 		string message;
+@@ -492,7 +492,7 @@ namespace Transmission {
+ 	 * An object that acts like a union for integers, strings, lists, dictionaries, booleans, and floating-point numbers. The structure is named benc due to the historical reason that it was originally tightly coupled with bencoded data. It currently supports being parsed from, and serialized to, both bencoded notation and json notation.
+ 	 *
+ 	 */
+-	[CCode (cheader_filename = "libtransmission/transmission.h,libtransmission/variant.h", cname = "tr_variant", free_function = "tr_variantFree", has_type_id = false)]
++	[CCode (cheader_filename = "transmission/transmission.h,transmission/variant.h", cname = "tr_variant", free_function = "tr_variantFree", has_type_id = false)]
+ 	public struct variant {
+ 		[CCode (cname = "tr_variantLoadFile")]
+ 		public static int load_file (out variant variant, VariantFormat mode, string filename);
+@@ -571,7 +571,7 @@ namespace Transmission {
+ 		[CCode (cname = "tr_variantIsReal")]
+ 		public bool is_real ();
+ 	}
+-	[CCode (cheader_filename = "libtransmission/transmission.h,libtransmission/variant.h", cname = "tr_variant", free_function = "tr_variantFree", has_type_id = false)]
++	[CCode (cheader_filename = "transmission/transmission.h,transmission/variant.h", cname = "tr_variant", free_function = "tr_variantFree", has_type_id = false)]
+ 	public struct variant_list : variant {
+ 		[CCode (cname = "tr_variantInitList")]
+ 		public variant_list (size_t reserveCount);
+@@ -602,7 +602,7 @@ namespace Transmission {
+ 		[CCode (cname = "tr_variantListRemove")]
+ 		public bool remove (size_t n);
+ 	}
+-	[CCode (cheader_filename = "libtransmission/transmission.h,libtransmission/variant.h", cname = "tr_variant", free_function = "tr_variantFree", has_type_id = false)]
++	[CCode (cheader_filename = "transmission/transmission.h,transmission/variant.h", cname = "tr_variant", free_function = "tr_variantFree", has_type_id = false)]
+ 	public struct variant_dict : variant {
+ 		[CCode (cname = "tr_variantInitDict")]
+ 		public variant_dict (size_t reserve_count);
+@@ -1195,9 +1195,9 @@ namespace Transmission {
+ 		DBG;
+ 		[CCode (cname = "tr_setMessageLevel")]
+ 		public void activate ();
+-		[CCode (cname = "getMessageLevel", cheader_filename = "libtransmission/utils.h")]
++		[CCode (cname = "getMessageLevel", cheader_filename = "transmission/utils.h")]
+ 		public static MessageLevel get_current ();
+-		[CCode (cname = "msgLoggingIsActive", cheader_filename = "libtransmission/utils.h")]
++		[CCode (cname = "msgLoggingIsActive", cheader_filename = "transmission/utils.h")]
+ 		public bool is_logging_active ();
+ 	}
+ 
+@@ -2062,13 +2062,13 @@ namespace Transmission {
+ 	public class Torrent {
+ 
+ 		[PrintfFormat]
+-		[CCode (header_filename = "libtransmission/utils.h", cname = "tr_torerr")]
++		[CCode (header_filename = "transmission/utils.h", cname = "tr_torerr")]
+ 		public void show_error (string fmt, ...);
+ 		[PrintfFormat]
+-		[CCode (header_filename = "libtransmission/utils.h", cname = "tr_torinf")]
++		[CCode (header_filename = "transmission/utils.h", cname = "tr_torinf")]
+ 		public void show_info (string fmt, ...);
+ 		[PrintfFormat]
+-		[CCode (header_filename = "libtransmission/utils.h", cname = "tr_tordbg")]
++		[CCode (header_filename = "transmission/utils.h", cname = "tr_tordbg")]
+ 		public void show_debug (string fmt, ...);
+ 
+ 		/**
+@@ -2463,7 +2463,7 @@ namespace Transmission {
+ 		public void make_file (string outputFile, tracker_info[] trackers, string comment, bool is_private);
+ 	}
+ 
+-	[CCode (cheader_filename = "libtransmission/utils.h", cprefix = "tr_", lower_case_cprefix = "tr_")]
++	[CCode (cheader_filename = "transmission/utils.h", cprefix = "tr_", lower_case_cprefix = "tr_")]
+ 	namespace Log {
+ 		[CCode (cname = "TR_MAX_MSG_LOG")]
+ 		public const int MAX_MSG_LOG;
+@@ -2508,7 +2508,7 @@ namespace Transmission {
+ 		public unowned string get_log_time ([CCode (array_length_type = "size_t")] char[] buf);
+ 	}
+ 
+-	[CCode (cheader_filename = "libtransmission/utils.h", cprefix = "tr_", lower_case_cprefix = "tr_")]
++	[CCode (cheader_filename = "transmission/utils.h", cprefix = "tr_", lower_case_cprefix = "tr_")]
+ 	namespace Path {
+ 		/**
+ 		 * Rich Salz's classic implementation of shell-style pattern matching for?, \, [], and * characters.
+@@ -2570,7 +2570,7 @@ namespace Transmission {
+ 		public bool is_same_file (string filename1, string filename2);
+ 	}
+ 
+-	[CCode (cheader_filename = "libtransmission/utils.h", cprefix = "tr_", lower_case_cprefix = "tr_")]
++	[CCode (cheader_filename = "transmission/utils.h", cprefix = "tr_", lower_case_cprefix = "tr_")]
+ 	namespace Time {
+ 
+ 		[CCode (cname = "struct event", cprefix = "tr_", has_type_id = false)]
+@@ -2614,7 +2614,7 @@ namespace Transmission {
+ 		public time_t get_time ();
+ 	}
+ 
+-	[CCode (cheader_filename = "libtransmission/utils.h", cprefix = "tr_", lower_case_cprefix = "tr_")]
++	[CCode (cheader_filename = "transmission/utils.h", cprefix = "tr_", lower_case_cprefix = "tr_")]
+ 	namespace Url {
+ 
+ 		/**
+@@ -2637,7 +2637,7 @@ namespace Transmission {
+ 		public int parse (string url, int url_len, out string scheme, out string host, out int port, out string path);
+ 	}
+ 
+-	[CCode (cheader_filename = "libtransmission/utils.h", cprefix = "tr_", lower_case_cprefix = "tr_")]
++	[CCode (cheader_filename = "transmission/utils.h", cprefix = "tr_", lower_case_cprefix = "tr_")]
+ 	namespace String {
+ 		/**
+ 		 * Make a copy of 'str' whose non-utf8 content has been corrected or stripped
+diff --git a/submodules/meson.build b/submodules/meson.build
+deleted file mode 100644
+index 53e73a2..0000000
+--- a/submodules/meson.build
++++ /dev/null
+@@ -1,16 +0,0 @@
+-b64_lib = meson.get_compiler('c').find_library('b64', dirs: join_paths (meson.source_root (), 'submodules', 'libtransmission', 'third-party', 'b64', 'lib'))
+-utp_lib = meson.get_compiler('c').find_library('utp', dirs: join_paths (meson.source_root (), 'submodules', 'libtransmission', 'third-party', 'utp', 'lib'))
+-miniupnpc_lib = meson.get_compiler('c').find_library('miniupnpc', dirs: join_paths (meson.source_root (), 'submodules', 'libtransmission', 'third-party', 'miniupnpc', 'lib'))
+-dht_lib = meson.get_compiler('c').find_library('dht', dirs: join_paths (meson.source_root (), 'submodules', 'libtransmission', 'third-party', 'dht', 'lib'))
+-natpmp_lib = meson.get_compiler('c').find_library('natpmp', dirs: join_paths (meson.source_root (), 'submodules', 'libtransmission', 'third-party', 'natpmp', 'lib'))
+-event_lib = meson.get_compiler('c').find_library('event')
+-
+-curl_lib = meson.get_compiler('c').find_library('libcurl')
+-crypto_lib = meson.get_compiler('c').find_library('libcrypto')
+-pthread_lib = meson.get_compiler('c').find_library('libpthread', dirs: join_paths (meson.source_root (), 'submodules', 'libtransmission', 'libtransmission'))
+-zlib_lib = meson.get_compiler('c').find_library('libz', dirs: join_paths (meson.source_root (), 'submodules', 'libtransmission', 'libtransmission'))
+-
+-transmission_include = include_directories('transmission/')
+-transmission_lib = meson.get_compiler('c').find_library('libtransmission', dirs: join_paths (meson.source_root (), 'submodules', 'libtransmission', 'libtransmission'))
+-transmission_vapi = meson.get_compiler('vala').find_library('transmission', dirs: vapi_dir)
+-transmission_dep = declare_dependency(include_directories: [transmission_include], dependencies: [pthread_lib, b64_lib, utp_lib, miniupnpc_lib, dht_lib, natpmp_lib, curl_lib, crypto_lib, event_lib, zlib_lib, transmission_vapi, transmission_lib])
+\ No newline at end of file
+-- 
+GitLab
+
