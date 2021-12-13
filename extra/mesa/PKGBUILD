@@ -13,7 +13,7 @@
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=21.2.5
+pkgver=21.3.1
 pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
@@ -25,12 +25,14 @@ license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         swr-llvm13-patch1.patch
         swr-llvm13-patch2.patch
+        gbm-fix-with-old-nvidia-drivers.patch
         0001-Rip-out-VC4-forced-NEON.patch
         LICENSE)
-sha512sums=('aaa1ebaa1e18eea76c3784c9a65942c3e417c1079d7bf75dcede574999dc459fb4d68d041cf2f767afb9cbfa834a985e0a4edd5a56b0fc90f8fdc506359aa5da'
+sha512sums=('43f019d4810bafd177b1a41207ae20a77982e4e6df3ab2b7a700273748cbc766694bd44594c898c4bd7848a94200fd28237a67d290c4e06595e6eab71cb716e8'
             'SKIP'
             '073ea2bb4778b3151717b26e0ec737abb4916ea340c7193a7382c2e2197534e93e95622d530e2f731ae156fd6ca1fc86f315f6ecae0baaeab88846773fb98bba'
             'b59f18f4bc69b872e97b5f33a53b9c2398143bc1d0a1b42787ca2a0c204fc11b2837ca40f6f773a0b1bd49756754f9d755ac14d4eb10df6269570477ba8484fc'
+            '8484be4d1d3dc38cefe22edea33c5cfce98bb71711370e502cc812f41b0d5536857749cb337cb6a8feb370d87e38d6f2c294bea3470370e25dc2ddd1ab691bf2'
             '4cd472e3db19b658265cbbeae6b23be6b5bbf54380c64963f867aa3991de4700b48aae23718283aae4608e8e73627a0103862adbbae9ce17a00a266e425e948c'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
@@ -47,6 +49,9 @@ prepare() {
   patch -Np1 -i ../swr-llvm13-patch1.patch
   # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/13267
   patch -Np1 -i ../swr-llvm13-patch2.patch
+
+  # Fix KDE with old nvidia drivers
+  patch -Np1 -i ../gbm-fix-with-old-nvidia-drivers.patch
 
   if [[ $CARCH != "aarch64" ]]; then
     patch -p1 -i ../0001-Rip-out-VC4-forced-NEON.patch
