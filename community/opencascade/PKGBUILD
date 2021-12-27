@@ -1,0 +1,82 @@
+# Maintainer: Kyle Keen <keenerd@gmail.com>
+# Contributor: Gabriel Souza Franco <Z2FicmllbGZyYW5jb3NvdXphQGdtYWlsLmNvbQ==>
+# Contributor: Florian Pritz <bluewind@xinu.at>
+# Contributor: Giuseppe Borzi <gborzi@ieee.org>
+# Contributor: Brice Méalier <mealier_brice@yahoo.fr>
+# Contributor: Michele Mocciola <mickele>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - removed makedepends on adios2
+
+pkgname=opencascade
+pkgver=7.5.3
+_pkgver=V7_5_3
+#_pkgver=${pkgver//_/}
+#_pkgver=V${_pkgver//./_}
+pkgrel=4
+pkgdesc="Open CASCADE Technology, 3D modeling & numerical simulation"
+arch=('x86_64')
+url="https://www.opencascade.org"
+license=('custom')
+depends=('tk' 'vtk' 'gl2ps' 'ffmpeg' 'freeimage' 'intel-tbb')
+makedepends=('cmake' 'qt5-base' 'rapidjson' 'eigen' 'utf8cpp' 'python' 'pugixml' 'glew'
+             'gdal' 'proj' 'boost' 'liblas' 'pdal' 'libharu' 'unixodbc'
+             'python-mpi4py' 'openvr') # VTK requires these to build
+source=("opencascade-${pkgver}.tgz::https://git.dev.opencascade.org/gitweb/?p=occt.git;a=snapshot;h=refs/tags/${_pkgver};sf=tgz"
+        'opencascade.sh' 'fix-install-dir-references.patch'
+        'cmake-fix-variable.patch'
+        'vtk9.patch'
+        "fix-freecad-build.patch::https://git.dev.opencascade.org/gitweb/?p=occt.git;a=patch;h=5e7632824302761b84cfceb5bfb2241d906d0eb4"
+        'opencascade-tbb-2021.patch')
+sha256sums=('cc3d3fd9f76526502c3d9025b651f45b034187430f231414c97dda756572410b'
+            '2064536a85d46fee368a8f1a712b2c6c77ca79c5bffcc68cba79d70d36efa2f4'
+            'afb584aa453993ae8d9e2b983594558531ede735a5892754b812be30650c9fb5'
+            'c7427082400b2d1ac58c59549d4dd1ee5b27d06847b7907842e9e2f2b68980fa'
+            'ae24da8eac8b57af8f612c872c8ec1962b6e5243758aa39c92e805223fdfe157'
+            '4782d4d93cbd7f5489d23a855a1d31801bd61383d7cf9dc0e613fae34541cfde'
+            'b0c4601fd9b2905e4b3bc3ed8af1493960c80bfe10332a0c562c59786efd57a2')
+
+prepare() {
+  cd "occt-${_pkgver}"
+  patch -Np1 -i "$srcdir/fix-install-dir-references.patch"
+  patch -Np1 -i "$srcdir/cmake-fix-variable.patch"
+  patch -p1 -i ../vtk9.patch # Fix build with VTK 9 https://gitlab.kitware.com/vtk/vtk/-/issues/18240
+  patch -p1 -i ../fix-freecad-build.patch # Fix build of FreeCAD
+  patch -p1 -i ../opencascade-tbb-2021.patch # Fix build with TBB 2021
+}
+
+build() {
+  cd "occt-${_pkgver}"
+  mkdir -p build && cd build
+
+  cmake .. \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_RELEASE_DISABLE_EXCEPTIONS=OFF \
+    -DUSE_GL2PS=ON \
+    -DUSE_FREEIMAGE=ON \
+    -DUSE_FFMPEG=ON \
+    -DUSE_VTK=ON \
+    -DUSE_RAPIDJSON=ON \
+    -DUSE_TBB=ON \
+    -D3RDPARTY_VTK_INCLUDE_DIR=/usr/include/vtk
+
+  make
+}
+
+package() {
+  cd "occt-${_pkgver}/build"
+
+  make DESTDIR="$pkgdir" install
+
+  cd ..
+
+  install -Dm755 "$srcdir/opencascade.sh" "$pkgdir/etc/profile.d/opencascade.sh"
+  install -dm755 "$pkgdir/usr/share/licenses/$pkgname/"
+  mv "$pkgdir/usr/share/doc/opencascade/"* "$pkgdir/usr/share/licenses/$pkgname"
+  rm -r "$pkgdir/usr/share/doc"
+
+  rm "$pkgdir/usr/bin/"*.sh
+}
+
+# vim:set ts=2 sw=2 et:
