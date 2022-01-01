@@ -13,24 +13,20 @@
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=21.3.2
-pkgrel=1
+pkgver=21.3.3
+pkgrel=2
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
              'libomxil-bellagio' 'libclc' 'clang' 'libglvnd' 'libunwind' 'lm_sensors' 'libxrandr'
-             'glslang' 'vulkan-icd-loader' 'cmake' 'meson')
+             'glslang' 'vulkan-icd-loader' 'directx-headers' 'cmake' 'meson')
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
-        swr-llvm13-patch1.patch
-        swr-llvm13-patch2.patch
         0001-Rip-out-VC4-forced-NEON.patch
         LICENSE)
-sha512sums=('35c510cbab70be43bc207720a12fe85b0c010fafa147238f2c22dd873967278f187ee7675a662882ead3598305f1f37804567deb93022a692ca259f563abfdac'
+sha512sums=('0263d75435f8c16d40eba3eae29bf372e8994816718deec153c582a17c4dd6ef1c67b3236ed31e63f98bf4e1089fac5cfafae9fb84d3e1fa919b274f43e7e673'
             'SKIP'
-            '073ea2bb4778b3151717b26e0ec737abb4916ea340c7193a7382c2e2197534e93e95622d530e2f731ae156fd6ca1fc86f315f6ecae0baaeab88846773fb98bba'
-            'b59f18f4bc69b872e97b5f33a53b9c2398143bc1d0a1b42787ca2a0c204fc11b2837ca40f6f773a0b1bd49756754f9d755ac14d4eb10df6269570477ba8484fc'
             '4cd472e3db19b658265cbbeae6b23be6b5bbf54380c64963f867aa3991de4700b48aae23718283aae4608e8e73627a0103862adbbae9ce17a00a266e425e948c'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
@@ -42,11 +38,6 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 
 prepare() {
   cd mesa-$pkgver
-
-  # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/11568
-  patch -Np1 -i ../swr-llvm13-patch1.patch
-  # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/13267
-  patch -Np1 -i ../swr-llvm13-patch2.patch
 
   if [[ $CARCH != "aarch64" ]]; then
     patch -p1 -i ../0001-Rip-out-VC4-forced-NEON.patch
@@ -66,7 +57,7 @@ build() {
     -D b_ndebug=true \
     -D platforms=x11,wayland \
     -D dri-drivers=r100,r200,nouveau \
-    -D gallium-drivers=r300,r600,radeonsi,freedreno,nouveau,swrast,virgl,zink${GALLIUM} \
+    -D gallium-drivers=r300,r600,radeonsi,freedreno,nouveau,swrast,virgl,zink,d3d12${GALLIUM} \
     -D vulkan-drivers=amd,swrast,broadcom,panfrost \
     -D vulkan-layers=device-select,overlay \
     -D dri3=enabled \
