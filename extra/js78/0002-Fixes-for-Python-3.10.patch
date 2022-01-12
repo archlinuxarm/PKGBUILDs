@@ -1,0 +1,1013 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jan Alexander Steffens (heftig)" <jan.steffens@gmail.com>
+Date: Tue, 11 Jan 2022 19:26:43 +0100
+Subject: [PATCH] Fixes for Python 3.10
+
+Bug 1719144 cherry-picked from Firefox Nightly.
+---
+ python/mach/mach/config.py                    |   5 +-
+ python/mach/mach/decorators.py                |   3 +-
+ python/mach/mach/main.py                      |   2 +-
+ .../mozbuild/backend/configenvironment.py     |   3 +-
+ python/mozbuild/mozbuild/makeutil.py          |   2 +-
+ python/mozbuild/mozbuild/util.py              |   3 +-
+ taskcluster/taskgraph/util/schema.py          |   3 +-
+ .../manifestparser/manifestparser/filters.py  |   3 +-
+ third_party/python/gyp/pylib/gyp/common.py    |   3 +-
+ third_party/python/requirements.in            |   2 +-
+ third_party/python/requirements.txt           |   6 +-
+ .../{ => voluptuous-0.12.1.dist-info}/COPYING |   0
+ .../METADATA}                                 | 114 +++++++---
+ .../voluptuous-0.12.1.dist-info/RECORD        |  11 +
+ .../voluptuous-0.12.1.dist-info/WHEEL         |  11 +
+ .../top_level.txt                             |   0
+ .../python/voluptuous/voluptuous/__init__.py  |   2 +-
+ .../python/voluptuous/voluptuous/error.py     |   4 +-
+ .../voluptuous/voluptuous/schema_builder.py   |  25 ++-
+ .../python/voluptuous/voluptuous/util.py      |  18 +-
+ .../voluptuous/voluptuous/validators.py       | 198 ++++++++++++------
+ 21 files changed, 300 insertions(+), 118 deletions(-)
+ copy third_party/python/voluptuous/{ => voluptuous-0.12.1.dist-info}/COPYING (100%)
+ rename third_party/python/voluptuous/{README.md => voluptuous-0.12.1.dist-info/METADATA} (83%)
+ create mode 100644 third_party/python/voluptuous/voluptuous-0.12.1.dist-info/RECORD
+ create mode 100644 third_party/python/voluptuous/voluptuous-0.12.1.dist-info/WHEEL
+ rename third_party/python/{psutil-cp27-none-win_amd64/psutil-5.7.0.dist-info => voluptuous/voluptuous-0.12.1.dist-info}/top_level.txt (100%)
+
+diff --git a/python/mach/mach/config.py b/python/mach/mach/config.py
+index 7210eca82308..6605e381b310 100644
+--- a/python/mach/mach/config.py
++++ b/python/mach/mach/config.py
+@@ -17,6 +17,7 @@ settings are available.
+ from __future__ import absolute_import, unicode_literals
+ 
+ import collections
++import collections.abc
+ import os
+ import sys
+ import six
+@@ -144,7 +145,7 @@ def reraise_attribute_error(func):
+     return _
+ 
+ 
+-class ConfigSettings(collections.Mapping):
++class ConfigSettings(collections.abc.Mapping):
+     """Interface for configuration settings.
+ 
+     This is the main interface to the configuration.
+@@ -190,7 +191,7 @@ class ConfigSettings(collections.Mapping):
+     will result in exceptions being raised.
+     """
+ 
+-    class ConfigSection(collections.MutableMapping, object):
++    class ConfigSection(collections.abc.MutableMapping, object):
+         """Represents an individual config section."""
+         def __init__(self, config, name, settings):
+             object.__setattr__(self, '_config', config)
+diff --git a/python/mach/mach/decorators.py b/python/mach/mach/decorators.py
+index 27f7f34a6ddc..8b1a49c76dc2 100644
+--- a/python/mach/mach/decorators.py
++++ b/python/mach/mach/decorators.py
+@@ -6,6 +6,7 @@ from __future__ import absolute_import, unicode_literals
+ 
+ import argparse
+ import collections
++import collections.abc
+ 
+ from .base import MachError
+ from .registrar import Registrar
+@@ -140,7 +141,7 @@ def CommandProvider(cls):
+               'Conditions argument must take a list ' + \
+               'of functions. Found %s instead.'
+ 
+-        if not isinstance(command.conditions, collections.Iterable):
++        if not isinstance(command.conditions, collections.abc.Iterable):
+             msg = msg % (command.name, type(command.conditions))
+             raise MachError(msg)
+ 
+diff --git a/python/mach/mach/main.py b/python/mach/mach/main.py
+index a7311806d0a4..0f2c6a16d9d2 100644
+--- a/python/mach/mach/main.py
++++ b/python/mach/mach/main.py
+@@ -16,7 +16,7 @@ import os
+ import sys
+ import traceback
+ import uuid
+-from collections import Iterable
++from collections.abc import Iterable
+ 
+ from six import string_types
+ 
+diff --git a/python/mozbuild/mozbuild/backend/configenvironment.py b/python/mozbuild/mozbuild/backend/configenvironment.py
+index 20d1a9fa69da..898cabb73b0b 100644
+--- a/python/mozbuild/mozbuild/backend/configenvironment.py
++++ b/python/mozbuild/mozbuild/backend/configenvironment.py
+@@ -9,7 +9,8 @@ import six
+ import sys
+ import json
+ 
+-from collections import Iterable, OrderedDict
++from collections.abc import Iterable
++from collections import OrderedDict
+ from types import ModuleType
+ 
+ import mozpack.path as mozpath
+diff --git a/python/mozbuild/mozbuild/makeutil.py b/python/mozbuild/mozbuild/makeutil.py
+index 4da1a3b268e5..4ce56848cd6c 100644
+--- a/python/mozbuild/mozbuild/makeutil.py
++++ b/python/mozbuild/mozbuild/makeutil.py
+@@ -7,7 +7,7 @@ from __future__ import absolute_import, print_function, unicode_literals
+ import os
+ import re
+ import six
+-from collections import Iterable
++from collections.abc import Iterable
+ 
+ 
+ class Makefile(object):
+diff --git a/python/mozbuild/mozbuild/util.py b/python/mozbuild/mozbuild/util.py
+index 044cf645c1f1..ed30088c0059 100644
+--- a/python/mozbuild/mozbuild/util.py
++++ b/python/mozbuild/mozbuild/util.py
+@@ -9,6 +9,7 @@ from __future__ import absolute_import, print_function, unicode_literals
+ 
+ import argparse
+ import collections
++import collections.abc
+ import ctypes
+ import difflib
+ import errno
+@@ -782,7 +783,7 @@ class HierarchicalStringList(object):
+         self._strings = StrictOrderingOnAppendList()
+         self._children = {}
+ 
+-    class StringListAdaptor(collections.Sequence):
++    class StringListAdaptor(collections.abc.Sequence):
+         def __init__(self, hsl):
+             self._hsl = hsl
+ 
+diff --git a/taskcluster/taskgraph/util/schema.py b/taskcluster/taskgraph/util/schema.py
+index 0b15d3d5fd6f..29e36793f336 100644
+--- a/taskcluster/taskgraph/util/schema.py
++++ b/taskcluster/taskgraph/util/schema.py
+@@ -7,6 +7,7 @@ from __future__ import absolute_import, print_function, unicode_literals
+ import re
+ import pprint
+ import collections
++import collections.abc
+ import voluptuous
+ 
+ from six import text_type, iteritems
+@@ -160,7 +161,7 @@ def check_schema(schema):
+                     'Unexpected type in YAML schema: {} @ {}'.format(
+                         type(k).__name__, path))
+ 
+-        if isinstance(sch, collections.Mapping):
++        if isinstance(sch, collections.abc.Mapping):
+             for k, v in iteritems(sch):
+                 child = "{}[{!r}]".format(path, k)
+                 check_identifier(child, k)
+diff --git a/testing/mozbase/manifestparser/manifestparser/filters.py b/testing/mozbase/manifestparser/manifestparser/filters.py
+index 287ee033b222..b1d6080031f6 100644
+--- a/testing/mozbase/manifestparser/manifestparser/filters.py
++++ b/testing/mozbase/manifestparser/manifestparser/filters.py
+@@ -12,7 +12,8 @@ from __future__ import absolute_import
+ 
+ import itertools
+ import os
+-from collections import defaultdict, MutableSequence
++from collections import defaultdict
++from collections.abc import MutableSequence
+ 
+ import six
+ from six import string_types
+diff --git a/third_party/python/gyp/pylib/gyp/common.py b/third_party/python/gyp/pylib/gyp/common.py
+index b268d229a483..2195e1e458e3 100644
+--- a/third_party/python/gyp/pylib/gyp/common.py
++++ b/third_party/python/gyp/pylib/gyp/common.py
+@@ -5,6 +5,7 @@
+ from __future__ import with_statement
+ 
+ import collections
++import collections.abc
+ import errno
+ import filecmp
+ import os.path
+@@ -494,7 +495,7 @@ def uniquer(seq, idfun=None):
+ 
+ 
+ # Based on http://code.activestate.com/recipes/576694/.
+-class OrderedSet(collections.MutableSet):
++class OrderedSet(collections.abc.MutableSet):
+   def __init__(self, iterable=None):
+     self.end = end = []
+     end += [None, end, end]         # sentinel node for doubly linked list
+diff --git a/third_party/python/requirements.in b/third_party/python/requirements.in
+index b65c92e30c09..1127ab280c84 100644
+--- a/third_party/python/requirements.in
++++ b/third_party/python/requirements.in
+@@ -42,4 +42,4 @@ requests==2.9.1
+ responses==0.10.6
+ sentry-sdk==0.14.3
+ six==1.13.0
+-voluptuous==0.11.5
++voluptuous==0.12.1
+diff --git a/third_party/python/requirements.txt b/third_party/python/requirements.txt
+index fd0b6cb1a181..5742c9cdb771 100644
+--- a/third_party/python/requirements.txt
++++ b/third_party/python/requirements.txt
+@@ -172,9 +172,9 @@ urllib3==1.25.9 \
+     --hash=sha256:3018294ebefce6572a474f0604c2021e33b3fd8006ecd11d62107a5d2a963527 \
+     --hash=sha256:88206b0eb87e6d677d424843ac5209e3fb9d0190d0ee169599165ec25e9d9115 \
+     # via sentry-sdk
+-voluptuous==0.11.5 \
+-    --hash=sha256:303542b3fc07fb52ec3d7a1c614b329cdbee13a9d681935353d8ea56a7bfa9f1 \
+-    --hash=sha256:567a56286ef82a9d7ae0628c5842f65f516abcb496e74f3f59f1d7b28df314ef \
++voluptuous==0.12.1 \
++    --hash=sha256:663572419281ddfaf4b4197fd4942d181630120fb39b333e3adad70aeb56444b \
++    --hash=sha256:8ace33fcf9e6b1f59406bfaf6b8ec7bcc44266a9f29080b4deb4fe6ff2492386
+     # via -r requirements-mach-vendor-python.in
+ 
+ # WARNING: The following packages were not pinned, but pip requires them to be
+diff --git a/third_party/python/voluptuous/COPYING b/third_party/python/voluptuous/voluptuous-0.12.1.dist-info/COPYING
+similarity index 100%
+copy from third_party/python/voluptuous/COPYING
+copy to third_party/python/voluptuous/voluptuous-0.12.1.dist-info/COPYING
+diff --git a/third_party/python/voluptuous/README.md b/third_party/python/voluptuous/voluptuous-0.12.1.dist-info/METADATA
+similarity index 83%
+rename from third_party/python/voluptuous/README.md
+rename to third_party/python/voluptuous/voluptuous-0.12.1.dist-info/METADATA
+index 46e2288f4bea..914a5761d63a 100644
+--- a/third_party/python/voluptuous/README.md
++++ b/third_party/python/voluptuous/voluptuous-0.12.1.dist-info/METADATA
+@@ -1,7 +1,67 @@
++<<<<<<<< HEAD:third_party/python/voluptuous/README.md
++|||||||| parent of 8f49ebff11d78 (Bug 1719144 - Update voluptuous. r=firefox-build-system-reviewers,mhentges):third_party/python/voluptuous/voluptuous-0.11.5.dist-info/METADATA
++Metadata-Version: 2.1
++Name: voluptuous
++Version: 0.11.5
++Summary: # Voluptuous is a Python data validation library
++Home-page: https://github.com/alecthomas/voluptuous
++Author: Alec Thomas
++Author-email: alec@swapoff.org
++License: BSD
++Download-URL: https://pypi.python.org/pypi/voluptuous
++Platform: any
++Classifier: Development Status :: 5 - Production/Stable
++Classifier: Intended Audience :: Developers
++Classifier: License :: OSI Approved :: BSD License
++Classifier: Operating System :: OS Independent
++Classifier: Programming Language :: Python :: 2
++Classifier: Programming Language :: Python :: 2.7
++Classifier: Programming Language :: Python :: 3
++Classifier: Programming Language :: Python :: 3.6
++Classifier: Programming Language :: Python :: 3.7
++Description-Content-Type: text/markdown
++
++========
++Metadata-Version: 2.1
++Name: voluptuous
++Version: 0.12.1
++Summary: UNKNOWN
++Home-page: https://github.com/alecthomas/voluptuous
++Author: Alec Thomas
++Author-email: alec@swapoff.org
++License: BSD
++Download-URL: https://pypi.python.org/pypi/voluptuous
++Platform: any
++Classifier: Development Status :: 5 - Production/Stable
++Classifier: Intended Audience :: Developers
++Classifier: License :: OSI Approved :: BSD License
++Classifier: Operating System :: OS Independent
++Classifier: Programming Language :: Python :: 2
++Classifier: Programming Language :: Python :: 2.7
++Classifier: Programming Language :: Python :: 3
++Classifier: Programming Language :: Python :: 3.6
++Classifier: Programming Language :: Python :: 3.7
++Classifier: Programming Language :: Python :: 3.8
++Classifier: Programming Language :: Python :: 3.9
++Description-Content-Type: text/markdown
++
++
++# CONTRIBUTIONS ONLY
++
++**What does this mean?** I do not have time to fix issues myself. The only way fixes or new features will be added is by people submitting PRs.
++
++**Current status:** Voluptuous is largely feature stable. There hasn't been a need to add new features in a while, but there are some bugs that should be fixed.
++
++**Why?** I no longer use Voluptuous personally (in fact I no longer regularly write Python code). Rather than leave the project in a limbo of people filing issues and wondering why they're not being worked on, I believe this notice will more clearly set expectations.
++
++>>>>>>>> 8f49ebff11d78 (Bug 1719144 - Update voluptuous. r=firefox-build-system-reviewers,mhentges):third_party/python/voluptuous/voluptuous-0.12.1.dist-info/METADATA
+ # Voluptuous is a Python data validation library
+ 
+-[![Build Status](https://travis-ci.org/alecthomas/voluptuous.png)](https://travis-ci.org/alecthomas/voluptuous)
+-[![Coverage Status](https://coveralls.io/repos/github/alecthomas/voluptuous/badge.svg?branch=master)](https://coveralls.io/github/alecthomas/voluptuous?branch=master) [![Gitter chat](https://badges.gitter.im/alecthomas.png)](https://gitter.im/alecthomas/Lobby)
++[![image](https://img.shields.io/pypi/v/voluptuous.svg)](https://python.org/pypi/voluptuous)
++[![image](https://img.shields.io/pypi/l/voluptuous.svg)](https://python.org/pypi/voluptuous)
++[![image](https://img.shields.io/pypi/pyversions/voluptuous.svg)](https://python.org/pypi/voluptuous)
++[![Build Status](https://travis-ci.org/alecthomas/voluptuous.svg)](https://travis-ci.org/alecthomas/voluptuous)
++[![Coverage Status](https://coveralls.io/repos/github/alecthomas/voluptuous/badge.svg?branch=master)](https://coveralls.io/github/alecthomas/voluptuous?branch=master) [![Gitter chat](https://badges.gitter.im/alecthomas.svg)](https://gitter.im/alecthomas/Lobby)
+ 
+ Voluptuous, *despite* the name, is a Python data validation library. It
+ is primarily intended for validating data coming into Python as JSON,
+@@ -32,6 +92,28 @@ The documentation is provided [here](http://alecthomas.github.io/voluptuous/).
+ 
+ See [CHANGELOG.md](https://github.com/alecthomas/voluptuous/blob/master/CHANGELOG.md).
+ 
++## Why use Voluptuous over another validation library?
++
++**Validators are simple callables:**
++No need to subclass anything, just use a function.
++
++**Errors are simple exceptions:**
++A validator can just `raise Invalid(msg)` and expect the user to get
++useful messages.
++
++**Schemas are basic Python data structures:**
++Should your data be a dictionary of integer keys to strings?
++`{int: str}` does what you expect. List of integers, floats or
++strings? `[int, float, str]`.
++
++**Designed from the ground up for validating more than just forms:**
++Nested data structures are treated in the same way as any other
++type. Need a list of dictionaries? `[{}]`
++
++**Consistency:**
++Types in the schema are checked as types. Values are compared as
++values. Callables are called to validate. Simple.
++
+ ## Show me an example
+ 
+ Twitter's [user search API](https://dev.twitter.com/rest/reference/get/users/search) accepts
+@@ -189,9 +271,9 @@ True
+ 
+ ```
+ 
+-### URL's
++### URLs
+ 
+-URL's in the schema are matched by using `urlparse` library.
++URLs in the schema are matched by using `urlparse` library.
+ 
+ ```pycon
+ >>> from voluptuous import Url
+@@ -679,35 +761,13 @@ cross-field validator will not run:
+ s({'password':'123', 'password_again': 1337})
+ ```
+ 
+-## Running tests.
++## Running tests
+ 
+ Voluptuous is using nosetests:
+ 
+     $ nosetests
+ 
+ 
+-## Why use Voluptuous over another validation library?
+-
+-**Validators are simple callables**
+-:   No need to subclass anything, just use a function.
+-
+-**Errors are simple exceptions.**
+-:   A validator can just `raise Invalid(msg)` and expect the user to get
+-useful messages.
+-
+-**Schemas are basic Python data structures.**
+-:   Should your data be a dictionary of integer keys to strings?
+-`{int: str}` does what you expect. List of integers, floats or
+-strings? `[int, float, str]`.
+-
+-**Designed from the ground up for validating more than just forms.**
+-:   Nested data structures are treated in the same way as any other
+-type. Need a list of dictionaries? `[{}]`
+-
+-**Consistency.**
+-:   Types in the schema are checked as types. Values are compared as
+-values. Callables are called to validate. Simple.
+-
+ ## Other libraries and inspirations
+ 
+ Voluptuous is heavily inspired by
+diff --git a/third_party/python/voluptuous/voluptuous-0.12.1.dist-info/RECORD b/third_party/python/voluptuous/voluptuous-0.12.1.dist-info/RECORD
+new file mode 100644
+index 000000000000..5f7fde6e52bc
+--- /dev/null
++++ b/third_party/python/voluptuous/voluptuous-0.12.1.dist-info/RECORD
+@@ -0,0 +1,11 @@
++voluptuous/__init__.py,sha256=tSYWPAIWee6YwcMK8hxmaiagG_swokUMeH8MluJLWZM,203
++voluptuous/error.py,sha256=fLRmJwKp0bqRGgBM34ztg9MTxhEOf465sbQcvJlEtAk,4026
++voluptuous/humanize.py,sha256=hZlhdN4aVeGDIXdtSTeyEbmku65SDPRuut3mOfuRQP0,1606
++voluptuous/schema_builder.py,sha256=xVJpf3uJMyS1CKwzDw3rEK39ebqDiF_A2Kbq4VnZ3Aw,43677
++voluptuous/util.py,sha256=RXLZ2b5y-A4az3teG6UpCx2UZcXpS11sIVCdORyKar8,3150
++voluptuous/validators.py,sha256=xZgyKH-EVqUHCHral5gzViXq4HfEjJEsGdQy7z6llc0,32798
++voluptuous-0.12.1.dist-info/COPYING,sha256=JHtJdren-k2J2Vh8qlCVVh60bcVFfyJ59ipitUUq3qk,1486
++voluptuous-0.12.1.dist-info/METADATA,sha256=OdEydy5NydPFFzAhP8qj_YqJsQPQvoIt5ZT1t8B14Ok,20120
++voluptuous-0.12.1.dist-info/WHEEL,sha256=S6zePDbUAjzMmpYOg2cHDxuYFWw7WiOXt6ogM6hIB5Q,92
++voluptuous-0.12.1.dist-info/top_level.txt,sha256=TTdVb7M-vndb67UqTmAxuVjpAUakrlAWJYqvo3w4Iqc,11
++voluptuous-0.12.1.dist-info/RECORD,,
+diff --git a/third_party/python/voluptuous/voluptuous-0.12.1.dist-info/WHEEL b/third_party/python/voluptuous/voluptuous-0.12.1.dist-info/WHEEL
+new file mode 100644
+index 000000000000..4c2552761e69
+--- /dev/null
++++ b/third_party/python/voluptuous/voluptuous-0.12.1.dist-info/WHEEL
+@@ -0,0 +1,11 @@
++Wheel-Version: 1.0
++<<<<<<<< HEAD:testing/web-platform/tests/tools/third_party/six/six-1.13.0.dist-info/WHEEL
++Generator: bdist_wheel (0.32.1)
++|||||||| parent of 8f49ebff11d78 (Bug 1719144 - Update voluptuous. r=firefox-build-system-reviewers,mhentges):third_party/python/voluptuous/voluptuous-0.11.5.dist-info/WHEEL
++Generator: bdist_wheel (0.31.1)
++========
++Generator: bdist_wheel (0.36.1)
++>>>>>>>> 8f49ebff11d78 (Bug 1719144 - Update voluptuous. r=firefox-build-system-reviewers,mhentges):third_party/python/voluptuous/voluptuous-0.12.1.dist-info/WHEEL
++Root-Is-Purelib: true
++Tag: py3-none-any
++
+diff --git a/third_party/python/psutil-cp27-none-win_amd64/psutil-5.7.0.dist-info/top_level.txt b/third_party/python/voluptuous/voluptuous-0.12.1.dist-info/top_level.txt
+similarity index 100%
+rename from third_party/python/psutil-cp27-none-win_amd64/psutil-5.7.0.dist-info/top_level.txt
+rename to third_party/python/voluptuous/voluptuous-0.12.1.dist-info/top_level.txt
+diff --git a/third_party/python/voluptuous/voluptuous/__init__.py b/third_party/python/voluptuous/voluptuous/__init__.py
+index 10236d5a6670..4d09fe670fd4 100644
+--- a/third_party/python/voluptuous/voluptuous/__init__.py
++++ b/third_party/python/voluptuous/voluptuous/__init__.py
+@@ -5,5 +5,5 @@ from voluptuous.validators import *
+ from voluptuous.util import *
+ from voluptuous.error import *
+ 
+-__version__ = '0.11.5'
++__version__ = '0.12.1'
+ __author__ = 'alecthomas'
+diff --git a/third_party/python/voluptuous/voluptuous/error.py b/third_party/python/voluptuous/voluptuous/error.py
+index 86c4e0a35933..97f37d2c7c4b 100644
+--- a/third_party/python/voluptuous/voluptuous/error.py
++++ b/third_party/python/voluptuous/voluptuous/error.py
+@@ -142,11 +142,11 @@ class BooleanInvalid(Invalid):
+ 
+ 
+ class UrlInvalid(Invalid):
+-    """The value is not a url."""
++    """The value is not a URL."""
+ 
+ 
+ class EmailInvalid(Invalid):
+-    """The value is not a email."""
++    """The value is not an email address."""
+ 
+ 
+ class FileInvalid(Invalid):
+diff --git a/third_party/python/voluptuous/voluptuous/schema_builder.py b/third_party/python/voluptuous/voluptuous/schema_builder.py
+index 8d7a81a3e3e5..df19c8da2ddf 100644
+--- a/third_party/python/voluptuous/voluptuous/schema_builder.py
++++ b/third_party/python/voluptuous/voluptuous/schema_builder.py
+@@ -22,6 +22,11 @@ else:
+     def iteritems(d):
+         return d.iteritems()
+ 
++if sys.version_info >= (3, 3):
++    _Mapping = collections.abc.Mapping
++else:
++    _Mapping = collections.Mapping
++
+ """Schema validation for Python data structures.
+ 
+ Given eg. a nested data structure like this:
+@@ -280,7 +285,7 @@ class Schema(object):
+             return schema.__voluptuous_compile__(self)
+         if isinstance(schema, Object):
+             return self._compile_object(schema)
+-        if isinstance(schema, collections.Mapping):
++        if isinstance(schema, _Mapping):
+             return self._compile_dict(schema)
+         elif isinstance(schema, list):
+             return self._compile_list(schema)
+@@ -610,11 +615,11 @@ class Schema(object):
+             if not isinstance(data, seq_type):
+                 raise er.SequenceTypeInvalid('expected a %s' % seq_type_name, path)
+ 
+-            # Empty seq schema, allow any data.
++            # Empty seq schema, reject any data.
+             if not schema:
+                 if data:
+                     raise er.MultipleInvalid([
+-                        er.ValueInvalid('not a valid value', [value]) for value in data
++                        er.ValueInvalid('not a valid value', path if path else data)
+                     ])
+                 return data
+ 
+@@ -735,7 +740,7 @@ class Schema(object):
+ 
+         result = self.schema.copy()
+ 
+-        # returns the key that may have been passed as arugment to Marker constructor
++        # returns the key that may have been passed as an argument to Marker constructor
+         def key_literal(key):
+             return (key.schema if isinstance(key, Marker) else key)
+ 
+@@ -771,9 +776,10 @@ class Schema(object):
+                 result[key] = value
+ 
+         # recompile and send old object
++        result_cls = type(self)
+         result_required = (required if required is not None else self.required)
+         result_extra = (extra if extra is not None else self.extra)
+-        return Schema(result, required=result_required, extra=result_extra)
++        return result_cls(result, required=result_required, extra=result_extra)
+ 
+ 
+ def _compile_scalar(schema):
+@@ -809,7 +815,7 @@ def _compile_scalar(schema):
+         def validate_callable(path, data):
+             try:
+                 return schema(data)
+-            except ValueError as e:
++            except ValueError:
+                 raise er.ValueInvalid('not a valid value', path)
+             except er.Invalid as e:
+                 e.prepend(path)
+@@ -1121,8 +1127,11 @@ class Inclusive(Optional):
+     True
+     """
+ 
+-    def __init__(self, schema, group_of_inclusion, msg=None):
+-        super(Inclusive, self).__init__(schema, msg=msg)
++    def __init__(self, schema, group_of_inclusion,
++                 msg=None, description=None, default=UNDEFINED):
++        super(Inclusive, self).__init__(schema, msg=msg,
++                                        default=default,
++                                        description=description)
+         self.group_of_inclusion = group_of_inclusion
+ 
+ 
+diff --git a/third_party/python/voluptuous/voluptuous/util.py b/third_party/python/voluptuous/voluptuous/util.py
+index 434c360c7e95..e0ff43f8500a 100644
+--- a/third_party/python/voluptuous/voluptuous/util.py
++++ b/third_party/python/voluptuous/voluptuous/util.py
+@@ -7,54 +7,62 @@ from voluptuous import validators
+ __author__ = 'tusharmakkar08'
+ 
+ 
++def _fix_str(v):
++    if sys.version_info[0] == 2 and isinstance(v, unicode):
++        s = v
++    else:
++        s = str(v)
++    return s
++
++
+ def Lower(v):
+     """Transform a string to lower case.
+ 
+     >>> s = Schema(Lower)
+     >>> s('HI')
+     'hi'
+     """
+-    return str(v).lower()
++    return _fix_str(v).lower()
+ 
+ 
+ def Upper(v):
+     """Transform a string to upper case.
+ 
+     >>> s = Schema(Upper)
+     >>> s('hi')
+     'HI'
+     """
+-    return str(v).upper()
++    return _fix_str(v).upper()
+ 
+ 
+ def Capitalize(v):
+     """Capitalise a string.
+ 
+     >>> s = Schema(Capitalize)
+     >>> s('hello world')
+     'Hello world'
+     """
+-    return str(v).capitalize()
++    return _fix_str(v).capitalize()
+ 
+ 
+ def Title(v):
+     """Title case a string.
+ 
+     >>> s = Schema(Title)
+     >>> s('hello world')
+     'Hello World'
+     """
+-    return str(v).title()
++    return _fix_str(v).title()
+ 
+ 
+ def Strip(v):
+     """Strip whitespace from a string.
+ 
+     >>> s = Schema(Strip)
+     >>> s('  hello world  ')
+     'hello world'
+     """
+-    return str(v).strip()
++    return _fix_str(v).strip()
+ 
+ 
+ class DefaultTo(object):
+diff --git a/third_party/python/voluptuous/voluptuous/validators.py b/third_party/python/voluptuous/voluptuous/validators.py
+index d5e3ed598051..fac9cc7717c0 100644
+--- a/third_party/python/voluptuous/voluptuous/validators.py
++++ b/third_party/python/voluptuous/voluptuous/validators.py
+@@ -192,33 +192,44 @@ class _WithSubValidators(object):
+     def __init__(self, *validators, **kwargs):
+         self.validators = validators
+         self.msg = kwargs.pop('msg', None)
++        self.required = kwargs.pop('required', False)
++        self.discriminant = kwargs.pop('discriminant', None)
+ 
+     def __voluptuous_compile__(self, schema):
+-        self._compiled = [
+-            schema._compile(v)
+-            for v in self.validators
+-        ]
++        self._compiled = []
++        old_required = schema.required
++        self.schema = schema
++        for v in self.validators:
++            schema.required = self.required
++            self._compiled.append(schema._compile(v))
++        schema.required = old_required
+         return self._run
+ 
+     def _run(self, path, value):
++        if self.discriminant is not None:
++            self._compiled = [
++                self.schema._compile(v)
++                for v in self.discriminant(value, self.validators)
++            ]
++
+         return self._exec(self._compiled, value, path)
+ 
+     def __call__(self, v):
+         return self._exec((Schema(val) for val in self.validators), v)
+ 
+     def __repr__(self):
+         return '%s(%s, msg=%r)' % (
+             self.__class__.__name__,
+             ", ".join(repr(v) for v in self.validators),
+             self.msg
+         )
+ 
+ 
+ class Any(_WithSubValidators):
+     """Use the first validated value.
+ 
+     :param msg: Message to deliver to user if validation fails.
+-    :param kwargs: All other keyword arguments are passed to the sub-Schema constructors.
++    :param kwargs: All other keyword arguments are passed to the sub-schema constructors.
+     :returns: Return value of the first validator that passes.
+ 
+     >>> validate = Schema(Any('true', 'false',
+@@ -262,13 +273,57 @@ class Any(_WithSubValidators):
+ Or = Any
+ 
+ 
++class Union(_WithSubValidators):
++    """Use the first validated value among those selected by discriminant.
++
++    :param msg: Message to deliver to user if validation fails.
++    :param discriminant(value, validators): Returns the filtered list of validators based on the value.
++    :param kwargs: All other keyword arguments are passed to the sub-schema constructors.
++    :returns: Return value of the first validator that passes.
++
++    >>> validate = Schema(Union({'type':'a', 'a_val':'1'},{'type':'b', 'b_val':'2'},
++    ...                         discriminant=lambda val, alt: filter(
++    ...                         lambda v : v['type'] == val['type'] , alt)))
++    >>> validate({'type':'a', 'a_val':'1'}) == {'type':'a', 'a_val':'1'}
++    True
++    >>> with raises(MultipleInvalid, "not a valid value for dictionary value @ data['b_val']"):
++    ...   validate({'type':'b', 'b_val':'5'})
++
++    ```discriminant({'type':'b', 'a_val':'5'}, [{'type':'a', 'a_val':'1'},{'type':'b', 'b_val':'2'}])``` is invoked
++
++    Without the discriminant, the exception would be "extra keys not allowed @ data['b_val']"
++    """
++
++    def _exec(self, funcs, v, path=None):
++        error = None
++        for func in funcs:
++            try:
++                if path is None:
++                    return func(v)
++                else:
++                    return func(path, v)
++            except Invalid as e:
++                if error is None or len(e.path) > len(error.path):
++                    error = e
++        else:
++            if error:
++                raise error if self.msg is None else AnyInvalid(
++                    self.msg, path=path)
++            raise AnyInvalid(self.msg or 'no valid value found',
++                             path=path)
++
++
++# Convenience alias
++Switch = Union
++
++
+ class All(_WithSubValidators):
+     """Value must pass all validators.
+ 
+     The output of each validator is passed as input to the next.
+ 
+     :param msg: Message to deliver to user if validation fails.
+-    :param kwargs: All other keyword arguments are passed to the sub-Schema constructors.
++    :param kwargs: All other keyword arguments are passed to the sub-schema constructors.
+ 
+     >>> validate = Schema(All('10', Coerce(int)))
+     >>> validate('10')
+@@ -303,7 +358,7 @@ class Match(object):
+     >>> with raises(MultipleInvalid, 'expected string or buffer'):
+     ...   validate(123)
+ 
+-    Pattern may also be a _compiled regular expression:
++    Pattern may also be a compiled regular expression:
+ 
+     >>> validate = Schema(Match(re.compile(r'0x[A-F0-9]+', re.I)))
+     >>> validate('0x123ef4')
+@@ -361,38 +416,38 @@ def _url_validation(v):
+     return parsed
+ 
+ 
+-@message('expected an Email', cls=EmailInvalid)
++@message('expected an email address', cls=EmailInvalid)
+ def Email(v):
+-    """Verify that the value is an Email or not.
++    """Verify that the value is an email address or not.
+ 
+     >>> s = Schema(Email())
+-    >>> with raises(MultipleInvalid, 'expected an Email'):
++    >>> with raises(MultipleInvalid, 'expected an email address'):
+     ...   s("a.com")
+-    >>> with raises(MultipleInvalid, 'expected an Email'):
++    >>> with raises(MultipleInvalid, 'expected an email address'):
+     ...   s("a@.com")
+-    >>> with raises(MultipleInvalid, 'expected an Email'):
++    >>> with raises(MultipleInvalid, 'expected an email address'):
+     ...   s("a@.com")
+     >>> s('t@x.com')
+     't@x.com'
+     """
+     try:
+         if not v or "@" not in v:
+-            raise EmailInvalid("Invalid Email")
++            raise EmailInvalid("Invalid email address")
+         user_part, domain_part = v.rsplit('@', 1)
+ 
+         if not (USER_REGEX.match(user_part) and DOMAIN_REGEX.match(domain_part)):
+-            raise EmailInvalid("Invalid Email")
++            raise EmailInvalid("Invalid email address")
+         return v
+     except:
+         raise ValueError
+ 
+ 
+-@message('expected a Fully qualified domain name URL', cls=UrlInvalid)
++@message('expected a fully qualified domain name URL', cls=UrlInvalid)
+ def FqdnUrl(v):
+-    """Verify that the value is a Fully qualified domain name URL.
++    """Verify that the value is a fully qualified domain name URL.
+ 
+     >>> s = Schema(FqdnUrl())
+-    >>> with raises(MultipleInvalid, 'expected a Fully qualified domain name URL'):
++    >>> with raises(MultipleInvalid, 'expected a fully qualified domain name URL'):
+     ...   s("http://localhost/")
+     >>> s('http://w3.org')
+     'http://w3.org'
+@@ -423,29 +478,29 @@ def Url(v):
+         raise ValueError
+ 
+ 
+-@message('not a file', cls=FileInvalid)
++@message('Not a file', cls=FileInvalid)
+ @truth
+ def IsFile(v):
+     """Verify the file exists.
+ 
+     >>> os.path.basename(IsFile()(__file__)).startswith('validators.py')
+     True
+-    >>> with raises(FileInvalid, 'not a file'):
++    >>> with raises(FileInvalid, 'Not a file'):
+     ...   IsFile()("random_filename_goes_here.py")
+     >>> with raises(FileInvalid, 'Not a file'):
+     ...   IsFile()(None)
+     """
+     try:
+         if v:
+             v = str(v)
+             return os.path.isfile(v)
+         else:
+             raise FileInvalid('Not a file')
+     except TypeError:
+         raise FileInvalid('Not a file')
+ 
+ 
+-@message('not a directory', cls=DirInvalid)
++@message('Not a directory', cls=DirInvalid)
+ @truth
+ def IsDir(v):
+     """Verify the directory exists.
+@@ -487,20 +542,20 @@ def PathExists(v):
+         raise PathInvalid("Not a Path")
+ 
+ 
+-def Maybe(validator):
++def Maybe(validator, msg=None):
+     """Validate that the object matches given validator or is None.
+ 
+-    :raises Invalid: if the value does not match the given validator and is not
+-        None
++    :raises Invalid: If the value does not match the given validator and is not
++        None.
+ 
+     >>> s = Schema(Maybe(int))
+     >>> s(10)
+     10
+     >>> with raises(Invalid):
+     ...  s("string")
+ 
+     """
+-    return Any(None, validator)
++    return Any(validator, None, msg=msg)
+ 
+ 
+ class Range(object):
+@@ -533,23 +588,30 @@ class Range(object):
+         self.msg = msg
+ 
+     def __call__(self, v):
+-        if self.min_included:
+-            if self.min is not None and not v >= self.min:
+-                raise RangeInvalid(
+-                    self.msg or 'value must be at least %s' % self.min)
+-        else:
+-            if self.min is not None and not v > self.min:
+-                raise RangeInvalid(
+-                    self.msg or 'value must be higher than %s' % self.min)
+-        if self.max_included:
+-            if self.max is not None and not v <= self.max:
+-                raise RangeInvalid(
+-                    self.msg or 'value must be at most %s' % self.max)
+-        else:
+-            if self.max is not None and not v < self.max:
+-                raise RangeInvalid(
+-                    self.msg or 'value must be lower than %s' % self.max)
+-        return v
++        try:
++            if self.min_included:
++                if self.min is not None and not v >= self.min:
++                    raise RangeInvalid(
++                        self.msg or 'value must be at least %s' % self.min)
++            else:
++                if self.min is not None and not v > self.min:
++                    raise RangeInvalid(
++                        self.msg or 'value must be higher than %s' % self.min)
++            if self.max_included:
++                if self.max is not None and not v <= self.max:
++                    raise RangeInvalid(
++                        self.msg or 'value must be at most %s' % self.max)
++            else:
++                if self.max is not None and not v < self.max:
++                    raise RangeInvalid(
++                        self.msg or 'value must be lower than %s' % self.max)
++
++            return v
++
++        # Objects that lack a partial ordering, e.g. None or strings will raise TypeError
++        except TypeError:
++            raise RangeInvalid(
++                self.msg or 'invalid value or type (must have a partial ordering)')
+ 
+     def __repr__(self):
+         return ('Range(min=%r, max=%r, min_included=%r,'
+@@ -579,32 +641,44 @@ class Clamp(object):
+         self.msg = msg
+ 
+     def __call__(self, v):
+-        if self.min is not None and v < self.min:
+-            v = self.min
+-        if self.max is not None and v > self.max:
+-            v = self.max
+-        return v
++        try:
++            if self.min is not None and v < self.min:
++                v = self.min
++            if self.max is not None and v > self.max:
++                v = self.max
++            return v
++
++        # Objects that lack a partial ordering, e.g. None or strings will raise TypeError
++        except TypeError:
++            raise RangeInvalid(
++                self.msg or 'invalid value or type (must have a partial ordering)')
+ 
+     def __repr__(self):
+         return 'Clamp(min=%s, max=%s)' % (self.min, self.max)
+ 
+ 
+ class Length(object):
+     """The length of a value must be in a certain range."""
+ 
+     def __init__(self, min=None, max=None, msg=None):
+         self.min = min
+         self.max = max
+         self.msg = msg
+ 
+     def __call__(self, v):
+-        if self.min is not None and len(v) < self.min:
+-            raise LengthInvalid(
+-                self.msg or 'length of value must be at least %s' % self.min)
+-        if self.max is not None and len(v) > self.max:
+-            raise LengthInvalid(
+-                self.msg or 'length of value must be at most %s' % self.max)
+-        return v
++        try:
++            if self.min is not None and len(v) < self.min:
++                raise LengthInvalid(
++                    self.msg or 'length of value must be at least %s' % self.min)
++            if self.max is not None and len(v) > self.max:
++                raise LengthInvalid(
++                    self.msg or 'length of value must be at most %s' % self.max)
++            return v
++
++        # Objects that havbe no length e.g. None or strings will raise TypeError
++        except TypeError:
++            raise RangeInvalid(
++                self.msg or 'invalid value or type')
+ 
+     def __repr__(self):
+         return 'Length(min=%s, max=%s)' % (self.min, self.max)
+@@ -663,27 +737,29 @@ class In(object):
+         except TypeError:
+             check = True
+         if check:
+-            raise InInvalid(self.msg or 'value is not allowed')
++            raise InInvalid(self.msg or 
++                            'value must be one of {}'.format(sorted(self.container)))
+         return v
+ 
+     def __repr__(self):
+         return 'In(%s)' % (self.container,)
+ 
+ 
+ class NotIn(object):
+     """Validate that a value is not in a collection."""
+ 
+     def __init__(self, container, msg=None):
+         self.container = container
+         self.msg = msg
+ 
+     def __call__(self, v):
+         try:
+             check = v in self.container
+         except TypeError:
+             check = True
+         if check:
+-            raise NotInInvalid(self.msg or 'value is not allowed')
++            raise NotInInvalid(self.msg or 
++                               'value must not be one of {}'.format(sorted(self.container)))
+         return v
+ 
+     def __repr__(self):
+@@ -722,7 +798,7 @@ class ExactSequence(object):
+     the validators.
+ 
+     :param msg: Message to deliver to user if validation fails.
+-    :param kwargs: All other keyword arguments are passed to the sub-Schema
++    :param kwargs: All other keyword arguments are passed to the sub-schema
+         constructors.
+ 
+     >>> from voluptuous import Schema, ExactSequence
+@@ -887,7 +963,7 @@ class Unordered(object):
+ class Number(object):
+     """
+     Verify the number of digits that are present in the number(Precision),
+-    and the decimal places(Scale)
++    and the decimal places(Scale).
+ 
+     :raises Invalid: If the value does not match the provided Precision and Scale.
+ 
+@@ -951,13 +1027,13 @@ class SomeOf(_WithSubValidators):
+     The output of each validator is passed as input to the next.
+ 
+     :param min_valid: Minimum number of valid schemas.
+-    :param validators: a list of schemas or validators to match input against
++    :param validators: List of schemas or validators to match input against.
+     :param max_valid: Maximum number of valid schemas.
+     :param msg: Message to deliver to user if validation fails.
+-    :param kwargs: All other keyword arguments are passed to the sub-Schema constructors.
++    :param kwargs: All other keyword arguments are passed to the sub-schema constructors.
+ 
+-    :raises NotEnoughValid: if the minimum number of validations isn't met
+-    :raises TooManyValid: if the more validations than the given amount is met
++    :raises NotEnoughValid: If the minimum number of validations isn't met.
++    :raises TooManyValid: If the maximum number of validations is exceeded.
+ 
+     >>> validate = Schema(SomeOf(min_valid=2, validators=[Range(1, 5), Any(float, int), 6.6]))
+     >>> validate(6.6)
