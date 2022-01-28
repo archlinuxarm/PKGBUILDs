@@ -14,7 +14,7 @@ pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=21.3.5
-pkgrel=1
+pkgrel=1.1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
@@ -41,17 +41,13 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 prepare() {
   cd mesa-$pkgver
 
+  # FS#73501 
+  patch -Np1 -i ../0001-iris-implement-inter-context-busy-tracking.patch
+
   if [[ $CARCH != "aarch64" ]]; then
     patch -p1 -i ../0001-Rip-out-VC4-forced-NEON.patch
     CPPFLAGS+=" -DNO_FORMAT_ASM"
   fi
-}
-
-prepare() {
-  cd mesa-$pkgver
-
-  # FS#73501 
-  patch -Np1 -i ../0001-iris-implement-inter-context-busy-tracking.patch
 }
 
 build() {
