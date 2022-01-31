@@ -11,12 +11,11 @@
 pkgname=(libvirt libvirt-storage-gluster libvirt-storage-iscsi-direct)
 epoch=1
 pkgver=8.0.0
-pkgrel=1
+pkgrel=2
 pkgdesc="API for controlling virtualization engines (openvz,kvm,qemu,virtualbox,xen,etc)"
 arch=('x86_64')
 url="https://libvirt.org/"
 license=('LGPL' 'GPL3') #libvirt_parthelper links to libparted which is GPL3 only
-install=libvirt.install
 depends=('libpciaccess' 'yajl' 'fuse2' 'gnutls' 'parted' 'libssh' 'libxml2' 'numactl' 'polkit')
 makedepends=('meson' 'libxslt' 'python-docutils' 'lvm2' 'open-iscsi' 'libiscsi' 'glusterfs'
              'bash-completion' 'rpcsvc-proto' 'dnsmasq' 'iproute2')
@@ -97,9 +96,13 @@ backup=(
   'etc/logrotate.d/libvirtd.qemu'
   'etc/sasl2/libvirt.conf'
 )
-source=("https://libvirt.org/sources/$pkgname-$pkgver.tar.xz"{,.asc})
+source=("https://libvirt.org/sources/$pkgname-$pkgver.tar.xz"{,.asc}
+        "$pkgname"-fix-snapshot-revert.patch::https://gitlab.com/libvirt/libvirt/-/commit/76deb65.patch
+        "$pkgname"-fix-virProcessGetStatInfo.patch::https://gitlab.com/libvirt/libvirt/-/commit/105dace.patch)
 sha256sums=('51e6e8ff04bafe96d7e314b213dcd41fb1163d9b4f0f75cdab01e663728f4cf6'
-            'SKIP')
+            'SKIP'
+            '06164af980ab2ece221de494f4da5a0d38c22c0f1ac527dd53aed2e2dbf1ed48'
+            'a7b0f7b2941c0fed41205c8db3d3d37ed9ccee910e44196d2d2bf5aa0eb986d8')
 validpgpkeys=('453B65310595562855471199CA68BE8010084C9C') # Jiří Denemark <jdenemar@redhat.com>
 
 prepare() {
@@ -114,7 +117,9 @@ prepare() {
     src/qemu/qemu.conf \
     src/qemu/test_libvirtd_qemu.aug.in
 
-  sed -i 's/notify/simple/' src/remote/libvirtd.service.in
+  # bugs fixed post-release
+  patch -Np1 < ../libvirt-fix-snapshot-revert.patch
+  patch -Np1 < ../libvirt-fix-virProcessGetStatInfo.patch
 }
 
 build() {
@@ -167,9 +172,6 @@ package_libvirt() {
   chmod 0750 "$pkgdir/usr/share/polkit-1/rules.d"
   chmod 600 "$pkgdir"/etc/libvirt/nwfilter/*.xml \
     "$pkgdir/etc/libvirt/qemu/networks/default.xml"
-
-  # Strip auto-generated UUID, so it will be generated per-install. (reproducible builds)
-  sed -i 's|<uuid>.*</uuid>|<uuid></uuid>|' "$pkgdir"/etc/libvirt/qemu/networks/default.xml
 
   rm -rf \
     "$pkgdir/run" \
