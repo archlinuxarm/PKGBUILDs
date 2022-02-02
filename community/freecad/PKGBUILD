@@ -1,0 +1,108 @@
+# Maintainer: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: loqs <bugs-archlinux@entropy-collector.net>
+# Contributor: Gabriel Souza Franco <gabrielfrancosouza@gmail.com>
+# Contributor: Florian Pritz
+# Contributor: Jonas Heinrich <onny@project-insanity.org>
+# Contributor: Jordi De Groof <jordi.degroof@gmail.com>
+# Contributor: mickele
+# Contributor: manwithgrenade
+# Contributor: bricem13
+# Contributor: gborzi
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove makedepend on ospray
+
+buildarch=8
+highmem=1
+
+pkgname=freecad
+pkgver=0.19.3
+pkgrel=12
+pkgdesc='General purpose 3D CAD modeler'
+arch=(x86_64)
+url='https://freecadweb.org/'
+license=(LGPL)
+depends=(boost-libs glew jsoncpp libspnav med netcdf opencascade openmpi
+         pyside2-tools python-gitpython python-matplotlib python-pivy
+         python-ply python-pyside2 pugixml qt5-svg qt5-tools qt5-webkit
+         qt5-x11extras qt5-xmlpatterns xerces-c)
+makedepends=(adios2 boost cmake cgns coin eigen fmt gcc-fortran gendesk git
+             jdk-openjdk libharu liblas ninja openvdb openvr pdal
+             postgresql-libs python-mpi4py python-shiboken2 shiboken2 swig
+             utf8cpp)
+source=(freecad.xml
+        freecad-boost.patch
+        freecad-vtk9.patch
+        "git+https://github.com/FreeCAD/FreeCAD#commit=7b5e18a0759de778b74d3a5c17eba9cb815035ac") # tag: 0.19.2
+b2sums=('f5f295b9b5f268126feffbe3f3344c124faf5e2263f3f071348bd7f5d0bf2e30eb33fcf174d0ab76ad80ca7bd8ddea95ccbaf7f33f0896189ac78603fecb9485'
+        '6ec5dcead7f3438b387aeb3f608b910105d493aafcd47ae84715cdfe6f8651926056283ec4aeeab542b89df9fd9ffc2dbb74f5593e864acd23c8b352033ed1dc'
+        '242702f926101c57774046548068d17b22bd582ba1a1c45534ac8ceaa174c56277db80f32bed8ad1475b37006a1d777193b6c098ed8a733772152a898d1dd825'
+        'SKIP')
+
+prepare() {
+  # Fix Boost linking with VTK 9 (thanks Fedora)
+  patch -d FreeCAD -p1 -i ../freecad-boost.patch
+  # Fix build with VTK 9 (thanks Fedora)
+  patch -d FreeCAD -p1 -i ../freecad-vtk9.patch
+  # Generate desktop shortcut
+  gendesk -f -n --pkgname "$pkgname" --pkgdesc "$pkgdesc" --name FreeCAD \
+    --mimetypes='application/x-extension-fcstd' --startupnotify=true
+}
+
+build() {
+  # OpenCascade requires that /usr/bin comes before /bin in $PATH
+  export PATH="/usr/bin:$PATH"
+
+  cmake \
+    -B build \
+    -D BUILD_ENABLE_CXX_STD=C++14 \
+    -D BUILD_QT5=ON \
+    -D CMAKE_BUILD_TYPE=Release \
+    -D CMAKE_C_FLAGS="$CFLAGS -fPIC -w" \
+    -D CMAKE_CXX_FLAGS="$CXXFLAGS -fPIC -w" \
+    -D CMAKE_INSTALL_DATADIR=/usr/share/freecad \
+    -D CMAKE_INSTALL_DOCDIR=/usr/share/freecad/doc \
+    -D CMAKE_INSTALL_PREFIX=/usr/lib/freecad \
+    -D FREECAD_USE_EXTERNAL_PIVY=ON \
+    -D FREECAD_USE_OCC_VARIANT='Official Version' \
+    -D FREECAD_USE_QT_FILEDIALOG=ON \
+    -D PYTHON_EXECUTABLE=/usr/bin/python \
+    -G Ninja \
+    -S FreeCAD
+  ninja -C build
+}
+
+package() {
+  DESTDIR="$pkgdir" ninja -C build install
+
+  # Desktop shortcut
+  install -Dm644 freecad.desktop \
+    "$pkgdir/usr/share/applications/freecad.desktop"
+
+  # MIME info
+  install -Dm644 freecad.xml "$pkgdir/usr/share/mime/packages/freecad.xml"
+
+  # Thumbnailer
+  install -Dm755 FreeCAD/src/Tools/freecad-thumbnailer \
+    "$pkgdir/usr/bin/freecad-thumbnailer"
+  install -Dm644 \
+    "$pkgdir/usr/lib/freecad/share/thumbnailers/FreeCAD.thumbnailer" \
+    "$pkgdir/usr/share/thumbnailers/FreeCAD.thumbnailer"
+  rm -f "$pkgdir/usr/lib/freecad/share/thumbnailers/FreeCAD.thumbnailer"
+
+  # Icons
+  cd FreeCAD/src/Gui/Icons
+  install -Dm644 freecad.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/freecad.svg"
+  for i in 16 32 48 64; do
+    install -Dm644 "freecad-icon-$i.png" \
+      "$pkgdir/usr/share/icons/hicolor/${i}x$i/apps/freecad.png"
+  done
+
+  # Symlinks in /usr/bin
+  install -d "$pkgdir/usr/bin"
+  ln -sf /usr/lib/freecad/bin/FreeCAD "$pkgdir/usr/bin/freecad"
+  ln -sf /usr/lib/freecad/bin/FreeCAD "$pkgdir/usr/bin/FreeCAD"
+  ln -sf /usr/lib/freecad/bin/FreeCADCmd "$pkgdir/usr/bin/freecadcmd"
+  ln -sf /usr/lib/freecad/bin/FreeCADCmd "$pkgdir/usr/bin/FreeCADCmd"
+}
