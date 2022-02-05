@@ -1,0 +1,76 @@
+From db43e8a2a02adaa3571137b82855c01fad4c2534 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Caol=C3=A1n=20McNamara?= <caolanm@redhat.com>
+Date: Wed, 2 Feb 2022 16:21:43 +0000
+Subject: rhbz#2047319 drop the SolarMutex before QApplication::init()
+
+https://invent.kde.org/qt/qt/qtwayland/-/merge_requests/24#note_383915
+
+reproducible with with qt5-qtwayland-5.15.2-17.fc35.x86_64 and
+export OOO_FORCE_DESKTOP=plasma5
+export SAL_USE_VCLPLUGIN=gtk3
+
+Change-Id: Icdf6b8709865c723c266e6400169b33639a1b0e4
+Reviewed-on: https://gerrit.libreoffice.org/c/core/+/129428
+Tested-by: Jenkins
+Reviewed-by: Michael Weghorn <m.weghorn@posteo.de>
+---
+ shell/Library_kf5be.mk                     |  1 +
+ shell/source/backends/kf5be/kf5backend.cxx | 23 +++++++++++++++--------
+ 2 files changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/shell/Library_kf5be.mk b/shell/Library_kf5be.mk
+index 628145176e0f..157f8b9836f8 100644
+--- a/shell/Library_kf5be.mk
++++ b/shell/Library_kf5be.mk
+@@ -20,6 +20,7 @@ $(eval $(call gb_Library_use_libraries,kf5be1,\
+ 	cppu \
+ 	cppuhelper \
+ 	sal \
++	vcl \
+ ))
+ 
+ $(eval $(call gb_Library_set_componentfile,kf5be1,shell/source/backends/kf5be/kf5be1))
+diff --git a/shell/source/backends/kf5be/kf5backend.cxx b/shell/source/backends/kf5be/kf5backend.cxx
+index e9e10e60fd27..2b41414c54cd 100644
+--- a/shell/source/backends/kf5be/kf5backend.cxx
++++ b/shell/source/backends/kf5be/kf5backend.cxx
+@@ -41,6 +41,7 @@
+ #include <rtl/ustring.hxx>
+ #include <sal/types.h>
+ #include <uno/current_context.hxx>
++#include <vcl/svapp.hxx>
+ 
+ #include <osl/process.h>
+ #include <osl/thread.h>
+@@ -172,14 +173,20 @@ void initQApp(std::map<OUString, css::beans::Optional<css::uno::Any>>& rSettings
+         unsetenv("SESSION_MANAGER");
+     }
+ 
+-    std::unique_ptr<QApplication> app(new QApplication(nFakeArgc, pFakeArgv));
+-    QObject::connect(app.get(), &QObject::destroyed, app.get(), [nFakeArgc, pFakeArgv]() {
+-        for (int i = 0; i < nFakeArgc; ++i)
+-            free(pFakeArgv[i]);
+-        delete[] pFakeArgv;
+-    });
+-
+-    readKDESettings(rSettings);
++    {
++        // rhbz#2047319 drop the SolarMutex during the execution of QApplication::init()
++        // https://invent.kde.org/qt/qt/qtwayland/-/merge_requests/24#note_383915
++        SolarMutexReleaser aReleaser; // rhbz#2047319 drop the SolarMutex during the execution
++
++        std::unique_ptr<QApplication> app(new QApplication(nFakeArgc, pFakeArgv));
++        QObject::connect(app.get(), &QObject::destroyed, app.get(), [nFakeArgc, pFakeArgv]() {
++            for (int i = 0; i < nFakeArgc; ++i)
++                free(pFakeArgv[i]);
++            delete[] pFakeArgv;
++        });
++
++        readKDESettings(rSettings);
++    }
+ 
+     if (session_manager != nullptr)
+     {
+-- 
+cgit v1.2.1
+
