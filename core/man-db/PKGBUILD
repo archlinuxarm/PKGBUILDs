@@ -1,0 +1,79 @@
+# Maintainer: Andreas Radke <andyrtr@archlinux.org>
+# Contributor: Sergej Pupykin <sergej@aur.archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - upstream patch to fix FTBFS
+
+pkgname=man-db
+pkgver=2.10.0
+pkgrel=1
+pkgdesc="A utility for reading man pages"
+arch=('x86_64')
+url="https://www.nongnu.org/man-db/"
+license=('GPL' 'LGPL')
+depends=( 'bash' 'gdbm' 'zlib' 'groff' 'libpipeline' 'less' 'libseccomp')
+makedepends=('po4a')
+optdepends=('gzip') # covered by virtual "base" package
+backup=('etc/man_db.conf')
+conflicts=('man')
+provides=('man')
+replaces=('man')
+install=${pkgname}.install
+source=(https://savannah.nongnu.org/download/man-db/$pkgname-$pkgver.tar.xz{,.asc}
+        # fallback should be used within first 24h after a release
+        #https://download-mirror.savannah.gnu.org/releases/man-db/$pkgname-$pkgver.tar.xz{,.asc} 
+        f4f94402834f20b9da730aeca5daa465be38efdf.patch
+        snapdir.diff
+        convert-mans
+)
+validpgpkeys=('AC0A4FF12611B6FCCF01C111393587D97D86500B') # Colin Watson <cjwatson@debian.org>
+sha512sums=('de9c9f3dd9e6a578eb99aca0d04ce5c98cf6733e83e3be5299b6cafc4aad202896429a263a34111529eccdf07c353438afdade278818fc5d884471df7a4816c9'
+            'SKIP'
+            '79f24aae532b9a152b18711f591c548efa2ab67ec272cbafd1715848a494f49662883d3b7d517217a5ce66fd3b79f22dba8e7bf3b81f422d5b3234225785b653'
+            'f24a8152c82c3b99dab2c34654382512f226bb6b0e5e3b1376d577019a4cca0f4e5a9ac92c62ed7ea5cf0ed3ad94509d34f455d845bc5fb026ef908da82cd5fe'
+            '0b159285da20008f0fc0afb21f1eaebd39e8df5b0594880aa0e8a913b656608b8d16bb8d279d9e62d7aae52f62cb9b2fc49e237c6711f4a5170972b38d345535')
+
+prepare() {
+  cd ${pkgname}-${pkgver}
+  # fix default Add MANDB_MAP entry mapping /snap/man to /var/cache/man/snap
+  # Arch needs /var/lib/snapd/snap/man to /var/cache/man/snap
+  patch -Np0 -i ../snapdir.diff
+
+  patch -p1 -i ../f4f94402834f20b9da730aeca5daa465be38efdf.patch
+}
+
+
+build() {
+  cd ${pkgname}-${pkgver}
+  ./configure --prefix=/usr \
+    --sbindir=/usr/bin \
+    --sysconfdir=/etc \
+    --libexecdir=/usr/lib \
+    --with-systemdsystemunitdir=/usr/lib/systemd/system \
+    --with-db=gdbm \
+    --disable-setuid \
+    --enable-cache-owner=root \
+    --enable-mandirs=GNU \
+    --with-sections="1 1p n l 8 3 3p 0 0p 2 5 4 9 6 7"
+  make
+}
+
+check() {
+  cd ${pkgname}-${pkgver}
+  make check
+}
+
+package() {
+  cd ${pkgname}-${pkgver}
+  make DESTDIR=${pkgdir} install
+
+  # part of groff pkg
+  rm -f ${pkgdir}/usr/bin/zsoelim
+
+  # script from LFS to convert manpages, see
+  # http://www.linuxfromscratch.org/lfs/view/6.4/chapter06/man-db.html
+  install -D -m755 ${srcdir}/convert-mans  ${pkgdir}/usr/bin/convert-mans
+
+  install -d -m755 ${pkgdir}/usr/lib/systemd/system/timers.target.wants
+  ln -s ../man-db.timer ${pkgdir}/usr/lib/systemd/system/timers.target.wants/man-db.timer
+}
