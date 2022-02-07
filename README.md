@@ -58,10 +58,8 @@ be combined (bitwise OR) to select more than one architecture. Without being
 specified, the package will build for all architectures.
 
 * `0000 0001` (1) = *the default*, package will be built for all architectures
-* `0000 0010` (2) = the package will be built only for armv5
 * `0000 0100` (4) = the package will be built only for armv7h
 * `0000 1000` (8) = the package will be build only for armv8 (AArch64)
-* `0001 0000` (16) = the package will be built only for armv6h
 
 ### highmem
 If non-zero, the build system will mark the package as requiring a builder that
