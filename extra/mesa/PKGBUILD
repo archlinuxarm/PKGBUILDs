@@ -7,12 +7,15 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Removed DRI and Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, VMware svga).
 #  - added broadcom and panfrost vulkan packages
+#  - enable lto for aarch64
+
+highmem=1
 
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=21.3.5
-pkgrel=1.2
+pkgrel=1.3
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
@@ -48,7 +51,7 @@ build() {
   esac
 
   arch-meson mesa-$pkgver build \
-    -D b_lto=false \
+    -D b_lto=$([[ $CARCH == aarch64 ]] && echo true || echo false) \
     -D b_ndebug=true \
     -D platforms=x11,wayland \
     -D dri-drivers=r100,r200,nouveau \
