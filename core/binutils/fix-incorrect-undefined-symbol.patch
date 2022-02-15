@@ -1,0 +1,114 @@
+From 20ea3acc727f3be6322dfbd881e506873535231d Mon Sep 17 00:00:00 2001
+From: "H.J. Lu" <hjl.tools@gmail.com>
+Date: Fri, 11 Feb 2022 15:13:19 -0800
+Subject: [PATCH] ld: Keep indirect symbol from IR if referenced from shared
+ object
+
+Don't change indirect symbol defined in IR to undefined if it is
+referenced from shared object.
+
+bfd/
+
+	PR ld/28879
+	* elflink.c (_bfd_elf_merge_symbol): Don't change indirect
+	symbol defined in IR to undefined if it is referenced from
+	shared object.
+
+ld/
+
+	PR ld/28879
+	* testsuite/ld-plugin/lto.exp: Run PR ld/28879 tests.
+	* testsuite/ld-plugin/pr28879a.cc: New file.
+	* testsuite/ld-plugin/pr28879b.cc: Likewise.
+---
+ bfd/elflink.c                      |  5 ++---
+ ld/testsuite/ld-plugin/lto.exp     | 26 ++++++++++++++++++++++++++
+ ld/testsuite/ld-plugin/pr28879a.cc |  7 +++++++
+ ld/testsuite/ld-plugin/pr28879b.cc |  8 ++++++++
+ 4 files changed, 43 insertions(+), 3 deletions(-)
+ create mode 100644 ld/testsuite/ld-plugin/pr28879a.cc
+ create mode 100644 ld/testsuite/ld-plugin/pr28879b.cc
+
+diff --git a/bfd/elflink.c b/bfd/elflink.c
+index 6fa18d92007..f8521426cad 100644
+--- a/bfd/elflink.c
++++ b/bfd/elflink.c
+@@ -1294,9 +1294,8 @@ _bfd_elf_merge_symbol (bfd *abfd,
+ 	  h->root.non_ir_ref_dynamic = true;
+ 	  hi->root.non_ir_ref_dynamic = true;
+ 	}
+-
+-      if ((oldbfd->flags & BFD_PLUGIN) != 0
+-	  && hi->root.type == bfd_link_hash_indirect)
++      else if ((oldbfd->flags & BFD_PLUGIN) != 0
++	       && hi->root.type == bfd_link_hash_indirect)
+ 	{
+ 	  /* Change indirect symbol from IR to undefined.  */
+ 	  hi->root.type = bfd_link_hash_undefined;
+diff --git a/ld/testsuite/ld-plugin/lto.exp b/ld/testsuite/ld-plugin/lto.exp
+index a70a84562b8..64b880265ee 100644
+--- a/ld/testsuite/ld-plugin/lto.exp
++++ b/ld/testsuite/ld-plugin/lto.exp
+@@ -471,6 +471,32 @@ set lto_link_elf_tests [list \
+   [list {pr27441c.so} \
+    {-shared -fPIC -Wl,--as-needed tmpdir/pr27441c.o tmpdir/pr27441b.so tmpdir/pr27441a.so} {-fPIC} \
+    {dummy.c} {{readelf {-dW} pr27441c.d}} {pr27441c.so}] \
++  [list \
++   "Build libpr28879a.so" \
++   "-shared" \
++   "-O0 -fpic" \
++   {pr28879a.cc} \
++   {} \
++   "libpr28879a.so" \
++   "c++" \
++  ] \
++  [list \
++   "Build libpr28879b.so" \
++   "-shared -Wl,--no-as-needed tmpdir/libpr28879a.so" \
++   "-O2 -fpic" \
++   {dummy.c} \
++   {} \
++   "libpr28879b.so" \
++  ] \
++  [list \
++   "Build pr28879" \
++   "-Wl,--no-as-needed tmpdir/libpr28879b.so -Wl,-rpath-link,." \
++   "-O0 -flto -D_GLIBCXX_ASSERTIONS" \
++   {pr28879b.cc} \
++   {} \
++   "pr28879" \
++   "c++" \
++  ] \
+ ]
+ 
+ # PR 14918 checks that libgcc is not spuriously included in a shared link of
+diff --git a/ld/testsuite/ld-plugin/pr28879a.cc b/ld/testsuite/ld-plugin/pr28879a.cc
+new file mode 100644
+index 00000000000..8307a42e2fb
+--- /dev/null
++++ b/ld/testsuite/ld-plugin/pr28879a.cc
+@@ -0,0 +1,7 @@
++#include <string>
++
++void
++func (std::string *s)
++{
++  delete s;
++}
+diff --git a/ld/testsuite/ld-plugin/pr28879b.cc b/ld/testsuite/ld-plugin/pr28879b.cc
+new file mode 100644
+index 00000000000..02fc351366c
+--- /dev/null
++++ b/ld/testsuite/ld-plugin/pr28879b.cc
+@@ -0,0 +1,8 @@
++#include <string>
++
++int
++main (void)
++{
++  std::string header;
++  return 0;
++}
+-- 
+2.35.1
+

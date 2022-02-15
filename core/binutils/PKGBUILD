@@ -1,30 +1,32 @@
 # Maintainer:  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Allan McRae <allan@archlinux.org>
 
-# toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
+# toolchain build order: linux-api-headers->glibc->binutils->gcc->glibc->binutils->gcc
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Added a CONFIGFLAG for ARM, defining our build hosts
-#  - --disable-sim, files provided by gdb
 
 noautobuild=1
 
 pkgname=binutils
-pkgver=2.36.1
+pkgver=2.38
 pkgrel=3
 pkgdesc='A set of programs to assemble and manipulate binary and object files'
 arch=(x86_64)
 url='https://www.gnu.org/software/binutils/'
 license=(GPL)
 groups=(base-devel)
-depends=(glibc zlib elfutils)
-makedepends=(elfutils git)
-options=(staticlibs !distcc !ccache)
+depends=(glibc zlib libelf)
+checkdepends=(dejagnu debuginfod bc)
+optdepends=('debuginfod: for debuginfod server/client functionality')
+options=(staticlibs !distcc !ccache debug)
 #_commit=cb5f6a3e146cc70bc2d864989386df80acec5d3e
 #source=(git+https://sourceware.org/git/binutils-gdb.git#commit=$_commit)
-source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz{,.sig})
-sha256sums=('e81d9edf373f193af428a0f256674aea62a9d74dfe93f65192d4eae030b0f3b0'
-            'SKIP')
+source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz{,.sig}
+        fix-incorrect-undefined-symbol.patch)
+sha256sums=('e316477a914f567eccc34d5d29785b8b0f5a10208d36bbacedcc39048ecfe024'
+            'SKIP'
+            'fd33b2f8cac7561cecf3fdbb5a50fd2f2dfa6420516cbe57c47784a06fa16bf6')
 validpgpkeys=(3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F)
 
 prepare() {
@@ -38,6 +40,10 @@ prepare() {
 
   # hack! - libiberty configure tests for header files using "$CPP $CPPFLAGS"
   sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" libiberty/configure
+
+  # fix incorrect "undefined reference" errors
+  # https://sourceware.org/bugzilla/show_bug.cgi?id=28879
+  patch -Np1 -i "${srcdir}"/fix-incorrect-undefined-symbol.patch
 }
 
 build() {
@@ -53,29 +59,38 @@ build() {
     --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
     --enable-deterministic-archives \
     --enable-gold \
+    --enable-install-libiberty \
     --enable-ld=default \
     --enable-lto \
     --enable-plugins \
     --enable-relro \
+    --enable-shared \
     --enable-threads \
     --disable-gdb \
+    --disable-gdbserver \
+    --disable-libdecnumber \
+    --disable-readline \
+    --disable-sim \
     --disable-werror \
     --with-debuginfod \
     --with-pic \
     --with-system-zlib \
-    --disable-sim \
     $CONFIGFLAG
 
-  make configure-host
-  make tooldir=/usr
+  make -O tooldir=/usr
 }
 
 check() {
   cd binutils-build
 
-  # unset LDFLAGS as testsuite makes assumptions about which ones are active
-  # ignore failures in gold testsuite...
-  make -k LDFLAGS="" check || true
+  # Use minimal flags for testsuite
+  # ld testsuite uses CFLAGS_FOR_TARGET and requires -g
+  # gold testsuite requires CXXFLAGS/CFLAGS with default PIE/PIC disabled
+  make -O CFLAGS_FOR_TARGET="-O2 -g" \
+          CXXFLAGS="-O2 -no-pie -fno-PIC" \
+          CFLAGS="-O2 -no-pie" \
+          LDFLAGS="" \
+          check
 }
 
 package() {
