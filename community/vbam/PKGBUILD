@@ -3,20 +3,23 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - disable LTO: -DENABLE_LTO='FALSE'
-#  - cherry-pick upstream patch to fix ARM FTBFS
 
 pkgbase=vbam
 pkgname=(
   vbam-sdl
   vbam-wx
 )
-pkgver=2.1.4
-pkgrel=3
+pkgver=2.1.4.r453.65b5affe
+pkgrel=1
 pkgdesc='Nintendo GameBoy Advance emulator'
 arch=(x86_64)
 url=https://vba-m.com
 license=(GPL2)
 depends=(
+  libavcodec.so
+  libavformat.so
+  libavutil.so
+  libswscale.so
   libgl
   libpng
   sdl2
@@ -28,47 +31,42 @@ makedepends=(
   ffmpeg
   git
   libglvnd
+  ninja
   wxgtk3
   zip
 )
-source=(git+https://github.com/visualboyadvance-m/visualboyadvance-m.git#tag=8f4862de88de2f95866b7e501304f1e57a4e0abb?signed)
-sha256sums=(SKIP)
+#_tag=8f4862de88de2f95866b7e501304f1e57a4e0abb
+_commit=65b5affe7ddd87653362d1bb1cb3da7979762b92
+#source=(git+https://github.com/visualboyadvance-m/visualboyadvance-m.git?signed#tag=${_tag})
+source=(
+  git+https://github.com/visualboyadvance-m/visualboyadvance-m.git#commit=${_commit}
+  vbam-ffmpeg5.0.patch
+)
+b2sums=('SKIP'
+        'c24813fab7a155ac0711e4c5764148d45dae8c1a57938fd8ce253368c31f7d91c2c912f5b0da48c70952f990449315489f175e0894d9f4a75efc53a3e6abd162')
 validpgpkeys=(A0C0E526E36FD2138C149D4D08AB596679D86240) # Rafael Kitover <rkitover@gmail.com>
+
+prepare() {
+  cd visualboyadvance-m
+  patch -Np1 -i ../vbam-ffmpeg5.0.patch
+}
 
 pkgver() {
   cd visualboyadvance-m
-
-  git describe --tags | sed 's/^v//'
-}
-
-prepare() {
-  for p in sdl wx; do
-    if [[ -d build-$p ]]; then
-      rm -rf build-$p
-    fi
-    mkdir build-$p
-  done
-
-  cd visualboyadvance-m
-  git cherry-pick -n af0de1c4b308ef8d9a081ecf407805b75a99d877
+  git describe --tags | sed 's/^v//; s/-/.r/; s/-g/./'
 }
 
 build() {
-  cd build-sdl
-
-  cmake ../visualboyadvance-m \
-    -DCMAKE_BUILD_TYPE=Release \
+  cmake -S visualboyadvance-m -B build-sdl -G Ninja \
+    -DCMAKE_BUILD_TYPE='' \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_SKIP_RPATH=TRUE \
     -DENABLE_SDL=TRUE \
     -DENABLE_WX=FALSE \
     -DENABLE_LINK=TRUE \
     -DENABLE_LTO=FALSE
-  make
-
-  cd ../build-wx
-
-  cmake ../visualboyadvance-m \
+  cmake --build build-sdl
+  cmake -S visualboyadvance-m -B build-wx -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_SKIP_RPATH=TRUE \
@@ -78,31 +76,27 @@ build() {
     -DENABLE_LINK=TRUE \
     -DENABLE_LTO=FALSE \
     -DwxWidgets_CONFIG_EXECUTABLE=/usr/bin/wx-config-gtk3
-  make
+  cmake --build build-wx
 }
 
 package_vbam-sdl() {
   backup=(etc/vbam.cfg)
   conflicts=(vbam-wx)
 
-  make DESTDIR="${pkgdir}" -C build-sdl install
+  DESTDIR="${pkgdir}" cmake --install build-sdl
 }
 
 package_vbam-wx() {
   depends+=(
     glib2
     gtk3
-    libavcodec.so
-    libavformat.so
-    libavutil.so
-    libswscale.so
     openal
     wxgtk3
     zip
   )
   conflicts=(vbam-sdl)
 
-  make DESTDIR="${pkgdir}" -C build-wx install
+  DESTDIR="${pkgdir}" cmake --install build-wx
 }
 
 # vim: ts=2 sw=2 et:
