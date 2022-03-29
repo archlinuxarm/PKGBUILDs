@@ -8,7 +8,6 @@
 #  - Removed Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, VMware svga).
 #  - added broadcom and panfrost vulkan packages
 #  - enable lto for aarch64
-#  - add patch to fix xwayland on panfrost
 
 highmem=1
 
@@ -25,11 +24,9 @@ makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
-        https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/15120.patch
         LICENSE)
 sha512sums=('9faef66adbacba24d11dfe8e2d1a753295798883a10a7cc91e6df9d678c64a8286a12e60c0d8576d944a8cc76f00c30d27c3a71d3458bbe3dbcd66c88a454c3b'
             'SKIP'
-            '591e63fee09467d5de3e5c882d0ce49785eda7975833f9bd81486b232cd1dc79ad6492f3dac813f509d47cd74eaaf4e8024041840e344a08923128023add6d08'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -40,8 +37,7 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 
 prepare() {
   cd mesa-$pkgver
-  # Fix XWayland issues on Panfrost devices
-  patch -Np1 -i "${srcdir}/15120.patch"
+
 }
 
 build() {
