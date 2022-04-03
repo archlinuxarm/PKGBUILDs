@@ -15,7 +15,7 @@ pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=22.0.0
-pkgrel=1
+pkgrel=1.1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
@@ -24,9 +24,11 @@ makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence
 url="https://www.mesa3d.org/"
 license=('custom')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
+        https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/15365.patch
         LICENSE)
 sha512sums=('9faef66adbacba24d11dfe8e2d1a753295798883a10a7cc91e6df9d678c64a8286a12e60c0d8576d944a8cc76f00c30d27c3a71d3458bbe3dbcd66c88a454c3b'
             'SKIP'
+            '9178bbe145ba2d8b5ef5cb3fcfc63b90aff47ec45bed075d2af27b2c42d1e38e16f1c5a712b7ab3788038170bd4c4cacd5cdb9ad578a0275fc54621dd9356ce6'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -37,7 +39,8 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 
 prepare() {
   cd mesa-$pkgver
-
+  # Add patch to fix rendering on Panfrost
+  patch -Np1 -i "${srcdir}/15365.patch"
 }
 
 build() {
