@@ -5,24 +5,23 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - move xorg-server-xvfb from checkdepends to makedepends
 
-pkgname=mutter
-pkgver=41.5
+pkgbase=mutter
+pkgname=(mutter mutter-docs)
+pkgver=42.0
 pkgrel=1
 pkgdesc="A window manager for GNOME"
 url="https://gitlab.gnome.org/GNOME/mutter"
 arch=(x86_64)
 license=(GPL)
 depends=(dconf gobject-introspection-runtime gsettings-desktop-schemas
-         libcanberra startup-notification zenity libsm gnome-desktop upower
+         libcanberra startup-notification zenity libsm gnome-desktop 
          libxkbcommon-x11 gnome-settings-daemon libgudev libinput pipewire
          xorg-xwayland graphene libxkbfile libsysprof-capture)
 makedepends=(gobject-introspection git egl-wayland meson xorg-server
-             wayland-protocols xorg-server-xvfb sysprof)
+             wayland-protocols sysprof gi-docgen xorg-server-xvfb)
 checkdepends=(pipewire-media-session python-dbusmock)
-provides=(libmutter-9.so)
-groups=(gnome)
 options=(debug)
-_commit=17926e941d67867911c462737f4d013adb55e4d6  # tags/41.5^0
+_commit=9249aba72a5c4454894c08735a4963ca1665e34d  # tags/42.0^0
 source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=$_commit")
 sha256sums=('SKIP')
 
@@ -33,9 +32,6 @@ pkgver() {
 
 prepare() {
   cd mutter
-
-  # Make tests run
-  sed -i '/catchsegv/d' meson.build
 }
 
 build() {
@@ -45,6 +41,7 @@ build() {
   arch-meson mutter build \
     -D egl_device=true \
     -D wayland_eglstream=true \
+    -D docs=true \
     -D installed_tests=false
   meson compile -C build
 }
@@ -62,7 +59,7 @@ _check() (
 
   trap "kill $_p1 $_p2; wait" EXIT
 
-  meson test -C build --print-errorlogs
+  meson test -C build --print-errorlogs -t 3
 )
 
 check() {
@@ -70,8 +67,30 @@ check() {
     bash -c "$(declare -f _check); _check"
 }
 
-package() {
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_mutter() {
+  provides=(libmutter-10.so)
+  groups=(gnome)
+
   meson install -C build --destdir "$pkgdir"
+
+  _pick docs "$pkgdir"/usr/share/mutter-*/doc
+}
+
+package_mutter-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv docs/* "$pkgdir"
 }
 
 # vim:set sw=2 et:
