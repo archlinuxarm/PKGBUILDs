@@ -1,39 +1,43 @@
-# Maintainer:  Bartłomiej Piotrowski <barthalion@gmail.com>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Bartłomiej Piotrowski <barthalion@gmail.com>
 # Contributor: Thomas S Hatch <thatch45 at gmail dot com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - replace CFLAGS setting with just a removal of -fstack-protector
+#  - replace simplified CFLAGS with ARM versions
 
 pkgname=libaio
 pkgver=0.3.112
-pkgrel=2
+pkgrel=3
 pkgdesc="The Linux-native asynchronous I/O facility (aio) library"
-arch=('x86_64')
-url="http://lse.sourceforge.net/io/aio.html"
-license=('LGPL')
-source=(http://ftp.de.debian.org/debian/pool/main/liba/$pkgname/${pkgname}_${pkgver}.orig.tar.xz)
-md5sums=('66e3b7dd255581a73542ee851f8cd737')
+arch=(x86_64)
+url="https://pagure.io/libaio"
+license=(LGPL2.1)
+depends=(glibc)
+provides=(libaio.so)
+options=(debug)
+source=(https://releases.pagure.org/libaio/${pkgname}-${pkgver}.tar.gz)
+sha512sums=('5f984529c9f747a6c82f1e4457fc0832bb1fc299ae6e700f2ac5a8ea7b9bfc6ea1e75809728cc115a020cff6685ed1f4e38c6aeacc1ea98dfccce04dd19dafaa')
+b2sums=('088f3b195a65bdc97ae2318e47af17c65259ed3208dca7bfef93c81a800602085e5b2078dbd436c740be316d0ebd923a1b3b7c0808257e2e7c7fb0f7ae1e0dba')
+
+prepare() {
+  # -Werror, not even once
+  sed 's/-Werror//' -i $pkgname-$pkgver/harness/Makefile
+}
 
 build() {
-  cd "$srcdir/$pkgname-$pkgver"
-  # AIO library is a thin wrapper around kernel syscalls, it does not use stdlib
-  # and other helpers like stack protection libraries
-  CFLAGS=`echo $CFLAGS | sed -e 's/-fstack-protector-strong//'` && CXXFLAGS="$CFLAGS"
-  make
+  # libaio is a thin wrapper around kernel syscalls, it does not use stdlib and
+  # other helpers like stack protection libraries
+  [[ $CARCH == "aarch64" ]] && CFLAGS="-march=armv8-a -O2 -pipe" || CFLAGS="-march=armv7-a -mfloat-abi=hard -mfpu=neon -O2 -pipe"
+  make -C $pkgname-$pkgver
 }
 
 check() {
-  cd "$srcdir/$pkgname-$pkgver"
-
-  # work around gcc warning (-Werror) in test suite
-  sed -i '/strncpy/s#sizeof(TEMPLATE)#sizeof(template)#' harness/cases/19.t
-  sed -i '/strncpy/s#sizeof(TEMPLATE)#sizeof(temp_file)#' harness/cases/21.t
-
-  make partcheck
+  make partcheck -k -C $pkgname-$pkgver
 }
 
 package() {
-  cd "$srcdir/$pkgname-$pkgver"
-  make prefix="$pkgdir/usr" install
+  make DESTDIR="$pkgdir" install -C $pkgname-$pkgver
+  install -vDm 644 $pkgname-$pkgver/{ChangeLog,README.md} -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 $pkgname-$pkgver/man/*.3 -t "$pkgdir/usr/share/man/man3/"
 }
 
