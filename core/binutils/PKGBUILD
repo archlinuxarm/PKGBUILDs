@@ -1,4 +1,6 @@
-# Maintainer:  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Maintainer: Giancarlo Razzolini <grazzolini@archlinux.org>
+# Maintainer: Frederik Schwan <freswa at archlinux dot org>
+# Contributor:  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Allan McRae <allan@archlinux.org>
 
 # toolchain build order: linux-api-headers->glibc->binutils->gcc->glibc->binutils->gcc
@@ -10,11 +12,11 @@ noautobuild=1
 
 pkgname=binutils
 pkgver=2.38
-pkgrel=3
+pkgrel=4
 pkgdesc='A set of programs to assemble and manipulate binary and object files'
 arch=(x86_64)
 url='https://www.gnu.org/software/binutils/'
-license=(GPL)
+license=('GPL3' 'GPL' 'FDL1.3' 'custom:FSFAP')
 groups=(base-devel)
 depends=(glibc zlib libelf)
 checkdepends=(dejagnu debuginfod bc)
@@ -23,9 +25,11 @@ options=(staticlibs !distcc !ccache debug)
 #_commit=cb5f6a3e146cc70bc2d864989386df80acec5d3e
 #source=(git+https://sourceware.org/git/binutils-gdb.git#commit=$_commit)
 source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz{,.sig}
+        gold-warn-unsupported.patch
         fix-incorrect-undefined-symbol.patch)
 sha256sums=('e316477a914f567eccc34d5d29785b8b0f5a10208d36bbacedcc39048ecfe024'
             'SKIP'
+            '2d430b66f84a19c154725ec535280c493be1d34f1a90f95208dce02fecd0e4e4'
             'fd33b2f8cac7561cecf3fdbb5a50fd2f2dfa6420516cbe57c47784a06fa16bf6')
 validpgpkeys=(3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F)
 
@@ -38,8 +42,11 @@ prepare() {
   # Turn off development mode (-Werror, gas run-time checks, date in sonames)
   sed -i '/^development=/s/true/false/' bfd/development.sh
 
-  # hack! - libiberty configure tests for header files using "$CPP $CPPFLAGS"
-  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" libiberty/configure
+  # Creds @Fedora
+  # Change the gold configuration script to only warn about
+  # unsupported targets.  This allows the binutils to be built with
+  # BPF support enabled.
+  patch -Np1 -i "${srcdir}"/gold-warn-unsupported.patch
 
   # fix incorrect "undefined reference" errors
   # https://sourceware.org/bugzilla/show_bug.cgi?id=28879
@@ -61,7 +68,6 @@ build() {
     --enable-gold \
     --enable-install-libiberty \
     --enable-ld=default \
-    --enable-lto \
     --enable-plugins \
     --enable-relro \
     --enable-shared \
@@ -78,6 +84,11 @@ build() {
     $CONFIGFLAG
 
   make -O tooldir=/usr
+
+  # Extract the FSF All Permissive License
+  # <https://www.gnu.org/prep/maintain/html_node/License-Notices-for-Other-Files.html>
+  # used for some linker scripts.
+  tail -n 5 "${srcdir}"/binutils-${pkgver}/ld/scripttempl/README > FSFAP
 }
 
 check() {
@@ -97,11 +108,17 @@ package() {
   cd binutils-build
   make prefix="$pkgdir/usr" tooldir="$pkgdir/usr" install
 
+  # install PIC version of libiberty
+  install -m644 libiberty/pic/libiberty.a "$pkgdir/usr/lib"
+
   # Remove unwanted files
-  rm -f "$pkgdir"/usr/share/man/man1/{dlltool,nlmconv,windres,windmc}*
+  rm -f "$pkgdir"/usr/share/man/man1/{dlltool,windres,windmc}*
 
   # No shared linking to these files outside binutils
   rm -f "$pkgdir"/usr/lib/lib{bfd,opcodes}.so
   echo 'INPUT( /usr/lib/libbfd.a -liberty -lz -ldl )' > "$pkgdir/usr/lib/libbfd.so"
   echo 'INPUT( /usr/lib/libopcodes.a -lbfd )' > "$pkgdir/usr/lib/libopcodes.so"
+
+  # install FSF All Permissive License
+  install -Dm644 -t "${pkgdir}"/usr/share/licenses/${pkgname}/ FSFAP
 }
