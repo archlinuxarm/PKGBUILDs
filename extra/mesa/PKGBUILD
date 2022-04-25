@@ -25,11 +25,9 @@ url="https://www.mesa3d.org/"
 license=('custom')
 options=('debug')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
-        https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/15365.patch
         LICENSE)
 sha512sums=('939ddf9acd280e1b20b3540349b3ad07bbeee5d821198f1d667e86634449bf5d0a0df5832753b8b3f8816709c2f02959cce25f3d26a33cc758dd8e25d158ddb8'
             'SKIP'
-            '9178bbe145ba2d8b5ef5cb3fcfc63b90aff47ec45bed075d2af27b2c42d1e38e16f1c5a712b7ab3788038170bd4c4cacd5cdb9ad578a0275fc54621dd9356ce6'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -40,8 +38,7 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 
 prepare() {
   cd mesa-$pkgver
-  # Add patch to fix rendering on Panfrost
-  patch -Np1 -i "${srcdir}/15365.patch"
+
 }
 
 build() {
