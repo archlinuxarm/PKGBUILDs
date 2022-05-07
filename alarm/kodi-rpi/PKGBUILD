@@ -1,4 +1,4 @@
-# Contributor graysky <therealgraysky ATprotonmail DOT com>
+# Contributor graysky <therealgraysky AT proton DOT me>
 # Contributor: BlackIkeEagle < ike DOT devolder AT gmail DOT com>
 # Contributor Kevin Mihelich <kevin@archlinuxarm.org>
 # Contributor BlackIkeEagle < ike DOT devolder AT gmail DOT com >
@@ -13,7 +13,7 @@ pkgname=(
   'kodi-rpi-eventclients' 'kodi-rpi-tools-texturepacker' 'kodi-rpi-dev'
 )
 pkgver=19.4
-pkgrel=1
+pkgrel=2
 _commit=51a36cca9f6dd2bc717e41153fb2d0aa9caf11ca
 arch=('armv7h' 'aarch64')
 url="https://github.com/graysky2/xbmc/tree/gs-gbm_matrix"
@@ -55,8 +55,10 @@ source=(
   "http://mirrors.kodi.tv/build-deps/sources/libudfread-$_libudfread_version.tar.gz"
   "ArchARM-kodi-init-v$_init_version.tar.gz::https://github.com/graysky2/kodi-standalone-service/archive/v$_init_version.tar.gz"
   kodi.config.txt
+  build-fix-for-dav1d-1.0.0.patch
   use-mcpu-avoiding-march-and-mtune.patch
   0001-mcpu-cortex-application-to-ffmpeg.patch
+  0002-add-dav1d-patch-to-build-system.patch
 )
 backup=(boot/kodi.config.txt etc/conf.d/kodi-standalone)
 noextract=(
@@ -84,8 +86,10 @@ sha256sums=('ea57f7d2339bede8086082865afbb47c953f195dbfbaf54c43aeb4b46b8f9f2e'
             '5ad9f95c53e8f29853c1fefa0a20a301be4045e2c7ae49d1164bc74d94155627'
             'b94c70baa45e30346224ceecfab031dd183e09303b1f97d6522f9941da9b0067'
             '23f105f914f3372afa432251b69c7601e50c22d1a88168185105ee859005f5cd'
-            '16d6c79ff3a3d3653f21d77a36326a0335c8cec49a9c06dbc2de0ed143e50a9f'
-            '76eafede11af936bb554932b2be71ce91d4bf1c07107d847500ebbf3ff7d7245')
+            'bcde6299a805430c3ca1f2807101edc7001e77b1934088db9057f74d9a9dd8f6'
+            'c226f082349e6442b8920e1108005792c42b9461f7cec0e1576ae079520eed13'
+            'afe90ded82e70af8e5680347a72edcbdc1dcae498083a90cc453dce00b665fce'
+            '7f6e8e5c2084ab88d10ab2c55982212a8c6cbcf4101079be343763127f129a22')
 
 prepare() {
   [[ -d kodi-build ]] && rm -rf kodi-build
@@ -93,12 +97,16 @@ prepare() {
 
   cd "xbmc-$_commit"
 
-  # put patch in source tree so kodi build system can pick it up
+  # put patches in source tree so kodi build system can pick it up
   cp ../use-mcpu-avoiding-march-and-mtune.patch \
     tools/depends/target/ffmpeg/0002-use-mcpu-avoiding-march-and-mtune.patch
 
-  # patch kodi build system to apply the patch we just copied over
-  patch -Np1 -i ../0001-mcpu-cortex-application-to-ffmpeg.patch
+  cp ../build-fix-for-dav1d-1.0.0.patch \
+    tools/depends/target/ffmpeg/0003-add-dav1d-patch-to-build-system.patch
+
+  # patch kodi build system to apply the patches we just copied over
+  patch -p1 -i ../0001-mcpu-cortex-application-to-ffmpeg.patch
+  patch -p1 -i ../0002-add-dav1d-patch-to-build-system.patch
 }
 
 build() {
@@ -108,8 +116,8 @@ build() {
   # uses here so unset them and redefine below
   unset CFLAGS CXXFLAGS
 
-  CFLAGS="-O2 -pipe -fno-plt"
-  CXXFLAGS="${CFLAGS}"
+  CFLAGS="-O2 -pipe -fstack-protector-strong -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security -fstack-clash-protection"
+  CXXFLAGS="${CFLAGS} -Wp,-D_GLIBCXX_ASSERTIONS"
 
   if [[ $CARCH = "armv7h" ]]; then
     # we use -mcpu=cortex-a53 rather than cortex-a72 to maximize RPi 3B and RPi 4B/400 compatibility
