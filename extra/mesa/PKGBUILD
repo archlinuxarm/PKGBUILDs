@@ -14,7 +14,7 @@ highmem=1
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=22.0.4
+pkgver=22.1.0
 pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
@@ -26,7 +26,7 @@ license=('custom')
 options=('debug')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         LICENSE)
-sha512sums=('afecaf97fdf824e9004f3a50ea17f42edf810d682f383082ef87449a883263d4c5c8ae03558052960a63336451797101e198977553dedc09dbbc8fdb4815f526'
+sha512sums=('a2a6f6f37d1e63aa5537a2bbdfd8634fafebf7e223099deb0fd96749d6d1880ea692231fe12eb06ade78a5eb483d11d6f9ef746e94fe3fd58b4381d469afa934'
             'SKIP'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
@@ -52,8 +52,10 @@ build() {
   CXXFLAGS+=' -g1'
 
   # https://gitlab.freedesktop.org/mesa/mesa/-/issues/6229
-  CFLAGS+=' -mtls-dialect=gnu'
-  CXXFLAGS+=' -mtls-dialect=gnu'
+  if [[ $CARCH != "aarch64" ]]; then
+    CFLAGS+=' -mtls-dialect=gnu'
+    CXXFLAGS+=' -mtls-dialect=gnu'
+  fi
 
   arch-meson mesa-$pkgver build \
     -D b_lto=$([[ $CARCH == aarch64 ]] && echo true || echo false) \
