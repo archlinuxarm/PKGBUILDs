@@ -89,9 +89,9 @@ endif()
 if(ENABLE_FFTW)
   find_package(FFTW3)
 
-  if(Fftw_FOUND)
+  if(FFTW3_FOUND)
     list(APPEND COMPILE_FLAGS "cimg_use_fftw3")
-    list(APPEND EXTRA_LIBRARY_TARGETS ${FFTW3_LIBRARIES})
+    list(APPEND EXTRA_LIBRARY_TARGETS ${FFTW3_LIBRARIES} -lfftw3_threads)
   endif()
 endif()
 
