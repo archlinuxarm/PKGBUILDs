@@ -1,0 +1,62 @@
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - replace $CARCH with uname -m for v7
+
+pkgbase=libusbsio
+pkgname=(libusbsio python-libusbsio)
+pkgver=2.1.11
+pkgrel=1
+pkgdesc="Library for USB-HID communication over SPI, I2C or GPIO"
+arch=(x86_64)
+url="https://www.nxp.com/design/software/development-software/library-for-windows-macos-and-ubuntu-linux:LIBUSBSIO"
+license=(BSD)
+makedepends=(hidapi libusb python-build python-installer python-setuptools python-wheel systemd)
+source=(https://www.nxp.com/downloads/en/libraries/$pkgbase-$pkgver-src.zip)
+sha512sums=('200717be44cdb2bb7cc7eeba29afb6aed8a88a72e7664377c1abf8c1d1f88f7de1ed05c9a7d6c960ae53e4b9420889c252d51fd807b1534396430004138518a0')
+b2sums=('711b7b59cec79ebc37f42eab7a7c377d6cf15ccc50982dfcacd4e8f6b0c4107ebf14f758a41ee9edad9d2d6d789c99376f1b181e37b5dfea8e543cf06f7b566a')
+
+prepare() {
+  cd $pkgbase-$pkgver-src
+  # remove prebuilt shared libs
+  rm -frv bin/*
+
+  # extract sources for python package for PEP517 build
+  cd python/dist
+  tar xvzf $pkgbase-$pkgver.tar.gz
+  # remove prebuilt shared libs from sdist tarball
+  rm -frv $pkgbase-$pkgver/$pkgbase/bin/*
+}
+
+build() {
+  cd $pkgbase-$pkgver-src
+  make
+  cd python/dist/$pkgbase-$pkgver
+  python -m build --wheel --skip-dependency-check --no-isolation
+}
+
+package_libusbsio() {
+  depends=(systemd-libs libudev.so)
+
+  cd $pkgbase-$pkgver-src
+  install -vDm 755 bin/linux_$(uname -m)/$pkgbase.so -t "$pkgdir/usr/lib/"
+  install -vDm 644 license/*.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_python-libusbsio() {
+  local _site_packages="$(python -c 'import site; print(site.getsitepackages()[0])')"
+
+  pkgdesc+=" - Python bindings"
+  depends=(libusbsio python)
+
+  cd $pkgbase-$pkgver-src
+  (
+    cd python/dist/$pkgbase-$pkgver
+    python -m installer --destdir="$pkgdir" dist/*.whl
+    install -vdm 755 "$pkgdir/$_site_packages/$pkgbase/bin/linux_$(uname -m)"
+    ln -fsv /usr/lib/$pkgbase.so "$pkgdir/$_site_packages/$pkgbase/bin/linux_$(uname -m)/$pkgbase.so"
+  )
+  install -vDm 644 license/BSD-3-clause.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -vDm 644 python/README.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 python/examples/*.py -t "$pkgdir/usr/share/doc/$pkgname/"
+}
