@@ -15,11 +15,10 @@
 highmem=1
 
 pkgname=chromium
-pkgver=103.0.5060.134
+pkgver=104.0.5112.79
 pkgrel=1
 _launcher_ver=8
-_gcc_patchset=4
-_manual_clone=0
+_gcc_patchset=2
 pkgdesc="A web browser built for speed, simplicity, and security"
 arch=('x86_64')
 url="https://www.chromium.org/Home"
@@ -37,30 +36,27 @@ options=('!lto') # Chromium adds its own flags for ThinLTO
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/chromium-$pkgver.tar.xz
         https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver/chromium-launcher-$_launcher_ver.tar.gz
         https://github.com/stha09/chromium-patches/releases/download/chromium-${pkgver%%.*}-patchset-$_gcc_patchset/chromium-${pkgver%%.*}-patchset-$_gcc_patchset.tar.xz
+        x11-ozone-fix-X11-screensaver-suspension.patch
         enable-GlobalMediaControlsCastStartStop.patch
         roll-src-third_party-ffmpeg.patch
-        sql-make-VirtualCursor-standard-layout-type.patch
+        chromium-tflite-system-zlib.patch
         remove-no-opaque-pointers-flag.patch
         use-oauth2-client-switches-as-default.patch
         0001-widevine-support-for-arm.patch
         0002-Run-blink-bindings-generation-single-threaded.patch
         0003-Fix-eu-strip-build-for-newer-GCC.patch)
-sha256sums=('e48a272481e41b1aae7aba71b55c41fe9e994cf71edd01c8ca1d0b604af0b571'
+sha256sums=('9cc662f1a84c796521ee17ed2808795ca937fe7f77bc605e788f0304a81dabf3'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
-            'fed11a8987d9f9baa04457fb114f8f7fdb800300a3780927020865bcc43e4f52'
+            'ce702099849465927cf47f7bc3a4a27045d0e35e16b17481ebf35e14506bafa7'
+            '9956a843bc8a765c130080616ccd3ebc46ea95c3a2324c4b403bc293a8705eb2'
             '779fb13f2494209d3a7f1f23a823e59b9dded601866d3ab095937a1a04e19ac6'
             '30df59a9e2d95dcb720357ec4a83d9be51e59cc5551365da4c0073e68ccdec44'
-            'b94b2e88f63cfb7087486508b8139599c89f96d7a4181c61fec4b4e250ca327a'
-            '00c16ce83ea4ca924a50fa0cfc2b2a4d744c722f363b065323e6ba0fcbac45a5'
+            '588c166bf748793758a7df438cfa665b32e09ca8fbd6380be28bc5984a33523c'
+            'ab46b2c26a4dfe86486fd7e31bfc7211c515994a61a8c0cbd742f9c9e3c91873'
             'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
-            '765d78ba10af7a4dfbf7badb1c32a2b9b4a21941531a766ca2cdc0ff00425d01'
-            '4c79e4beac02269c864e69264ba6325ea809a5fefb8f48553bb2a610b1bb45f5'
-            '597083226fd762c8e4fd527d4ea2478b8cbf9180f12740efd9c6a1f4798a5d3a')
-
-if (( _manual_clone )); then
-  source[0]=fetch-chromium-release
-  makedepends+=('python-httplib2' 'python-pyparsing' 'python-six')
-fi
+            '7fc0eb593ccb82ce2003ad32662e925f300a9042ef8d560ba437691c4fba12cf'
+            'a2df732e49f7395fceda3acb781b1b3fc4d2826461b772a6cc9ce9dfe9c1e33a'
+            '601c57358026bd4dd31f075b445698ccb9b730b73a50ff2b46d64b1812ebb141')
 
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
@@ -98,9 +94,6 @@ depends+=(${_system_libs[@]})
 _google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
 
 prepare() {
-  if (( _manual_clone )); then
-    ./fetch-chromium-release $pkgver
-  fi
   cd chromium-$pkgver
 
   # Allow building against system libraries in official builds
@@ -135,6 +128,12 @@ prepare() {
   # Remove '-Xclang -no-opaque-pointers' flag not supported by our clang
   patch -Np1 -i ../remove-no-opaque-pointers-flag.patch
 
+  # Fix build with unbundled zlip (patch from Gentoo)
+  patch -Np1 -i ../chromium-tflite-system-zlib.patch
+
+  # Upstream fixes
+  patch -Np1 -i ../x11-ozone-fix-X11-screensaver-suspension.patch
+
   # Revert kGlobalMediaControlsCastStartStop enabled by default
   # https://crbug.com/1314342
   patch -Rp1 -F3 -i ../enable-GlobalMediaControlsCastStartStop.patch
@@ -143,11 +142,8 @@ prepare() {
   # https://crbug.com/1325301
   patch -Rp1 -i ../roll-src-third_party-ffmpeg.patch
 
-  # https://chromium-review.googlesource.com/c/chromium/src/+/2862724
-  patch -Np1 -i ../sql-make-VirtualCursor-standard-layout-type.patch
-
   # Fixes for building with libstdc++ instead of libc++
-  #patch -Np1 -i ../patches/
+  patch -Np1 -i ../patches/chromium-103-VirtualCursor-std-layout.patch
 
   # Link to system tools required by the build
   mkdir -p third_party/node/linux/node-linux-x64/bin
