@@ -4,7 +4,7 @@
 * **Detailed description.** The body of the PR must contain a detailed description of what changes are being introduced, and most importantly, *why* this PR should be merged.
 * **One package per request.** PRs must be for a single package only.  A PR addressing multiple packages without merit risks having a delayed merge or being closed.
 * **Squash commits.** Your commits must be meaningful. If you make incremental changes or fixes, they must [be squashed](https://git-scm.com/book/en/v2/Git-Tools-Rewriting-History#Squashing-Commits) before the pull request will be merged.
-* **Check that your changes build.** Your submission must build using the [clean chroot](https://wiki.archlinux.org/index.php/DeveloperWiki:Building_in_a_Clean_Chroot) method on *all* supported architectures that the package is to be built for.  No exceptions.
+* **Check that your changes build.** Your submission must build using the [clean chroot](https://wiki.archlinux.org/index.php/DeveloperWiki:Building_in_a_Clean_Chroot) method (e.g. using `extra-*-build` helpers from `devtools-alarm`) on *all* supported architectures that the package is to be built for.  No exceptions.
 * **Work within one PR.** Do not close a PR and open another with new changes.  Amend your commit and force push to your branch to update the changes in the pull request.
 * Ensure your PR addresses three of the most common problems:
   * Correctly update the pkgver or pkgrel of the package (see below).
