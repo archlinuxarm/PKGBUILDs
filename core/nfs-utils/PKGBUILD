@@ -10,26 +10,32 @@
 
 pkgbase=nfs-utils
 pkgname=('nfs-utils' 'nfsidmap')
-pkgver=2.6.1
+pkgver=2.6.2
 pkgrel=1
 arch=('x86_64')
 url='http://nfs.sourceforge.net'
 makedepends=('libevent' 'sqlite' 'rpcsvc-proto' 'device-mapper')
+options=('debug')
 # http://git.linux-nfs.org/?p=steved/nfs-utils.git;a=summary
 source=(https://www.kernel.org/pub/linux/utils/${pkgname}/${pkgver}/${pkgname}-${pkgver}.tar.{xz,sign}
-        exports)
-# https://mirrors.edge.kernel.org/pub/linux/utils/nfs-utils/2.6.1/sha256sums.asc
-sha256sums=('60dfcd94a9f3d72a12bc7058d811787ec87a6d593d70da2123faf9aad3d7a1df'
+        exports
+        sysusers.d)
+# https://mirrors.edge.kernel.org/pub/linux/utils/nfs-utils/2.6.2/sha256sums.asc
+sha256sums=('5200873e81c4d610e2462fc262fe18135f2dbe78b7979f95accd159ae64d5011'
             'SKIP'
-            'b8238b74179f7e1626db2b637671ddc17288a1c5b7692954ae6d2fbb1be3788d')
+            'b8238b74179f7e1626db2b637671ddc17288a1c5b7692954ae6d2fbb1be3788d'
+            '8e1b6aa59cf5539b9da13cfec217b3ca7b6c32e08df3b0a204901ed2891b2ded')
 validpgpkeys=('E1B71E339E20A10A676F7CB69AFB1D681A125177') # Steve Dickson
 
 prepare() {
   cd "${pkgbase}"-${pkgver}
  
-  # fix hardcoded sbin path to our needs
+  # fix hardcoded sbin/libexec path to our needs
   sed -i "s|sbindir = /sbin|sbindir = /usr/bin|g" utils/*/Makefile.am
   sed -i "s|sbin|bin|" utils/nfsidmap/id_resolver.conf
+  sed -i "s|sbin|usr/bin|" systemd/50-nfs.conf
+  sed -i "s|/sbin|/usr/bin|" systemd/50-nfs.conf
+  sed -i "s|libexec|bin|" tools/nfsrahead/99-nfs.rules
   autoreconf -vfi
 }
 
@@ -39,14 +45,16 @@ build() {
   ./configure --prefix=/usr \
     --sbindir=/usr/bin \
     --sysconfdir=/etc \
+    --libexecdir=/usr/bin \
+    --with-statedir=/var/lib/nfs \
+    --with-statdpath=/var/lib/nfs/statd \
+    --with-start-statd=/usr/bin/start-statd \
     --enable-nfsv4server \
     --enable-gss \
     --without-tcp-wrappers \
-    --with-statedir=/var/lib/nfs \
     --enable-ipv6 \
     --enable-libmount-mount \
     --enable-mountconfig \
-    --with-start-statd=/usr/bin/start-statd \
     --with-systemd
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
@@ -54,7 +62,8 @@ build() {
 
 check() {
   cd "${pkgbase}"-${pkgver}
-  make -k check || /bin/true
+  #make -k check || /bin/true
+  make check
 }
 
 package_nfs-utils() {
@@ -66,7 +75,7 @@ package_nfs-utils() {
           var/lib/nfs/{etab,rmtab})
   depends=('rpcbind' 'nfsidmap' 'gssproxy' 'libevent' 'device-mapper')
   optdepends=('sqlite: for nfsdcltrack usage'
-              'python: for nfsiostat, nfsdclnts and mountstats usage')
+              'python: for rpcctl, nfsiostat, nfsdclnts and mountstats usage')
 
   cd "${pkgbase}"-${pkgver}
   make DESTDIR="$pkgdir" install
@@ -76,7 +85,7 @@ package_nfs-utils() {
   
   install -d -m 755 "$pkgdir"/usr/share/doc/$pkgname
   install -D -m 644 systemd/README "$pkgdir"/usr/share/doc/$pkgname/README.systemd
-  
+
   # docs
   install -m 644 {NEWS,README} "$pkgdir"/usr/share/doc/$pkgname/
 
@@ -89,6 +98,12 @@ package_nfs-utils() {
   mkdir "$pkgdir"/etc/exports.d
   mkdir -m 555 "$pkgdir"/var/lib/nfs/rpc_pipefs
   mkdir "$pkgdir"/var/lib/nfs/v4recovery
+
+  # systemd sysusers - FS#75536
+  install -D -m 644 ../sysusers.d "${pkgdir}"/usr/lib/sysusers.d/rpcuser.conf
+  chown -Rv 34:34 "${pkgdir}"/var/lib/nfs/statd
+  chmod -R 700 "${pkgdir}"/var/lib/nfs/statd
+  chmod 644 "${pkgdir}"/var/lib/nfs/statd/state
 
   # nfsidmap cleanup
   rm -vrf "$pkgdir"/usr/include #/nfsid*
