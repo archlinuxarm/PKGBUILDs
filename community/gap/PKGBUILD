@@ -7,53 +7,28 @@
 
 pkgbase=gap
 pkgname=(gap gap-doc gap-packages)
-pkgver=4.11.1
-pkgrel=10
+pkgver=4.12.0
+pkgrel=1
 pkgdesc='Groups, Algorithms, Programming: a system for computational discrete algebra'
 arch=(x86_64)
 url='https://www.gap-system.org/'
 license=(GPL)
-_semigroupsver=4.0.1
-_normalizinterfacever=1.3.2
 source=(https://github.com/gap-system/gap/releases/download/v$pkgver/$pkgbase-$pkgver.tar.gz
-        gap.sh
-        https://github.com/semigroups/Semigroups/archive/v$_semigroupsver/Semigroups-$_semigroupsver.tar.gz
-        https://github.com/gap-packages/NormalizInterface/releases/download/v$_normalizinterfacever/NormalizInterface-$_normalizinterfacever.tar.gz)
-sha256sums=('6635c5da7d82755f8339486b9cac33766f58712f297e8234fba40818902ea304'
-            '143fb8a79a52c007903cce13407850df309ef803a9b00398d05169355917de46'
-            '09f3f59506e6b273d44954eff91b9af7ffb91263d70e43faf676bcdb51878974'
-            '05f8ec10bd9975cc3f84249057b96e4865c284d9aaf5d94ac0c3e96377c3645e')
+        gap.sh)
+sha256sums=('6005d0c0316fe8803d84681f30be64eace83a9542f975f5cb3dedfadd4391849'
+            '143fb8a79a52c007903cce13407850df309ef803a9b00398d05169355917de46')
 makedepends=(libxaw givaro mpfi cddlib boost libsemigroups c-xsc zeromq fplll wget chrpath fmt eigen normaliz)
 
 prepare() {
   cd gap-$pkgver
 
 # Use system libsemigroups
-  sed -e 's|test "$with_external_libsemigroups" = yes|true|' -i pkg/semigroups-*/configure
+  sed -e 's|test "$with_external_libsemigroups" = yes|true|' -i pkg/semigroups/configure
 # Use system normaliz
   sed -e 's|.\/build-normaliz.sh|true|' -i bin/BuildPackages.sh
 # Fix https://bugs.archlinux.org/task/55174
-  sed -e '/xgap/d' -i pkg/sonata-*/PackageInfo.g
+  sed -e '/xgap/d' -i pkg/sonata/PackageInfo.g
   sed -e '/XGAP/d' -i pkg/cryst/PackageInfo.g
-
-# Update semigroups to support libsemigroups 2
-  rm -r pkg/semigroups-* 
-  mv ../Semigroups-$_semigroupsver pkg/semigroups-$_semigroupsver
-  cd pkg/semigroups-$_semigroupsver
-  rm prerequisites.sh
-  mkdir libsemigroups
-  ./autogen.sh
-  sed -e 's|test "$with_external_libsemigroups" = yes|true|' -i configure
-
-# Update normalizinterface to support normaliz 3.9
-  cd ..
-  rm -r NormalizInterface*
-  mv ../../NormalizInterface-$_normalizinterfacever .
-  sed -e 's|\$PWD/NormalizInstallDir|/usr|' -i NormalizInterface-$_normalizinterfacever/configure
-
-  cd CddInterface-*
-  sed -e 's|/usr/include/cdd|/usr/include/cddlib|' -i configure.ac # Fix build with cddlib 0.94k
-  rm configure
 }
 
 build() {
@@ -77,21 +52,19 @@ build() {
   export CXXFLAGS+=" -I/usr/include/eigen3" # Fix build of semigroups
   export LDFLAGS+=" -L$srcdir/gap-$pkgver/tmp-install -lgap" # See https://trac.sagemath.org/ticket/27372
   export LD_LIBRARY_PATH="$srcdir"/gap-$pkgver/tmp-install
-  ../bin/BuildPackages.sh
+  ../bin/BuildPackages.sh --strict
 }
 
-_standardpkgs=(GAPDoc-* primgrp-* SmallGrp-* transgrp atlasrep autpgrp-* alnuth-* crisp-* ctbllib-* FactInt-* fga irredsol-* laguna-*
-               polenta-* polycyclic-* resclasses-* sophus-* tomlib-*)
+_standardpkgs=(gapdoc primgrp smallgrp transgrp atlasrep autpgrp alnuth crisp ctbllib factint fga irredsol laguna
+               polenta polycyclic resclasses sophus tomlib)
 
 package_gap() {
   depends=(gmp zlib)
   optdepends=('gap-packages: extra packages' 'gap-doc: documentation')
-  conflicts=(libgap)
-  replaces=(gap-data libgap gap-4.8 gap-4.8-data)
   cd gap-$pkgver
 
   install -Dm644 src/*.h -t "$pkgdir"/usr/include/gap
-  install -Dm644 gen/config.h -t "$pkgdir"/usr/include/gap
+  install -Dm644 build/config.h -t "$pkgdir"/usr/include/gap
   install -Dm644 src/hpc/*.h -t "$pkgdir"/usr/include/gap/hpc
 
   install -d "$pkgdir"/usr/lib
@@ -112,19 +85,16 @@ package_gap() {
   ln -s /usr/lib/gap -t "$pkgdir"/usr/share # expected by sagemath
 
 # Add provides for bundled packages
-  for _f in $(ls "$pkgdir"/usr/lib/gap/pkg); do
-    _pkg=$(basename $_f | cut -d- -f1 | tr '[:upper:]' '[:lower:]')
-    _prov=gap-$_pkg
-    if [[ $_f == *-* ]]; then
-      _prov+="=$(basename $_f | cut -d- -f2)"
-    fi
+  for _f in "$pkgdir"/usr/lib/gap/pkg/*/PackageInfo.g; do
+    _pkg=$(cat $_f | grep PackageName | tr '\n' ' ' | cut -d '"' -f2 | tr '[:upper:]' '[:lower:]')
+    _ver=$(cat $_f | grep Version | tr '\n' ' ' | cut -d '"' -f2)
+    _prov="gap-$_pkg=${_ver/-/.}"
     provides+=($_prov)
   done
 }
 
 package_gap-doc() {
   depends=(gap)
-  replaces=(gap-4.8-doc)
   pkgdesc="Documentation for GAP"
   cd gap-$pkgver
 
@@ -134,7 +104,6 @@ package_gap-doc() {
 
 package_gap-packages() {
   depends=(gap)
-  replaces=(gap-4.8-packages)
   optdepends=('libxaw: xgap package' 'c-xsc: float package' 'mpfi: float package'
               'libmpc: float package' 'fplll: float package' 'zeromq: ZeroMQ interface package' 'planarity: digraph package'
               'curl: curl interface package' 'libsemigroups: semigroups package' 'cddlib: CddLib interface package'
@@ -147,9 +116,9 @@ package_gap-packages() {
 
 # fix xgap launch script
   sed -e "s|/build/gap/src/gap-$pkgver|/usr/lib/gap|g" -e 's|^GAP=.*|GAP=/usr/lib/gap/gap|g' \
-    "$pkgdir"/usr/lib/gap/pkg/xgap-*/xgap.sh > "$pkgdir"/usr/bin/xgap
+    "$pkgdir"/usr/lib/gap/pkg/xgap/xgap.sh > "$pkgdir"/usr/bin/xgap
   chmod 755 "$pkgdir"/usr/bin/xgap
-  rm "$pkgdir"/usr/lib/gap/pkg/xgap-*/xgap.sh*
+  rm "$pkgdir"/usr/lib/gap/pkg/xgap/xgap.sh
 
 # provided by main gap package
   for _pkg in ${_standardpkgs[@]}; do
@@ -160,24 +129,22 @@ package_gap-packages() {
   find "$pkgdir"/usr/lib/gap/pkg/ -name '*.so' | xargs chrpath -d
 
 # remove bundled planarity
-  rm -fr "$pkgdir"/usr/lib/gap/pkg/digraphs-*/bin/lib/
+  rm -fr "$pkgdir"/usr/lib/gap/pkg/digraphs/bin/lib/
 
 # remove leftover binaries and source files
   find "$pkgdir"/usr/lib/gap/pkg -name .libs -o -name '*.o' | xargs rm -fr
   find "$pkgdir"/usr/lib/gap/pkg -type d -name src | xargs rm -fr
-  rm -r "$pkgdir"/usr/lib/gap/pkg/digraphs*/extern
-  rm -r "$pkgdir"/usr/lib/gap/pkg/semigroups*/libsemigroups
-  rm -r "$pkgdir"/usr/lib/gap/pkg/CaratInterface/carat*
-  rm -r "$pkgdir"/usr/lib/gap/pkg/kbmag-1.5.9/standalone
+  rm -r "$pkgdir"/usr/lib/gap/pkg/digraphs/extern
+  rm -r "$pkgdir"/usr/lib/gap/pkg/semigroups/libsemigroups
+  rm -r "$pkgdir"/usr/lib/gap/pkg/caratinterface/carat*
+  rm -r "$pkgdir"/usr/lib/gap/pkg/kbmag/standalone
   rm -r "$pkgdir"/usr/lib/gap/pkg/log
 
 # Add provides for bundled packages
-  for _f in $(ls "$pkgdir"/usr/lib/gap/pkg); do
-    _pkg=$(basename $_f | cut -d- -f1 | tr '[:upper:]' '[:lower:]')
-    _prov=gap-$_pkg
-    if [[ $_f == *-* ]]; then
-      _prov+="=$(basename $_f | cut -d- -f2)"
-    fi
+  for _f in "$pkgdir"/usr/lib/gap/pkg/*/PackageInfo.g; do
+    _pkg=$(cat $_f | grep PackageName | tr '\n' ' ' | cut -d '"' -f2 | tr '[:upper:]' '[:lower:]')
+    _ver=$(cat $_f | grep Version | tr '\n' ' ' | cut -d '"' -f2)
+    _prov="gap-$_pkg=${_ver/-/.}"
     provides+=($_prov)
   done
 }
