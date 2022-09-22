@@ -1,0 +1,77 @@
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Contributor: Eric Bélanger <eric@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove makedepends on pandoc, set -DINSTALL_MANPAGES=OFF
+
+pkgbase=flac
+pkgname=('flac' 'flac-doc')
+pkgver=1.4.1
+pkgrel=1
+pkgdesc='Free Lossless Audio Codec'
+url='https://xiph.org/flac/'
+arch=('x86_64')
+license=('BSD' 'GPL')
+depends=('gcc-libs' 'libogg')
+makedepends=('nasm' 'cmake' 'ninja' 'doxygen' 'git')
+options=('debug')
+_commit=b6fbd6b3d97e2da4481bdbd25176f263fd6a5e75  # tags/1.4.1
+source=("git+https://github.com/xiph/flac?signed#commit=$_commit")
+b2sums=('SKIP')
+validpgpkeys=('5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23') # https://github.com/web-flow.gpg
+
+pkgver() {
+  cd flac
+  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
+}
+
+prepare() {
+  cd flac
+
+  # Shorten tests
+  sed -i 's/FLAC__TEST_LEVEL=1/FLAC__TEST_LEVEL=0/' test/CMakeLists.txt
+}
+
+build() {
+  cmake -S flac -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_SHARED_LIBS=ON \
+    -DINSTALL_MANPAGES=OFF \
+    -DWITH_STACK_PROTECTOR=OFF \
+    -DNDEBUG=ON
+  cmake --build build
+
+  # Build docs and place them where install expects them
+  cmake --build build --target FLAC-doxygen
+  mv build/doc/doxytmp/html flac/doc/api
+}
+
+check() {
+  cd build
+  ctest --output-on-failure --stop-on-failure -j1
+}
+
+package_flac() {
+  provides=('libFLAC.so' 'libFLAC++.so')
+
+  DESTDIR="${pkgdir}" cmake --install build
+
+  install -Dm 644 flac/src/*/*.m4 -t "${pkgdir}/usr/share/aclocal"
+
+  mkdir -p doc/usr/share
+  mv {"${pkgdir}",doc}/usr/share/doc
+
+  install -Dm 644 flac/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+package_flac-doc() {
+  pkgdesc+=' documentation'
+  depends=()
+
+  mv doc/* "$pkgdir"
+
+  install -Dm 644 flac/COPYING.Xiph -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+# vim:set sw=2 sts=-1 et:
