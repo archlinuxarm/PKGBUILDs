@@ -5,3 +5,4 @@
 #export SAL_USE_VCLPLUGIN=kf5
 #export SAL_USE_VCLPLUGIN=qt5
 #export SAL_USE_VCLPLUGIN=gtk3
+#export SAL_USE_VCLPLUGIN=gtk4
