@@ -9,17 +9,15 @@
 pkgbase=gap
 pkgname=(gap gap-doc gap-packages)
 pkgver=4.12.0
-pkgrel=3
+pkgrel=4
 pkgdesc='Groups, Algorithms, Programming: a system for computational discrete algebra'
 arch=(x86_64)
 url='https://www.gap-system.org/'
 license=(GPL)
 source=(https://github.com/gap-system/gap/releases/download/v$pkgver/$pkgbase-$pkgver.tar.gz
-        https://github.com/gap-system/gap/commit/dce6fa96.patch
-        gap.sh)
+        https://github.com/gap-system/gap/commit/dce6fa96.patch)
 sha256sums=('6005d0c0316fe8803d84681f30be64eace83a9542f975f5cb3dedfadd4391849'
-            'd8a362a6c1d27f2925d8b3f8eddc9aaafac1699fb568a035768d039b34ba6eb3'
-            '143fb8a79a52c007903cce13407850df309ef803a9b00398d05169355917de46')
+            'd8a362a6c1d27f2925d8b3f8eddc9aaafac1699fb568a035768d039b34ba6eb3')
 makedepends=(libxaw givaro mpfi cddlib boost libsemigroups c-xsc zeromq fplll wget chrpath fmt eigen normaliz)
 
 prepare() {
@@ -46,19 +44,15 @@ build() {
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
 
   make
-  make libgap.la
 
   # Install libgap so we can link packages against it
   mkdir -p tmp-install
-  libtool --mode=install install libgap.la "$srcdir"/gap-$pkgver/tmp-install
-  rm "$srcdir"/gap-$pkgver/tmp-install/libgap.la
+  make DESTDIR="$srcdir"/gap-$pkgver/tmp-install install-libgap
 
   cd pkg
-  export CFLAGS+=" -fcommon" # Fix anupq and cohomolo build with GCC 10
-  export CXXFLAGS+=" -I/usr/include/cxsc" # Find c-xsc headers
   export CXXFLAGS+=" -I/usr/include/eigen3" # Fix build of semigroups
-  export LDFLAGS+=" -L$srcdir/gap-$pkgver/tmp-install -lgap" # See https://trac.sagemath.org/ticket/27372
-  export LD_LIBRARY_PATH="$srcdir"/gap-$pkgver/tmp-install
+  export LDFLAGS+=" -L$srcdir/gap-$pkgver/tmp-install/usr/lib -lgap" # See https://trac.sagemath.org/ticket/27372
+  export LD_LIBRARY_PATH="$srcdir"/gap-$pkgver/tmp-install/usr/lib
   ../bin/BuildPackages.sh --strict
 }
 
@@ -70,29 +64,14 @@ package_gap() {
   optdepends=('gap-packages: extra packages' 'gap-doc: documentation')
   cd gap-$pkgver
 
-  install -Dm644 src/*.h -t "$pkgdir"/usr/include/gap
-  install -Dm644 build/config.h -t "$pkgdir"/usr/include/gap
-  install -Dm644 src/hpc/*.h -t "$pkgdir"/usr/include/gap/hpc
+  make DESTDIR="$pkgdir" install-bin install-gaproot install-sysinfo install-headers install-libgap
 
-  install -d "$pkgdir"/usr/lib
-  libtool --mode=install install libgap.la "$pkgdir"/usr/lib
-
-  mkdir -p "$pkgdir"/usr/{bin,lib/gap/pkg}
-  cp -r grp lib "$pkgdir"/usr/lib/gap
   for _pkg in ${_standardpkgs[@]}; do
-    cp -r pkg/$_pkg "$pkgdir"/usr/lib/gap/pkg
+    cp -r pkg/$_pkg "$pkgdir"/usr/share/gap/pkg
   done
-  install -Dm755 gap -t "$pkgdir"/usr/lib/gap
-  sed -e "s|$PWD|/usr/lib/gap|g" -e "s|-I/usr/lib|-I/usr/include|g" -i sysinfo.gap
-  cp -ar sysinfo.gap* "$pkgdir"/usr/lib/gap
-# Install launcher script
-  install -Dm755 "$srcdir"/gap.sh "$pkgdir"/usr/bin/gap
-
-  mkdir -p "$pkgdir"/usr/share
-  ln -s /usr/lib/gap -t "$pkgdir"/usr/share # expected by sagemath
 
 # Add provides for bundled packages
-  for _f in "$pkgdir"/usr/lib/gap/pkg/*/PackageInfo.g; do
+  for _f in "$pkgdir"/usr/share/gap/pkg/*/PackageInfo.g; do
     _pkg=$(cat $_f | sed -ze 's|:=\n|:=|g' | grep PackageName | tr '\n' ' ' | cut -d '"' -f2 | tr '[:upper:]' '[:lower:]')
     _ver=$(cat $_f | sed -ze 's|:=\n|:=|g' | grep Version | tr '\n' ' ' | cut -d '"' -f2)
     _prov="gap-$_pkg=${_ver/-/.}"
@@ -114,12 +93,13 @@ package_gap-packages() {
   optdepends=('libxaw: xgap package' 'c-xsc: float package' 'mpfi: float package'
               'libmpc: float package' 'fplll: float package' 'zeromq: ZeroMQ interface package' 'planarity: digraph package'
               'curl: curl interface package' 'libsemigroups: semigroups package' 'cddlib: CddLib interface package'
-              'normaliz: NormalizInterface package')
+              'normaliz: NormalizInterface package' 'pari: alnuth package' 'singular: singular package' 'polymake: polymaking package')
   pkgdesc="Extra packages for GAP"
   cd gap-$pkgver
 
   mkdir -p "$pkgdir"/usr/{bin,lib/gap}
   cp -r pkg "$pkgdir"/usr/lib/gap
+  chmod 755 "$pkgdir"/usr/lib/gap/pkg
 
 # fix xgap launch script
   sed -e "s|/build/gap/src/gap-$pkgver|/usr/lib/gap|g" -e 's|^GAP=.*|GAP=/usr/lib/gap/gap|g' \
