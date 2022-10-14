@@ -1,0 +1,83 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lionel Landwerlin <lionel.g.landwerlin@intel.com>
+Date: Sat, 25 Jun 2022 23:38:45 +0300
+Subject: [PATCH] intel/fs: always mask the bottom bits of the sampler extended
+ descriptor
+
+Fixes a hang in Age Of Empire 4. The HW is hang with the sampler input
+unit busy. Replaying on simulation showed the extended message length
+in the extended descriptor is invalid. Since the Anv ensures the input
+is correct in anv_surface_state_to_handle(), the likely reason for
+this issue is the use of VK_VALVE_mutable_descriptor_type and the
+application leaving a previous value for a different descriptor type.
+
+Signed-off-by: Lionel Landwerlin <lionel.g.landwerlin@intel.com>
+---
+ src/intel/compiler/brw_fs.cpp                 |  2 +-
+ .../compiler/brw_lower_logical_sends.cpp      | 20 +++++++++++++++----
+ 2 files changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/src/intel/compiler/brw_fs.cpp b/src/intel/compiler/brw_fs.cpp
+index 0f282dcd345f..165d8b33b677 100644
+--- a/src/intel/compiler/brw_fs.cpp
++++ b/src/intel/compiler/brw_fs.cpp
+@@ -4421,7 +4421,7 @@ brw_fb_write_msg_control(const fs_inst *inst,
+    return mctl;
+ }
+ 
+- /**
++/**
+  * Predicate the specified instruction on the sample mask.
+  */
+ void
+diff --git a/src/intel/compiler/brw_lower_logical_sends.cpp b/src/intel/compiler/brw_lower_logical_sends.cpp
+index 255ce7594811..e99c7b8ab844 100644
+--- a/src/intel/compiler/brw_lower_logical_sends.cpp
++++ b/src/intel/compiler/brw_lower_logical_sends.cpp
+@@ -1112,30 +1112,42 @@ lower_sampler_logical_send_gfx7(const fs_builder &bld, fs_inst *inst, opcode op,
+       inst->src[1] = brw_imm_ud(0);
+    } else if (surface_handle.file != BAD_FILE) {
+       /* Bindless surface */
++      const fs_builder ubld = bld.group(1, 0).exec_all();
+       assert(devinfo->ver >= 9);
+       inst->desc = brw_sampler_desc(devinfo,
+                                     GFX9_BTI_BINDLESS,
+                                     sampler.file == IMM ? sampler.ud % 16 : 0,
+                                     msg_type,
+                                     simd_mode,
+                                     0 /* return_format unused on gfx7+ */);
+ 
+       /* For bindless samplers, the entire address is included in the message
+        * header so we can leave the portion in the message descriptor 0.
+        */
+       if (sampler_handle.file != BAD_FILE || sampler.file == IMM) {
+          inst->src[0] = brw_imm_ud(0);
+       } else {
+-         const fs_builder ubld = bld.group(1, 0).exec_all();
+          fs_reg desc = ubld.vgrf(BRW_REGISTER_TYPE_UD);
+          ubld.SHL(desc, sampler, brw_imm_ud(8));
+          inst->src[0] = desc;
+       }
+ 
+-      /* We assume that the driver provided the handle in the top 20 bits so
+-       * we can use the surface handle directly as the extended descriptor.
++      /* We previously assumed that the driver provided the handle in the top
++       * 20 bits (leaving the bottom 12 bits at 0). But with extensions like
++       * VK_VALVE_mutable_descriptor_type, the application is more in control
++       * of the content of VkDescriptors which is where we store
++       * surface/sampler offsets. We experience GPU hangs because the
++       * application left an invalid value in the descriptor (probably used
++       * for another descriptor type than sampler) and the lower 12bits of the
++       * surface handle overlapping with the extended descriptor length make
++       * the HW hang. The following AND() clears those bits and fixes a hang
++       * in Age Of Empire 4.
+        */
+-      inst->src[1] = retype(surface_handle, BRW_REGISTER_TYPE_UD);
++      fs_reg ex_desc = ubld.vgrf(BRW_REGISTER_TYPE_UD);
++      ubld.AND(ex_desc,
++               retype(surface_handle, BRW_REGISTER_TYPE_UD),
++               brw_imm_ud(INTEL_MASK(31, 12)));
++      inst->src[1] = component(ex_desc, 0);
+    } else {
+       /* Immediate portion of the descriptor */
+       inst->desc = brw_sampler_desc(devinfo,
