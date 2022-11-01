@@ -1,15 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jan Alexander Steffens (heftig)" <heftig@archlinux.org>
+Date: Sat, 29 Oct 2022 17:43:52 +0200
+Subject: [PATCH] libwebrtc screen-cast sync
+
+Patch from Fedora, at
+https://src.fedoraproject.org/rpms/firefox/blob/rawhide/f/libwebrtc-screen-cast-sync.patch
+
+Fixes: https://bugs.archlinux.org/task/76231
+Fixes: https://bugzilla.mozilla.org/show_bug.cgi?id=1790496
+---
+ dom/media/webrtc/moz.build                    |    2 +
+ third_party/drm/README                        |    4 +
+ third_party/drm/drm/drm.h                     | 1193 ++++++++++++++
+ third_party/drm/drm/drm_fourcc.h              | 1377 +++++++++++++++++
+ third_party/drm/drm/drm_mode.h                | 1217 +++++++++++++++
+ third_party/drm/drm/xf86drm.h                 |  966 ++++++++++++
+ .../libpipewire => drm/libdrm}/moz.build      |    4 +-
+ third_party/drm/libdrm/mozdrm.cpp             |   66 +
+ third_party/gbm/README                        |    4 +
+ third_party/gbm/gbm/gbm.h                     |  452 ++++++
+ .../libpipewire => gbm/libgbm}/moz.build      |    4 +-
+ third_party/gbm/libgbm/mozgbm.cpp             |   66 +
+ .../desktop_capture_generic_gn/moz.build      |   45 +-
+ .../desktop_capture_options.cc                |    4 +-
+ .../desktop_capture/desktop_capture_options.h |    6 +-
+ .../linux/wayland/base_capturer_pipewire.cc   |    2 +-
+ .../desktop_capture/screen_capturer_linux.cc  |    8 -
+ .../desktop_capture/window_capturer_linux.cc  |    8 -
+ third_party/moz.build                         |    6 +
+ .../pipewire/libpipewire/mozpipewire.cpp      |   49 +-
+ 20 files changed, 5450 insertions(+), 33 deletions(-)
+ create mode 100644 third_party/drm/README
+ create mode 100644 third_party/drm/drm/drm.h
+ create mode 100644 third_party/drm/drm/drm_fourcc.h
+ create mode 100644 third_party/drm/drm/drm_mode.h
+ create mode 100644 third_party/drm/drm/xf86drm.h
+ copy third_party/{pipewire/libpipewire => drm/libdrm}/moz.build (86%)
+ create mode 100644 third_party/drm/libdrm/mozdrm.cpp
+ create mode 100644 third_party/gbm/README
+ create mode 100644 third_party/gbm/gbm/gbm.h
+ copy third_party/{pipewire/libpipewire => gbm/libgbm}/moz.build (86%)
+ create mode 100644 third_party/gbm/libgbm/mozgbm.cpp
+
 diff --git a/dom/media/webrtc/moz.build b/dom/media/webrtc/moz.build
 index ddf9321b58ea..af0f7ab64cc3 100644
 --- a/dom/media/webrtc/moz.build
 +++ b/dom/media/webrtc/moz.build
 @@ -84,6 +84,8 @@ if CONFIG["MOZ_WEBRTC_SIGNALING"]:
      ]
-
+ 
      if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
 +        DIRS += ["/third_party/drm/libdrm"]
 +        DIRS += ["/third_party/gbm/libgbm"]
          DIRS += ["/third_party/pipewire/libpipewire"]
-
+ 
      # Avoid warnings from third-party code that we can not modify.
 diff --git a/third_party/drm/README b/third_party/drm/README
 new file mode 100644
@@ -3828,7 +3872,7 @@ index 000000000000..e1e351682872
 +#endif
 diff --git a/third_party/drm/drm/xf86drm.h b/third_party/drm/drm/xf86drm.h
 new file mode 100644
-index 000000000000..a105b9e13108
+index 000000000000..501ab9e9d36d
 --- /dev/null
 +++ b/third_party/drm/drm/xf86drm.h
 @@ -0,0 +1,966 @@
@@ -4210,7 +4254,7 @@ index 000000000000..a105b9e13108
 +			"lock ; cmpxchg %4,%1\n\t"                     \
 +                        "setnz %0"                                     \
 +			: "=d" (__ret),                                \
-+   			  "=m" (__drm_dummy_lock(lock)),               \
++			  "=m" (__drm_dummy_lock(lock)),               \
 +                          "=a" (__dummy)                               \
 +			: "2" (old),                                   \
 +			  "r" (new));                                  \
@@ -4798,28 +4842,28 @@ index 000000000000..a105b9e13108
 +#endif
 +
 +#endif
-diff --git a/third_party/drm/libdrm/moz.build b/third_party/drm/libdrm/moz.build
-new file mode 100644
-index 000000000000..3b37b913e8b2
---- /dev/null
+diff --git a/third_party/pipewire/libpipewire/moz.build b/third_party/drm/libdrm/moz.build
+similarity index 86%
+copy from third_party/pipewire/libpipewire/moz.build
+copy to third_party/drm/libdrm/moz.build
+index 3102b3cb69b7..3b37b913e8b2 100644
+--- a/third_party/pipewire/libpipewire/moz.build
 +++ b/third_party/drm/libdrm/moz.build
-@@ -0,0 +1,16 @@
-+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
-+# vim: set filetype=python:
-+# This Source Code Form is subject to the terms of the Mozilla Public
-+# License, v. 2.0. If a copy of the MPL was not distributed with this
-+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
-+
-+SOURCES += [
+@@ -5,12 +5,12 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ SOURCES += [
+-    'mozpipewire.cpp',
 +    'mozdrm.cpp',
-+]
-+
-+if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
-+    CXXFLAGS += CONFIG['MOZ_GTK3_CFLAGS']
-+
+ ]
+ 
+ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
+     CXXFLAGS += CONFIG['MOZ_GTK3_CFLAGS']
+ 
+-LOCAL_INCLUDES += ['/third_party/pipewire']
 +LOCAL_INCLUDES += ['/third_party/drm']
-+
-+FINAL_LIBRARY = 'xul'
+ 
+ FINAL_LIBRARY = 'xul'
 diff --git a/third_party/drm/libdrm/mozdrm.cpp b/third_party/drm/libdrm/mozdrm.cpp
 new file mode 100644
 index 000000000000..b2fb59be64a2
@@ -5360,28 +5404,28 @@ index 000000000000..e28fa04aaed8
 +#endif
 +
 +#endif
-diff --git a/third_party/gbm/libgbm/moz.build b/third_party/gbm/libgbm/moz.build
-new file mode 100644
-index 000000000000..0953d2f17a54
---- /dev/null
+diff --git a/third_party/pipewire/libpipewire/moz.build b/third_party/gbm/libgbm/moz.build
+similarity index 86%
+copy from third_party/pipewire/libpipewire/moz.build
+copy to third_party/gbm/libgbm/moz.build
+index 3102b3cb69b7..0953d2f17a54 100644
+--- a/third_party/pipewire/libpipewire/moz.build
 +++ b/third_party/gbm/libgbm/moz.build
-@@ -0,0 +1,16 @@
-+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
-+# vim: set filetype=python:
-+# This Source Code Form is subject to the terms of the Mozilla Public
-+# License, v. 2.0. If a copy of the MPL was not distributed with this
-+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
-+
-+SOURCES += [
+@@ -5,12 +5,12 @@
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ SOURCES += [
+-    'mozpipewire.cpp',
 +    'mozgbm.cpp',
-+]
-+
-+if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
-+    CXXFLAGS += CONFIG['MOZ_GTK3_CFLAGS']
-+
+ ]
+ 
+ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
+     CXXFLAGS += CONFIG['MOZ_GTK3_CFLAGS']
+ 
+-LOCAL_INCLUDES += ['/third_party/pipewire']
 +LOCAL_INCLUDES += ['/third_party/gbm']
-+
-+FINAL_LIBRARY = 'xul'
+ 
+ FINAL_LIBRARY = 'xul'
 diff --git a/third_party/gbm/libgbm/mozgbm.cpp b/third_party/gbm/libgbm/mozgbm.cpp
 new file mode 100644
 index 000000000000..bc024a11c0b7
@@ -5458,17 +5502,28 @@ diff --git a/third_party/libwebrtc/modules/desktop_capture/desktop_capture_gener
 index 809899a92847..8869fae89703 100644
 --- a/third_party/libwebrtc/modules/desktop_capture/desktop_capture_generic_gn/moz.build
 +++ b/third_party/libwebrtc/modules/desktop_capture/desktop_capture_generic_gn/moz.build
-@@ -8,7 +8,8 @@
+@@ -8,25 +8,28 @@
  if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
      CXXFLAGS += CONFIG["MOZ_GTK3_CFLAGS"]
-
+ 
 -COMPILE_FLAGS["OS_INCLUDES"] = []
 +# FIXME: No idea why it doesn't pick libdrm from /third_party/drm
 +COMPILE_FLAGS["OS_INCLUDES"] = [ "-I/usr/include/libdrm" ]
  AllowCompilerWarnings()
-
+ 
  DEFINES["ABSL_ALLOCATOR_NOTHROW"] = "1"
-@@ -27,6 +28,8 @@ LOCAL_INCLUDES += [
+ DEFINES["RTC_DAV1D_IN_INTERNAL_DECODER_FACTORY"] = True
+ DEFINES["RTC_ENABLE_VP9"] = True
+ DEFINES["WEBRTC_ENABLE_PROTOBUF"] = "0"
+ DEFINES["WEBRTC_LIBRARY_IMPL"] = True
+ DEFINES["WEBRTC_MOZILLA_BUILD"] = True
+ DEFINES["WEBRTC_NON_STATIC_TRACE_EVENT_HANDLERS"] = "0"
+ 
+ FINAL_LIBRARY = "webrtc"
+ 
+ 
+ LOCAL_INCLUDES += [
+     "!/ipc/ipdl/_ipdlheaders",
      "/ipc/chromium/src",
      "/media/libyuv/",
      "/media/libyuv/libyuv/include/",
@@ -5479,7 +5534,7 @@ index 809899a92847..8869fae89703 100644
      "/third_party/pipewire/",
 @@ -240,7 +243,15 @@ if CONFIG["CPU_ARCH"] == "arm":
      DEFINES["_GNU_SOURCE"] = True
-
+ 
      UNIFIED_SOURCES += [
 -        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/moz_base_capturer_pipewire.cc"
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/base_capturer_pipewire.cc",
@@ -5492,11 +5547,11 @@ index 809899a92847..8869fae89703 100644
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc",
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.cc"
      ]
-
+ 
  if CONFIG["CPU_ARCH"] == "ppc64":
-@@ -295,7 +306,15 @@ if CONFIG["CPU_ARCH"] == "aarch64" and CONFIG["OS_TARGET"] == "Linux":
+@@ -295,27 +306,51 @@ if CONFIG["CPU_ARCH"] == "aarch64" and CONFIG["OS_TARGET"] == "Linux":
      DEFINES["_GNU_SOURCE"] = True
-
+ 
      UNIFIED_SOURCES += [
 -        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/moz_base_capturer_pipewire.cc"
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/base_capturer_pipewire.cc",
@@ -5509,11 +5564,13 @@ index 809899a92847..8869fae89703 100644
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc",
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.cc"
      ]
-
+ 
  if CONFIG["CPU_ARCH"] == "x86" and CONFIG["OS_TARGET"] == "Linux":
-@@ -305,7 +324,15 @@ if CONFIG["CPU_ARCH"] == "x86" and CONFIG["OS_TARGET"] == "Linux":
+ 
+     DEFINES["WEBRTC_ENABLE_AVX2"] = True
+     DEFINES["WEBRTC_USE_PIPEWIRE"] = True
      DEFINES["_GNU_SOURCE"] = True
-
+ 
      UNIFIED_SOURCES += [
 -        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/moz_base_capturer_pipewire.cc"
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/base_capturer_pipewire.cc",
@@ -5526,11 +5583,13 @@ index 809899a92847..8869fae89703 100644
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc",
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.cc"
      ]
-
+ 
  if CONFIG["CPU_ARCH"] == "x86_64" and CONFIG["OS_TARGET"] == "Linux":
-@@ -315,7 +342,15 @@ if CONFIG["CPU_ARCH"] == "x86_64" and CONFIG["OS_TARGET"] == "Linux":
+ 
+     DEFINES["WEBRTC_ENABLE_AVX2"] = True
+     DEFINES["WEBRTC_USE_PIPEWIRE"] = True
      DEFINES["_GNU_SOURCE"] = True
-
+ 
      UNIFIED_SOURCES += [
 -        "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/moz_base_capturer_pipewire.cc"
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/base_capturer_pipewire.cc",
@@ -5543,13 +5602,13 @@ index 809899a92847..8869fae89703 100644
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/shared_screencast_stream.cc",
 +      "/third_party/libwebrtc/modules/desktop_capture/linux/wayland/xdg_desktop_portal_utils.cc"
      ]
-
+ 
  if CONFIG["CPU_ARCH"] == "aarch64" and CONFIG["MOZ_X11"] == "1" and CONFIG["OS_TARGET"] == "Linux":
 diff --git a/third_party/libwebrtc/modules/desktop_capture/desktop_capture_options.cc b/third_party/libwebrtc/modules/desktop_capture/desktop_capture_options.cc
 index 8bdc83b76218..ab7932195c85 100644
 --- a/third_party/libwebrtc/modules/desktop_capture/desktop_capture_options.cc
 +++ b/third_party/libwebrtc/modules/desktop_capture/desktop_capture_options.cc
-@@ -14,7 +14,7 @@
+@@ -14,33 +14,33 @@
  #elif defined(WEBRTC_WIN)
  #include "modules/desktop_capture/win/full_screen_win_application_handler.h"
  #endif
@@ -5557,8 +5616,26 @@ index 8bdc83b76218..ab7932195c85 100644
 +#if defined(WEBRTC_USE_PIPEWIRE)
  #include "modules/desktop_capture/linux/wayland/shared_screencast_stream.h"
  #endif
-
-@@ -40,7 +40,7 @@ DesktopCaptureOptions DesktopCaptureOptions::CreateDefault() {
+ 
+ #include "rtc_base/ref_counted_object.h"
+ 
+ namespace webrtc {
+ 
+ DesktopCaptureOptions::DesktopCaptureOptions() {}
+ DesktopCaptureOptions::DesktopCaptureOptions(
+     const DesktopCaptureOptions& options) = default;
+ DesktopCaptureOptions::DesktopCaptureOptions(DesktopCaptureOptions&& options) =
+     default;
+ DesktopCaptureOptions::~DesktopCaptureOptions() {}
+ 
+ DesktopCaptureOptions& DesktopCaptureOptions::operator=(
+     const DesktopCaptureOptions& options) = default;
+ DesktopCaptureOptions& DesktopCaptureOptions::operator=(
+     DesktopCaptureOptions&& options) = default;
+ 
+ // static
+ DesktopCaptureOptions DesktopCaptureOptions::CreateDefault() {
+   DesktopCaptureOptions result;
  #if defined(WEBRTC_USE_X11)
    result.set_x_display(SharedXDisplay::CreateDefault());
  #endif
@@ -5574,27 +5651,27 @@ index 1605d30f82d1..eb5b8a2a8777 100644
 @@ -17,7 +17,7 @@
  #include "modules/desktop_capture/linux/x11/shared_x_display.h"
  #endif
-
+ 
 -#if defined(WEBRTC_USE_PIPEWIRE) && !defined(WEBRTC_MOZILLA_BUILD)
 +#if defined(WEBRTC_USE_PIPEWIRE)
  #include "modules/desktop_capture/linux/wayland/shared_screencast_stream.h"
  #endif
-
-@@ -181,7 +181,6 @@ class RTC_EXPORT DesktopCaptureOptions {
+ 
+@@ -181,22 +181,20 @@ class RTC_EXPORT DesktopCaptureOptions {
    bool allow_pipewire() const { return allow_pipewire_; }
    void set_allow_pipewire(bool allow) { allow_pipewire_ = allow; }
-
+ 
 -#if !defined(WEBRTC_MOZILLA_BUILD)
    const rtc::scoped_refptr<SharedScreenCastStream>& screencast_stream() const {
      return screencast_stream_;
    }
-@@ -189,14 +188,13 @@ class RTC_EXPORT DesktopCaptureOptions {
+   void set_screencast_stream(
        rtc::scoped_refptr<SharedScreenCastStream> stream) {
      screencast_stream_ = stream;
    }
 -#endif
  #endif
-
+ 
   private:
  #if defined(WEBRTC_USE_X11)
    rtc::scoped_refptr<SharedXDisplay> x_display_;
@@ -5616,14 +5693,14 @@ index 75659a9eb9e2..32578411059b 100644
 +  sources->push_back({PIPEWIRE_ID, 0, PIPEWIRE_NAME});
    return true;
  }
-
+ 
 diff --git a/third_party/libwebrtc/modules/desktop_capture/screen_capturer_linux.cc b/third_party/libwebrtc/modules/desktop_capture/screen_capturer_linux.cc
 index d9f27951302d..18840cc6d7ef 100644
 --- a/third_party/libwebrtc/modules/desktop_capture/screen_capturer_linux.cc
 +++ b/third_party/libwebrtc/modules/desktop_capture/screen_capturer_linux.cc
-@@ -14,11 +14,7 @@
+@@ -14,29 +14,21 @@
  #include "modules/desktop_capture/desktop_capturer.h"
-
+ 
  #if defined(WEBRTC_USE_PIPEWIRE)
 -#if defined(WEBRTC_MOZILLA_BUILD)
 -#include "modules/desktop_capture/linux/wayland/moz_base_capturer_pipewire.h"
@@ -5631,9 +5708,15 @@ index d9f27951302d..18840cc6d7ef 100644
  #include "modules/desktop_capture/linux/wayland/base_capturer_pipewire.h"
 -#endif
  #endif  // defined(WEBRTC_USE_PIPEWIRE)
-
+ 
  #if defined(WEBRTC_USE_X11)
-@@ -32,11 +28,7 @@ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateRawScreenCapturer(
+ #include "modules/desktop_capture/linux/x11/screen_capturer_x11.h"
+ #endif  // defined(WEBRTC_USE_X11)
+ 
+ namespace webrtc {
+ 
+ // static
+ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateRawScreenCapturer(
      const DesktopCaptureOptions& options) {
  #if defined(WEBRTC_USE_PIPEWIRE)
    if (options.allow_pipewire() && DesktopCapturer::IsRunningUnderWayland()) {
@@ -5644,14 +5727,14 @@ index d9f27951302d..18840cc6d7ef 100644
 -#endif
    }
  #endif  // defined(WEBRTC_USE_PIPEWIRE)
-
+ 
 diff --git a/third_party/libwebrtc/modules/desktop_capture/window_capturer_linux.cc b/third_party/libwebrtc/modules/desktop_capture/window_capturer_linux.cc
 index b2b1e376ada5..638c42ae3963 100644
 --- a/third_party/libwebrtc/modules/desktop_capture/window_capturer_linux.cc
 +++ b/third_party/libwebrtc/modules/desktop_capture/window_capturer_linux.cc
-@@ -14,11 +14,7 @@
+@@ -14,29 +14,21 @@
  #include "modules/desktop_capture/desktop_capturer.h"
-
+ 
  #if defined(WEBRTC_USE_PIPEWIRE)
 -#if defined(WEBRTC_MOZILLA_BUILD)
 -#include "modules/desktop_capture/linux/wayland/moz_base_capturer_pipewire.h"
@@ -5659,9 +5742,15 @@ index b2b1e376ada5..638c42ae3963 100644
  #include "modules/desktop_capture/linux/wayland/base_capturer_pipewire.h"
 -#endif
  #endif  // defined(WEBRTC_USE_PIPEWIRE)
-
+ 
  #if defined(WEBRTC_USE_X11)
-@@ -32,11 +28,7 @@ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateRawWindowCapturer(
+ #include "modules/desktop_capture/linux/x11/window_capturer_x11.h"
+ #endif  // defined(WEBRTC_USE_X11)
+ 
+ namespace webrtc {
+ 
+ // static
+ std::unique_ptr<DesktopCapturer> DesktopCapturer::CreateRawWindowCapturer(
      const DesktopCaptureOptions& options) {
  #if defined(WEBRTC_USE_PIPEWIRE)
    if (options.allow_pipewire() && DesktopCapturer::IsRunningUnderWayland()) {
@@ -5672,7 +5761,7 @@ index b2b1e376ada5..638c42ae3963 100644
 -#endif
    }
  #endif  // defined(WEBRTC_USE_PIPEWIRE)
-
+ 
 diff --git a/third_party/moz.build b/third_party/moz.build
 index 19ee0224b041..fab8f23c624f 100644
 --- a/third_party/moz.build
@@ -5680,7 +5769,7 @@ index 19ee0224b041..fab8f23c624f 100644
 @@ -61,6 +61,12 @@ with Files("libwebrtc/**"):
  with Files("pipewire/**"):
      BUG_COMPONENT = ("Core", "WebRTC")
-
+ 
 +with Files("drm/**"):
 +    BUG_COMPONENT = ("Core", "WebRTC")
 +
@@ -5689,12 +5778,12 @@ index 19ee0224b041..fab8f23c624f 100644
 +
  with Files('rlbox_wasm2c_sandbox/**'):
      BUG_COMPONENT = ('Firefox Build System', 'General')
-
+ 
 diff --git a/third_party/pipewire/libpipewire/mozpipewire.cpp b/third_party/pipewire/libpipewire/mozpipewire.cpp
-index 1ecfc3196af1..fbeeb8e5a760 100644
+index 1ecfc3196af1..380c5b2c8582 100644
 --- a/third_party/pipewire/libpipewire/mozpipewire.cpp
 +++ b/third_party/pipewire/libpipewire/mozpipewire.cpp
-@@ -69,11 +69,13 @@ static int (*pw_stream_connect_fn)(struct pw_stream *stream,
+@@ -69,86 +69,99 @@ static int (*pw_stream_connect_fn)(struct pw_stream *stream,
                                  enum pw_stream_flags flags,
                                  const struct spa_pod **params,
                                  uint32_t n_params);
@@ -5708,7 +5797,13 @@ index 1ecfc3196af1..fbeeb8e5a760 100644
  static int (*pw_stream_queue_buffer_fn)(struct pw_stream *stream,
                                       struct pw_buffer *buffer);
  static int (*pw_stream_update_params_fn)(struct pw_stream *stream,
-@@ -87,7 +89,10 @@ static int (*pw_thread_loop_start_fn)(struct pw_thread_loop *loop);
+                                       const struct spa_pod **params,
+                                       uint32_t n_params);
+ static void (*pw_thread_loop_destroy_fn)(struct pw_thread_loop *loop);
+ static struct pw_loop* (*pw_thread_loop_get_loop_fn)(struct pw_thread_loop *loop);
+ static struct pw_thread_loop* (*pw_thread_loop_new_fn)(const char *name,
+                                                 const struct spa_dict *props);
+ static int (*pw_thread_loop_start_fn)(struct pw_thread_loop *loop);
  static void (*pw_thread_loop_stop_fn)(struct pw_thread_loop *loop);
  static void (*pw_thread_loop_lock_fn)(struct pw_thread_loop *loop);
  static void (*pw_thread_loop_unlock_fn)(struct pw_thread_loop *loop);
@@ -5716,10 +5811,14 @@ index 1ecfc3196af1..fbeeb8e5a760 100644
 +static void (*pw_thread_loop_signal_fn)(struct pw_thread_loop *loop, bool wait_for_accept);
  static struct pw_properties* (*pw_properties_new_string_fn)(const char *str);
 +static const char* (*pw_get_library_version_fn)();
-
+ 
  bool IsPwLibraryLoaded() {
    static bool isLoaded =
-@@ -99,6 +104,7 @@ bool IsPwLibraryLoaded() {
+          (IS_FUNC_LOADED(pw_context_connect_fn) &&
+           IS_FUNC_LOADED(pw_context_connect_fd_fn) &&
+           IS_FUNC_LOADED(pw_context_destroy_fn) &&
+           IS_FUNC_LOADED(pw_context_new_fn) &&
+           IS_FUNC_LOADED(pw_core_disconnect_fn) &&
            IS_FUNC_LOADED(pw_init_fn) &&
            IS_FUNC_LOADED(pw_stream_add_listener_fn) &&
            IS_FUNC_LOADED(pw_stream_connect_fn) &&
@@ -5727,7 +5826,12 @@ index 1ecfc3196af1..fbeeb8e5a760 100644
            IS_FUNC_LOADED(pw_stream_dequeue_buffer_fn) &&
            IS_FUNC_LOADED(pw_stream_destroy_fn) &&
            IS_FUNC_LOADED(pw_stream_new_fn) &&
-@@ -111,7 +117,10 @@ bool IsPwLibraryLoaded() {
+           IS_FUNC_LOADED(pw_stream_queue_buffer_fn) &&
+           IS_FUNC_LOADED(pw_stream_update_params_fn) &&
+           IS_FUNC_LOADED(pw_thread_loop_destroy_fn) &&
+           IS_FUNC_LOADED(pw_thread_loop_get_loop_fn) &&
+           IS_FUNC_LOADED(pw_thread_loop_new_fn) &&
+           IS_FUNC_LOADED(pw_thread_loop_start_fn) &&
            IS_FUNC_LOADED(pw_thread_loop_stop_fn) &&
            IS_FUNC_LOADED(pw_thread_loop_lock_fn) &&
            IS_FUNC_LOADED(pw_thread_loop_unlock_fn) &&
@@ -5736,10 +5840,27 @@ index 1ecfc3196af1..fbeeb8e5a760 100644
 +          IS_FUNC_LOADED(pw_thread_loop_wait_fn) &&
 +          IS_FUNC_LOADED(pw_properties_new_string_fn) &&
 +          IS_FUNC_LOADED(pw_get_library_version_fn));
-
+ 
    return isLoaded;
  }
-@@ -136,6 +145,7 @@ bool LoadPWLibrary() {
+ 
+ bool LoadPWLibrary() {
+   static PRLibrary* pwLib = nullptr;
+   static bool pwInitialized = false;
+ 
+   //TODO Thread safe
+   if (!pwInitialized) {
+     pwInitialized = true;
+     pwLib = PR_LoadLibrary("libpipewire-0.3.so.0");
+     if (!pwLib) {
+       return false;
+     }
+ 
+     GET_FUNC(pw_context_connect, pwLib);
+     GET_FUNC(pw_context_connect_fd, pwLib);
+     GET_FUNC(pw_context_destroy, pwLib);
+     GET_FUNC(pw_context_new, pwLib);
+     GET_FUNC(pw_core_disconnect, pwLib);
      GET_FUNC(pw_init, pwLib);
      GET_FUNC(pw_stream_add_listener, pwLib);
      GET_FUNC(pw_stream_connect, pwLib);
@@ -5747,7 +5868,12 @@ index 1ecfc3196af1..fbeeb8e5a760 100644
      GET_FUNC(pw_stream_dequeue_buffer, pwLib);
      GET_FUNC(pw_stream_destroy, pwLib);
      GET_FUNC(pw_stream_new, pwLib);
-@@ -148,7 +158,10 @@ bool LoadPWLibrary() {
+     GET_FUNC(pw_stream_queue_buffer, pwLib);
+     GET_FUNC(pw_stream_update_params, pwLib);
+     GET_FUNC(pw_thread_loop_destroy, pwLib);
+     GET_FUNC(pw_thread_loop_get_loop, pwLib);
+     GET_FUNC(pw_thread_loop_new, pwLib);
+     GET_FUNC(pw_thread_loop_start, pwLib);
      GET_FUNC(pw_thread_loop_stop, pwLib);
      GET_FUNC(pw_thread_loop_lock, pwLib);
      GET_FUNC(pw_thread_loop_unlock, pwLib);
@@ -5756,12 +5882,12 @@ index 1ecfc3196af1..fbeeb8e5a760 100644
      GET_FUNC(pw_properties_new_string, pwLib);
 +    GET_FUNC(pw_get_library_version, pwLib);
    }
-
+ 
    return IsPwLibraryLoaded();
 @@ -242,6 +255,15 @@ pw_stream_connect(struct pw_stream *stream,
                                params, n_params);
  }
-
+ 
 +int
 +pw_stream_disconnect(struct pw_stream *stream)
 +{
@@ -5774,10 +5900,10 @@ index 1ecfc3196af1..fbeeb8e5a760 100644
  struct pw_buffer *
  pw_stream_dequeue_buffer(struct pw_stream *stream)
  {
-@@ -356,6 +378,23 @@ pw_thread_loop_unlock(struct pw_thread_loop *loop)
+@@ -356,13 +378,38 @@ pw_thread_loop_unlock(struct pw_thread_loop *loop)
    return pw_thread_loop_unlock_fn(loop);
  }
-
+ 
 +void
 +pw_thread_loop_signal(struct pw_thread_loop *loop, bool wait_for_accept)
 +{
@@ -5795,13 +5921,16 @@ index 1ecfc3196af1..fbeeb8e5a760 100644
 +  }
 +  return pw_thread_loop_wait_fn(loop);
 +}
-
+ 
  struct pw_properties *
  pw_properties_new_string(const char *str)
-@@ -366,3 +405,12 @@ pw_properties_new_string(const char *str)
+ {
+   if (!LoadPWLibrary()) {
+     return nullptr;
+   }
    return pw_properties_new_string_fn(str);
  }
-
+ 
 +const char*
 +pw_get_library_version()
 +{
@@ -5810,4 +5939,3 @@ index 1ecfc3196af1..fbeeb8e5a760 100644
 +  }
 +  return pw_get_library_version_fn();
 +}
-+
