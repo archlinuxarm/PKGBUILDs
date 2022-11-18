@@ -1,0 +1,112 @@
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - move socat to makedepends
+#  - set -Dtests=false
+
+pkgbase=flatpak
+pkgname=(flatpak flatpak-docs)
+pkgver=1.15.1
+pkgrel=1
+epoch=1
+pkgdesc="Linux application sandboxing and distribution framework (formerly xdg-app)"
+url="https://flatpak.org"
+arch=(x86_64)
+license=(LGPL)
+depends=(dbus glib2 curl polkit libxau ostree json-glib libseccomp libarchive
+         python bubblewrap appstream xdg-dbus-proxy systemd fuse3 libmalcontent)
+makedepends=(gobject-introspection gtk-doc git docbook-xsl xmlto
+             python-pyparsing meson socat)
+checkdepends=(valgrind socat)
+options=(debug)
+_commit=47ea3934c0e055605b8dff93edad2136141e48ec  # tags/1.15.1^0
+source=(
+  "git+https://github.com/flatpak/flatpak#commit=$_commit"
+  git+https://gitlab.gnome.org/GNOME/libglnx.git
+  git+https://github.com/projectatomic/bubblewrap
+  git+https://github.com/flatpak/xdg-dbus-proxy
+  git+https://gitlab.gnome.org/alexl/variant-schema-compiler.git
+  https://dl.flathub.org/repo/flathub.flatpakrepo
+  fusermount3.diff
+  flatpak-bindir.sh
+)
+sha256sums=('SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            '3371dd250e61d9e1633630073fefda153cd4426f72f4afa0c3373ae2e8fea03a'
+            '023c2bb5f355095e87357e625ef85119b5e15b3d0a4ad07ce858ed1a8f99a57a'
+            '1824cb4eb1cc88702cb2b9f1c55b6dfdf20fca5eab83f6e8e532099281328745')
+
+pkgver() {
+  cd flatpak
+  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
+}
+
+prepare() {
+  cd flatpak
+
+  # Support fuse3
+  # https://bugs.archlinux.org/task/75623
+  git apply -3 ../fusermount3.diff
+
+  git submodule init
+  git submodule set-url libglnx "$srcdir/libglnx"
+  git submodule set-url bubblewrap "$srcdir/bubblewrap"
+  git submodule set-url dbus-proxy "$srcdir/xdg-dbus-proxy"
+  git submodule set-url variant-schema-compiler "$srcdir/variant-schema-compiler"
+  git -c protocol.file.allow=always submodule update
+}
+
+build() {
+  local meson_options=(
+    -D dbus_config_dir=/usr/share/dbus-1/system.d
+    -D selinux_module=disabled
+    -D system_bubblewrap=bwrap
+    -D system_dbus_proxy=xdg-dbus-proxy
+    -D tests=false
+  )
+
+  arch-meson flatpak build "${meson_options[@]}"
+  meson compile -C build
+}
+
+check() {
+  meson test -C build --print-errorlogs
+}
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_flatpak() {
+  depends+=(xdg-desktop-portal libostree-1.so)
+  provides=(libflatpak.so)
+
+  meson install -C build --destdir "$pkgdir"
+
+  install -Dt "$pkgdir/etc/profile.d" -m644 flatpak-bindir.sh
+  install -Dt "$pkgdir/etc/flatpak/remotes.d" flathub.flatpakrepo
+
+  # Fixup mode to match polkit
+  install -d -o root -g 102 -m 750 "$pkgdir/usr/share/polkit-1/rules.d"
+
+  _pick docs "$pkgdir"/usr/share/{doc,gtk-doc}
+}
+
+package_flatpak-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+  mv docs/* "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:
