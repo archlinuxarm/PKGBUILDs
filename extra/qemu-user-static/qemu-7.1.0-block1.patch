@@ -1,0 +1,76 @@
+diff --git a/block/file-posix.c b/block/file-posix.c
+index 256de1f456a77bb617aa9366f8028081313a5994..989dfc4586c2dbdf5e7b6d4a977b0e2e819195a4 100644
+--- a/block/file-posix.c
++++ b/block/file-posix.c
+@@ -2061,6 +2061,27 @@ static int coroutine_fn raw_thread_pool_submit(BlockDriverState *bs,
+     return thread_pool_submit_co(pool, func, arg);
+ }
+ 
++/*
++ * Check if all memory in this vector is sector aligned.
++ */
++static bool bdrv_qiov_is_aligned(BlockDriverState *bs, QEMUIOVector *qiov)
++{
++    int i;
++    size_t alignment = bdrv_min_mem_align(bs);
++    IO_CODE();
++
++    for (i = 0; i < qiov->niov; i++) {
++        if ((uintptr_t) qiov->iov[i].iov_base % alignment) {
++            return false;
++        }
++        if (qiov->iov[i].iov_len % alignment) {
++            return false;
++        }
++    }
++
++    return true;
++}
++
+ static int coroutine_fn raw_co_prw(BlockDriverState *bs, uint64_t offset,
+                                    uint64_t bytes, QEMUIOVector *qiov, int type)
+ {
+diff --git a/block/io.c b/block/io.c
+index 51d8f943a4b79a2d13c9f139ff666d542b6e7e62..c3200bcdffe2eefe7266f863bd7ac31246f2af5a 100644
+--- a/block/io.c
++++ b/block/io.c
+@@ -3227,27 +3227,6 @@ void *qemu_try_blockalign0(BlockDriverState *bs, size_t size)
+     return mem;
+ }
+ 
+-/*
+- * Check if all memory in this vector is sector aligned.
+- */
+-bool bdrv_qiov_is_aligned(BlockDriverState *bs, QEMUIOVector *qiov)
+-{
+-    int i;
+-    size_t alignment = bdrv_min_mem_align(bs);
+-    IO_CODE();
+-
+-    for (i = 0; i < qiov->niov; i++) {
+-        if ((uintptr_t) qiov->iov[i].iov_base % alignment) {
+-            return false;
+-        }
+-        if (qiov->iov[i].iov_len % alignment) {
+-            return false;
+-        }
+-    }
+-
+-    return true;
+-}
+-
+ void bdrv_io_plug(BlockDriverState *bs)
+ {
+     BdrvChild *child;
+diff --git a/include/block/block-io.h b/include/block/block-io.h
+index fd25ffa9be83c28ed98e20caa470de2c27d28f1a..492f95fc05744dabb170aa2fe76f1d656a8cc124 100644
+--- a/include/block/block-io.h
++++ b/include/block/block-io.h
+@@ -150,7 +150,6 @@ void *qemu_blockalign(BlockDriverState *bs, size_t size);
+ void *qemu_blockalign0(BlockDriverState *bs, size_t size);
+ void *qemu_try_blockalign(BlockDriverState *bs, size_t size);
+ void *qemu_try_blockalign0(BlockDriverState *bs, size_t size);
+-bool bdrv_qiov_is_aligned(BlockDriverState *bs, QEMUIOVector *qiov);
+ 
+ void bdrv_enable_copy_on_read(BlockDriverState *bs);
+ void bdrv_disable_copy_on_read(BlockDriverState *bs);

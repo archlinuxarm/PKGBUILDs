@@ -1,0 +1,138 @@
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Tobias Powalowski <tpowa@archlinux.org>
+# Contributor: Sébastien "Seblu" Luttringer <seblu@seblu.net>
+# Contributor: Qu Wenruo <wqu@suse.com>
+
+pkgbase=qemu
+pkgname=(
+	qemu-user-static{,-binfmt}
+)
+pkgver=7.1.0
+pkgrel=99
+pkgdesc="QEMU static user mode emulation"
+arch=(x86_64 aarch64)
+url="https://www.qemu.org/"
+license=(GPL2 LGPL2.1)
+makedepends=(
+	meson
+)
+source=(
+  https://download.qemu.org/qemu-$pkgver.tar.xz{,.sig}
+  $pkgbase-7.1.0-io_uring.patch::https://patchwork.kernel.org/project/qemu-devel/patch/20220924144815.5591-1-faithilikerun@gmail.com/raw/
+  $pkgbase-7.1.0-block1.patch::https://gitlab.com/qemu-project/qemu/-/commit/a7c5f67a78569f8c275ea4ea9962e9c79b9d03cb.diff
+  $pkgbase-7.1.0-block2.patch::https://gitlab.com/qemu-project/qemu/-/commit/25474d90aa50bd32e0de395a33d8de42dd6f2aef.diff
+)
+sha512sums=('c60c5ff8ec99b7552e485768908920658fdd8035ff7a6fa370fb6881957dc8b7e5f18ff1a8f49bd6aa22909ede2a7c084986d8244f12074ccd33ebe40a0c411f'
+	    'SKIP'
+            '306193b1ed6396acaf5d3d3957dd09954fadc7546c757cca113b35e6a0ad06e41efb94adcd9810d814858a7e2d5d3e535398128820e770b0bbdef2e5ab125cb0'
+            '2d1c76e2c1433867a0156bfb067a0df2229083b61215a87a317685c47f7921b0ce815901dccb005508cf0793b8c9dc37f76ef27b302fe78eb740df073710e672'
+            '4ad2aff54b9e7a85fc62c7dceceda5f946e7578dd1b9902a74383ffadce91d8ae7a4219e9ae3184fcba51fccea2f69fc040277c30b7566e79eb29e1604acd594')
+b2sums=('e05f91ce4993c7591a2df08b5fb017f8b8ec2141ab7bfd55d14730ea6b793ac1091de539992058392a5522d4e58beee92a87752707be58e3619b8213ef9f35bf'
+	'SKIP'
+        'd8b392ef1cd629796a9221f13df43a3ea3a4c2d50a574888a65fa5f9ecffcc75134b0a33ec798be65706831043926ceb2d4b1a8751fedcd181271a986318e6ed'
+        '06d1b099ef1acf393f2866925bbb43a6ad93c28b976deb69c4859aca8f3bd4180e3d49ff43a3d75193af4dd890ee38243a661399517dd4bb3fb74493f7ecfe7f'
+        '5171ae60bbaeb7f277459c27d18ece0d7ea890a71c2cdd110ea84e15b77e3dd491b75965583a1daa859459afafa5310544f58846b38997f91e307ce86a70ab45')
+validpgpkeys=('CEACC9E15534EBABB82D3FA03353C9CEF108B584') # Michael Roth <flukshun@gmail.com>
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+prepare() {
+  # fix issues with io_uring: https://gitlab.com/qemu-project/qemu/-/issues/1193
+  patch -Np1 -d $pkgbase-$pkgver -i ../$pkgbase-7.1.0-io_uring.patch
+
+  # fix issue with block alignment: https://bugs.archlinux.org/task/76220
+  patch -Np1 -d $pkgbase-$pkgver -i ../$pkgbase-7.1.0-block1.patch
+  patch -Np1 -d $pkgbase-$pkgver -i ../$pkgbase-7.1.0-block2.patch
+
+  # extract licenses for TCG
+  sed -n '1,23p' $pkgbase-$pkgver/tcg/tcg-internal.h > tcg.LICENSE.MIT
+  sed -n '1,23p' $pkgbase-$pkgver/tcg/arm/tcg-target.c.inc > tcg-arm.LICENSE.MIT
+  sed -n '1,23p' $pkgbase-$pkgver/tcg/tci/tcg-target.h > tci.LICENSE.MIT
+
+  # create build dir
+  mkdir -vp build-static
+}
+
+build() {
+  cd build-static
+  ../$pkgbase-$pkgver/configure \
+      --prefix=/usr \
+      --sysconfdir=/etc \
+      --libexecdir=/usr/lib/qemu \
+      --enable-attr \
+      --enable-linux-user \
+      --enable-tcg \
+      --disable-bpf \
+      --disable-bsd-user \
+      --disable-capstone \
+      --disable-docs \
+      --disable-fdt \
+      --disable-gcrypt \
+      --disable-glusterfs \
+      --disable-gnutls \
+      --disable-gtk \
+      --disable-install-blobs \
+      --disable-kvm \
+      --disable-libiscsi \
+      --disable-libnfs \
+      --disable-libssh \
+      --disable-linux-io-uring \
+      --disable-nettle \
+      --disable-opengl \
+      --disable-qom-cast-debug \
+      --disable-sdl \
+      --disable-system \
+      --disable-tools \
+      --disable-tpm \
+      --disable-vde \
+      --disable-vhost-crypto \
+      --disable-vhost-kernel \
+      --disable-vhost-net \
+      --disable-vhost-user \
+      --disable-vnc \
+      --disable-werror \
+      --disable-xen \
+      --disable-zstd \
+      --static
+  ninja
+
+}
+
+package_qemu-user-static() {
+  pkgdesc="QEMU static user mode emulation"
+  depends=(glibc)
+  optdepends=('qemu-user-static-binfmt: for binary format rules')
+
+  meson install -C build-static --destdir "$pkgdir"
+
+  # rename static binaries to prevent name conflicts
+  for _src in "$pkgdir/usr/bin/qemu-"*; do
+    mv -v "$_src" "$pkgdir/usr/bin/$(basename "$_src")-static"
+  done
+  rm -rf $pkgdir/usr/lib $pkgdir/usr/share
+}
+
+package_qemu-user-static-binfmt() {
+  pkgdesc="Binary format rules for QEMU static user mode emulation"
+  depends=(qemu-user-static=$pkgver-$pkgrel)
+  provides=(qemu-user-binfmt-provider)
+  conflicts=(qemu-user-binfmt-provider)
+
+  meson install -C build-static --destdir "$pkgdir"
+  install -vdm 755 "$pkgdir/usr/lib/binfmt.d/"
+  $pkgbase-$pkgver/scripts/qemu-binfmt-conf.sh --systemd ALL --exportdir "$pkgdir/usr/lib/binfmt.d/" --qemu-path "/usr/bin"
+
+  # modify and rename binfmt.d configs to prevent name conflicts
+  for _conf in "$pkgdir/usr/lib/binfmt.d/"*; do
+    cat "$_conf" | tr -d '\n' | sed "s/:$/-static:F/" > "${_conf//.conf/-static.conf}"
+  done
+  rm -rf $pkgdir/usr/bin $pkgdir/usr/share
+}
