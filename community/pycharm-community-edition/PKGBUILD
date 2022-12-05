@@ -1,0 +1,97 @@
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Orhun Parmaksız <orhun@archlinux.org>
+# Maintainer: Leonidas Spyropoulos <artafinde@archlinux.org>
+# Contributor: Maxime Gauduin <alucryd@archlinux.org>
+# Contributor: David Keogh <davekeogh@archlinux.us>
+
+# ALARM: David Marrero <bdface[at]proton[dot]me>
+pkgname=pycharm-community-edition
+pkgver=2022.3
+_build=223.7571.203
+_jrever=17
+_jdkver=17
+pkgrel=1
+pkgdesc='Python IDE for Professional Developers'
+arch=(aarch64)
+url=https://www.jetbrains.com/pycharm/
+license=(APACHE)
+depends=(
+  giflib
+  glib2
+  "java-runtime=${_jrever}"
+  python
+  sh
+  ttf-font
+  fontconfig
+  libdbusmenu-glib
+)
+optdepends=(
+  'ipython: IPython integration for Python 3'
+)
+makedepends=(
+  git
+  "java-environment-openjdk=${_jdkver}"
+  python-setuptools
+)
+source=(
+  "git+https://github.com/JetBrains/intellij-community.git#tag=pycharm/${_build}"
+  idea-android::"git://git.jetbrains.org/idea/android.git#tag=pycharm/${_build}"
+  pycharm.desktop
+  pycharm.sh
+)
+sha256sums=('SKIP'
+            'SKIP'
+            'f727119ec7c8b96820e80712b1ee342de6a94ff72402e8f2d390cbff702f9b21'
+            'f4c4f1dfac7fa89ac1ea407904b19d0513d481b2f6f562672d02bfa4ce32c1ff')
+
+prepare() {
+  cd intellij-community
+
+  echo ${_build} > build.txt
+  mv "${srcdir}"/idea-android android
+
+  sed -e 's/var targetOs: String/var targetOs: String = OS_LINUX/' \
+      -e 's/System.getProperty(TARGET_OS_PROPERTY, OS_ALL)/OS_LINUX/' \
+      -i "platform/build-scripts/src/org/jetbrains/intellij/build/BuildOptions.kt"
+  sed 's|../build/plugins-autoupload.txt|plugins-autoupload.txt|' \
+      -i "platform/build-scripts/src/org/jetbrains/intellij/build/impl/DistributionJARsBuilder.kt"
+  touch plugins-autoupload.txt
+  # Fix pycharm python/installer.cmd & python/plugin.cmd
+  sed 's|intellij.pycharm.community.build|"$(cd "$(dirname "$0")"; pwd)/../" intellij.pycharm.community.build|' -i python/installers.cmd
+  #sed 's|intellij.pycharm.community.build|"$(cd "$(dirname "$0")"; pwd)/../" intellij.pycharm.community.build|' -i python/plugin.cmd
+}
+
+build() {
+  cd intellij-community
+
+  export JAVA_HOME="/usr/lib/jvm/java-${_jdkver}-openjdk"
+  export PATH="/usr/lib/jvm/java-${_jdkver}-openjdk  ln -s /usr/share/idea/bin/pycharm.svg "${pkgdir}"/usr/share/icons/hicolor/scalable/apps/
+/bin:$PATH"
+  export MAVEN_REPOSITORY=/build/.m2/repository
+
+  ./python/installers.cmd -Dintellij.build.use.compiled.classes=false -Dintellij.build.target.os=linux
+  #./python/plugin.cmd -Dintellij.build.target.os=linux
+
+  tar -xf out/pycharm-ce/artifacts/pycharmPC-${_build}-aarch64.tar.gz -C "${srcdir}"
+
+  cd ../pycharm-community-${pkgver}
+
+  python3 plugins/python-ce/helpers/pydev/setup_cython.py build_ext --build-temp build --build-lib .
+}
+
+package() {
+  cd pycharm-community-${pkgver}
+
+  # workaround FS#40934
+  sed -i 's/lcd/on/' bin/*.vmoptions
+
+  install -dm 755 "${pkgdir}"/usr/share/{licenses,pixmaps,pycharm,icons/hicolor/scalable/apps}
+  cp -dr --no-preserve='ownership' bin lib plugins "${pkgdir}"/usr/share/pycharm/
+  cp -dr --no-preserve='ownership' license "${pkgdir}"/usr/share/licenses/pycharm/
+  ln -s /usr/share/pycharm/bin/pycharm.png "${pkgdir}"/usr/share/pixmaps/
+  ln -s /usr/share/pycharm/bin/pycharm.svg "${pkgdir}"/usr/share/icons/hicolor/scalable/apps/
+  install -Dm 644 ../pycharm.desktop -t "${pkgdir}"/usr/share/applications/
+  install -Dm 755 ../pycharm.sh "${pkgdir}"/usr/bin/pycharm
+}
+
+# vim: ts=2 sw=2 et:
