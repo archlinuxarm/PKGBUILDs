@@ -1,6 +1,6 @@
 --- a/configure.ac
 +++ b/configure.ac
-@@ -3112,6 +3112,21 @@ dnl OpenGL ES 2: depends on EGL 1.1
+@@ -3081,6 +3081,21 @@ dnl OpenGL ES 2: depends on EGL 1.1
  PKG_ENABLE_MODULES_VLC([GLES2], [], [glesv2], [OpenGL ES v2 support], [disabled])
  
  dnl
@@ -22,7 +22,7 @@
  dnl  Xlib
  dnl
  
-@@ -3475,20 +3490,24 @@ AM_CONDITIONAL([HAVE_KVA], [test "${have
+@@ -3444,20 +3459,24 @@ AM_CONDITIONAL([HAVE_KVA], [test "${have
  dnl
  dnl MMAL plugin
  dnl
@@ -50,7 +50,7 @@
            AS_IF([test "${enable_mmal}" = "yes"],
              [ AC_MSG_ERROR([Cannot find bcm library...]) ],
              [ AC_MSG_WARN([Cannot find bcm library...]) ])
-@@ -3500,6 +3519,7 @@ if test "${enable_mmal}" != "no"; then
+@@ -3469,6 +3488,7 @@ if test "${enable_mmal}" != "no"; then
    VLC_RESTORE_FLAGS
  fi
  AM_CONDITIONAL([HAVE_MMAL], [test "${have_mmal}" = "yes"])
@@ -60,7 +60,7 @@
  dnl evas plugin
 --- a/include/vlc_fourcc.h
 +++ b/include/vlc_fourcc.h
-@@ -365,6 +365,11 @@
+@@ -374,6 +374,11 @@
  
  /* Broadcom MMAL opaque buffer type */
  #define VLC_CODEC_MMAL_OPAQUE     VLC_FOURCC('M','M','A','L')
@@ -72,7 +72,7 @@
  
  /* DXVA2 opaque video surface for use with D3D9 */
  #define VLC_CODEC_D3D9_OPAQUE     VLC_FOURCC('D','X','A','9') /* 4:2:0  8 bpc */
-@@ -374,6 +379,12 @@
+@@ -383,6 +388,12 @@
  #define VLC_CODEC_D3D11_OPAQUE          VLC_FOURCC('D','X','1','1') /* 4:2:0  8 bpc */
  #define VLC_CODEC_D3D11_OPAQUE_10B      VLC_FOURCC('D','X','1','0') /* 4:2:0 10 bpc */
  
@@ -348,7 +348,16 @@
          case AV_PIX_FMT_D3D11VA_VLD:
 --- a/modules/codec/avcodec/video.c
 +++ b/modules/codec/avcodec/video.c
-@@ -46,11 +46,20 @@
+@@ -29,6 +29,8 @@
+ # include "config.h"
+ #endif
+ 
++#define OPT_RPI 1
++
+ #include <vlc_common.h>
+ #include <vlc_codec.h>
+ #include <vlc_avcodec.h>
+@@ -46,11 +48,20 @@
  #include "avcodec.h"
  #include "va.h"
  
@@ -369,7 +378,15 @@
  struct decoder_sys_t
  {
      AVCodecContext *p_context;
-@@ -356,6 +365,13 @@ static int lavc_CopyPicture(decoder_t *d
+@@ -88,6 +99,7 @@ struct decoder_sys_t
+     /* VA API */
+     vlc_va_t *p_va;
+     enum PixelFormat pix_fmt;
++    enum PixelFormat sw_pix_fmt;
+     int profile;
+     int level;
+ 
+@@ -356,6 +368,13 @@ static int lavc_CopyPicture(decoder_t *d
  {
      decoder_sys_t *sys = dec->p_sys;
  
@@ -383,7 +400,15 @@
      vlc_fourcc_t fourcc = FindVlcChroma(frame->format);
      if (!fourcc)
      {
-@@ -458,17 +474,37 @@ static int OpenVideoCodec( decoder_t *p_
+@@ -417,6 +436,7 @@ static int OpenVideoCodec( decoder_t *p_
+ 
+     ctx->bits_per_coded_sample = p_dec->fmt_in.video.i_bits_per_pixel;
+     p_sys->pix_fmt = AV_PIX_FMT_NONE;
++    p_sys->sw_pix_fmt = AV_PIX_FMT_NONE;
+     p_sys->profile = -1;
+     p_sys->level = -1;
+     cc_Init( &p_sys->cc );
+@@ -458,17 +478,37 @@ static int OpenVideoCodec( decoder_t *p_
      return 0;
  }
  
@@ -423,7 +448,7 @@
      if( p_context == NULL )
          return VLC_EGENERIC;
  
-@@ -649,6 +685,27 @@ int InitVideoDec( vlc_object_t *obj )
+@@ -649,6 +689,27 @@ int InitVideoDec( vlc_object_t *obj )
      return VLC_SUCCESS;
  }
  
@@ -451,29 +476,74 @@
  /*****************************************************************************
   * Flush:
   *****************************************************************************/
-@@ -1183,9 +1240,10 @@ static picture_t *DecodeBlock( decoder_t
+@@ -1183,9 +1244,10 @@ static picture_t *DecodeBlock( decoder_t
          {   /* When direct rendering is not used, get_format() and get_buffer()
               * might not be called. The output video format must be set here
               * then picture buffer can be allocated. */
 -            if (p_sys->p_va == NULL
-+            if (frame->format == AV_PIX_FMT_DRM_PRIME ||
-+                (p_sys->p_va == NULL
++            if ((frame->format == AV_PIX_FMT_DRM_PRIME ||
++                 p_sys->p_va == NULL)
               && lavc_UpdateVideoFormat(p_dec, p_context, p_context->pix_fmt,
 -                                       p_context->pix_fmt) == 0)
-+                                       p_context->pix_fmt) == 0))
++                                       p_context->sw_pix_fmt) == 0)
                  p_pic = decoder_NewPicture(p_dec);
  
              if( !p_pic )
-@@ -1618,6 +1676,8 @@ no_reuse:
+@@ -1538,7 +1600,7 @@ static enum PixelFormat ffmpeg_GetFormat
+     video_format_t fmt;
+ 
+     /* Enumerate available formats */
+-    enum PixelFormat swfmt = avcodec_default_get_format(p_context, pi_fmt);
++    enum PixelFormat def_swfmt = avcodec_default_get_format(p_context, pi_fmt);
+     bool can_hwaccel = false;
+ 
+     for (size_t i = 0; pi_fmt[i] != AV_PIX_FMT_NONE; i++)
+@@ -1561,7 +1623,7 @@ static enum PixelFormat ffmpeg_GetFormat
+      * existing output format, and if present, hardware acceleration back-end.
+      * This avoids resetting the pipeline downstream. This also avoids
+      * needlessly probing for hardware acceleration support. */
+-     if (lavc_GetVideoFormat(p_dec, &fmt, p_context, p_sys->pix_fmt, swfmt) != 0)
++     if (lavc_GetVideoFormat(p_dec, &fmt, p_context, p_sys->pix_fmt, p_sys->sw_pix_fmt) != 0)
+      {
+          msg_Dbg(p_dec, "get format failed");
+          goto no_reuse;
+@@ -1583,7 +1645,7 @@ static enum PixelFormat ffmpeg_GetFormat
+      for (size_t i = 0; pi_fmt[i] != AV_PIX_FMT_NONE; i++)
+         if (pi_fmt[i] == p_sys->pix_fmt)
+         {
+-            if (lavc_UpdateVideoFormat(p_dec, p_context, p_sys->pix_fmt, swfmt) == 0)
++            if (lavc_UpdateVideoFormat(p_dec, p_context, p_sys->pix_fmt, p_sys->sw_pix_fmt) == 0)
+             {
+                 msg_Dbg(p_dec, "reusing decoder output format %d", pi_fmt[i]);
+                 return p_sys->pix_fmt;
+@@ -1602,7 +1664,7 @@ no_reuse:
+     p_sys->level = p_context->level;
+ 
+     if (!can_hwaccel)
+-        return swfmt;
++        return def_swfmt;
+ 
+ #if (LIBAVCODEC_VERSION_MICRO >= 100) \
+   && (LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 83, 101))
+@@ -1610,7 +1672,7 @@ no_reuse:
+     {
+         msg_Warn(p_dec, "thread type %d: disabling hardware acceleration",
+                  p_context->active_thread_type);
+-        return swfmt;
++        return def_swfmt;
+     }
+ #endif
+ 
+@@ -1618,6 +1680,8 @@ no_reuse:
  
      static const enum PixelFormat hwfmts[] =
      {
 +        AV_PIX_FMT_DRM_PRIME,
-+#if 0  // RPI - ignore stuff we know isn't going to work
++#if !OPT_RPI  // RPI - ignore stuff we know isn't going to work
  #ifdef _WIN32
  #if LIBAVUTIL_VERSION_CHECK(54, 13, 1, 24, 100)
          AV_PIX_FMT_D3D11VA_VLD,
-@@ -1628,6 +1688,7 @@ no_reuse:
+@@ -1628,12 +1692,14 @@ no_reuse:
  #if (LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(52, 4, 0))
          AV_PIX_FMT_VDPAU,
  #endif
@@ -481,6 +551,45 @@
          AV_PIX_FMT_NONE,
      };
  
+     for( size_t i = 0; hwfmts[i] != AV_PIX_FMT_NONE; i++ )
+     {
+         enum PixelFormat hwfmt = AV_PIX_FMT_NONE;
++        enum PixelFormat swfmt = def_swfmt;
+         for( size_t j = 0; hwfmt == AV_PIX_FMT_NONE && pi_fmt[j] != AV_PIX_FMT_NONE; j++ )
+             if( hwfmts[i] == pi_fmt[j] )
+                 hwfmt = hwfmts[i];
+@@ -1641,6 +1707,14 @@ no_reuse:
+         if( hwfmt == AV_PIX_FMT_NONE )
+             continue;
+ 
++#if OPT_RPI
++        // Kludge to what we know the swfmt is going to be
++        if (hwfmt == AV_PIX_FMT_DRM_PRIME && p_context->codec_id == AV_CODEC_ID_HEVC && def_swfmt == AV_PIX_FMT_YUV420P)
++            swfmt = AV_PIX_FMT_RPI4_8;
++        if (hwfmt == AV_PIX_FMT_DRM_PRIME && p_context->codec_id == AV_CODEC_ID_HEVC && def_swfmt == AV_PIX_FMT_YUV420P10LE)
++            swfmt = AV_PIX_FMT_RPI4_10;
++#endif
++
+         p_dec->fmt_out.video.i_chroma = vlc_va_GetChroma(hwfmt, swfmt);
+         if (p_dec->fmt_out.video.i_chroma == 0)
+             continue; /* Unknown brand of hardware acceleration */
+@@ -1673,12 +1747,14 @@ no_reuse:
+ 
+         p_sys->p_va = va;
+         p_sys->pix_fmt = hwfmt;
++        p_sys->sw_pix_fmt = swfmt;
+         p_context->draw_horiz_band = NULL;
+         return hwfmt;
+     }
+ 
+     post_mt(p_sys);
+     /* Fallback to default behaviour */
+-    p_sys->pix_fmt = swfmt;
+-    return swfmt;
++    p_sys->pix_fmt = def_swfmt;
++    p_sys->sw_pix_fmt = def_swfmt;
++    return p_sys->pix_fmt;
+ }
 --- a/modules/gui/qt/qt.cpp
 +++ b/modules/gui/qt/qt.cpp
 @@ -31,6 +31,7 @@
@@ -545,7 +654,7 @@
 +endif
 --- /dev/null
 +++ b/modules/hw/drm/conv_sand30.c
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,212 @@
 +#ifdef HAVE_CONFIG_H
 +# include "config.h"
 +#endif
@@ -563,7 +672,7 @@
 +
 +#include <assert.h>
 +
-+#define TRACE_ALL 1
++#define TRACE_ALL 0
 +
 +//----------------------------------------------------------------------------
 +//
@@ -577,6 +686,8 @@
 +dst_fourcc_vlc_to_av(const vlc_fourcc_t av)
 +{
 +    switch (av) {
++    case VLC_CODEC_I420:
++        return AV_PIX_FMT_YUV420P;
 +    case VLC_CODEC_NV12:
 +        return AV_PIX_FMT_NV12;
 +    case VLC_CODEC_I420_10L:
@@ -682,18 +793,29 @@
 +
 +static bool to_nv12_validate_fmt(const video_format_t * const f_in, const video_format_t * const f_out)
 +{
-+    if (!(f_in->i_chroma == VLC_CODEC_DRM_PRIME_SAND30 &&
-+          dst_fourcc_vlc_to_av(f_out->i_chroma) != 0))
-+    {
-+        return false;
-+    }
 +    if (f_in->i_height != f_out->i_height ||
 +        f_in->i_width  != f_out->i_width)
 +    {
 +        return false;
 +    }
 +
-+    return true;
++    if (f_in->i_chroma == VLC_CODEC_DRM_PRIME_SAND8 &&
++        (f_out->i_chroma == VLC_CODEC_I420 || f_out->i_chroma == VLC_CODEC_NV12))
++        return true;
++
++    if (f_in->i_chroma == VLC_CODEC_DRM_PRIME_I420 &&
++        f_out->i_chroma == VLC_CODEC_I420)
++        return true;
++
++    if (f_in->i_chroma == VLC_CODEC_DRM_PRIME_NV12 &&
++        f_out->i_chroma == VLC_CODEC_NV12)
++        return true;
++
++    if (f_in->i_chroma == VLC_CODEC_DRM_PRIME_SAND30 &&
++        (f_out->i_chroma == VLC_CODEC_I420_10L || f_out->i_chroma == VLC_CODEC_NV12))
++        return true;
++
++    return false;
 +}
 +
 +static int OpenConverterToNv12(vlc_object_t * obj)
@@ -738,10 +860,10 @@
 +vlc_module_begin()
 +    set_category( CAT_VIDEO )
 +    set_subcategory( SUBCAT_VIDEO_VFILTER )
-+    set_shortname(N_("DRMPRIME-SAND30 to NV12"))
-+    set_description(N_("DRMPRIME-SAND30 to NV12 filter"))
-+    add_shortcut("sand30_to_nv12")
-+    set_capability( "video converter", 901 )
++    set_shortname(N_("DRMPRIME to s/w"))
++    set_description(N_("DRMPRIME-to software picture filter"))
++    add_shortcut("drmprime_to_sw")
++    set_capability( "video converter", 50 )
 +    set_callbacks(OpenConverterToNv12, CloseConverterToNv12)
 +vlc_module_end()
 +
@@ -1120,7 +1242,7 @@
 +vlc_module_end()
 --- /dev/null
 +++ b/modules/hw/drm/drm_gl_conv.c
-@@ -0,0 +1,301 @@
+@@ -0,0 +1,314 @@
 +#ifdef HAVE_CONFIG_H
 +# include "config.h"
 +#endif
@@ -1142,39 +1264,51 @@
 +
 +#define TRACE_ALL 0
 +
++#define ICACHE_SIZE 2
++
 +typedef struct drm_gl_converter_s
 +{
 +    EGLint drm_fourcc;
 +
-+    EGLImageKHR last_image;
-+    picture_t * last_pic;
++    unsigned int icache_n;
++    struct icache_s {
++        EGLImageKHR last_image;
++        picture_context_t * last_ctx;
++    } icache[ICACHE_SIZE];
 +
 +    PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES;
 +} drm_gl_converter_t;
 +
 +
-+static void unset_last(const opengl_tex_converter_t * const tc)
++static void
++unset_icache_ent(const opengl_tex_converter_t * const tc, struct icache_s * const s)
 +{
-+    drm_gl_converter_t * const sys = tc->priv;
-+
-+    if (sys->last_image)
++    if (s->last_image)
 +    {
-+        tc->gl->egl.destroyImageKHR(tc->gl, sys->last_image);
-+        sys->last_image = NULL;
++        tc->gl->egl.destroyImageKHR(tc->gl, s->last_image);
++        s->last_image = NULL;
 +    }
 +
-+    if (sys->last_pic)
++    if (s->last_ctx)
 +    {
-+        picture_Release(sys->last_pic);
-+        sys->last_pic = NULL;
++        s->last_ctx->destroy(s->last_ctx);
++        s->last_ctx = NULL;
 +    }
 +}
 +
-+static void set_last(const opengl_tex_converter_t * const tc, EGLImageKHR image, picture_t * pic)
++static void
++update_icache(const opengl_tex_converter_t * const tc, EGLImageKHR image, picture_t * pic)
 +{
 +    drm_gl_converter_t * const sys = tc->priv;
-+    sys->last_image = image;
-+    sys->last_pic = picture_Hold(pic);
++    struct icache_s * const s = sys->icache + sys->icache_n;
++
++    s->last_image = image;
++    // DRM buffer is held by the context, pictures can be in surprisingly
++    // small pools for filters so let go of the pic and keep a ref on the
++    // context
++    unset_icache_ent(tc, s);
++    s->last_ctx = pic->context->copy(pic->context);
++    sys->icache_n = sys->icache_n + 1 >= ICACHE_SIZE ? 0 : sys->icache_n + 1;
 +}
 +
 +static int
@@ -1279,8 +1413,7 @@
 +        tc->vt->TexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 +        sys->glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, image);
 +
-+        unset_last(tc);
-+        set_last(tc, image, pic);
++        update_icache(tc, image, pic);
 +    }
 +
 +    return VLC_SUCCESS;
@@ -1343,11 +1476,13 @@
 +{
 +    opengl_tex_converter_t * const tc = (opengl_tex_converter_t *)obj;
 +    drm_gl_converter_t * const sys = tc->priv;
++    unsigned int i;
 +
 +    if (sys == NULL)
 +        return;
 +
-+    unset_last(tc);
++    for (i = 0; i != ICACHE_SIZE; ++i)
++        unset_icache_ent(tc, sys->icache + i);
 +    free(sys);
 +}
 +
@@ -15515,7 +15650,7 @@
  libwl_shm_plugin_la_SOURCES = video_output/wayland/shm.c
 --- /dev/null
 +++ b/modules/video_output/drmu/drm_vout.c
-@@ -0,0 +1,889 @@
+@@ -0,0 +1,927 @@
 +/*****************************************************************************
 + * mmal.c: MMAL-based vout plugin for Raspberry Pi
 + *****************************************************************************
@@ -16003,8 +16138,8 @@
 +    }
 +    drmu_output_fb_info_set(sys->dout, dfb);
 +
-+    ret = drmu_atomic_plane_fb_set(da, sys->dp, dfb, r);
-+    drmu_atomic_add_output_props(da, sys->dout);
++    ret = drmu_atomic_plane_add_fb(da, sys->dp, dfb, r);
++    drmu_atomic_output_add_props(da, sys->dout);
 +    drmu_fb_unref(&dfb);
 +
 +    if (ret != 0) {
@@ -16023,11 +16158,11 @@
 +        // Rescale from sub-space
 +        if (sys->subplanes[i])
 +        {
-+            if ((ret = drmu_atomic_plane_fb_set(da, sys->subplanes[i], spe->fb,
++            if ((ret = drmu_atomic_plane_add_fb(da, sys->subplanes[i], spe->fb,
 +                                  drmu_rect_rescale(spe->pos, r, spe->space))) != 0) {
 +                 msg_Err(vd, "drmModeSetPlane for subplane %d failed: %s", i, strerror(-ret));
 +            }
-+            drmu_atomic_add_plane_alpha(da, sys->subplanes[i], (spe->alpha * DRMU_PLANE_ALPHA_OPAQUE) / (0xff * 0xff));
++            drmu_atomic_plane_add_alpha(da, sys->subplanes[i], (spe->alpha * DRMU_PLANE_ALPHA_OPAQUE) / (0xff * 0xff));
 +        }
 +    }
 +
@@ -16221,6 +16356,39 @@
 +    return c;
 +}
 +
++static int
++test_simple_plane_set(vout_display_t * const vd, vout_display_sys_t * const sys)
++{
++    drmu_atomic_t *da = drmu_atomic_new(sys->du);
++    drmu_fb_t *fb;
++    int rv = -ENOMEM;
++
++    if (da == NULL) {
++        msg_Warn(vd, "Failed to alloc test atomic");
++        goto fail;
++    }
++
++    if ((fb = drmu_pool_fb_new_dumb(sys->sub_fb_pool, 128, 128, drmu_format_vlc_chroma_to_drm(sys->subpic_chromas[0]))) == NULL) {
++        msg_Warn(vd, "Failed to alloc test FB");
++        goto fail;
++    }
++
++    if ((rv = drmu_atomic_plane_add_fb(da, sys->subplanes[0], fb, drmu_rect_wh(128, 128))) != 0) {
++        msg_Warn(vd, "Failed to add test FB to atomic");
++        goto fail;
++    }
++
++    if ((rv = drmu_atomic_commit(da, DRM_MODE_ATOMIC_TEST_ONLY)) != 0) {
++        msg_Warn(vd, "Failed to commit test FB");
++        goto fail;
++    }
++
++fail:
++    drmu_atomic_unref(&da);
++    drmu_fb_unref(&fb);
++    return rv;
++}
++
 +static int OpenDrmVout(vlc_object_t *object)
 +{
 +    vout_display_t * const vd = (vout_display_t *)object;
@@ -16288,6 +16456,11 @@
 +            const uint32_t * const drm_chromas = drmu_plane_formats(sys->subplanes[i], &n);
 +            sys->subpic_chromas = subpic_make_chromas_from_drm(drm_chromas, n);
 +        }
++    }
++
++    if (test_simple_plane_set(vd, sys) != 0) {
++        msg_Warn(vd, "Failed simple pic test");
++        goto fail;
 +    }
 +
 +    vd->info = (vout_display_info_t){
@@ -18707,7 +18880,7 @@
 +
 +
 +int
-+drmu_atomic_conn_hdr_metadata_set(drmu_atomic_t * const da, drmu_conn_t * const dn, const struct hdr_output_metadata * const m)
++drmu_atomic_conn_add_hdr_metadata(drmu_atomic_t * const da, drmu_conn_t * const dn, const struct hdr_output_metadata * const m)
 +{
 +    drmu_env_t * const du = drmu_atomic_env(da);
 +    int rv;
@@ -18729,14 +18902,14 @@
 +}
 +
 +int
-+drmu_atomic_conn_hi_bpc_set(drmu_atomic_t * const da, drmu_conn_t * const dn, bool hi_bpc)
++drmu_atomic_conn_add_hi_bpc(drmu_atomic_t * const da, drmu_conn_t * const dn, bool hi_bpc)
 +{
 +    return drmu_atomic_add_prop_range(da, dn->conn.connector_id, dn->pid.max_bpc, !hi_bpc ? 8 :
 +                                      drmu_prop_range_max(dn->pid.max_bpc));
 +}
 +
 +int
-+drmu_atomic_conn_colorspace_set(drmu_atomic_t * const da, drmu_conn_t * const dn, const drmu_colorspace_t colorspace)
++drmu_atomic_conn_add_colorspace(drmu_atomic_t * const da, drmu_conn_t * const dn, const drmu_colorspace_t colorspace)
 +{
 +    if (!dn->pid.colorspace)
 +        return 0;
@@ -18745,7 +18918,7 @@
 +}
 +
 +int
-+drmu_atomic_conn_broadcast_rgb_set(drmu_atomic_t * const da, drmu_conn_t * const dn, const drmu_broadcast_rgb_t bcrgb)
++drmu_atomic_conn_add_broadcast_rgb(drmu_atomic_t * const da, drmu_conn_t * const dn, const drmu_broadcast_rgb_t bcrgb)
 +{
 +    if (!dn->pid.broadcast_rgb)
 +        return 0;
@@ -19500,7 +19673,7 @@
 +}
 +
 +int
-+drmu_atomic_add_plane_alpha(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int alpha)
++drmu_atomic_plane_add_alpha(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int alpha)
 +{
 +    if (alpha == DRMU_PLANE_ALPHA_UNSET)
 +        return 0;
@@ -19508,7 +19681,7 @@
 +}
 +
 +int
-+drmu_atomic_add_plane_rotation(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int rot)
++drmu_atomic_plane_add_rotation(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int rot)
 +{
 +    if (!dp->pid.rotation)
 +        return rot == DRMU_PLANE_ROTATION_0 ? 0 : -EINVAL;
@@ -19534,7 +19707,7 @@
 +}
 +
 +int
-+drmu_atomic_plane_fb_set(drmu_atomic_t * const da, drmu_plane_t * const dp,
++drmu_atomic_plane_add_fb(drmu_atomic_t * const da, drmu_plane_t * const dp,
 +    drmu_fb_t * const dfb, const drmu_rect_t pos)
 +{
 +    int rv;
@@ -20301,7 +20474,7 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu.h
-@@ -0,0 +1,594 @@
+@@ -0,0 +1,605 @@
 +#ifndef _DRMU_DRMU_H
 +#define _DRMU_DRMU_H
 +
@@ -20580,7 +20753,16 @@
 +typedef const char * drmu_colorspace_t;
 +#define DRMU_COLORSPACE_UNSET                   NULL
 +#define DRMU_COLORSPACE_DEFAULT                 "Default"
++#define DRMU_COLORSPACE_BT2020_CYCC             "BT2020_CYCC"
 +#define DRMU_COLORSPACE_BT2020_RGB              "BT2020_RGB"
++#define DRMU_COLORSPACE_BT2020_YCC              "BT2020_YCC"
++#define DRMU_COLORSPACE_BT709_YCC               "BT709_YCC"
++#define DRMU_COLORSPACE_DCI_P3_RGB_D65          "DCI-P3_RGB_D65"
++#define DRMU_COLORSPACE_DCI_P3_RGB_THEATER      "DCI-P3_RGB_Theater"
++#define DRMU_COLORSPACE_SMPTE_170M_YCC          "SMPTE_170M_YCC"
++#define DRMU_COLORSPACE_SYCC_601                "SYCC_601"
++#define DRMU_COLORSPACE_XVYCC_601               "XVYCC_601"
++#define DRMU_COLORSPACE_XVYCC_709               "XVYCC_709"
 +static inline bool drmu_colorspace_is_set(const drmu_colorspace_t x) {return x != NULL;}
 +typedef const char * drmu_broadcast_rgb_t;
 +#define DRMU_BROADCAST_RGB_UNSET                NULL
@@ -20674,13 +20856,13 @@
 +// Connector
 +
 +// Set none if m=NULL
-+int drmu_atomic_conn_hdr_metadata_set(struct drmu_atomic_s * const da, drmu_conn_t * const dn, const struct hdr_output_metadata * const m);
++int drmu_atomic_conn_add_hdr_metadata(struct drmu_atomic_s * const da, drmu_conn_t * const dn, const struct hdr_output_metadata * const m);
 +
 +// False set max_bpc to 8, true max value
-+int drmu_atomic_conn_hi_bpc_set(struct drmu_atomic_s * const da, drmu_conn_t * const dn, bool hi_bpc);
++int drmu_atomic_conn_add_hi_bpc(struct drmu_atomic_s * const da, drmu_conn_t * const dn, bool hi_bpc);
 +
-+int drmu_atomic_conn_colorspace_set(struct drmu_atomic_s * const da, drmu_conn_t * const dn, const drmu_colorspace_t colorspace);
-+int drmu_atomic_conn_broadcast_rgb_set(struct drmu_atomic_s * const da, drmu_conn_t * const dn, const drmu_broadcast_rgb_t bcrgb);
++int drmu_atomic_conn_add_colorspace(struct drmu_atomic_s * const da, drmu_conn_t * const dn, const drmu_colorspace_t colorspace);
++int drmu_atomic_conn_add_broadcast_rgb(struct drmu_atomic_s * const da, drmu_conn_t * const dn, const drmu_broadcast_rgb_t bcrgb);
 +
 +// Add crtc id
 +int drmu_atomic_conn_add_crtc(struct drmu_atomic_s * const da, drmu_conn_t * const dn, drmu_crtc_t * const dc);
@@ -20726,7 +20908,7 @@
 +#define DRMU_PLANE_ALPHA_UNSET                  (-1)
 +#define DRMU_PLANE_ALPHA_TRANSPARENT            0
 +#define DRMU_PLANE_ALPHA_OPAQUE                 0xffff
-+int drmu_atomic_add_plane_alpha(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int alpha);
++int drmu_atomic_plane_add_alpha(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int alpha);
 +
 +// X, Y & TRANSPOSE can be ORed to get all others
 +#define DRMU_PLANE_ROTATION_0                   0
@@ -20738,7 +20920,7 @@
 +#define DRMU_PLANE_ROTATION_90                  5  // Rotate 90 clockwise
 +#define DRMU_PLANE_ROTATION_270                 6  // Rotate 90 anti-cockwise
 +#define DRMU_PLANE_ROTATION_180_TRANSPOSE       7  // Rotate 180 & transpose
-+int drmu_atomic_add_plane_rotation(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int rot);
++int drmu_atomic_plane_add_rotation(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int rot);
 +
 +// Init constants - C winges if the struct is specified in a const init (which seems like a silly error)
 +#define drmu_chroma_siting_float_i(_x, _y) {.x = (int32_t)((double)(_x) * 65536 + .5), .y = (int32_t)((double)(_y) * 65536 + .5)}
@@ -20760,7 +20942,9 @@
 +#define DRMU_CHROMA_SITING_UNSPECIFIED          (drmu_chroma_siting_t){INT32_MIN, INT32_MIN}
 +int drmu_atomic_plane_add_chroma_siting(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const drmu_chroma_siting_t siting);
 +
-+int drmu_atomic_plane_fb_set(struct drmu_atomic_s * const da, drmu_plane_t * const dp, drmu_fb_t * const dfb, const drmu_rect_t pos);
++// Adds the fb to the plane along with all fb properties that apply to a plane
++// pos is dest rect on the plane in full pixels (not frac)
++int drmu_atomic_plane_add_fb(struct drmu_atomic_s * const da, drmu_plane_t * const dp, drmu_fb_t * const dfb, const drmu_rect_t pos);
 +
 +// Unref a plane
 +void drmu_plane_unref(drmu_plane_t ** const ppdp);
@@ -21849,7 +22033,7 @@
 +}
 +
 +int
-+drmu_atomic_add_output_props(drmu_atomic_t * const da, drmu_output_t * const dout)
++drmu_atomic_output_add_props(drmu_atomic_t * const da, drmu_output_t * const dout)
 +{
 +    int rv = 0;
 +    unsigned int i;
@@ -21863,13 +22047,13 @@
 +        drmu_conn_t * const dn = dout->dns[i];
 +
 +        if (dout->fmt_info && dout->max_bpc_allow)
-+            rv = rvup(rv, drmu_atomic_conn_hi_bpc_set(da, dn, (drmu_format_info_bit_depth(dout->fmt_info) > 8)));
++            rv = rvup(rv, drmu_atomic_conn_add_hi_bpc(da, dn, (drmu_format_info_bit_depth(dout->fmt_info) > 8)));
 +        if (drmu_colorspace_is_set(dout->colorspace))
-+            rv = rvup(rv, drmu_atomic_conn_colorspace_set(da, dn, dout->colorspace));
++            rv = rvup(rv, drmu_atomic_conn_add_colorspace(da, dn, dout->colorspace));
 +        if (drmu_broadcast_rgb_is_set(dout->broadcast_rgb))
-+            rv = rvup(rv, drmu_atomic_conn_broadcast_rgb_set(da, dn, dout->broadcast_rgb));
++            rv = rvup(rv, drmu_atomic_conn_add_broadcast_rgb(da, dn, dout->broadcast_rgb));
 +        if (dout->hdr_metadata_isset != DRMU_ISSET_UNSET)
-+            rv = rvup(rv, drmu_atomic_conn_hdr_metadata_set(da, dn,
++            rv = rvup(rv, drmu_atomic_conn_add_hdr_metadata(da, dn,
 +                dout->hdr_metadata_isset == DRMU_ISSET_NULL ? NULL : &dout->hdr_metadata));
 +    }
 +
@@ -22133,7 +22317,7 @@
 +        drmu_atomic_t * da = drmu_atomic_new(du);
 +        if (!da)
 +            return -ENOMEM;
-+        dout->has_max_bpc = (drmu_atomic_conn_hi_bpc_set(da, dn, true) == 0);
++        dout->has_max_bpc = (drmu_atomic_conn_add_hi_bpc(da, dn, true) == 0);
 +        drmu_atomic_unref(&da);
 +    }
 +
@@ -22390,7 +22574,7 @@
 +drmu_plane_t * drmu_output_plane_ref_other(drmu_output_t * const dout);
 +
 +// Add all props accumulated on the output to the atomic
-+int drmu_atomic_add_output_props(drmu_atomic_t * const da, drmu_output_t * const dout);
++int drmu_atomic_output_add_props(drmu_atomic_t * const da, drmu_output_t * const dout);
 +
 +// Set FB info (bit-depth, HDR metadata etc.)
 +// Only sets properties that are set in the fb - retains previous value otherwise
@@ -22613,7 +22797,7 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu_vlc.c
-@@ -0,0 +1,519 @@
+@@ -0,0 +1,533 @@
 +#include "drmu_vlc.h"
 +#include "drmu_log.h"
 +
@@ -22687,6 +22871,47 @@
 +}
 +#endif
 +
++// Convert chroma to drm - can't cope with RGB32 or RGB16 as they require
++// more info
++uint32_t
++drmu_format_vlc_chroma_to_drm(const vlc_fourcc_t chroma)
++{
++    switch (chroma) {
++        case VLC_CODEC_RGBA:
++            return DRM_FORMAT_ABGR8888;
++        case VLC_CODEC_BGRA:
++            return DRM_FORMAT_ARGB8888;
++        case VLC_CODEC_ARGB:
++            return DRM_FORMAT_BGRA8888;
++        // VLC_CODEC_ABGR does not exist in VLC
++        case VLC_CODEC_VUYA:
++            return DRM_FORMAT_AYUV;
++        // AYUV appears to be the only DRM YUVA-like format
++        case VLC_CODEC_VYUY:
++            return DRM_FORMAT_YUYV;
++        case VLC_CODEC_UYVY:
++            return DRM_FORMAT_YVYU;
++        case VLC_CODEC_YUYV:
++            return DRM_FORMAT_VYUY;
++        case VLC_CODEC_YVYU:
++            return DRM_FORMAT_UYVY;
++        case VLC_CODEC_NV12:
++            return DRM_FORMAT_NV12;
++        case VLC_CODEC_NV21:
++            return DRM_FORMAT_NV21;
++        case VLC_CODEC_I420:
++            return DRM_FORMAT_YUV420;
++        default:
++            break;
++    }
++
++#if HAS_ZC_CMA
++    return drmu_format_vlc_to_drm_cma(chroma);
++#else
++    return 0;
++#endif
++}
++
 +uint32_t
 +drmu_format_vlc_to_drm(const video_frame_format_t * const vf_vlc)
 +{
@@ -22719,38 +22944,11 @@
 +                return DRM_FORMAT_BGR565;
 +            break;
 +        }
-+        case VLC_CODEC_RGBA:
-+            return DRM_FORMAT_ABGR8888;
-+        case VLC_CODEC_BGRA:
-+            return DRM_FORMAT_ARGB8888;
-+        case VLC_CODEC_ARGB:
-+            return DRM_FORMAT_BGRA8888;
-+        // VLC_CODEC_ABGR does not exist in VLC
-+        case VLC_CODEC_VUYA:
-+            return DRM_FORMAT_AYUV;
-+        // AYUV appears to be the only DRM YUVA-like format
-+        case VLC_CODEC_VYUY:
-+            return DRM_FORMAT_YUYV;
-+        case VLC_CODEC_UYVY:
-+            return DRM_FORMAT_YVYU;
-+        case VLC_CODEC_YUYV:
-+            return DRM_FORMAT_VYUY;
-+        case VLC_CODEC_YVYU:
-+            return DRM_FORMAT_UYVY;
-+        case VLC_CODEC_NV12:
-+            return DRM_FORMAT_NV12;
-+        case VLC_CODEC_NV21:
-+            return DRM_FORMAT_NV21;
-+        case VLC_CODEC_I420:
-+            return DRM_FORMAT_YUV420;
 +        default:
 +            break;
 +    }
-+#if HAS_ZC_CMA
-+    return drmu_format_vlc_to_drm_cma(vf_vlc->i_chroma);
-+#else
-+    return 0;
-+#endif
++
++    return drmu_format_vlc_chroma_to_drm(vf_vlc->i_chroma);
 +}
 +
 +vlc_fourcc_t
@@ -23135,7 +23333,7 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu_vlc.h
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,93 @@
 +#ifndef _DRMU_DRMU_VLC_H
 +#define _DRMU_DRMU_VLC_H
 +
@@ -23198,6 +23396,10 @@
 +}
 +
 +
++// Convert chroma to drm - can't cope with RGB32 or RGB16 as they require
++// more info. returns 0 if unknown.
++uint32_t drmu_format_vlc_chroma_to_drm(const vlc_fourcc_t chroma);
++// Convert format to drm fourcc - does cope with RGB32 & RGB16
 +uint32_t drmu_format_vlc_to_drm(const video_frame_format_t * const vf_vlc);
 +vlc_fourcc_t drmu_format_vlc_to_vlc(const uint32_t vf_drm);
 +
@@ -23821,7 +24023,7 @@
  typedef struct vlc_gl_sys_t
  {
      EGLDisplay display;
-@@ -355,6 +357,14 @@ static int Open (vlc_object_t *obj, cons
+@@ -371,6 +373,14 @@ static int Open (vlc_object_t *obj, cons
          goto error;
      }
  
@@ -23836,7 +24038,7 @@
      const EGLint conf_attr[] = {
          EGL_RED_SIZE, 5,
          EGL_GREEN_SIZE, 5,
-@@ -447,7 +457,7 @@ vlc_module_begin ()
+@@ -463,7 +473,7 @@ vlc_module_begin ()
      add_shortcut ("egl")
  
      add_submodule ()
@@ -23847,7 +24049,7 @@
  
 --- a/src/input/decoder.c
 +++ b/src/input/decoder.c
-@@ -1998,6 +1998,7 @@ void input_DecoderDelete( decoder_t *p_d
+@@ -2000,6 +2000,7 @@ void input_DecoderDelete( decoder_t *p_d
      vlc_mutex_lock( &p_owner->lock );
      p_owner->b_waiting = false;
      vlc_cond_signal( &p_owner->wait_request );
@@ -23855,7 +24057,7 @@
  
      /* If the video output is paused or slow, or if the picture pool size was
       * under-estimated (e.g. greedy video filter, buggy decoder...), the
-@@ -2008,7 +2009,6 @@ void input_DecoderDelete( decoder_t *p_d
+@@ -2010,7 +2011,6 @@ void input_DecoderDelete( decoder_t *p_d
       * worker threads (if any) and the decoder thread to terminate. */
      if( p_owner->p_vout != NULL )
          vout_Cancel( p_owner->p_vout, true );
@@ -23900,7 +24102,7 @@
      0,
  };
  
-@@ -755,11 +769,19 @@ static const struct
+@@ -762,11 +776,19 @@ static const struct
      { { VLC_CODEC_VDPAU_VIDEO_420, VLC_CODEC_VDPAU_VIDEO_422,
          VLC_CODEC_VDPAU_VIDEO_444, VLC_CODEC_VDPAU_OUTPUT },
                                                 FAKE_FMT() },
