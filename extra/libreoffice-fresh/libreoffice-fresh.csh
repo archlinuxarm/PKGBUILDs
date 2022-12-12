@@ -4,5 +4,6 @@
 #setenv SAL_USE_VCLPLUGIN gtk3_kde5
 #setenv SAL_USE_VCLPLUGIN kf5
 #setenv SAL_USE_VCLPLUGIN qt5
+#setenv SAL_USE_VCLPLUGIN qt6
 #setenv SAL_USE_VCLPLUGIN gtk3
 #setenv SAL_USE_VCLPLUGIN gtk4
