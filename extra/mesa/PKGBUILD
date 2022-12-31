@@ -12,10 +12,10 @@
 highmem=1
 
 pkgbase=mesa
-pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
+pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-virtio' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=22.3.1
-pkgrel=1
+pkgrel=2
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
@@ -51,7 +51,7 @@ prepare() {
 build() {
   case "${CARCH}" in
     armv7h)  GALLIUM=",etnaviv,kmsro,lima,panfrost,tegra,v3d,vc4" ;;
-    aarch64) GALLIUM=",etnaviv,kmsro,lima,panfrost,svga,v3d,vc4" ;;
+    aarch64) GALLIUM=",asahi,etnaviv,kmsro,lima,panfrost,svga,v3d,vc4" ;;
   esac
 
   # Build only minimal debug info to reduce size
@@ -60,10 +60,10 @@ build() {
 
   arch-meson mesa-$pkgver build \
     -D b_ndebug=true \
-    -D b_lto=false \
+    -D b_lto=$([[ $CARCH == aarch64 ]] && echo true || echo false)  \
     -D platforms=x11,wayland \
     -D gallium-drivers=r300,r600,radeonsi,freedreno,nouveau,swrast,virgl,zink,d3d12${GALLIUM} \
-    -D vulkan-drivers=amd,swrast,broadcom,panfrost \
+    -D vulkan-drivers=amd,swrast,broadcom,panfrost,virtio-experimental \
     -D vulkan-layers=device-select,overlay \
     -D dri3=enabled \
     -D egl=enabled \
@@ -127,7 +127,7 @@ package_vulkan-mesa-layers() {
 
 package_opencl-mesa() {
   pkgdesc="OpenCL support with clover and rusticl for mesa drivers"
-  depends=('libdrm' 'libclc' 'clang' 'expat')
+  depends=('libdrm' 'libclc' 'clang' 'expat' 'spirv-llvm-translator')
   optdepends=('opencl-headers: headers necessary for OpenCL development')
   provides=('opencl-driver')
 
@@ -165,6 +165,18 @@ package_vulkan-swrast() {
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
 
+package_vulkan-virtio() {
+  pkgdesc="Venus Vulkan mesa driver for Virtual Machines"
+  depends=('wayland' 'libx11' 'libxshmfence' 'libdrm' 'zstd' 'systemd-libs')
+  optdepends=('vulkan-mesa-layers: additional vulkan layers')
+  provides=('vulkan-driver')
+
+  _install fakeinstall/usr/share/vulkan/icd.d/virtio_icd*.json
+  _install fakeinstall/usr/lib/libvulkan_virtio.so
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+}
+
 package_vulkan-broadcom() {
   pkgdesc="Broadcom's Vulkan mesa driver"
   depends=('wayland' 'libx11' 'libxshmfence' 'libdrm')
@@ -190,9 +202,10 @@ package_vulkan-panfrost() {
 }
 
 package_libva-mesa-driver() {
-  pkgdesc="VA-API implementation for gallium"
+  pkgdesc="VA-API drivers"
   depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence')
   depends+=('libexpat.so')
+  provides=('libva-driver')
 
   _install fakeinstall/usr/lib/dri/*_drv_video.so
 
@@ -200,9 +213,10 @@ package_libva-mesa-driver() {
 }
 
 package_mesa-vdpau() {
-  pkgdesc="Mesa VDPAU drivers"
+  pkgdesc="VDPAU drivers"
   depends=('libdrm' 'libx11' 'llvm-libs' 'expat' 'libelf' 'libxshmfence')
   depends+=('libexpat.so')
+  provides=('vdpau-driver')
 
   _install fakeinstall/usr/lib/vdpau
 
