@@ -6,12 +6,12 @@
 # Contributor: Douglas Soares de Andrade <dsa@aur.archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - replace make/optdepends on python{,2}-cairocffi with python{,2}-cairo (cffi has haskell dep)
+#  - replace make/optdepends on pytho-cairocffi with python-cairo (cffi has haskell dep)
 #  - disable lto via setup.cfg
 
 pkgname=python-matplotlib
 pkgver=3.6.2
-pkgrel=1
+pkgrel=2
 pkgdesc="A python plotting library, making publication quality plots"
 arch=(x86_64)
 url="https://matplotlib.org"
@@ -33,11 +33,15 @@ optdepends=('tk: Tk{Agg,Cairo} backends'
             'texlive-bin: usetex dependencies'
             'texlive-latexextra: usetex usage with pdflatex'
             'python-certifi: https support')
-makedepends=(git python-setuptools-scm-git-archive python-certifi)
+makedepends=(git python-setuptools-scm python-certifi)
 checkdepends=(python-pytest python-pytest-xdist python-pytest-runner python-pytest-rerunfailures xorg-server-xvfb
-              texlive-bin texlive-core texlive-latexextra texlive-pictures ghostscript inkscape ffmpeg imagemagick
-              gtk4 python-cairo python-gobject python-pyqt5 pyside2 python-pyqt6 pyside6 python-tornado python-wxpython tk
-              jupyter-nbconvert jupyter-nbformat python-ipykernel python-pandas python-pikepdf python-pytz)
+              texlive-bin texlive-core texlive-latexextra texlive-pictures
+              ghostscript inkscape ffmpeg imagemagick gtk4
+              python-cairo python-gobject python-pyqt5 pyside2
+              python-pyqt6 pyside6 python-tornado python-wxpython tk
+              jupyter-nbconvert jupyter-nbformat python-ipykernel
+              python-pandas python-pikepdf python-pytz python-xarray
+              noto-fonts-cjk wqy-zenhei)
 _tag=4a8e97684d016a1624b2977977aaeae29210a46e # git rev-parse v${pkgver}
 _ftver=2.12.1
 source=(git+https://github.com/matplotlib/matplotlib.git#tag=${_tag}?signed
@@ -52,9 +56,8 @@ prepare() {
   cd matplotlib
   # Fix SCM detected version
   rm -r .git
-  echo "Version: ${pkgver}" > PKG-INFO
-  # Use system freetype and qhull, disable LTO
-  sed -e 's|#system_freetype = False|system_freetype = True|' -e 's|#system_qhull = False|system_qhull = True|' -e 's|#enable_lto = True|enable_lto = False|' mplsetup.cfg.template > mplsetup.cfg
+  # Use system freetype and qhull
+  sed -e 's|#system_freetype = False|system_freetype = True|' -e 's|#system_qhull = False|system_qhull = True|' mplsetup.cfg.template > mplsetup.cfg
   patch -p1 < ../freetype.patch # From Fedora/upstream
   sed -e 's|2_000_000|2_500_000|' -i lib/matplotlib/tests/test_backends_interactive.py
   # Install tests for check()
@@ -68,21 +71,24 @@ prepare() {
 
 build() {
   cd matplotlib
+  export SETUPTOOLS_SCM_PRETEND_VERSION=${pkgver}
   python setup.py build
 }
 
 check() {
   cd matplotlib
+  export SETUPTOOLS_SCM_PRETEND_VERSION=${pkgver}
   python -m venv --system-site-packages test-env
   test-env/bin/python setup.py install --skip-build
   # test_ipynb: https://github.com/matplotlib/matplotlib/issues/21654 fixed but `ModuleNotFoundError: No module named 'matplotlib'`
-  # test_cross_Qt_imports https://github.com/matplotlib/matplotlib/issues/23004
+  # test_compressed1: https://github.com/QuLogic/mpl-images/issues/4
   xvfb-run -a -s "-screen 0 640x480x24" \
-    test-env/bin/python -m pytest -ra -n auto -v --color=yes --pyargs matplotlib mpl_toolkits.tests -k 'not test_ipynb and not test_cross_Qt_imports'
+    test-env/bin/python -m pytest -ra -n auto -v --color=yes --pyargs matplotlib mpl_toolkits.tests -k 'not test_ipynb and not test_compressed1 and not test_multi_font_type3 and not test_multi_font_type42'
 }
 
 package() {
   cd matplotlib
+  export SETUPTOOLS_SCM_PRETEND_VERSION=${pkgver}
   python setup.py install --root "${pkgdir}" --prefix=/usr --optimize=1 --skip-build
   install -Dm644 doc/users/project/license.rst -t "${pkgdir}"/usr/share/licenses/${pkgname}/
   # Remove tests
