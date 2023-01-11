@@ -8,8 +8,6 @@
 # NOTE: libtool requires rebuilt with each new gcc version
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - removed ada packages
-#  - removed gnat (ada stuff) from gcc packaging
 #  - disabled make check, too much stress, kills plugs :(
 #  - specifid build host, disabled distcc
 #  - replaced bugurl with our GitHub issue page
@@ -17,7 +15,7 @@
 
 noautobuild=1
 
-pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go gcc-d lto-dump libgccjit)
+pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-ada gcc-go gcc-d lto-dump libgccjit)
 pkgver=12.2.0
 _majorver=${pkgver%%.*}
 _commit=2ee5e4300186a92ad73f1a1a64cb918dc76c8d67
@@ -131,7 +129,7 @@ build() {
   CXXFLAGS=${CXXFLAGS/-Werror=format-security/}
 
   "$srcdir/gcc/configure" \
-    --enable-languages=c,c++,fortran,go,lto,objc,obj-c++,d \
+    --enable-languages=c,c++,ada,fortran,go,lto,objc,obj-c++,d \
     --enable-bootstrap \
     "${_confflags[@]:?_confflags unset}"
 
@@ -273,7 +271,7 @@ package_gcc() {
 
   make -C gcc DESTDIR="$pkgdir" install-man install-info
   rm "$pkgdir"/usr/share/man/man1/{gccgo,gfortran,lto-dump,gdc}.1
-  rm "$pkgdir"/usr/share/info/{gccgo,gfortran,gdc}.info
+  rm "$pkgdir"/usr/share/info/{gccgo,gfortran,gnat-style,gnat_rm,gnat_ugn,gdc}.info
 
   make -C libcpp DESTDIR="$pkgdir" install
   make -C gcc DESTDIR="$pkgdir" install-po
@@ -325,6 +323,32 @@ package_gcc-objc() {
   make DESTDIR="$pkgdir" -C $CHOST/libobjc install-headers
   install -dm755 "$pkgdir/${_libdir}"
   install -m755 gcc/cc1obj{,plus} "$pkgdir/${_libdir}/"
+
+  # Install Runtime Library Exception
+  install -d "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+    "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_gcc-ada() {
+  pkgdesc='Ada front-end for GCC (GNAT) (git version)'
+  depends=("gcc=$pkgver-$pkgrel" libisl.so)
+
+  cd gcc-build/gcc
+  make DESTDIR="$pkgdir" ada.install-{common,info}
+  install -m755 gnat1 "$pkgdir/${_libdir}"
+
+  cd "$srcdir"/gcc-build/$CHOST/libada
+  make DESTDIR="${pkgdir}" INSTALL="install" \
+    INSTALL_DATA="install -m644" install-libada
+
+  ln -s gcc "$pkgdir/usr/bin/gnatgcc"
+
+  # insist on dynamic linking, but keep static libraries because gnatmake complains
+  mv "$pkgdir"/${_libdir}/adalib/libgna{rl,t}-${_majorver}.so "$pkgdir/usr/lib"
+  ln -s libgnarl-${_majorver}.so "$pkgdir/usr/lib/libgnarl.so"
+  ln -s libgnat-${_majorver}.so "$pkgdir/usr/lib/libgnat.so"
+  rm -f "$pkgdir"/${_libdir}/adalib/libgna{rl,t}.so
 
   # Install Runtime Library Exception
   install -d "$pkgdir/usr/share/licenses/$pkgname/"
