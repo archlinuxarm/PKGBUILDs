@@ -14,8 +14,8 @@ highmem=1
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-virtio' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=22.3.2
-pkgrel=3
+pkgver=22.3.3
+pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
@@ -27,10 +27,14 @@ license=('custom')
 options=('debug' '!lto')
 source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0001-anv-force-MEDIA_INTERFACE_DESCRIPTOR_LOAD-reemit-aft.patch
+        0002-iris-Retry-DRM_IOCTL_I915_GEM_EXECBUFFER2-on-ENOMEM.patch
+        0003-Revert-iris-Avoid-abort-if-kernel-can-t-allocate-mem.patch
         LICENSE)
-sha512sums=('32934dd23cfcd6165c365597d9a469da0b806b72ea98a200f499344c3b47815db3bf78875b4ea766d2d28d9c70b50c1615d2d3fcbfd4769447fe0a9d3b32951f'
+sha512sums=('dcf166bc7c80e6ad09337e0188219e5ea4bdc558bc4b4ca35ce30d5421568f6b5328e5508b3175a2696521214e466354d8652ade22468ce448d9f61d5709c8a1'
             'SKIP'
-            'd02f3fd44cf95b7dbfd607a58b764bd79d02b8b8586acd37bd4b2340aea171410b2b5eda7eab5c5d2c87bbf512e2322d5468f95aab0bfedeabc5367ebdee3b1d'
+            '6150324d4e4b974bd2398157decaceef69bb0867d878d60fb9f4d15fa2fc52948edd27b787846cc1e552a331f7e91953bd3c4a4500d5445df1dba1fe3326bcfe'
+            '33067a6fab6c078cb829b6266ab5e328929923ace7c580c3b347f25682b4427a5f7cfd52234311636fc23e03beb021c543020d3deb30bf8515f58bf78173bde8'
+            '94f25da531a1ccbb630f0b1ccd80fe85aae60cba7b6e29b2761d4014b79f611eb4b89b2e29e2501231620ee381bc91e546ad2158cf76ec2d6c678d048553eba0'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -46,6 +50,11 @@ prepare() {
   # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/17247
   # https://github.com/HansKristian-Work/vkd3d-proton/issues/1200
   patch -Np1 -i ../0001-anv-force-MEDIA_INTERFACE_DESCRIPTOR_LOAD-reemit-aft.patch
+
+  # https://gitlab.freedesktop.org/drm/intel/-/issues/6851
+  # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/20449
+  patch -Np1 -i ../0002-iris-Retry-DRM_IOCTL_I915_GEM_EXECBUFFER2-on-ENOMEM.patch
+  patch -Np1 -i ../0003-Revert-iris-Avoid-abort-if-kernel-can-t-allocate-mem.patch
 }
 
 build() {
