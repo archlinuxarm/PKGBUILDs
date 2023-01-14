@@ -1,0 +1,333 @@
+# Maintainer: Pierre Schmitz <pierre@archlinux.de>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - add -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 to CPPFLAGS
+
+pkgbase=php-legacy
+pkgname=('php-legacy'
+         'php-legacy-cgi'
+         'php-legacy-apache'
+         'php-legacy-fpm'
+         'php-legacy-embed'
+         'php-legacy-phpdbg'
+         'php-legacy-dblib'
+         'php-legacy-enchant'
+         'php-legacy-gd'
+         'php-legacy-sodium'
+         'php-legacy-odbc'
+         'php-legacy-pgsql'
+         'php-legacy-pspell'
+         'php-legacy-snmp'
+         'php-legacy-sqlite'
+         'php-legacy-tidy'
+         'php-legacy-xsl')
+pkgver=8.1.14
+pkgrel=1.1
+arch=('x86_64')
+license=('PHP')
+url='https://www.php.net/'
+makedepends=('apache' 'aspell' 'gdbm' 'enchant' 'gd' 'gmp' 'icu' 'libsodium' 'libxslt' 'libzip' 'net-snmp'
+             'postgresql-libs' 'sqlite' 'systemd' 'tidy' 'unixodbc' 'curl' 'libtool' 'postfix' 'freetds' 'pcre2' 'libnsl'
+             'oniguruma')
+checkdepends=('procps-ng')
+options=('debug')
+source=("https://php.net/distributions/php-${pkgver}.tar.xz"{,.asc}
+        'apache.patch' 'apache.conf' 'php-fpm.patch' 'php-fpm.tmpfiles' 'php.ini.patch' 'php-legacy.patch')
+sha256sums=('e16e47a872d58685913ac848ce92ec49f42c1828110c98c65fb6265a08724a1a'
+            'SKIP'
+            '702b163c66c65af92dcad8d79f41bda84bcd5d863235fcf1497c33a86db9e4ca'
+            '2173046ac22ac50c7a6721306d3f79b2086f66a7a6ff5d8af249a474763197a1'
+            '632aaa2e87f7d687b0b55a6a89e473d57891fdb0d20eef1b7733dabc02b78ba8'
+            'f3236ca866095d5e42e51e3fa600082ccd0afcfb7f1aecbeb286ef9d4f0dd564'
+            '0d651c14cbd76bf430cd9b0c3b3ebf12fd19bf3ca4a18cb6dc329e0352aabe66'
+            'a1859005c9fad835079470e6fb3c0721b9bd024c8f3ae1f34cb082ec41c63194')
+validpgpkeys=('F1F692238FBC1666E5A5CCD4199F9DFEF6FFBAFD'
+              '39B641343D8C104B2B146DC3F9C39DC0B9698544')
+_interpreter=${pkgver%.*}
+
+prepare() {
+	cd "${srcdir}/php-${pkgver}"
+
+	patch -p0 -i "${srcdir}/apache.patch"
+	patch -p0 -i "${srcdir}/php-fpm.patch"
+	patch -p0 -i "${srcdir}/php.ini.patch"
+	patch -p0 -i "${srcdir}/php-legacy.patch"
+	autoconf
+
+	# Disable failing tests
+	rm tests/output/stream_isatty_*.phpt
+	rm Zend/tests/arginfo_zpp_mismatch*.phpt
+}
+
+build() {
+	CPPFLAGS+=' -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64'
+	local _phpconfig="--srcdir=../php-${pkgver} \
+		--config-cache \
+		--prefix=/usr \
+		--sbindir=/usr/bin \
+		--sysconfdir=/etc/php-legacy \
+		--localstatedir=/var \
+		--with-layout=GNU \
+		--with-config-file-path=/etc/php-legacy \
+		--with-config-file-scan-dir=/etc/php-legacy/conf.d \
+		--disable-rpath \
+		--mandir=/usr/share/man \
+		--libdir=/usr/lib/php-legacy \
+		--datarootdir=/usr/share/php-legacy \
+		--datadir=/usr/share/php-legacy \
+		--program-suffix=-legacy \
+		--includedir=/usr/include/php-legacy \
+		--disable-gcc-global-regs \
+		"
+
+	local _phpextensions="\
+		--enable-bcmath=shared \
+		--enable-calendar=shared \
+		--enable-dba=shared \
+		--enable-exif=shared \
+		--enable-ftp=shared \
+		--enable-gd=shared \
+		--enable-intl=shared \
+		--enable-mbstring \
+		--enable-pcntl \
+		--enable-shmop=shared \
+		--enable-soap=shared \
+		--enable-sockets=shared \
+		--enable-sysvmsg=shared \
+		--enable-sysvsem=shared \
+		--enable-sysvshm=shared \
+		--with-bz2=shared \
+		--with-curl=shared \
+		--with-enchant=shared \
+		--with-external-gd \
+		--with-external-pcre \
+		--with-ffi=shared \
+		--with-gdbm \
+		--with-gettext=shared \
+		--with-gmp=shared \
+		--with-iconv=shared \
+		--with-kerberos \
+		--with-ldap=shared \
+		--with-ldap-sasl \
+		--with-mhash \
+		--with-mysql-sock=/run/mysqld/mysqld.sock \
+		--with-mysqli=shared,mysqlnd \
+		--with-openssl \
+		--with-password-argon2 \
+		--with-pdo-dblib=shared,/usr \
+		--with-pdo-mysql=shared,mysqlnd \
+		--with-pdo-odbc=shared,unixODBC,/usr \
+		--with-pdo-pgsql=shared \
+		--with-pdo-sqlite=shared \
+		--with-pgsql=shared \
+		--with-pspell=shared \
+		--with-readline \
+		--with-snmp=shared \
+		--with-sodium=shared \
+		--with-sqlite3=shared \
+		--with-tidy=shared \
+		--with-unixODBC=shared \
+		--with-xsl=shared \
+		--with-zip=shared \
+		--with-zlib \
+		"
+
+	EXTENSION_DIR=/usr/lib/php-legacy/modules
+	export EXTENSION_DIR
+
+	mkdir "${srcdir}/build"
+	cd "${srcdir}/build"
+	ln -s "../php-${pkgver}/configure"
+	./configure ${_phpconfig} \
+		--enable-cgi \
+		--enable-fpm \
+		--with-fpm-systemd \
+		--with-fpm-acl \
+		--with-fpm-user=http \
+		--with-fpm-group=http \
+		--enable-embed=shared \
+		${_phpextensions}
+	make
+
+	# apache
+	# reuse the previous run; this will save us a lot of time
+	cp -a "${srcdir}/build" "${srcdir}/build-apache"
+	cd "${srcdir}/build-apache"
+	./configure ${_phpconfig} \
+		--with-apxs2 \
+		${_phpextensions}
+	make
+
+	# phpdbg
+	cp -a "${srcdir}/build" "${srcdir}/build-phpdbg"
+	cd "${srcdir}/build-phpdbg"
+	./configure ${_phpconfig} \
+		--enable-phpdbg \
+		${_phpextensions}
+	make
+}
+
+check() {
+	cd "${srcdir}/build"
+
+	# Check if sendmail was configured correctly (FS#47600)
+	sapi/cli/php -n -r 'echo ini_get("sendmail_path");' | grep -q '/usr/bin/sendmail'
+
+	export REPORT_EXIT_STATUS=1
+	export NO_INTERACTION=1
+	export SKIP_ONLINE_TESTS=1
+	export SKIP_SLOW_TESTS=1
+	export TEST_PHP_ARGS="-j$(nproc)"
+	export TESTS='tests Zend'
+
+	make test
+}
+
+package_php-legacy() {
+	pkgdesc='A general-purpose scripting language that is especially suited to web development'
+	depends=('libxml2' 'curl' 'libzip' 'pcre2' 'argon2' 'oniguruma' 'gdbm')
+	provides=("php-interpreter=${_interpreter}" "php-legacy-intl=${pkgver}")
+	replaces=('php-legacy-intl')
+	conflicts=('php-legacy-intl')
+	backup=('etc/php-legacy/php.ini')
+
+	cd "${srcdir}/build"
+	make -j1 INSTALL_ROOT="${pkgdir}" install-{modules,cli,build,headers,programs,pharcmd}
+	install -D -m644 "${srcdir}/php-${pkgver}/php.ini-production" "${pkgdir}/etc/php-legacy/php.ini"
+	install -d -m755 "${pkgdir}/etc/php-legacy/conf.d/"
+
+	# remove static modules
+	rm -f "${pkgdir}/usr/lib/php-legacy/modules/"*.a
+	# remove modules provided by sub packages
+	rm -f "${pkgdir}/usr/lib/php-legacy/modules/"{enchant,gd,sodium,odbc,pdo_dblib,pdo_odbc,pgsql,pdo_pgsql,pspell,snmp,sqlite3,pdo_sqlite,tidy,xsl}.so
+	# remove empty directory
+	rmdir "${pkgdir}/usr/include/php-legacy/php/include"
+}
+
+package_php-legacy-cgi() {
+	pkgdesc='CGI and FCGI SAPI for PHP'
+	depends=('php-legacy')
+
+	cd "${srcdir}/build"
+	make -j1 INSTALL_ROOT="${pkgdir}" install-cgi
+}
+
+package_php-legacy-apache() {
+	pkgdesc='Apache SAPI for PHP'
+	depends=('php-legacy' 'apache' 'libnsl')
+	backup=('etc/httpd/conf/extra/php-legacy_module.conf')
+
+	install -D -m755 "${srcdir}/build-apache/libs/libphp.so" "${pkgdir}/usr/lib/httpd/modules/libphp-legacy.so"
+	install -D -m644 "${srcdir}/apache.conf" "${pkgdir}/etc/httpd/conf/extra/php-legacy_module.conf"
+}
+
+package_php-legacy-fpm() {
+	pkgdesc='FastCGI Process Manager for PHP'
+	depends=('php-legacy' 'systemd')
+	backup=('etc/php-legacy/php-fpm.conf' 'etc/php-legacy/php-fpm.d/www.conf')
+	options=('!emptydirs')
+
+	cd "${srcdir}/build"
+	make -j1 INSTALL_ROOT="${pkgdir}" install-fpm
+	install -D -m644 sapi/fpm/php-fpm.service "${pkgdir}/usr/lib/systemd/system/php-legacy-fpm.service"
+	install -D -m644 "${srcdir}/php-fpm.tmpfiles" "${pkgdir}/usr/lib/tmpfiles.d/php-legacy-fpm.conf"
+}
+
+package_php-legacy-embed() {
+	pkgdesc='Embedded PHP SAPI library'
+	depends=('php-legacy' 'systemd-libs' 'libnsl' 'libxcrypt')
+	options=('!emptydirs')
+
+	cd "${srcdir}/build"
+	make -j1 INSTALL_ROOT="${pkgdir}" PHP_SAPI=embed install-sapi
+	mv "${pkgdir}/usr/lib/libphp.so" "${pkgdir}/usr/lib/libphp-legacy.so"
+}
+
+package_php-legacy-phpdbg() {
+	pkgdesc='Interactive PHP debugger'
+	depends=('php-legacy')
+	options=('!emptydirs')
+
+	cd "${srcdir}/build-phpdbg"
+	make -j1 INSTALL_ROOT="${pkgdir}" install-phpdbg
+}
+
+package_php-legacy-dblib() {
+	pkgdesc='dblib module for PHP'
+	depends=('php-legacy' 'freetds')
+
+	install -D -m755 "${srcdir}/build/modules/pdo_dblib.so" "${pkgdir}/usr/lib/php-legacy/modules/pdo_dblib.so"
+}
+
+package_php-legacy-enchant() {
+	pkgdesc='enchant module for PHP'
+	depends=('php-legacy' 'enchant')
+
+	install -D -m755 "${srcdir}/build/modules/enchant.so" "${pkgdir}/usr/lib/php-legacy/modules/enchant.so"
+}
+
+package_php-legacy-gd() {
+	pkgdesc='gd module for PHP'
+	depends=('php-legacy' 'gd')
+
+	install -D -m755 "${srcdir}/build/modules/gd.so" "${pkgdir}/usr/lib/php-legacy/modules/gd.so"
+}
+
+package_php-legacy-sodium() {
+	pkgdesc='sodium module for PHP'
+	depends=('php-legacy' 'libsodium')
+
+	install -D -m755 "${srcdir}/build/modules/sodium.so" "${pkgdir}/usr/lib/php-legacy/modules/sodium.so"
+}
+
+package_php-legacy-odbc() {
+	pkgdesc='ODBC modules for PHP'
+	depends=('php-legacy' 'unixodbc')
+
+	install -D -m755 "${srcdir}/build/modules/odbc.so" "${pkgdir}/usr/lib/php-legacy/modules/odbc.so"
+	install -D -m755 "${srcdir}/build/modules/pdo_odbc.so" "${pkgdir}/usr/lib/php-legacy/modules/pdo_odbc.so"
+}
+
+package_php-legacy-pgsql() {
+	pkgdesc='PostgreSQL modules for PHP'
+	depends=('php-legacy' 'postgresql-libs')
+
+	install -D -m755 "${srcdir}/build/modules/pgsql.so" "${pkgdir}/usr/lib/php-legacy/modules/pgsql.so"
+	install -D -m755 "${srcdir}/build/modules/pdo_pgsql.so" "${pkgdir}/usr/lib/php-legacy/modules/pdo_pgsql.so"
+}
+
+package_php-legacy-pspell() {
+	pkgdesc='pspell module for PHP'
+	depends=('php-legacy' 'aspell')
+
+	install -D -m755 "${srcdir}/build/modules/pspell.so" "${pkgdir}/usr/lib/php-legacy/modules/pspell.so"
+}
+
+package_php-legacy-snmp() {
+	pkgdesc='snmp module for PHP'
+	depends=('php-legacy' 'net-snmp')
+
+	install -D -m755 "${srcdir}/build/modules/snmp.so" "${pkgdir}/usr/lib/php-legacy/modules/snmp.so"
+}
+
+package_php-legacy-sqlite() {
+	pkgdesc='sqlite module for PHP'
+	depends=('php-legacy' 'sqlite')
+
+	install -D -m755 "${srcdir}/build/modules/sqlite3.so" "${pkgdir}/usr/lib/php-legacy/modules/sqlite3.so"
+	install -D -m755 "${srcdir}/build/modules/pdo_sqlite.so" "${pkgdir}/usr/lib/php-legacy/modules/pdo_sqlite.so"
+}
+
+package_php-legacy-tidy() {
+	pkgdesc='tidy module for PHP'
+	depends=('php-legacy' 'tidy')
+
+	install -D -m755 "${srcdir}/build/modules/tidy.so" "${pkgdir}/usr/lib/php-legacy/modules/tidy.so"
+}
+
+package_php-legacy-xsl() {
+	pkgdesc='xsl module for PHP'
+	depends=('php-legacy' 'libxslt')
+
+	install -D -m755 "${srcdir}/build/modules/xsl.so" "${pkgdir}/usr/lib/php-legacy/modules/xsl.so"
+}
