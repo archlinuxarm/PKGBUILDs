@@ -19,14 +19,14 @@ pkgname=(
   uwsgi-plugin-cgi
   uwsgi-plugin-python
   uwsgi-plugin-php
-  uwsgi-plugin-php7
+  uwsgi-plugin-php-legacy
   uwsgi-plugin-lua51
   uwsgi-plugin-webdav
   uwsgi-plugin-zabbix
   uwsgi-plugin-notfound
 )
 pkgver=2.0.21
-pkgrel=2
+pkgrel=3
 pkgdesc="A full stack for building hosting services"
 arch=(x86_64)
 url="https://uwsgi-docs.readthedocs.io/en/latest/"
@@ -41,7 +41,7 @@ makedepends=(
   pcre
   perl
   php-embed
-  php7-embed
+  php-legacy-embed
   python
   python-gevent
   python-greenlet
@@ -63,6 +63,7 @@ source=(
   uwsgi.sysusers
   uwsgi.tmpfiles
   $pkgbase-1.9.13-ruby2.0.patch
+  $pkgbase-2.0.22-php8.2.patch
 )
 sha512sums=('36a9c1b87a4c3d08482b9045d2227f56b006acb53f38ddf1b510880ae5fc24c0177a077338ec8af3ef0b8f8e220bc4fc7f8311dab8066e13cbcbb616f736c795'
             '51c474a5ae025c0fae17dec309bea29550a8ca39815b7495189394ae5ce30eb264f77a45f48f9f7529c59d907baf139cdf7c488d1b13fcb862cc7b9bdc268804'
@@ -74,7 +75,8 @@ sha512sums=('36a9c1b87a4c3d08482b9045d2227f56b006acb53f38ddf1b510880ae5fc24c0177
             '937878372aa1556f6ba62ad7148d1681288c94d6cff609368a9e861dd4d4524330006a08ae5993441f7d3101170e3a0a681a4c8b3c2c13b364b8b1f81cf25117'
             '9e9eab08199cf08810ec95b0697cd8817226986d1e3aeb54845c0140ea5887360580348f295060c0558fb2d6aaed26fec929ea36b28cfeaf2b3588ce40fec3df'
             '4def9dcd06cfc2c6ce554add9d9545a01f3bb2681f0a2a6fc4ba68f91011111803a955cc41b5e70832ca448b196109368fdf874e81b7ec0edee4b51f864e16f7'
-            '162ca1be96282b32e8e6be919b6315bfd08954c491056958985bf99e7f5bdad3511665f059329d6cb6ef5d222f9aa11d4dc43c72e6a963ab941ada959fe8d964')
+            '162ca1be96282b32e8e6be919b6315bfd08954c491056958985bf99e7f5bdad3511665f059329d6cb6ef5d222f9aa11d4dc43c72e6a963ab941ada959fe8d964'
+            'd62db75b0e27bbc014ec5e69c360de79f523f33bc1ab15fe7957bf8531635be1bb77200d1ad6d50184eba18c6d56bcdd284082c042792ef7822233128bc22fbc')
 b2sums=('3c5fc3ce3a6a7f8f915bb302c0b775a75227f859dd2b141034e8b1aa5cb867b447ed532b3e8b537db80acc908fc26121b752e35ebc0bf9a542678843fd02ff54'
         '46f833e5d179d950bcbab51b539e6431959c9e3618c0d66b791a4b4d866b6195707704b394224b4fea97e1f65188b8b474499d70e5c2bb44da32c60447b80806'
         '835a1036422e9821cd52ffdf5a6053bdd59fc700d473600bda60b6730746f6c0750c30c85f4139d3ea81c6b6dd10d6849f9406decee3179861c51aca90da6161'
@@ -85,7 +87,8 @@ b2sums=('3c5fc3ce3a6a7f8f915bb302c0b775a75227f859dd2b141034e8b1aa5cb867b447ed532
         'a8b7d003f66ed5c5b1b60d57c05339af3dcdcf346eab52760810086e17f6936dd29ed7fd26281657bc86ac6721c989cbfbaa8e81f97111c807bcd06baece3bf2'
         '82e03ea95995cfa78abc4d930bd0c250f22788d9ca4dc0921cfbb44a965c0f851cbcc7a855e36ec6e6aa5bf33fbd313b4fe68a2f1c4b7935c2b297be25895324'
         '9759827f7619358383bf0e68c955522c0054620f742f5122a59888fadfc0bc20bd587eab7a77bc73e8ee4d20cf8f02625c07f241462e8ab9c08f5af509daaef3'
-        '0068763ca5a2f1b60782f53070cbff8cf930e1463d9199b156b02413026bcdb3d923bffcbba063a26d620b8e734bdbd26a4c22776532546ad8c8e5c0c73bd7d6')
+        '0068763ca5a2f1b60782f53070cbff8cf930e1463d9199b156b02413026bcdb3d923bffcbba063a26d620b8e734bdbd26a4c22776532546ad8c8e5c0c73bd7d6'
+        '99ddfb9918395d9d04284c6ab5160986d1aa7cdb175237ff5d2af8438a7a78b535836dee3c16dd0b8c917a00fdc9e64880756595b3070b941c406d99580c102c')
 
 prepare() {
   cd $pkgbase-$pkgver
@@ -98,12 +101,13 @@ prepare() {
   # move ruby plugin to new location and fix its name
   mv plugins/ruby{19,}
   sed -e 's/ruby19/ruby/' -i plugins/ruby/uwsgiplugin.py
-  # duplicate the php plugin, so that we can modify it (and leave the php7
-  # version unmodified)
-  cp -av plugins/php{,7}
   # remove the explicit lib version from the linking stage of the PHP plugin as
   # we do not provide /usr/lib/libphp8.so
   sed -e "s/ + php_version//" -i plugins/php/uwsgiplugin.py
+  # Compatibility with PHP 8.2
+  patch -p1 -i "$srcdir/$pkgbase-2.0.22-php8.2.patch"
+  # duplicate the php plugin, so that we can modify it
+  cp -av plugins/php{,_legacy}
   # copy our custom build profile into place
   cp -v ../archlinux.ini buildconf/
 }
@@ -111,9 +115,9 @@ prepare() {
 build() {
   cd $pkgbase-$pkgver
   python uwsgiconfig.py --verbose --build archlinux
-  # build php7 plugin separately and override php-config in use
-  UWSGICONFIG_PHPPATH='php-config7' \
-  python uwsgiconfig.py --verbose --plugin plugins/php7 archlinux php7
+  # build php-legacy plugin separately and override php-config in use
+  UWSGICONFIG_PHPPATH='php-config-legacy' \
+  python uwsgiconfig.py --verbose --plugin plugins/php_legacy archlinux php_legacy
 }
 
 package_uwsgi() {
@@ -187,12 +191,12 @@ package_uwsgi-plugin-php() {
   install -vDm 755 php_plugin.so -t "$pkgdir"/usr/lib/uwsgi/
 }
 
-package_uwsgi-plugin-php7() {
-  pkgdesc+=" (PHP7 plugin)"
-  depends=(glibc php7-embed uwsgi)
+package_uwsgi-plugin-php-legacy() {
+  pkgdesc+=" (PHP Legacy plugin)"
+  depends=(glibc php-legacy-embed uwsgi)
 
   cd $pkgbase-$pkgver
-  install -vDm 755 php7_plugin.so -t "$pkgdir"/usr/lib/uwsgi/
+  install -vDm 755 php_legacy_plugin.so -t "$pkgdir"/usr/lib/uwsgi/
 }
 
 package_uwsgi-plugin-webdav() {
