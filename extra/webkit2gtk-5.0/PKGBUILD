@@ -73,15 +73,18 @@ makedepends=(
   systemd
   wayland-protocols
 )
-options=(debug)
-source=($url/releases/webkitgtk-$pkgver.tar.xz{,.asc})
+source=($url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
+        "0001-ARM-NEON-FELightningNEON.cpp-fails-to-build-NEON-fas.patch")
 sha256sums=('41f001d1ed448c6936b394a9f20e4640eebf83a7f08262df28504f7410604a5a'
-            'SKIP')
+            'SKIP'
+            'eaa7eb7f60f497872a419ecf1ae397b9f8e986ff42fd78c8b2c8243d886f5767')
 validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
               '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
 
 prepare() {
   cd webkitgtk-$pkgver
+  # Building for ARM fails: https://github.com/flatpak/xdg-desktop-portal/issues/952
+  git apply ../0001-ARM-NEON-FELightningNEON.cpp-fails-to-build-NEON-fas.patch
 }
 
 build() {
@@ -89,8 +92,11 @@ build() {
   # build too slow and is too much to package for debuginfod
   CFLAGS+=' -g1'
   CXXFLAGS+=' -g1'
-
-  [[ $CARCH == "armv7h" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/neon/vfpv3/'` && CXXFLAGS="$CFLAGS"
+  # Disable neon simd on armv7h devices, even with the above patch, it still fails to link (see github issue).
+  if [ "${arch}" == "armv7h" ]; then
+    CFLAGS+=' -mfpu=vfpv3-d16'
+    CXXFLAGS+=' -mfpu=vfpv3-d16'
+  fi
 
   cmake -S webkitgtk-$pkgver -B build -G Ninja \
     -DPORT=GTK \
@@ -103,6 +109,7 @@ build() {
     -DUSE_GTK4=ON \
     -DENABLE_DOCUMENTATION=ON \
     -DENABLE_MINIBROWSER=ON
+  # ARMv7 devices dont have much memory, so you might want to add "-j 1" here:
   cmake --build build
 }
 
