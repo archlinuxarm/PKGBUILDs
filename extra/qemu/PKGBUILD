@@ -3,7 +3,9 @@
 # Contributor: Sébastien "Seblu" Luttringer <seblu@seblu.net>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - remove makedepends on numactl and seabios, revert not installing qemu seabios files
+#  - remove makedepends on seabios, revert not installing qemu seabios files
+# ALARM: Qu Wenruo <wqu@suse.com>
+#  - remove static build, make qemu-base/qemu-desktop meta packages to use their native system emulator as default dependency
 
 pkgbase=qemu
 pkgname=(
@@ -23,7 +25,7 @@ pkgname=(
   qemu-tests
   qemu-tools
   qemu-ui-{curses,dbus,egl-headless,gtk,opengl,sdl,spice-{app,core}}
-  qemu-user{,-static}{,-binfmt}
+  qemu-user{,-binfmt}
   qemu-vhost-user-gpu
   qemu-virtiofsd
   qemu-{base,desktop,emulators-full,full}
@@ -81,6 +83,7 @@ makedepends=(
   multipath-tools
   ncurses
   ndctl
+  numactl
   pam
   pcre2
   python
@@ -140,6 +143,7 @@ _qemu_system_deps=(
   liburing liburing.so
   lzo
   ndctl
+  numactl libnuma.so
   pam libpam.so
   pixman libpixman-1.so
   qemu-common=$pkgver-$pkgrel
@@ -238,54 +242,9 @@ prepare() {
 
   # create build dir
   mkdir -vp build
-  mkdir -vp build-static
 }
 
 build() {
-  (
-    cd build-static
-    ../$pkgbase-$pkgver/configure \
-      --prefix=/usr \
-      --sysconfdir=/etc \
-      --libexecdir=/usr/lib/qemu \
-      --enable-attr \
-      --enable-linux-user \
-      --enable-tcg \
-      --disable-bpf \
-      --disable-bsd-user \
-      --disable-capstone \
-      --disable-docs \
-      --disable-fdt \
-      --disable-gcrypt \
-      --disable-glusterfs \
-      --disable-gnutls \
-      --disable-gtk \
-      --disable-install-blobs \
-      --disable-kvm \
-      --disable-libiscsi \
-      --disable-libnfs \
-      --disable-libssh \
-      --disable-linux-io-uring \
-      --disable-nettle \
-      --disable-opengl \
-      --disable-qom-cast-debug \
-      --disable-sdl \
-      --disable-system \
-      --disable-tools \
-      --disable-tpm \
-      --disable-vde \
-      --disable-vhost-crypto \
-      --disable-vhost-kernel \
-      --disable-vhost-net \
-      --disable-vhost-user \
-      --disable-vnc \
-      --disable-werror \
-      --disable-xen \
-      --disable-zstd \
-      --static
-    ninja
-  )
-
   # Build only minimal debug info to reduce size
   CFLAGS+=' -g1'
   CXXFLAGS+=' -g1'
@@ -325,23 +284,6 @@ package_qemu-common() {
     etc/sasl2/$pkgbase.conf
   )
   install=$pkgname.install
-
-  # install static binaries
-  meson install -C build-static --destdir "$pkgdir"
-  install -vdm 755 "$pkgdir/usr/lib/binfmt.d/"
-  $pkgbase-$pkgver/scripts/qemu-binfmt-conf.sh "${binfmt_conf_options[@]}"
-
-  # rename static binaries to prevent name conflicts
-  for _src in "$pkgdir/usr/bin/qemu-"*; do
-    mv -v "$_src" "$pkgdir/usr/bin/$(basename "$_src")-static"
-  done
-  # modify and rename binfmt.d configs to prevent name conflicts
-  for _conf in "$pkgdir/usr/lib/binfmt.d/"*; do
-    _exe_name="$(basename "${_conf/.conf/}")"
-    _new_exe_name="${_exe_name}-static"
-    _new_conf_name="${_conf/.conf/-static.conf}"
-    sed -e "s|usr/bin/${_exe_name}|usr/bin/${_new_exe_name}|" "$_conf" > "${_new_conf_name}"
-  done
 
   # install default binaries
   meson install -C build --destdir "$pkgdir"
@@ -533,9 +475,6 @@ package_qemu-common() {
     _pick qemu-ui-spice-app usr/lib/qemu/ui-spice-app.so
     _pick qemu-ui-spice-core usr/lib/qemu/ui-spice-core.so
 
-    _pick qemu-user-static usr/bin/qemu-*-static
-    _pick qemu-user-static-binfmt usr/lib/binfmt.d/*-static.conf
-
     _pick qemu-user usr/bin/qemu-{aarch64{,_be},alpha,arm{,eb},cris,hexagon,hppa,i386,loongarch64,m68k,microblaze{,el},mips{,64,64el,el,n32,n32el},nios2,or1k,ppc{,64,64le},riscv{32,64},s390x,sh4{,eb},sparc{,32plus,64},x86_64,xtensa{,eb}}
     _pick qemu-user-binfmt usr/lib/binfmt.d/*.conf
 
@@ -709,7 +648,8 @@ package_qemu-hw-s390x-virtio-gpu-ccw() {
 
 package_qemu-system-aarch64() {
   pkgdesc="QEMU system emulator for AARCH64"
-  depends=("${_qemu_system_deps[@]}" edk2-aarch64 systemd-libs libudev.so)
+  depends=("${_qemu_system_deps[@]}" systemd-libs libudev.so)
+  optdepends=(edk2-armvirt)
   mv -v $pkgname/* "$pkgdir"
 }
 
@@ -1012,21 +952,6 @@ package_qemu-user-binfmt() {
   mv -v $pkgname/* "$pkgdir"
 }
 
-package_qemu-user-static() {
-  pkgdesc="QEMU static user mode emulation"
-  depends=(glibc)
-  optdepends=('qemu-user-static-binfmt: for binary format rules')
-  mv -v $pkgname/* "$pkgdir"
-}
-
-package_qemu-user-static-binfmt() {
-  pkgdesc="Binary format rules for QEMU static user mode emulation"
-  depends=(qemu-user-static=$pkgver-$pkgrel)
-  provides=(qemu-user-binfmt-provider)
-  conflicts=(qemu-user-binfmt-provider)
-  mv -v $pkgname/* "$pkgdir"
-}
-
 package_qemu-vhost-user-gpu() {
   pkgdesc="QEMU vhost-user-gpu display device"
   depends=(gcc-libs glib2 libglib-2.0.so libgmodule-2.0.so glibc pixman libpixman-1.so mesa numactl libnuma.so qemu-common=$pkgver-$pkgrel virglrenderer)
@@ -1052,11 +977,18 @@ package_qemu-base() {
     qemu-hw-usb-{host,redirect,smartcard}=$pkgver-$pkgrel
     qemu-img=$pkgver-$pkgrel
     qemu-pr-helper=$pkgver-$pkgrel
-    qemu-system-x86=$pkgver-$pkgrel
     qemu-tools=$pkgver-$pkgrel
     qemu-ui-{curses,spice-{app,core}}=$pkgver-$pkgrel
     qemu-virtiofsd=$pkgver-$pkgrel
   )
+  # Add the native target as the dependency.
+  if [ $CARCH == "x86_64" ]; then
+    depends+=(qemu-system-x86=$pkgver-$pkgrel)
+  elif [ $CARCH == "aarch64" ]; then
+    depends+=(qemu-system-aarch64=$pkgver-$pkgrel)
+  elif [ $CARCH == "arm" ]; then
+    depends+=(qemu-system-arm=$pkgver-$pkgrel)
+  fi
   optdepends=("${_qemu_optdepends[@]}")
   # TODO: remove conflicts/provides/replaces for qemu-headless after 2022-10-01
   conflicts=(qemu qemu-headless)
@@ -1077,12 +1009,19 @@ package_qemu-desktop() {
     qemu-hw-usb-{host,redirect,smartcard}=$pkgver-$pkgrel
     qemu-img=$pkgver-$pkgrel
     qemu-pr-helper=$pkgver-$pkgrel
-    qemu-system-x86=$pkgver-$pkgrel
     qemu-tools=$pkgver-$pkgrel
     qemu-ui-{curses,dbus,egl-headless,gtk,opengl,sdl,spice-{app,core}}=$pkgver-$pkgrel
     qemu-vhost-user-gpu=$pkgver-$pkgrel
     qemu-virtiofsd=$pkgver-$pkgrel
   )
+  # Add the native target as the dependency.
+  if [ $CARCH == "x86_64" ]; then
+    depends+=(qemu-system-x86=$pkgver-$pkgrel)
+  elif [ $CARCH == "aarch64" ]; then
+    depends+=(qemu-system-aarch64=$pkgver-$pkgrel)
+  elif [ $CARCH == "arm" ]; then
+    depends+=(qemu-system-arm=$pkgver-$pkgrel)
+  fi
   optdepends=("${_qemu_optdepends[@]}")
   conflicts=(qemu)
   provides=(qemu=$pkgver)
