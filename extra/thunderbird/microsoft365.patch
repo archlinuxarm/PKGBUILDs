@@ -1,0 +1,430 @@
+diff --git a/mailnews/base/src/OAuth2.jsm b/mailnews/base/src/OAuth2.jsm
+--- a/comm/mailnews/base/src/OAuth2.jsm
++++ b/comm/mailnews/base/src/OAuth2.jsm
+@@ -32,16 +32,17 @@ var gConnecting = {};
+  * @param {string} issuerDetails.tokenEndpoint - The token endpoint as defined
+  *   by RFC 6749 Section 3.2.
+  */
+ function OAuth2(scope, issuerDetails) {
+   this.scope = scope;
+   this.authorizationEndpoint = issuerDetails.authorizationEndpoint;
+   this.clientId = issuerDetails.clientId;
+   this.consumerSecret = issuerDetails.clientSecret || null;
++  this.useCORS = issuerDetails.useCORS;
+   this.redirectionEndpoint =
+     issuerDetails.redirectionEndpoint || "http://localhost";
+   this.tokenEndpoint = issuerDetails.tokenEndpoint;
+ 
+   this.extraAuthParams = [];
+ 
+   this.log = console.createInstance({
+     prefix: "mailnews.oauth",
+@@ -52,16 +53,17 @@ function OAuth2(scope, issuerDetails) {
+ 
+ OAuth2.prototype = {
+   clientId: null,
+   consumerSecret: null,
+   requestWindowURI: "chrome://messenger/content/browserRequest.xhtml",
+   requestWindowFeatures: "chrome,private,centerscreen,width=980,height=750",
+   requestWindowTitle: "",
+   scope: null,
++  useCORS: true,
+ 
+   accessToken: null,
+   refreshToken: null,
+   tokenExpires: 0,
+ 
+   connect(aSuccess, aFailure, aWithUI, aRefresh) {
+     this.connectSuccessCallback = aSuccess;
+     this.connectFailureCallback = aFailure;
+@@ -249,21 +251,27 @@ OAuth2.prototype = {
+       this.log.info(
+         `Making access token request to the token endpoint: ${this.tokenEndpoint}`
+       );
+       data.append("grant_type", "authorization_code");
+       data.append("code", aCode);
+       data.append("redirect_uri", this.redirectionEndpoint);
+     }
+ 
+-    fetch(this.tokenEndpoint, {
++    const fetchOptions = {
+       method: "POST",
+       cache: "no-cache",
+       body: data,
+-    })
++    };
++
++    if (!this.useCORS) {
++      fetchOptions.mode = "no-cors";
++    }
++
++    fetch(this.tokenEndpoint, fetchOptions)
+       .then(response => response.json())
+       .then(result => {
+         let resultStr = JSON.stringify(result, null, 2);
+         if ("error" in result) {
+           // RFC 6749 section 5.2. Error Response
+           this.log.info(
+             `The authorization server returned an error response: ${resultStr}`
+           );
+diff --git a/mailnews/base/src/OAuth2Providers.jsm b/mailnews/base/src/OAuth2Providers.jsm
+--- a/comm/mailnews/base/src/OAuth2Providers.jsm
++++ b/comm/mailnews/base/src/OAuth2Providers.jsm
+@@ -80,67 +80,73 @@ var kIssuers = new Map([
+   [
+     "accounts.google.com",
+     {
+       clientId:
+         "406964657835-aq8lmia8j95dhl1a2bvharmfk3t1hgqj.apps.googleusercontent.com",
+       clientSecret: "kSmqreRr0qwBWJgbf5Y-PjSU",
+       authorizationEndpoint: "https://accounts.google.com/o/oauth2/auth",
+       tokenEndpoint: "https://www.googleapis.com/oauth2/v3/token",
++      useCORS: true,
+     },
+   ],
+   [
+     "o2.mail.ru",
+     {
+       clientId: "thunderbird",
+       clientSecret: "I0dCAXrcaNFujaaY",
+       authorizationEndpoint: "https://o2.mail.ru/login",
+       tokenEndpoint: "https://o2.mail.ru/token",
++      useCORS: true,
+     },
+   ],
+   [
+     "oauth.yandex.com",
+     {
+       clientId: "2a00bba7374047a6ab79666485ffce31",
+       clientSecret: "3ded85b4ec574c2187a55dc49d361280",
+       authorizationEndpoint: "https://oauth.yandex.com/authorize",
+       tokenEndpoint: "https://oauth.yandex.com/token",
++      useCORS: true,
+     },
+   ],
+   [
+     "login.yahoo.com",
+     {
+       clientId:
+         "dj0yJmk9NUtCTWFMNVpTaVJmJmQ9WVdrOVJ6UjVTa2xJTXpRbWNHbzlNQS0tJnM9Y29uc3VtZXJzZWNyZXQmeD0yYw--",
+       clientSecret: "f2de6a30ae123cdbc258c15e0812799010d589cc",
+       authorizationEndpoint: "https://api.login.yahoo.com/oauth2/request_auth",
+       tokenEndpoint: "https://api.login.yahoo.com/oauth2/get_token",
++      useCORS: true,
+     },
+   ],
+   [
+     "login.aol.com",
+     {
+       clientId:
+         "dj0yJmk9OXRHc1FqZHRQYzVvJmQ9WVdrOU1UQnJOR0pvTjJrbWNHbzlNQS0tJnM9Y29uc3VtZXJzZWNyZXQmeD02NQ--",
+       clientSecret: "79c1c11991d148ddd02a919000d69879942fc278",
+       authorizationEndpoint: "https://api.login.aol.com/oauth2/request_auth",
+       tokenEndpoint: "https://api.login.aol.com/oauth2/get_token",
++      useCORS: true,
+     },
+   ],
+ 
+   [
+     "login.microsoftonline.com",
+     {
+       clientId: "9e5f94bc-e8a4-4e73-b8be-63364c29d753", // Application (client) ID
+       // https://docs.microsoft.com/en-us/azure/active-directory/develop/active-directory-v2-protocols#endpoints
+       authorizationEndpoint:
+         "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+       tokenEndpoint:
+         "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+       redirectionEndpoint: "https://localhost",
++      useCORS: false,
+     },
+   ],
+ 
+   // For testing purposes.
+   [
+     "mochi.test",
+     {
+       clientId: "test_client_id",
+@@ -148,16 +154,17 @@ var kIssuers = new Map([
+       authorizationEndpoint:
+         "http://mochi.test:8888/browser/comm/mail/components/addrbook/test/browser/data/redirect_auto.sjs",
+       tokenEndpoint:
+         "http://mochi.test:8888/browser/comm/mail/components/addrbook/test/browser/data/token.sjs",
+       // I don't know why, but tests refuse to work with a plain HTTP endpoint
+       // (the request is redirected to HTTPS, which we're not listening to).
+       // Just use an HTTPS endpoint.
+       redirectionEndpoint: "https://localhost",
++      useCORS: true,
+     },
+   ],
+ ]);
+ 
+ /**
+  * OAuth2Providers: Methods to lookup OAuth2 parameters for supported OAuth2
+  * providers.
+  */
+diff --git a/mailnews/base/src/OAuth2.jsm b/mailnews/base/src/OAuth2.jsm
+--- a/comm/mailnews/base/src/OAuth2.jsm
++++ b/comm/mailnews/base/src/OAuth2.jsm
+@@ -37,10 +37,10 @@ function OAuth2(scope, issuerDetails) {
+   this.authorizationEndpoint = issuerDetails.authorizationEndpoint;
+   this.clientId = issuerDetails.clientId;
+   this.consumerSecret = issuerDetails.clientSecret || null;
+-  this.useCORS = issuerDetails.useCORS;
+   this.redirectionEndpoint =
+     issuerDetails.redirectionEndpoint || "http://localhost";
+   this.tokenEndpoint = issuerDetails.tokenEndpoint;
++  this.useHttpChannel = issuerDetails.useHttpChannel || false;
+ 
+   this.extraAuthParams = [];
+ 
+@@ -58,7 +58,7 @@ OAuth2.prototype = {
+   requestWindowFeatures: "chrome,private,centerscreen,width=980,height=750",
+   requestWindowTitle: "",
+   scope: null,
+-  useCORS: true,
++  useHttpChannel: false,
+ 
+   accessToken: null,
+   refreshToken: null,
+@@ -256,53 +256,138 @@ OAuth2.prototype = {
+       data.append("redirect_uri", this.redirectionEndpoint);
+     }
+ 
+-    const fetchOptions = {
+-      method: "POST",
+-      cache: "no-cache",
+-      body: data,
+-    };
++    // Microsoft's OAuth explicitly breaks on receiving an Origin header, and
++    // we don't have control over whether fetch() sends Origin. Later versions
++    // of Gecko don't send it in this instance, but we have to work around it in
++    // this one.
++    if (this.useHttpChannel) {
++      // Get the request body as a string-based stream
++      let stream = Cc["@mozilla.org/io/string-input-stream;1"].createInstance(
++        Ci.nsIStringInputStream
++      );
++
++      let body = data.toString();
++      stream.setUTF8Data(body, body.length);
++
++      // Set up an HTTP channel in order to make our request
++      let channel = Services.io.newChannelFromURI(
++        Services.io.newURI(this.tokenEndpoint),
++        null,
++        Services.scriptSecurityManager.getSystemPrincipal(),
++        null,
++        Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_SEC_CONTEXT_IS_NULL,
++        Ci.nsIContentPolicy.TYPE_OTHER
++      );
++
++      channel.QueryInterface(Ci.nsIHttpChannel);
++      channel.setRequestHeader(
++        "Content-Type",
++        "application/x-www-form-urlencoded",
++        false
++      );
++
++      channel.QueryInterface(Ci.nsIUploadChannel);
++      channel.setUploadStream(stream, "application/x-www-form-urlencoded", -1);
++      channel.requestMethod = "POST";
++
++      // Set up a response handler for our request
++      let listener = Cc["@mozilla.org/network/stream-loader;1"].createInstance(
++        Ci.nsIStreamLoader
++      );
++
++      const oauth = this;
++
++      listener.init({
++        onStreamComplete(loader, context, status, resultLength, resultBytes) {
++          try {
++            let resultStr = new TextDecoder().decode(
++              Uint8Array.from(resultBytes)
++            );
++            let result = JSON.parse(resultStr);
+ 
+-    if (!this.useCORS) {
+-      fetchOptions.mode = "no-cors";
+-    }
++            if ("error" in result) {
++              // RFC 6749 section 5.2. Error Response
++              oauth.log.info(
++                `The authorization server returned an error response: ${resultStr}`
++              );
++              // Typically in production this would be {"error": "invalid_grant"}.
++              // That is, the token expired or was revoked (user changed password?).
++              // Reset the tokens we have and call success so that the auth flow
++              // will be re-triggered.
++              oauth.accessToken = null;
++              oauth.refreshToken = null;
++              oauth.connectSuccessCallback();
++              return;
++            }
++
++            // RFC 6749 section 5.1. Successful Response
++            oauth.log.info(
++              `Successful response from the authorization server: ${resultStr}`
++            );
++            oauth.accessToken = result.access_token;
++            if ("refresh_token" in result) {
++              oauth.refreshToken = result.refresh_token;
++            }
++            if ("expires_in" in result) {
++              oauth.tokenExpires =
++                new Date().getTime() + result.expires_in * 1000;
++            } else {
++              oauth.tokenExpires = Number.MAX_VALUE;
++            }
+ 
+-    fetch(this.tokenEndpoint, fetchOptions)
+-      .then(response => response.json())
+-      .then(result => {
+-        let resultStr = JSON.stringify(result, null, 2);
+-        if ("error" in result) {
+-          // RFC 6749 section 5.2. Error Response
++            oauth.connectSuccessCallback();
++          } catch (err) {
++            oauth.log.info(`Connection to authorization server failed: ${err}`);
++            oauth.connectFailureCallback(err);
++          }
++        },
++      });
++
++      // Make the request
++      channel.asyncOpen(listener, channel);
++    } else {
++      fetch(this.tokenEndpoint, {
++        method: "POST",
++        cache: "no-cache",
++        body: data,
++      })
++        .then(response => response.json())
++        .then(result => {
++          let resultStr = JSON.stringify(result, null, 2);
++          if ("error" in result) {
++            // RFC 6749 section 5.2. Error Response
++            this.log.info(
++              `The authorization server returned an error response: ${resultStr}`
++            );
++            // Typically in production this would be {"error": "invalid_grant"}.
++            // That is, the token expired or was revoked (user changed password?).
++            // Reset the tokens we have and call success so that the auth flow
++            // will be re-triggered.
++            this.accessToken = null;
++            this.refreshToken = null;
++            this.connectSuccessCallback();
++            return;
++          }
++
++          // RFC 6749 section 5.1. Successful Response
+           this.log.info(
+-            `The authorization server returned an error response: ${resultStr}`
++            `Successful response from the authorization server: ${resultStr}`
+           );
+-          // Typically in production this would be {"error": "invalid_grant"}.
+-          // That is, the token expired or was revoked (user changed password?).
+-          // Reset the tokens we have and call success so that the auth flow
+-          // will be re-triggered.
+-          this.accessToken = null;
+-          this.refreshToken = null;
++          this.accessToken = result.access_token;
++          if ("refresh_token" in result) {
++            this.refreshToken = result.refresh_token;
++          }
++          if ("expires_in" in result) {
++            this.tokenExpires = new Date().getTime() + result.expires_in * 1000;
++          } else {
++            this.tokenExpires = Number.MAX_VALUE;
++          }
+           this.connectSuccessCallback();
+-          return;
+-        }
+-
+-        // RFC 6749 section 5.1. Successful Response
+-        this.log.info(
+-          `Successful response from the authorization server: ${resultStr}`
+-        );
+-        this.accessToken = result.access_token;
+-        if ("refresh_token" in result) {
+-          this.refreshToken = result.refresh_token;
+-        }
+-        if ("expires_in" in result) {
+-          this.tokenExpires = new Date().getTime() + result.expires_in * 1000;
+-        } else {
+-          this.tokenExpires = Number.MAX_VALUE;
+-        }
+-        this.connectSuccessCallback();
+-      })
+-      .catch(err => {
+-        this.log.info(`Connection to authorization server failed: ${err}`);
+-        this.connectFailureCallback(err);
+-      });
++        })
++        .catch(err => {
++          this.log.info(`Connection to authorization server failed: ${err}`);
++          this.connectFailureCallback(err);
++        });
++    }
+   },
+ };
+diff --git a/mailnews/base/src/OAuth2Providers.jsm b/mailnews/base/src/OAuth2Providers.jsm
+--- a/comm/mailnews/base/src/OAuth2Providers.jsm
++++ b/comm/mailnews/base/src/OAuth2Providers.jsm
+@@ -85,7 +85,6 @@ var kIssuers = new Map([
+       clientSecret: "kSmqreRr0qwBWJgbf5Y-PjSU",
+       authorizationEndpoint: "https://accounts.google.com/o/oauth2/auth",
+       tokenEndpoint: "https://www.googleapis.com/oauth2/v3/token",
+-      useCORS: true,
+     },
+   ],
+   [
+@@ -95,7 +94,6 @@ var kIssuers = new Map([
+       clientSecret: "I0dCAXrcaNFujaaY",
+       authorizationEndpoint: "https://o2.mail.ru/login",
+       tokenEndpoint: "https://o2.mail.ru/token",
+-      useCORS: true,
+     },
+   ],
+   [
+@@ -105,7 +103,6 @@ var kIssuers = new Map([
+       clientSecret: "3ded85b4ec574c2187a55dc49d361280",
+       authorizationEndpoint: "https://oauth.yandex.com/authorize",
+       tokenEndpoint: "https://oauth.yandex.com/token",
+-      useCORS: true,
+     },
+   ],
+   [
+@@ -116,7 +113,6 @@ var kIssuers = new Map([
+       clientSecret: "f2de6a30ae123cdbc258c15e0812799010d589cc",
+       authorizationEndpoint: "https://api.login.yahoo.com/oauth2/request_auth",
+       tokenEndpoint: "https://api.login.yahoo.com/oauth2/get_token",
+-      useCORS: true,
+     },
+   ],
+   [
+@@ -127,7 +123,6 @@ var kIssuers = new Map([
+       clientSecret: "79c1c11991d148ddd02a919000d69879942fc278",
+       authorizationEndpoint: "https://api.login.aol.com/oauth2/request_auth",
+       tokenEndpoint: "https://api.login.aol.com/oauth2/get_token",
+-      useCORS: true,
+     },
+   ],
+ 
+@@ -141,7 +136,7 @@ var kIssuers = new Map([
+       tokenEndpoint:
+         "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+       redirectionEndpoint: "https://localhost",
+-      useCORS: false,
++      useHttpChannel: true,
+     },
+   ],
+ 
+@@ -159,7 +154,6 @@ var kIssuers = new Map([
+       // (the request is redirected to HTTPS, which we're not listening to).
+       // Just use an HTTPS endpoint.
+       redirectionEndpoint: "https://localhost",
+-      useCORS: true,
+     },
+   ],
+ ]);
