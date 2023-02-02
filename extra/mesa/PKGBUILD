@@ -14,8 +14,8 @@ highmem=1
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-virtio' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=22.3.3
-pkgrel=3
+pkgver=22.3.4
+pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
@@ -30,11 +30,11 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0002-iris-Retry-DRM_IOCTL_I915_GEM_EXECBUFFER2-on-ENOMEM.patch
         0003-Revert-iris-Avoid-abort-if-kernel-can-t-allocate-mem.patch
         LICENSE)
-sha512sums=('dcf166bc7c80e6ad09337e0188219e5ea4bdc558bc4b4ca35ce30d5421568f6b5328e5508b3175a2696521214e466354d8652ade22468ce448d9f61d5709c8a1'
+sha512sums=('6af340153244d3e95d0e155a45d6db134335654d62590797ae0ef6ba44c2ccfe91ebf95f70ff82c67cee108ac35536767b1f6848d6d1129f52eb9e8414ee321d'
             'SKIP'
-            '6150324d4e4b974bd2398157decaceef69bb0867d878d60fb9f4d15fa2fc52948edd27b787846cc1e552a331f7e91953bd3c4a4500d5445df1dba1fe3326bcfe'
-            '33067a6fab6c078cb829b6266ab5e328929923ace7c580c3b347f25682b4427a5f7cfd52234311636fc23e03beb021c543020d3deb30bf8515f58bf78173bde8'
-            '94f25da531a1ccbb630f0b1ccd80fe85aae60cba7b6e29b2761d4014b79f611eb4b89b2e29e2501231620ee381bc91e546ad2158cf76ec2d6c678d048553eba0'
+            '64f55c8fbb53c6cdf4a2898d8fc633e37a9f5b71284c222030914dedbddd0a712969378f3e7dc336c5e6349d5dd3d2e117e4ff5d83a9336847a20a1bd0dc09bb'
+            'f0dfde13bd7c08ece286c04c67729ec86e60dd61730a947c7bef19605303f413e3a125eec6081a40ef8fc15b7571aef2b8e42fe0bece9c53de4e5774783e48b4'
+            '6f5ff5185815c878999a4aa2f6b8251a68403c6755de9f58f89332251e04658729af7d9570761b2dc1367c5e33e2cce22b7e7199dcf6a64717e704034db6f8c0'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
