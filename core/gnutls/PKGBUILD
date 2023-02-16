@@ -1,0 +1,60 @@
+# Maintainer: Andreas Radke <andyrtr@archlinux.org>
+# Contributor: Jan de Groot <jgc@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - compile v7 with -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64
+
+pkgname=gnutls
+pkgver=3.7.9
+pkgrel=1.1
+pkgdesc="A library which provides a secure layer over a reliable transport layer"
+arch=('x86_64')
+license=('GPL3' 'LGPL2.1')
+url="https://www.gnutls.org/"
+options=('!zipman')
+depends=('gcc-libs' 'libtasn1' 'readline' 'zlib' 'nettle' 'p11-kit' 'libidn2'
+         'zstd' 'libidn2.so' 'libunistring' 'brotli')
+makedepends=('tpm2-tss')
+checkdepends=('net-tools' 'tpm2-tools')
+optdepends=('guile: for use with Guile bindings'
+            'tpm2-tss: support for TPM2 wrapped keys')
+source=(https://www.gnupg.org/ftp/gcrypt/gnutls/v3.7/${pkgname}-${pkgver}.tar.xz{,.sig})
+sha256sums=('aaa03416cdbd54eb155187b359e3ec3ed52ec73df4df35a0edd49429ff64d844'
+            'SKIP')
+validpgpkeys=('462225C3B46F34879FC8496CD605848ED7E69871') # "Daiki Ueno <ueno@unixuser.org>"
+#validpgpkeys=('5D46CB0F763405A7053556F47A75A648B3F9220C') # "Zoltan Fridrich <zfridric@redhat.com>"
+
+build() {
+  cd ${pkgname}-${pkgver}
+  [[ $CARCH == "armv7h" ]] && CPPFLAGS+=" -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64"
+  ./configure --prefix=/usr \
+	--disable-static \
+	--with-idn \
+	--with-brotli \
+	--with-zstd \
+	--with-tpm2 \
+	--enable-openssl-compatibility \
+	--enable-guile --with-guile-site-dir=no \
+	--with-default-trust-store-pkcs11="pkcs11:"
+#	--enable-ktls \ # breaks testsuite
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+  make
+}
+
+check() {
+  cd ${pkgname}-${pkgver}
+  # disable parallel tests:
+  # FAIL: serv-udp.sh
+#  make -j1 check
+  make check
+}
+
+package() {
+  cd ${pkgname}-${pkgver}
+  make DESTDIR="${pkgdir}" install
+
+  # lots of .png files are put into infodir and are gzipped by makepkg! this needs to be fixed by using !zipman
+  # gzip -9 all files in infodir and manpages manually
+  find "$pkgdir/usr/share/info" -name '*.info*' -exec gzip -n -9 {} \;
+  find "$pkgdir/usr/share/man" -exec gzip -n -9 {} \;
+}
