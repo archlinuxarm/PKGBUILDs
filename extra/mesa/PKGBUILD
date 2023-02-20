@@ -14,7 +14,7 @@ highmem=1
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-virtio' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=22.3.4
+pkgver=22.3.5
 pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
@@ -30,11 +30,11 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0002-iris-Retry-DRM_IOCTL_I915_GEM_EXECBUFFER2-on-ENOMEM.patch
         0003-Revert-iris-Avoid-abort-if-kernel-can-t-allocate-mem.patch
         LICENSE)
-sha512sums=('6af340153244d3e95d0e155a45d6db134335654d62590797ae0ef6ba44c2ccfe91ebf95f70ff82c67cee108ac35536767b1f6848d6d1129f52eb9e8414ee321d'
+sha512sums=('a4cad9b7e6501678fac279bd88a37e522633c7128afa8df04982f469c930e3557bb1d05b4b0f5ae16704d8d04e50c90a7489943a48861df17dd947704c329b85'
             'SKIP'
-            '64f55c8fbb53c6cdf4a2898d8fc633e37a9f5b71284c222030914dedbddd0a712969378f3e7dc336c5e6349d5dd3d2e117e4ff5d83a9336847a20a1bd0dc09bb'
-            'f0dfde13bd7c08ece286c04c67729ec86e60dd61730a947c7bef19605303f413e3a125eec6081a40ef8fc15b7571aef2b8e42fe0bece9c53de4e5774783e48b4'
-            '6f5ff5185815c878999a4aa2f6b8251a68403c6755de9f58f89332251e04658729af7d9570761b2dc1367c5e33e2cce22b7e7199dcf6a64717e704034db6f8c0'
+            '44981f1f86b72eec0a358d1764546443a7e6734a074e1e15929dc4312fe660eab1a04b8a8359c5f57b6f5815cbe149677f5b3f0e3919112e78c6ec1f64a97b61'
+            'c181cc258a3a96817f9733be53e0ddf3f5b093ec8d7b731e37c095077c1b423d13ddb902993e1056aed29c4163421e4873b64f7593ef5e39d8cba11516651724'
+            '4f3ef686b2244c5da033596336bdffa42f9f55061be7125cba47a5ae3c16037523d1ba9d17269d141498b8ad2e020f25d9d778fdf307329809fc25d30d59c470'
             'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -236,7 +236,7 @@ package_mesa() {
   depends=('libdrm' 'wayland' 'libxxf86vm' 'libxdamage' 'libxshmfence' 'libelf'
            'libomxil-bellagio' 'libunwind' 'llvm-libs' 'lm_sensors' 'libglvnd'
            'zstd' 'vulkan-icd-loader')
-  depends+=('libsensors.so' 'libexpat.so' 'libvulkan.so')
+  depends+=('libsensors.so' 'libexpat.so')
   optdepends=('opengl-man-pages: for the OpenGL API man pages'
               'mesa-vdpau: for accelerated video playback'
               'libva-mesa-driver: for accelerated video playback')
