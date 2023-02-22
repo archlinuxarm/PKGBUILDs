@@ -151,7 +151,10 @@ if(BUILD_LIB)
   add_library(libgmic SHARED ${CLI_Sources})
   target_compile_options(libgmic PRIVATE ${GMIC_CXX_COMPILE_FLAGS} -Dgmic_core)
   set_target_properties(libgmic PROPERTIES SOVERSION "1" OUTPUT_NAME "gmic")
-  target_link_libraries(libgmic
+  target_link_libraries(libgmic 
+    PUBLIC
+    X11::X11
+    PRIVATE
     CImg::CImg
     GMicStdlib::Stdlib
   )
