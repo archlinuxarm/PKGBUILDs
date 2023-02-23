@@ -14,7 +14,7 @@ highmem=1
 pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-virtio' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
-pkgver=22.3.5
+pkgver=22.3.6
 pkgrel=1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
@@ -30,7 +30,7 @@ source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
         0002-iris-Retry-DRM_IOCTL_I915_GEM_EXECBUFFER2-on-ENOMEM.patch
         0003-Revert-iris-Avoid-abort-if-kernel-can-t-allocate-mem.patch
         LICENSE)
-sha512sums=('a4cad9b7e6501678fac279bd88a37e522633c7128afa8df04982f469c930e3557bb1d05b4b0f5ae16704d8d04e50c90a7489943a48861df17dd947704c329b85'
+sha512sums=('506fc69ace128504fe45b7ca0b6b1d1d2a33837d74bff7ae7310fef5100b162136ca77ee6a50745a5bda270d0b8cb1ee99ecc19190eddd83cc78039bd02b1bb7'
             'SKIP'
             '44981f1f86b72eec0a358d1764546443a7e6734a074e1e15929dc4312fe660eab1a04b8a8359c5f57b6f5815cbe149677f5b3f0e3919112e78c6ec1f64a97b61'
             'c181cc258a3a96817f9733be53e0ddf3f5b093ec8d7b731e37c095077c1b423d13ddb902993e1056aed29c4163421e4873b64f7593ef5e39d8cba11516651724'
