@@ -1,0 +1,145 @@
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Laurent Carlier <lordheavym@gmail.com>
+# Contributor: Stéphane Gaudreault <stephane@archlinux.org>
+# Contributor: Andrej Gelenberg <andrej.gelenberg@udo.edu>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove default debuginfod url pointing to upstream
+
+pkgbase=elfutils
+pkgname=(debuginfod elfutils libelf)
+pkgver=0.188
+pkgrel=3.1
+pkgdesc="Handle ELF object files and DWARF debugging information"
+arch=(x86_64)
+url="https://sourceware.org/elfutils/"
+license=(LGPL3 GPL3)
+makedepends=(bzip2 curl gcc-libs libarchive libmicrohttpd sqlite xz zlib zstd)
+options=(staticlibs)
+source=(https://sourceware.org/$pkgbase/ftp/$pkgver/$pkgbase-$pkgver.tar.bz2{,.sig}
+        curl_7.85_compat.patch)
+sha512sums=('585551b2d937d19d1becfc2f28935db1dd1a3d25571a62f322b70ac8da98c1a741a55d070327705df6c3e2ee026652e0b9a3c733b050a0b0ec5f2fc75d5b74b5'
+            'SKIP'
+            '8f731bf2451ffd195a7da939d469486272873fa9fd19c2dc03a5311814840d7a7242b82de42162efc36404bee9a4fb3a6b85e0eb9fbb81e3c15f989cdd288c37')
+b2sums=('6b0474f1436eaf6af73b735b9b2ddd5448ab9c03fbaa0be745a31c89ae8f15b0e21a651409c38643ca125794ce82c19d7b46db4a079f3e72cb919d643560e7a4'
+        'SKIP'
+        '92b92aefc011b4be7ed00baca28c3447003baa864be58482bf0c220dcd6ad75133c6e34731eaf7e3cc97dbb3e1f85d1fce88cb532c3da37b36802d2c6e7a9e36')
+validpgpkeys=(
+  '47CC0331081B8BC6D0FD4DA08370665B57816A6A'  # Mark J. Wielaard <mark@klomp.org>
+  'EC3CFE88F6CA0788774F5C1D1AA44BE649DE760A'  # Mark Wielaard <mjw@gnu.org>
+)
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+prepare() {
+  cd $pkgbase-$pkgver
+  # Use CURLOPT_PROTOCOLS_STR for libcurl >= 7.85.0
+  # https://sourceware.org/git/?p=elfutils.git;a=commit;h=6560fb26a62ef135a804357ef4f15a47de3e49b3
+  patch -Np1 < ../curl_7.85_compat.patch
+  cd ..
+
+  # remove failing test due to missing glibc debug package during test: https://bugs.archlinux.org/task/74875
+  sed -e 's/run-backtrace-native.sh//g' -i $pkgbase-$pkgver/tests/Makefile.am
+  (
+    cd $pkgbase-$pkgver
+    autoreconf -fiv
+  )
+
+  cp -av $pkgbase-$pkgver $pkgbase-test-$pkgver
+}
+
+
+build() {
+  local configure_options=(
+    --prefix=/usr
+    --sysconfdir=/etc
+    --program-prefix="eu-"
+    --enable-deterministic-archives
+  )
+
+  (
+    # fat-lto-objects is required for non-mangled .a files in libelf
+    CFLAGS+=" -ffat-lto-objects"
+    cd $pkgbase-$pkgver
+    ./configure "${configure_options[@]}"
+    make
+  )
+  (
+    cd $pkgbase-test-$pkgver
+    # debugging information is required for test-suite
+    CFLAGS+=" -g"
+    # fat-lto-objects is required for non-mangled .a files in libelf
+    CFLAGS+=" -ffat-lto-objects"
+    ./configure "${configure_options[@]}"
+    make
+  )
+}
+
+check() {
+  make check -C $pkgbase-test-$pkgver
+}
+
+package_debuginfod() {
+  pkgdesc+=" (debuginfod)"
+  depends=(
+    gcc-libs
+    glibc
+    libarchive libarchive.so
+    libelf=$pkgver
+    libmicrohttpd libmicrohttpd.so
+    sqlite libsqlite3.so
+  )
+  optdepends=("elfutils=$pkgver: for translations")
+
+  make DESTDIR="$pkgdir" install -C $pkgbase-$pkgver
+  install -vDm 644 $pkgbase-$pkgver/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
+
+  # set the default DEBUGINFOD_URLS environment variable to the distribution's debuginfod URL
+  #printf "https://debuginfod.archlinux.org\n" > "$pkgdir/etc/debuginfod/archlinux.urls"
+
+  (
+    cd "$pkgdir"
+
+    _pick libelf etc/debuginfod/*
+    _pick libelf etc/profile.d/*
+    _pick libelf usr/{include,lib}
+    _pick elfutils usr/bin/eu-*
+    _pick elfutils usr/share/locale
+    _pick elfutils usr/share/man/man1/eu-*
+    _pick elfutils usr/share/man/man3/elf_*
+  )
+
+}
+
+package_elfutils() {
+  pkgdesc+=" (utilities)"
+  depends=(gcc-libs glibc libelf=$pkgver)
+
+  mv -v elfutils/* "$pkgdir"
+  install -vDm 644 $pkgbase-$pkgver/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
+}
+
+package_libelf() {
+  pkgdesc+=" (libraries)"
+  depends=(
+    bzip2 libbz2.so
+    curl libcurl.so
+    gcc-libs
+    glibc
+    xz liblzma.so
+    zlib
+    zstd libzstd.so
+  )
+  # NOTE: the shared objects can not be added to provides as they are not versioned
+
+  mv -v libelf/* "$pkgdir"
+  install -vDm 644 $pkgbase-$pkgver/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
+}
