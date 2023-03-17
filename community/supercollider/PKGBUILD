@@ -9,24 +9,46 @@
 _name=SuperCollider
 pkgname=supercollider
 pkgver=3.13.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Platform for audio synthesis and algorithmic composition"
 arch=(x86_64)
 url="https://supercollider.github.io"
 license=(GPL3)
 groups=(pro-audio)
-depends=(gcc-libs glibc  libx11 qt5-base qt5-svg qt5-webengine qt5-websockets)
-makedepends=(abletonlink alsa-lib avahi boost cmake emacs fftw libsndfile
-qt5-tools readline systemd-libs yaml-cpp)
-checkdepends=(xorg-server-xvfb)
-optdepends=('emacs: emacs interface'
-            'gedit: gedit interface'
-            'sc3-plugins: additional extension plugins for scsynth')
-provides=(libscsynth.so "sclang=${pkgver}" "scsynth=${pkgver}")
-source=(
-    "https://github.com/${pkgname}/${pkgname}/releases/download/Version-${pkgver}/${_name}-${pkgver}-Source.tar.bz2"{,.asc}
+depends=(
+  gcc-libs
+  glibc
+  libx11
+  qt5-base
+  qt5-svg
+  qt5-webengine
+  qt5-websockets
 )
-install="${pkgname}.install"
+makedepends=(
+  abletonlink
+  alsa-lib
+  avahi
+  boost
+  cmake
+  emacs
+  fftw
+  libsndfile
+  qt5-tools
+  readline
+  systemd-libs
+  yaml-cpp
+)
+checkdepends=(xorg-server-xvfb)
+optdepends=(
+  'emacs: emacs interface'
+  'gedit: gedit interface'
+  'sc3-plugins: additional extension plugins for scsynth'
+)
+provides=(libscsynth.so "sclang=$pkgver" "scsynth=$pkgver")
+source=(
+    https://github.com/$pkgname/$pkgname/releases/download/Version-$pkgver/$_name-$pkgver-Source.tar.bz2{,.asc}
+)
+install=$pkgname.install
 sha512sums=('a60a128f7646f077f91adae666fa4014529aa9df78cf0dfe5d68c9bd6447f008af7da2970b8736f3f29d0adbaf67bce680a8201fcbe7e1aba29c3499a57f89cd'
             'SKIP')
 b2sums=('a5e57a17f93e40848b2044ee0791179f857d144eabb7f4d74580b2eebd49a31d6ec671a0526236c5b906aadeb455e5a7ad18cacb79ed214076d6bceca39ea2ae'
@@ -35,23 +57,26 @@ validpgpkeys=('2E1C4FC2F6BB58FA157B21B8064B501EB7405F04') # Marcin Pączkowski (
 
 
 build() {
+  local cmake_options=(
+    -B build
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_BUILD_TYPE=None
+    -D Boost_NO_BOOST_CMAKE=ON
+    -D LIBSCSYNTH=ON
+    -D FORTIFY=ON
+    -D SYSTEM_ABLETON_LINK=ON
+    -D SYSTEM_BOOST=ON
+    -D SYSTEM_YAMLCPP=ON
+    -D SC_VIM=OFF
+    -S $_name-$pkgver-Source
+    -W no-dev
+    -DSSE=OFF -DSSE2=OFF -DSUPERNOVA=OFF -DNOVA_SIMD=ON -DNATIVE=OFF
+    -DCMAKE_C_FLAGS="${CFLAGS}"
+  )
   export CFLAGS+=" -DNDEBUG"
   export CXXFLAGS+=" -DNDEBUG"
-  cmake -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_BUILD_TYPE='None' \
-        -DBoost_NO_BOOST_CMAKE=ON \
-        -DLIBSCSYNTH=ON \
-        -DFORTIFY=ON \
-        -DSYSTEM_ABLETON_LINK=ON \
-        -DSYSTEM_BOOST=ON \
-        -DSYSTEM_YAMLCPP=ON \
-        -DSC_VIM=OFF \
-        -Wno-dev \
-        -B build \
-        -DSSE=OFF -DSSE2=OFF -DSUPERNOVA=OFF -DNOVA_SIMD=ON -DNATIVE=OFF \
-        -DCMAKE_C_FLAGS="${CFLAGS}" \
-        -S "${_name}-${pkgver}-Source"
-  make VERBOSE=1 -C build
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
 }
 
 check() {
@@ -59,11 +84,18 @@ check() {
 }
 
 package() {
-  depends+=(libasound.so libavahi-common.so libavahi-client.so
-  libboost_filesystem.so libboost_program_options.so libboost_regex.so
-  libboost_thread.so libfftw3f.so libjack.so libsndfile.so libreadline.so
-  libudev.so libyaml-cpp.so)
+  depends+=(
+    alsa-lib libasound.so
+    avahi libavahi-common.so libavahi-client.so
+    boost-libs libboost_{filesystem,program_options,thread}.so
+    fftw libfftw3f.so
+    jack libjack.so
+    libsndfile libsndfile.so
+    readline libreadline.so
+    systemd-libs libudev.so
+    yaml-cpp libyaml-cpp.so
+  )
 
-  make DESTDIR="${pkgdir}" install -C build
-  install -vDm 644 "${_name}-${pkgver}-Source/"{AUTHORS,{CHANGELOG,README,README_LINUX}.md} -t "${pkgdir}/usr/share/doc/${pkgname}/"
+  DESTDIR="$pkgdir" cmake --install build
+  install -vDm 644 $_name-$pkgver-Source/{AUTHORS,{CHANGELOG,README,README_LINUX}.md} -t "$pkgdir/usr/share/doc/$pkgname/"
 }
