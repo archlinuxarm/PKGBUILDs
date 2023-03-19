@@ -15,7 +15,7 @@ pkgbase=mesa
 pkgname=('vulkan-mesa-layers' 'opencl-mesa' 'vulkan-radeon' 'vulkan-swrast' 'vulkan-virtio' 'vulkan-broadcom' 'vulkan-panfrost' 'libva-mesa-driver' 'mesa-vdpau' 'mesa')
 pkgdesc="An open-source implementation of the OpenGL specification"
 pkgver=22.3.6
-pkgrel=1
+pkgrel=1.1
 arch=('x86_64')
 makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
              'libxdamage' 'libvdpau' 'libva' 'wayland' 'wayland-protocols' 'zstd' 'elfutils' 'llvm'
@@ -60,7 +60,7 @@ prepare() {
 build() {
   case "${CARCH}" in
     armv7h)  GALLIUM=",etnaviv,kmsro,lima,panfrost,tegra,v3d,vc4" ;;
-    aarch64) GALLIUM=",asahi,etnaviv,kmsro,lima,panfrost,svga,v3d,vc4" ;;
+    aarch64) GALLIUM=",etnaviv,kmsro,lima,panfrost,svga,v3d,vc4" ;;
   esac
 
   # Build only minimal debug info to reduce size
