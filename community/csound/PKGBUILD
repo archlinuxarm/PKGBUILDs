@@ -14,7 +14,7 @@ pkgbase=csound
 pkgname=(csound csound-doc)
 pkgver=6.18.1
 _manual_pkgver=6.17.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Programming language for sound rendering and signal processing"
 arch=(x86_64)
 url="https://csound.com"
@@ -48,11 +48,12 @@ makedepends=(
   wiiuse
 )
 checkdepends=(cunit)
-options=(debug)
-source=("${pkgbase}-${pkgver}.tar.gz::https://github.com/${pkgbase}/${pkgbase}/archive/${pkgver}.tar.gz"
-        "${pkgbase}.sh"
-        "https://github.com/${pkgbase}/${pkgbase}/releases/download/${_manual_pkgver}/Csound${_manual_pkgver}_manual_html.zip"
-        "https://github.com/${pkgbase}/${pkgbase}/releases/download/${_manual_pkgver}/Csound${_manual_pkgver}_manual_pdf.zip")
+source=(
+  https://github.com/$pkgbase/$pkgbase/archive/$pkgver/$pkgname-$pkgver.tar.gz
+  $pkgbase.sh
+  https://github.com/$pkgbase/$pkgbase/releases/download/$_manual_pkgver/Csound${_manual_pkgver}_manual_html.zip
+  https://github.com/$pkgbase/$pkgbase/releases/download/$_manual_pkgver/Csound${_manual_pkgver}_manual_pdf.zip
+)
 sha512sums=('4ea4dccb36017c96482389a8d139f6f55c79c5ceb9cc34e6d2bfabcb930b4833d0301be4a4b21929db27b2d8ce30754b5c5867acd2ea5a849135e1b8d1506acf'
             '53a8ae1e61db2a3a492930ef0f0881b613ae47108c5e8de0a6e2aa28bcf7a5c93c7fea8b7fc2bbae29ab92e1e68bf94ba406be1255ad8ab5725ea9078c1fd6dc'
             'ff2098828e51e78aa80b10736ea162d90c0b1bef3265e469951a5df63250d283e852490cb2a6599dcb1b8a5c185cf4f0b9534f501e4cb755b9da67ecfb1f4ba6'
@@ -69,75 +70,91 @@ prepare() {
 
 build() {
   local _java_major=$(java --version 2>/dev/null |grep 'openjdk'| cut -d ' ' -f2| cut -d '.' -f1)
-  # it's not allowed to redistribute the scansyn opcodes: https://github.com/csound/csound/issues/1148
-  # the python plugin is not python3 compatible: https://github.com/csound/csound/issues/631
-  cmake -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_BUILD_TYPE=None \
-        -DBUILD_SCANSYN_OPCODES=OFF \
-        -DCMAKE_CXX_FLAGS="-Wno-error -Wno-missing-field-initializers -DPFFFT_SIMD_DISABLE" \
-        -DCMAKE_C_FLAGS="-Wno-error -Wno-missing-field-initializers -DPFFFT_SIMD_DISABLE" \
-        -DBUILD_JAVA_INTERFACE=0 \
-        -DJAVA_AWT_LIBRARY="/usr/lib/jvm/java-${_java_major}-openjdk/jre/lib/libawt.so" \
-        -DJAVA_JVM_LIBRARY="/usr/lib/jvm/java-${_java_major}-openjdk/jre/lib" \
-        -DLUA_LIBRARY=/usr/lib/liblua.so \
-        -DBUILD_STATIC_LIBRARY=ON \
-        -W no-dev \
-        -B build \
-        -S "${pkgbase}-${pkgver}"
-  make VERBOSE=1 -C build
+  local cmake_options=(
+    -B build
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_BUILD_TYPE=None
+    # it's not allowed to redistribute the scansyn opcodes: https://github.com/csound/csound/issues/1148
+    -D BUILD_SCANSYN_OPCODES=OFF
+    -D CMAKE_CXX_FLAGS="-Wno-error -Wno-missing-field-initializers -DPFFFT_SIMD_DISABLE"
+    -D CMAKE_C_FLAGS="-Wno-error -Wno-missing-field-initializers -DPFFFT_SIMD_DISABLE"
+    -D BUILD_JAVA_INTERFACE=0 \
+    -D JAVA_AWT_LIBRARY="/usr/lib/jvm/java-${_java_major}-openjdk/jre/lib/libawt.so"
+    -D JAVA_JVM_LIBRARY="/usr/lib/jvm/java-${_java_major}-openjdk/jre/lib"
+    -D LUA_LIBRARY=/usr/lib/liblua.so
+    -D BUILD_STATIC_LIBRARY=ON
+    -S $pkgbase-$pkgver
+    -W no-dev
+  )
+
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
   # For reproducibility (See https://bugs.archlinux.org/task/70331)
   find build -name '*.jar' -exec strip-nondeterminism {} +
 }
 
 check() {
-  make test -C build
+  ctest --test-dir build --output-on-failure
 }
 
 package_csound() {
-  groups=(pro-audio)
-  depends=(gcc-libs glibc libcurl.so libsamplerate.so libsndfile.so)
-  optdepends=('alsa-lib: for librtalsa plugin'
-              'csound-doc: for the canonical Csound Reference Manual'
-              'csound-plugins: for additional opcodes'
-              'csoundqt: for frontend/ editor with integrated help'
-              'hdf5: for hdf5ops plugin'
-              'java-runtime: java integration'
-              'fluidsynth: for libfluidOpcodes plugin'
-              'jack: for libjacko, librtjack and libjackTransport plugins'
-              'liblo: for libosc plugin'
-              'ncurses: for libfaustcsound plugin'
-              'portmidi: for libpmidi plugin'
-              'portaudio: for librtpa plugin'
-              'libpulse: for librtpulse plugin'
-              'stk: for libstkops plugin'
-              'libwebsockets: for libwebsocketIO plugin'
-              'wiiuse: for libwiimote plugin'
-              'libx11: for libwidgets plugin'
-              'lua: for LUA integration'
-              'openssl: for libfaustcsound plugin'
-              'python-numpy: For Csound Python bindings'
-              'vim-csound: vim integration'
-              'zlib: for libfaustcsound plugin')
-  provides=(libcsound64.so libcsnd6.so)
+  groups=(
+    pro-audio
+  )
+  depends=(
+    curl libcurl.so
+    gcc-libs
+    glibc
+    libsamplerate libsamplerate.so
+    libsndfile libsndfile.so
+  )
+  optdepends=(
+    'alsa-lib: for librtalsa plugin'
+    'csound-doc: for the canonical Csound Reference Manual'
+    'csound-plugins: for additional opcodes'
+    'csoundqt: for frontend/ editor with integrated help'
+    'hdf5: for hdf5ops plugin'
+    'java-runtime: java integration'
+    'fluidsynth: for libfluidOpcodes plugin'
+    'jack: for libjacko, librtjack and libjackTransport plugins'
+    'liblo: for libosc plugin'
+    'ncurses: for libfaustcsound plugin'
+    'portmidi: for libpmidi plugin'
+    'portaudio: for librtpa plugin'
+    'libpulse: for librtpulse plugin'
+    'stk: for libstkops plugin'
+    'libwebsockets: for libwebsocketIO plugin'
+    'wiiuse: for libwiimote plugin'
+    'libx11: for libwidgets plugin'
+    'lua: for LUA integration'
+    'openssl: for libfaustcsound plugin'
+    'python-numpy: For Csound Python bindings'
+    'vim-csound: vim integration'
+    'zlib: for libfaustcsound plugin'
+  )
+  provides=(
+    libcsound64.so
+    libcsnd6.so
+  )
 
-  make VERBOSE=1 DESTDIR="${pkgdir}/" install -C build
+  DESTDIR="$pkgdir" cmake --install build
 
   # export vars in profile.d
-  install -vDm 755 "${srcdir}/${pkgname}.sh" -t "${pkgdir}/etc/profile.d/"
+  install -vDm 755 "$srcdir/$pkgname.sh" -t "$pkgdir/etc/profile.d/"
   # rename extract executable due to name conflict with libextractor
   # https://github.com/csound/csound/issues/985
-  mv -v "${pkgdir}/usr/bin/extract" "${pkgdir}/usr/bin/${pkgname}-extract"
+  mv -v "$pkgdir/usr/bin/extract" "$pkgdir/usr/bin/$pkgname-extract"
   # moving csnd6.jar to /usr/share/java
-  #install -vdm 755 "${pkgdir}/usr/share/java/"
-  #mv -v "${pkgdir}/usr/lib/"*.jar "${pkgdir}/usr/share/java/"
+  install -vdm 755 "$pkgdir/usr/share/java/"
+  mv -v "$pkgdir/usr/lib/"*.jar "$pkgdir/usr/share/java/"
 }
 
 package_csound-doc() {
   pkgdesc+=" - documentation"
 
-  install -vDm 644 Csound${_manual_pkgver}_manual.pdf "${pkgdir}/usr/share/doc/${pkgname}/${pkgbase}-manual.pdf"
+  install -vDm 644 Csound${_manual_pkgver}_manual.pdf "$pkgdir/usr/share/doc/$pkgname/$pkgbase-manual.pdf"
 
-  install -dv "${pkgdir}/usr/share/doc/${pkgname}/html"
-  cp -av html/* "${pkgdir}/usr/share/doc/${pkgname}/html/"
+  install -dv "$pkgdir/usr/share/doc/$pkgname/html"
+  cp -av html/* "$pkgdir/usr/share/doc/$pkgname/html/"
 }
 # vim:set ts=2 sw=2 et:
