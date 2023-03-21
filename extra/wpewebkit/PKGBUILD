@@ -4,8 +4,11 @@
 #  - build v7 with vfpv3, neon is broken
 
 pkgbase=wpewebkit
-pkgname=(wpewebkit wpewebkit-docs)
-pkgver=2.38.5
+pkgname=(
+  wpewebkit
+  wpewebkit-docs
+)
+pkgver=2.40.0
 pkgrel=1
 pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
@@ -25,6 +28,7 @@ depends=(
   harfbuzz-icu
   icu
   libavif
+  libdrm
   libepoxy
   libgcrypt
   libjpeg
@@ -38,6 +42,7 @@ depends=(
   libxkbcommon
   libxml2
   libxslt
+  mesa
   openjpeg2
   sqlite
   wayland
@@ -56,19 +61,37 @@ makedepends=(
   python
   ruby
   systemd
+  unifdef
   wayland-protocols
 )
-source=($url/releases/wpewebkit-$pkgver.tar.xz{,.asc})
-sha256sums=('ff00fd3d0a4c6d551850a78a7dfe4883b6b7ebd93c5549e1121b2f43d3ac1661'
+source=(
+  $url/releases/wpewebkit-$pkgver.tar.xz{,.asc}
+)
+sha256sums=('a8ec2bcfa1613768ab3ce7f65cac4f214835266c2ff59440d72180baec3086b6'
             'SKIP')
-validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
-              '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
+validpgpkeys=(
+  'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
+  '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
+)
 
 prepare() {
   cd wpewebkit-$pkgver
 }
 
 build() {
+  local cmake_options=(
+    -DPORT=WPE
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_INSTALL_LIBDIR=lib
+    -DCMAKE_INSTALL_LIBEXECDIR=lib
+    -DCMAKE_SKIP_RPATH=ON
+    -DUSE_AVIF=ON
+    -DENABLE_WPE_1_1_API=ON
+    -DENABLE_DOCUMENTATION=ON
+    -DENABLE_MINIBROWSER=ON
+  )
+
   # Produce minimal debug info: 4.3 GB of debug data makes the
   # build too slow and is too much to package for debuginfod
   CFLAGS+=' -g1'
@@ -76,27 +99,24 @@ build() {
 
   [[ $CARCH == "armv7h" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/neon/vfpv3/'` && CXXFLAGS="$CFLAGS"
 
-  cmake -S wpewebkit-$pkgver -B build -G Ninja \
-    -DPORT=WPE \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_LIBDIR=lib \
-    -DCMAKE_INSTALL_LIBEXECDIR=lib \
-    -DCMAKE_SKIP_RPATH=ON \
-    -DUSE_AVIF=ON \
-    -DUSE_SOUP2=OFF \
-    -DENABLE_DOCUMENTATION=ON \
-    -DENABLE_MINIBROWSER=ON
+  cmake -S wpewebkit-$pkgver -B build -G Ninja "${cmake_options[@]}"
   cmake --build build
 }
 
 package_wpewebkit() {
-  depends+=(libwpe-1.0.so libWPEBackend-fdo-1.0.so)
-  provides+=(libWPEWebKit-1.1.so)
-  optdepends=('geoclue: Geolocation support'
-              'gst-plugins-good: media decoding'
-              'gst-plugins-bad: media decoding'
-              'gst-libav: nonfree media decoding')
+  depends+=(
+    libWPEBackend-fdo-1.0.so
+    libwpe-1.0.so
+  )
+  provides+=(
+    libWPEWebKit-1.1.so
+  )
+  optdepends=(
+    'geoclue: Geolocation support'
+    'gst-libav: nonfree media decoding'
+    'gst-plugins-bad: media decoding'
+    'gst-plugins-good: media decoding'
+  )
 
   DESTDIR="$pkgdir" cmake --install build
 
