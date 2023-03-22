@@ -3,35 +3,32 @@
 # Contributor: Sarah Hay <sarah@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - comment touch on x86 python file
 #  - add -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 to v7 CPPFLAGS
 
 pkgbase=gpgme
 pkgname=(gpgme qgpgme python-gpgme)
-pkgver=1.18.0
-pkgrel=2
-_python_ver=3.10
+pkgver=1.19.0
+pkgrel=3
 pkgdesc='A C wrapper library for GnuPG'
 arch=('x86_64')
 url='https://www.gnupg.org/related_software/gpgme/'
 license=('LGPL')
-makedepends=('libgpg-error' 'gnupg' 'qt5-base' 'python' 'swig')
+makedepends=(
+  'gnupg'
+  'libgpg-error'
+  'python'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+  'qt5-base'
+  'swig'
+)
 validpgpkeys=('6DAA6E64A76D2840571B4902528897B826403ADA'  # Werner Koch (dist signing 2020)
               'AC8E115BF73E2D8D47FA9908E98E9B2D19C6C8BD') # Niibe Yutaka (GnuPG Release Key)
-source=("https://www.gnupg.org/ftp/gcrypt/${pkgbase}/${pkgbase}-${pkgver}.tar.bz2"{,.sig}
-        '0001-python-3-10.patch'
-        '0002-python-setup.patch')
-sha256sums=('361d4eae47ce925dba0ea569af40e7b52c645c4ae2e65e5621bf1b6cdd8b0e9e'
-            'SKIP'
-            '5de2f6bcb6b30642d0cbc3fbd86803c9460d732f44a526f44cedee8bb78d291a'
-            '84fb13e9afa549027469e0d1a1bad69bf786b63ef6359a5d65320bd226dcccc7')
-
-prepare() {
-  cd ${pkgbase}-${pkgver}
-
-  patch -Np1 -i ../0001-python-3-10.patch
-  patch -Np1 -i ../0002-python-setup.patch
-}
+source=("https://www.gnupg.org/ftp/gcrypt/${pkgbase}/${pkgbase}-${pkgver}.tar.bz2"{,.sig})
+sha256sums=('cb58494dc415fba9eeb12b826550ad3190dc92e265c5bb2ae1a21c92841cfd38'
+            'SKIP')
 
 build() {
   cd ${pkgbase}-${pkgver}
@@ -44,12 +41,12 @@ build() {
     --disable-gpgsm-test
   make
 
-  # ensure reproducibility of .pyc files
-  touch -d @$SOURCE_DATE_EPOCH lang/python/version.py
-  #touch -d @$SOURCE_DATE_EPOCH lang/python/python${_python_ver}-gpg/lib.linux-x86_64-${_python_ver}/gpg/gpgme.py
-
-  # .pyc files will be created if check() is used - generate them here
-
+  (
+    # use a PEP517 workflow to get a reproducible Python package
+    # NOTE: top_builddir is required so that the build takes place against local gpgme, not system gpgme
+    cd lang/python/
+    top_builddir="$srcdir/$pkgbase-$pkgver" python -m build --wheel --no-isolation
+  )
 }
 
 check() {
@@ -59,9 +56,6 @@ check() {
   sed -i 's#"t-keylist-secret",##' tests/json/t-json.c
 
   make check
-
-  # ensure reproducibilty whether test-suite is run or not
-  find . -name *.pyc -exec rm {} +
 }
 
 package_gpgme() {
@@ -94,5 +88,5 @@ package_python-gpgme() {
   depends=('gpgme' 'python')
 
   cd ${pkgbase}-${pkgver}/lang/python
-  make DESTDIR="${pkgdir}" install
+  python -m installer --destdir="$pkgdir" dist/*.whl
 }
