@@ -1,0 +1,63 @@
+From ed70b30b59325835b8ae418c17f0d11631bd5de0 Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Tue, 21 Mar 2023 17:56:32 -0600
+Subject: [PATCH 3/3] check for ALARM kernels in run_post_hooks
+
+---
+ functions  | 15 ++++++++++-----
+ mkinitcpio | 11 +++++++++++
+ 2 files changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/functions b/functions
+index c4cc536..b978c2e 100644
+--- a/functions
++++ b/functions
+@@ -219,13 +219,18 @@ kver_generic() {
+     # https://elixir.bootlin.com/linux/v5.7.2/source/init/version.c#L46
+     local kver='' reader='cat'
+     
+-    [[ "$(detect_compression "$1")" == 'gzip' ]] && reader='zcat'
++    # Check for xz zImage
++    if [[ $1 =~ "/zImage" ]]; then
++        read -r _ _ kver _ < <(dd if=$1 iflag=skip_bytes skip=$(LC_ALL=C grep -a -b -o $'\xFD\x37\x7A\x58\x5A\x00' $1 | tail -n 1 | cut -d ':' -f 1) | xzcat | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]+]+)+')
++    else
++        [[ "$(detect_compression "$1")" == 'gzip' ]] && reader='zcat'
+ 
+-    read -r _ _ kver _ < <($reader "$1" | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]+]+)+')
++        read -r _ _ kver _ < <($reader "$1" | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]+]+)+')
+ 
+-    # try if the image is gzip compressed
+-    if [[ -z "$kver" ]]; then
+-        read _ _ kver _ < <(gzip -c -d "$1" | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]]+)+')
++        # try if the image is gzip compressed
++        if [[ -z "$kver" ]]; then
++            read _ _ kver _ < <(gzip -c -d "$1" | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]]+)+')
++        fi
+     fi
+ 
+     printf '%s' "$kver"
+diff --git a/mkinitcpio b/mkinitcpio
+index f68d70c..7789ddf 100755
+--- a/mkinitcpio
++++ b/mkinitcpio
+@@ -801,6 +801,17 @@ if [[ "$KERNELVERSION" != 'none' ]]; then
+         done
+     fi
+ 
++    if [[ -z "$KERNELIMAGE" ]]; then
++        # check version of ALARM kernels in /boot
++        for img in /boot/*Image*; do
++            if [[ "$(kver "$img")" == "$KERNELVERSION" ]]; then
++                KERNELIMAGE="$img"
++                quiet "located kernel image: '%s'" "$KERNELIMAGE"
++                break
++            fi
++        done
++    fi
++
+     if [[ -z "$KERNELIMAGE" ]]; then
+         # check version of all kernels in /boot
+         for img in /boot/vmlinuz-*; do
+-- 
+2.36.1
+
