@@ -31,7 +31,7 @@ pkgname=(
   qemu-{base,desktop,emulators-full,full}
 )
 pkgver=7.2.0
-pkgrel=4
+pkgrel=5
 pkgdesc="A generic and open source machine emulator and virtualizer"
 arch=(x86_64)
 url="https://www.qemu.org/"
@@ -109,6 +109,8 @@ source=(
   qemu-sysusers.conf
   65-kvm.rules
   99-qemu-guest-agent.rules
+  # fixes https://gitlab.com/qemu-project/qemu/-/issues/1471
+  $pkgbase-7.2.0-gen_adcox.patch::https://gitlab.com/qemu-project/qemu/-/commit/60c7dd22e1383754d5f150bc9f7c2785c662a7b6.patch
 )
 sha512sums=('f3cfa00da739ba819a218d7e6e95c77fb79a8e0f487b024ddd281602e785249b81144595e3f8c746c32a4f5c4d1a88c6aebae3c162603edfbb50ae3722d7ed13'
             'SKIP'
@@ -116,14 +118,16 @@ sha512sums=('f3cfa00da739ba819a218d7e6e95c77fb79a8e0f487b024ddd281602e785249b811
             '6e838773d63ae0ffdffe2b891bf611d8f5f3c67a9bc4cbbedf8363c150c2c9971c8e44d92270bc581af40eb0ece02192760bcdd6aee229fff55635f3a4825afa'
             '985c2c7a6b5217c87a15b45368089ee91b2f9027b070f9eafa448a18b27ae0d9edd964d52e134b9c1f4aeef4d6aae88afd3f454551ca898affef7f9d28b99b8f'
             'bdf05f99407491e27a03aaf845b7cc8acfa2e0e59968236f10ffc905e5e3d5e8569df496fd71c887da2b5b8d1902494520c7da2d3a8258f7fd93a881dd610c99'
-            '93b905046fcea8a0a89513b9259c222494ab3b91319dde23baebcb40dc17376a56661b159b99785d6e816831974a0f3cbd7b2f7d89e5fc3c258f88f4492f3839')
+            '93b905046fcea8a0a89513b9259c222494ab3b91319dde23baebcb40dc17376a56661b159b99785d6e816831974a0f3cbd7b2f7d89e5fc3c258f88f4492f3839'
+            '505ddd4e387a29882a6ae1abac1d972371abac9abe0141358c0ab65bb11c5ac89c6e50d2639e4b8bb5e0ad9c3b805cbe3a01e33baaa44f8005db1f084fb2c4a3')
 b2sums=('415ff621356c59f88b29cfe3ef5db1e282b26bbafbee3d535477c6125ccb060ec9762d9e3ab9f70ce5478804dca0a46a59bcf12c112a2462029a93e578e61530'
         'SKIP'
         'b1eca364aa60f130ff5e649f5d004d3fcb75356d3421a4542efdfc410d39b40d9434d15e1dd7bbdbd315cb72b5290d3ea5f77f9c41961a5601cd28ef7bbe72e8'
         '2102e4a34e11e406e9606c97e026e7b92e887e296a7f77b9cede1b37119d0df33735f3588628167b2b8e32244c196c491bfab623e2caddac9014d445aa2a6d98'
         '69177b962d2fda20cafdbc6226fd017b5ca5a0f69f866d055dc1c744b7b2955059f47c693cfb5b4c863ec159569fdabd4327ab4b8a95566a68cd8ce38e339c7a'
         '3559fe9c4f744194939770047a0a02d07ff791c845a80726d0bc7b8c4801ed5f11150e7d5adab813844b3dab1cf38c3a5a87fb6efbb8fc9dccdda9fa56409ed8'
-        'a9a2bdfeeb44eb86cbe88ac7c65f72800bdb2fd5cecb02f3a258cf9470b52832180aab43c89d481f7fd4d067342a9a27dd6c8a94d625b95d6e2b912e47d274e7')
+        'a9a2bdfeeb44eb86cbe88ac7c65f72800bdb2fd5cecb02f3a258cf9470b52832180aab43c89d481f7fd4d067342a9a27dd6c8a94d625b95d6e2b912e47d274e7'
+        '6f8b1004835d0a9834c5b609f88589bdd243185b989cb1b4ce9c2792bb38f213a65c662d5f230099ee7e823481a28997997dd3082a95de54de26fd7d76b9d273')
 validpgpkeys=('CEACC9E15534EBABB82D3FA03353C9CEF108B584') # Michael Roth <flukshun@gmail.com>
 
 _qemu_system_deps=(
@@ -131,8 +135,10 @@ _qemu_system_deps=(
   dtc
   fuse3
   gcc-libs
+  glibc
   glib2 libgio-2.0.so libglib-2.0.so libgmodule-2.0.so
   gnutls
+  keyutils
   libaio
   libbpf libbpf.so
   libjpeg-turbo libjpeg.so
@@ -245,24 +251,26 @@ prepare() {
 }
 
 build() {
-  # Build only minimal debug info to reduce size
-  CFLAGS+=' -g1'
-  CXXFLAGS+=' -g1'
+  local common_configure_options=(
+    --prefix=/usr
+    --sysconfdir=/etc
+    --libexecdir=/usr/lib/qemu
+    --localstatedir=/var
+    --docdir=/usr/share/doc/qemu
+  )
+  local configure_options=(
+    "${common_configure_options[@]}"
+    --enable-modules
+    --enable-sdl
+    --enable-slirp
+    --enable-tpm
+    --smbd=/usr/bin/smbd
+    --with-coroutine=ucontext
+  )
 
   (
     cd build
-    ../$pkgbase-$pkgver/configure \
-      --prefix=/usr \
-      --sysconfdir=/etc \
-      --libexecdir=/usr/lib/qemu \
-      --localstatedir=/var \
-      --docdir=/usr/share/doc/qemu \
-      --enable-modules \
-      --enable-sdl \
-      --enable-slirp \
-      --enable-tpm \
-      --smbd=/usr/bin/smbd \
-      --with-coroutine=ucontext
+    ../$pkgbase-$pkgver/configure "${configure_options[@]}"
     ninja
   )
 
@@ -278,7 +286,7 @@ package_qemu-common() {
   )
 
   license+=(BSD MIT)
-  depends=(gcc-libs glib2 libglib-2.0.so libgmodule-2.0.so hicolor-icon-theme libcap-ng libcap-ng.so numactl libnuma.so)
+  depends=(gcc-libs glibc glib2 libglib-2.0.so libgmodule-2.0.so hicolor-icon-theme libcap-ng libcap-ng.so numactl libnuma.so)
   backup=(
     etc/$pkgbase/bridge.conf
     etc/sasl2/$pkgbase.conf
@@ -567,7 +575,7 @@ package_qemu-block-ssh() {
 
 package_qemu-chardev-baum() {
   pkgdesc="QEMU Baum chardev driver"
-  depends=(brltty libbrlapi.so glibc qemu-common=$pkgver-$pkgrel)
+  depends=(brltty libbrlapi.so gcc-libs glibc qemu-common=$pkgver-$pkgrel)
   mv -v $pkgname/* "$pkgdir"
 }
 
@@ -584,7 +592,7 @@ package_qemu-docs() {
 
 package_qemu-guest-agent() {
   pkgdesc="QEMU Guest Agent"
-  depends=(gcc-libs glib2 libglib-2.0.so libgmodule-2.0.so glibc liburing liburing.so numactl libnuma.so systemd-libs libudev.so)
+  depends=(gcc-libs glib2 libglib-2.0.so libgmodule-2.0.so glibc liburing liburing.so numactl libnuma.so sh systemd-libs libudev.so)
   backup=(
     etc/$pkgbase/$pkgbase-ga.conf
     etc/$pkgbase/fsfreeze-hook
@@ -703,7 +711,7 @@ package_qemu-system-hppa-firmware() {
 
 package_qemu-system-loongarch64() {
   pkgdesc="QEMU system emulator for LoongArch64"
-  depends=("${_qemu_system_deps[@]}")
+  depends=("${_qemu_system_deps[@]}" systemd-libs)
   mv -v $pkgname/* "$pkgdir"
 }
 
@@ -739,7 +747,7 @@ package_qemu-system-nios2() {
 
 package_qemu-system-or1k() {
   pkgdesc="QEMU system emulator for OpenRisc32"
-  depends=("${_qemu_system_deps[@]}")
+  depends=("${_qemu_system_deps[@]}" systemd-libs)
   mv -v $pkgname/* "$pkgdir"
 }
 
@@ -854,7 +862,7 @@ package_qemu-img() {
 
 package_qemu-pr-helper() {
   pkgdesc="QEMU persistent reservation utility"
-  depends=(gcc-libs glib2 libglib-2.0.so libgmodule-2.0.so glibc gnutls libcap-ng libcap-ng.so liburing liburing.so multipath-tools numactl libnuma.so pam libpam.so qemu-common=$pkgver-$pkgrel)
+  depends=(gcc-libs glib2 libglib-2.0.so libgmodule-2.0.so glibc gnutls libcap-ng libcap-ng.so liburing liburing.so multipath-tools numactl libnuma.so pam libpam.so qemu-common=$pkgver-$pkgrel systemd-libs)
   mv -v $pkgname/* "$pkgdir"
   install -vDm 644 $pkgbase-$pkgver/contrib/systemd/$pkgname.{service,socket} -t "$pkgdir/usr/lib/systemd/system/"
 }
@@ -954,7 +962,7 @@ package_qemu-user-binfmt() {
 
 package_qemu-vhost-user-gpu() {
   pkgdesc="QEMU vhost-user-gpu display device"
-  depends=(gcc-libs glib2 libglib-2.0.so libgmodule-2.0.so glibc pixman libpixman-1.so mesa numactl libnuma.so qemu-common=$pkgver-$pkgrel virglrenderer)
+  depends=(gcc-libs glib2 libglib-2.0.so libgmodule-2.0.so glibc pixman libepoxy libpixman-1.so mesa numactl libnuma.so qemu-common=$pkgver-$pkgrel virglrenderer)
   mv -v $pkgname/* "$pkgdir"
 }
 
