@@ -85,6 +85,18 @@
  /* CVPixelBuffer opaque buffer type */
  #define VLC_CODEC_CVPX_NV12       VLC_FOURCC('C','V','P','N')
  #define VLC_CODEC_CVPX_UYVY       VLC_FOURCC('C','V','P','Y')
+--- a/include/vlc_opengl.h
++++ b/include/vlc_opengl.h
+@@ -68,6 +68,9 @@ struct vlc_gl_t
+                                     const int32_t *attrib_list);
+             /* call eglDestroyImageKHR() with current display, can be NULL */
+             bool (*destroyImageKHR)(vlc_gl_t *, void *image);
++            bool (*queryDmaBufModifiersEXT)(vlc_gl_t *gl, uint32_t format,
++                                            unsigned int max_modifiers, uint64_t *modifiers,
++                                            unsigned int *external_only, int32_t *num_modifiers);
+         } egl;
+         /* if ext == VLC_GL_EXT_WGL */
+         struct
 --- a/modules/Makefile.am
 +++ b/modules/Makefile.am
 @@ -10,9 +10,7 @@ EXTRA_SUBDIRS = \
@@ -1242,7 +1254,7 @@
 +vlc_module_end()
 --- /dev/null
 +++ b/modules/hw/drm/drm_gl_conv.c
-@@ -0,0 +1,314 @@
+@@ -0,0 +1,367 @@
 +#ifdef HAVE_CONFIG_H
 +# include "config.h"
 +#endif
@@ -1486,6 +1498,62 @@
 +    free(sys);
 +}
 +
++#ifndef DRM_FORMAT_P030
++#define DRM_FORMAT_P030 fourcc_code('P', '0', '3', '0')
++#endif
++
++static struct vlc_to_drm_mod_s {
++    vlc_fourcc_t chroma;
++    uint32_t drm_fmt;
++    uint64_t drm_mod;
++} vlc_to_drm_mods[] = {
++    {VLC_CODEC_DRM_PRIME_I420,   DRM_FORMAT_YUV420, DRM_FORMAT_MOD_LINEAR},
++    {VLC_CODEC_DRM_PRIME_NV12,   DRM_FORMAT_NV12,   DRM_FORMAT_MOD_LINEAR},
++    {VLC_CODEC_DRM_PRIME_SAND8,  DRM_FORMAT_NV12,   DRM_FORMAT_MOD_BROADCOM_SAND128},
++    {VLC_CODEC_DRM_PRIME_SAND30, DRM_FORMAT_P030,   DRM_FORMAT_MOD_BROADCOM_SAND128},
++};
++
++static bool check_chroma(opengl_tex_converter_t * const tc)
++{
++    char fcc[5] = {0};
++    vlc_fourcc_to_char(tc->fmt.i_chroma, fcc);
++    uint32_t fmt = 0;
++    uint64_t mod = DRM_FORMAT_MOD_INVALID;
++    uint64_t mods[16];
++    int32_t mod_count = 0;
++
++    for (unsigned int i = 0; i != ARRAY_SIZE(vlc_to_drm_mods); ++i)
++    {
++        if (tc->fmt.i_chroma == vlc_to_drm_mods[i].chroma)
++        {
++            fmt = vlc_to_drm_mods[i].drm_fmt;
++            mod = vlc_to_drm_mods[i].drm_mod;
++            break;
++        }
++    }
++    if (!fmt)
++        return false;
++
++    if (!tc->gl->egl.queryDmaBufModifiersEXT)
++    {
++        msg_Dbg(tc, "No queryDmaBufModifiersEXT");
++        return false;
++    }
++
++    if (!tc->gl->egl.queryDmaBufModifiersEXT(tc->gl, fmt, 16, mods, NULL, &mod_count))
++    {
++        msg_Dbg(tc, "queryDmaBufModifiersEXT Failed for %s", fcc);
++        return false;
++    }
++
++    for (int32_t i = 0; i < mod_count; ++i)
++    {
++        if (mods[i] == mod)
++            return true;
++    }
++    msg_Dbg(tc, "Mod %" PRIx64 " not found for %s/%.4s in %d mods", mod, fcc, (char*)&fmt, mod_count);
++    return false;
++}
 +
 +static int
 +OpenGLConverter(vlc_object_t *obj)
@@ -1494,10 +1562,7 @@
 +    int rv = VLC_EGENERIC;
 +
 +    // Do we know what to do with this?
-+    // There must be a way of probing for supported formats...
-+    if (!(tc->fmt.i_chroma == VLC_CODEC_DRM_PRIME_I420 ||
-+          tc->fmt.i_chroma == VLC_CODEC_DRM_PRIME_NV12 ||
-+          tc->fmt.i_chroma == VLC_CODEC_DRM_PRIME_SAND8))
++    if (!check_chroma(tc))
 +        return VLC_EGENERIC;
 +
 +    {
@@ -15650,7 +15715,7 @@
  libwl_shm_plugin_la_SOURCES = video_output/wayland/shm.c
 --- /dev/null
 +++ b/modules/video_output/drmu/drm_vout.c
-@@ -0,0 +1,927 @@
+@@ -0,0 +1,1016 @@
 +/*****************************************************************************
 + * mmal.c: MMAL-based vout plugin for Raspberry Pi
 + *****************************************************************************
@@ -15699,6 +15764,13 @@
 +#include <libdrm/drm_mode.h>
 +#include <libdrm/drm_fourcc.h>
 +
++#define TRACE_ALL 0
++
++#define SUBPICS_MAX 4
++
++#define DRM_MODULE "vc4"
++
++
 +#define DRM_VOUT_SOURCE_MODESET_NAME "drm-vout-source-modeset"
 +#define DRM_VOUT_SOURCE_MODESET_TEXT N_("Attempt to match display to source")
 +#define DRM_VOUT_SOURCE_MODESET_LONGTEXT N_("Attempt to match display resolution and refresh rate to source.\
@@ -15720,12 +15792,22 @@
 +#define DRM_VOUT_NO_MAX_BPC_LONGTEXT N_("Do not try to switch from 8-bit RGB to 12-bit YCC on UHD frames.\
 + 12 bit is dependant on kernel and display support so may not be availible")
 +
++#define DRM_VOUT_WINDOW_NAME "drm-vout-window"
++#define DRM_VOUT_WINDOW_TEXT N_("Display window for Rpi fullscreen")
++#define DRM_VOUT_WINDOW_LONGTEXT N_("Display window for Rpi fullscreen."\
++"fullscreen|<width>x<height>+<x>+<y>")
 +
-+#define TRACE_ALL 0
++#define DRM_VOUT_DISPLAY_NAME "drm-vout-display"
++#define DRM_VOUT_DISPLAY_TEXT N_("Output device for Rpi fullscreen.")
++#define DRM_VOUT_DISPLAY_LONGTEXT N_("Output device for Rpi fullscreen. " \
++"Valid values are HDMI-1,HDMI-2.  By default if qt-fullscreen-screennumber " \
++"is specified (or set by Fullscreen Output Device in Preferences) " \
++"HDMI-<qt-fullscreen-screennumber+1> will be used, otherwise HDMI-1.")
 +
-+#define SUBPICS_MAX 4
++#define DRM_VOUT_MODULE_NAME "drm-vout-module"
++#define DRM_VOUT_MODULE_TEXT N_("DRM module to use")
++#define DRM_VOUT_MODULE_LONGTEXT N_("DRM module for Rpi fullscreen")
 +
-+#define DRM_MODULE "vc4"
 +
 +typedef struct subpic_ent_s {
 +    drmu_fb_t * fb;
@@ -15792,6 +15874,33 @@
 +    return fb;
 +}
 +
++
++static vout_display_place_t str_to_rect(const char * s)
++{
++    vout_display_place_t rect = {0};
++    rect.width = strtoul(s, (char**)&s, 0);
++    if (*s == '\0')
++        return rect;
++    if (*s++ != 'x')
++        goto fail;
++    rect.height = strtoul(s, (char**)&s, 0);
++    if (*s == '\0')
++        return rect;
++    if (*s++ != '+')
++        goto fail;
++    rect.x = strtoul(s, (char**)&s, 0);
++    if (*s == '\0')
++        return rect;
++    if (*s++ != '+')
++        goto fail;
++    rect.y = strtoul(s, (char**)&s, 0);
++    if (*s != '\0')
++        goto fail;
++    return rect;
++
++fail:
++    return (vout_display_place_t){0,0,0,0};
++}
 +
 +// MMAL headers comment these (getting 2 a bit wrong) but do not give
 +// defines
@@ -16082,39 +16191,33 @@
 +        }
 +        drmu_fb_unref(&dst->fb);
 +    }
++
++    r = drmu_rect_vlc_place(&sys->dest_rect);
++
 +#if 0
 +    {
-+        vout_display_place_t place;
-+        vout_display_cfg_t cfg = *vd->cfg;
-+        const drmu_mode_simple_params_t * const mode = drmu_output_mode_simple_params(sys->dout);
-+
-+        cfg.display.width  = mode->width;
-+        cfg.display.height = mode->height;
-+        cfg.display.sar    = drmu_ufrac_vlc_to_rational(mode->sar);
-+
-+        vout_display_PlacePicture(&place, &pic->format, &cfg, false);
-+        r = drmu_rect_vlc_place(&place);
-+
-+#if 0
-+        {
-+            static int z = 0;
-+            if (--z < 0) {
-+                z = 200;
-+                msg_Info(vd, "Cropped: %d,%d %dx%d %d/%d Cfg: %dx%d %d/%d Display: %dx%d %d/%d Place: %d,%d %dx%d",
-+                         pic->format.i_x_offset, pic->format.i_y_offset,
-+                         pic->format.i_visible_width, pic->format.i_visible_height,
-+                         pic->format.i_sar_num, pic->format.i_sar_den,
-+                         vd->cfg->display.width,   vd->cfg->display.height,
-+                         vd->cfg->display.sar.num, vd->cfg->display.sar.den,
-+                         cfg.display.width,   cfg.display.height,
-+                         cfg.display.sar.num, cfg.display.sar.den,
-+                         r.x, r.y, r.w, r.h);
-+            }
++        static int z = 0;
++        if (--z < 0) {
++            z = 200;
++            msg_Info(vd, "Pic: %d,%d %dx%d/%dx%d %d/%d Fmt: %d,%d %dx%d/%dx%d %d/%d Src: %d,%d %dx%d/%dx%d %d/%d Display: %dx%d %d/%d Place: %d,%d %dx%d",
++                     pic->format.i_x_offset, pic->format.i_y_offset,
++                     pic->format.i_width, pic->format.i_height,
++                     pic->format.i_visible_width, pic->format.i_visible_height,
++                     pic->format.i_sar_num, pic->format.i_sar_den,
++                     vd->fmt.i_x_offset, vd->fmt.i_y_offset,
++                     vd->fmt.i_width, vd->fmt.i_height,
++                     vd->fmt.i_visible_width, vd->fmt.i_visible_height,
++                     vd->fmt.i_sar_num, vd->fmt.i_sar_den,
++                     vd->source.i_x_offset, vd->source.i_y_offset,
++                     vd->source.i_width, vd->source.i_height,
++                     vd->source.i_visible_width, vd->source.i_visible_height,
++                     vd->source.i_sar_num, vd->source.i_sar_den,
++                     vd->cfg->display.width,   vd->cfg->display.height,
++                     vd->cfg->display.sar.num, vd->cfg->display.sar.den,
++                     r.x, r.y, r.w, r.h);
 +        }
-+#endif
 +    }
 +#endif
-+    r = drmu_rect_vlc_place(&sys->dest_rect);
 +
 +#if HAS_ZC_CMA
 +    if (drmu_format_vlc_to_drm_cma(pic->format.i_chroma) != 0) {
@@ -16136,6 +16239,19 @@
 +        msg_Err(vd, "Failed to create frme buffer from pic");
 +        return;
 +    }
++    // * Maybe scale cropping by vd->fmt.i_width/height / vd->source.i_width/height
++    //   to get pic coord cropping
++    //   Wait until we have a bad test case before doing this as I'm worried
++    //   that we may get unexpected w/h mismatches that do unwanted scaling
++#if 0
++    drmu_fb_crop_frac_set(dfb,
++        drmu_rect_rescale(
++            drmu_rect_vlc_format_crop(&vd->source),
++            drmu_rect_shl16(drmu_rect_wh(vd->fmt.i_width, vd->fmt.i_height)),
++            drmu_rect_wh(vd->source.i_width, vd->source.i_height)));
++#else
++    drmu_fb_crop_frac_set(dfb, drmu_rect_shl16(drmu_rect_vlc_format_crop(&vd->source)));
++#endif
 +    drmu_output_fb_info_set(sys->dout, dfb);
 +
 +    ret = drmu_atomic_plane_add_fb(da, sys->dp, dfb, r);
@@ -16418,7 +16534,7 @@
 +            .max_level = DRMU_LOG_LEVEL_ALL
 +        };
 +        if ((sys->du = drmu_env_new_xlease(&log)) == NULL &&
-+            (sys->du = drmu_env_new_open(DRM_MODULE, &log)) == NULL)
++            (sys->du = drmu_env_new_open(var_InheritString(vd, DRM_VOUT_MODULE_NAME), &log)) == NULL)
 +            goto fail;
 +    }
 +
@@ -16432,9 +16548,27 @@
 +    drmu_output_modeset_allow(sys->dout, !var_InheritBool(vd, DRM_VOUT_NO_MODESET_NAME));
 +    drmu_output_max_bpc_allow(sys->dout, !var_InheritBool(vd, DRM_VOUT_NO_MAX_BPC));
 +
-+    if ((rv = drmu_output_add_output(sys->dout, NULL)) != 0) {  // **** HDMI name here
-+        msg_Err(vd, "Failed to find output: %s", strerror(-rv));
-+        goto fail;
++
++    {
++        const char *display_name = var_InheritString(vd, DRM_VOUT_DISPLAY_NAME);
++        int qt_num = var_InheritInteger(vd, "qt-fullscreen-screennumber");
++        const char * conn_name = qt_num == 0 ? "HDMI-A-1" :  qt_num == 1 ? "HDMI-A-2" : NULL;
++        const char * dname;
++
++        if (display_name && strcasecmp(display_name, "auto") != 0) {
++            if (strcasecmp(display_name, "hdmi-1") == 0)
++                conn_name = "HDMI-A-1";
++            else if (strcasecmp(display_name, "hdmi-2") == 0)
++                conn_name = "HDMI-A-2";
++        }
++
++        dname = conn_name != NULL ? conn_name : "<auto>";
++
++        if ((rv = drmu_output_add_output(sys->dout, conn_name)) != 0) {
++            msg_Err(vd, "Failed to find output %s: %s", dname, strerror(-rv));
++            goto fail;
++        }
++        msg_Dbg(vd, "Using conn %s\n", dname);
 +    }
 +
 +    if ((sys->sub_fb_pool = drmu_pool_new(sys->du, 10)) == NULL)
@@ -16551,6 +16685,23 @@
 +//    vout_display_SetSizeAndSar(vd, drmu_crtc_width(sys->dc), drmu_crtc_height(sys->dc),
 +//                               drmu_ufrac_vlc_to_rational(drmu_crtc_sar(sys->dc)));
 +
++    {
++        const char *window_str = var_InheritString(vd, DRM_VOUT_WINDOW_NAME);
++        if (strcmp(window_str, "fullscreen") == 0) {
++            /* Leave req_win null */
++            msg_Dbg(vd, "Window: fullscreen");
++        }
++        else {
++            sys->req_win = str_to_rect(window_str);
++            if (sys->req_win.width != 0)
++                msg_Dbg(vd, "Window: %dx%d @ %d,%d",
++                        sys->req_win.width, sys->req_win.height,
++                        sys->req_win.x, sys->req_win.y);
++            else
++                msg_Warn(vd, "Window: '%s': cannot parse (usage: <w>x<h>+<x>+<y>) - using fullscreen", window_str);
++        }
++    }
++
 +    set_display_windows(vd, sys);
 +
 +    configure_display(vd, vd->cfg, &vd->source);
@@ -16574,13 +16725,16 @@
 +    add_bool(DRM_VOUT_NO_MODESET_NAME,     false, DRM_VOUT_NO_MODESET_TEXT, DRM_VOUT_NO_MODESET_LONGTEXT, false)
 +    add_bool(DRM_VOUT_NO_MAX_BPC,          false, DRM_VOUT_NO_MAX_BPC_TEXT, DRM_VOUT_NO_MAX_BPC_LONGTEXT, false)
 +    add_string(DRM_VOUT_MODE_NAME,         "none", DRM_VOUT_MODE_TEXT, DRM_VOUT_MODE_LONGTEXT, false)
++    add_string(DRM_VOUT_WINDOW_NAME,       "fullscreen", DRM_VOUT_WINDOW_TEXT, DRM_VOUT_WINDOW_LONGTEXT, false)
++    add_string(DRM_VOUT_DISPLAY_NAME,      "auto", DRM_VOUT_DISPLAY_TEXT, DRM_VOUT_DISPLAY_LONGTEXT, false)
++    add_string(DRM_VOUT_MODULE_NAME,       DRM_MODULE, DRM_VOUT_MODULE_TEXT, DRM_VOUT_MODULE_LONGTEXT, false)
 +
 +    set_callbacks(OpenDrmVout, CloseDrmVout)
 +vlc_module_end()
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu.c
-@@ -0,0 +1,3891 @@
+@@ -0,0 +1,3916 @@
 +#include "drmu.h"
 +#include "drmu_log.h"
 +
@@ -17800,18 +17954,6 @@
 +    return dfb->fb.height;
 +}
 +
-+static inline drmu_rect_t
-+rect_to_frac_rect(const drmu_rect_t a)
-+{
-+    drmu_rect_t b = {
-+        .x = a.x << 16,
-+        .y = a.y << 16,
-+        .w = a.w << 16,
-+        .h = a.h << 16
-+    };
-+    return b;
-+}
-+
 +// Set cropping (fractional) - x, y, relative to active x, y (and must be +ve)
 +int
 +drmu_fb_crop_frac_set(drmu_fb_t *const dfb, drmu_rect_t crop_frac)
@@ -17852,7 +17994,7 @@
 +    dfb->fb.width        = w;
 +    dfb->fb.height       = h;
 +    dfb->active          = active;
-+    dfb->crop            = rect_to_frac_rect(active);
++    dfb->crop            = drmu_rect_shl16(active);
 +    dfb->chroma_siting   = dfb->fmt_info ? dfb->fmt_info->chroma_siting : DRMU_CHROMA_SITING_TOP_LEFT;
 +}
 +
@@ -17986,6 +18128,19 @@
 +{
 +    return dfb->fmt_info->bpp;
 +}
++
++uint32_t
++drmu_fb_pixel_format(const drmu_fb_t * const dfb)
++{
++    return dfb->fb.pixel_format;
++}
++
++uint64_t
++drmu_fb_modifier(const drmu_fb_t * const dfb, const unsigned int plane)
++{
++    return plane >= 4 ? DRM_FORMAT_MOD_INVALID : dfb->fb.modifier[plane];
++}
++
 +
 +// Writeback fence
 +// Must be unset before set again
@@ -18144,7 +18299,7 @@
 +        return 0;
 +
 +    dfb->active = drmu_rect_wh(w, h);
-+    dfb->crop   = rect_to_frac_rect(dfb->active);
++    dfb->crop   = drmu_rect_shl16(dfb->active);
 +    return 1;
 +}
 +
@@ -19644,6 +19799,7 @@
 +        drmu_prop_bitmask_t * rotation;
 +        drmu_prop_range_t * chroma_siting_h;
 +        drmu_prop_range_t * chroma_siting_v;
++        drmu_prop_range_t * zpos;
 +    } pid;
 +    uint64_t rot_vals[8];
 +
@@ -19678,6 +19834,12 @@
 +    if (alpha == DRMU_PLANE_ALPHA_UNSET)
 +        return 0;
 +    return drmu_atomic_add_prop_range(da, dp->plane.plane_id, dp->pid.alpha, alpha);
++}
++
++int
++drmu_atomic_plane_add_zpos(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int zpos)
++{
++    return drmu_atomic_add_prop_range(da, dp->plane.plane_id, dp->pid.zpos, zpos);
 +}
 +
 +int
@@ -19739,6 +19901,12 @@
 +drmu_plane_id(const drmu_plane_t * const dp)
 +{
 +    return dp->plane.plane_id;
++}
++
++unsigned int
++drmu_plane_type(const drmu_plane_t * const dp)
++{
++    return dp->plane_type;
 +}
 +
 +const uint32_t *
@@ -19816,7 +19984,7 @@
 +}
 +
 +drmu_plane_t *
-+drmu_plane_new_find_type(drmu_crtc_t * const dc, const unsigned int req_type)
++drmu_plane_new_find(drmu_crtc_t * const dc, const drmu_plane_new_find_ok_fn cb, void * const v)
 +{
 +    uint32_t i;
 +    drmu_env_t * const du = drmu_crtc_env(dc);
@@ -19825,23 +19993,33 @@
 +    const uint32_t crtc_mask = (uint32_t)1 << drmu_crtc_idx(dc);
 +
 +    for (i = 0; (dp_t = drmu_env_plane_find_n(du, i)) != NULL; ++i) {
-+        // Is wanted type?
-+        if ((dp_t->plane_type & req_type) == 0)
-+            continue;
-+
-+        // In use?
-+        if (dp_t->dc != NULL)
-+            continue;
-+
++        // Is unused?
 +        // Availible for this crtc?
-+        if ((dp_t->plane.possible_crtcs & crtc_mask) == 0)
++        if (dp_t->dc != NULL ||
++            (dp_t->plane.possible_crtcs & crtc_mask) == 0)
 +            continue;
 +
-+        dp = dp_t;
-+        break;
++        if (cb(dp_t, v)) {
++            dp = dp_t;
++            break;
++        }
 +    }
++    return dp;
++}
++
++static bool plane_find_type_cb(const drmu_plane_t * dp, void * v)
++{
++    const unsigned int * const pReq = v;
++    return (*pReq & drmu_plane_type(dp)) != 0;
++}
++
++drmu_plane_t *
++drmu_plane_new_find_type(drmu_crtc_t * const dc, const unsigned int req_type)
++{
++    drmu_env_t * const du = drmu_crtc_env(dc);
++    drmu_plane_t * const dp = drmu_plane_new_find(dc, plane_find_type_cb, (void*)&req_type);
 +    if (dp == NULL) {
-+        drmu_err(du, "%s: No plane (count=%d) found for types %#x", __func__, i, req_type);
++        drmu_err(du, "%s: No plane found for types %#x", __func__, req_type);
 +        return NULL;
 +    }
 +    return dp;
@@ -19881,7 +20059,7 @@
 +        return -EINVAL;
 +
 +#if TRACE_PROP_NEW
-+    drmu_info(du, "Plane %d:", i);
++    drmu_info(du, "Plane id %d:", plane_id);
 +    props_dump(props);
 +#endif
 +
@@ -19910,6 +20088,7 @@
 +    dp->pid.rotation         = drmu_prop_enum_new(du, props_name_to_id(props, "rotation"));
 +    dp->pid.chroma_siting_h  = drmu_prop_range_new(du, props_name_to_id(props, "CHROMA_SITING_H"));
 +    dp->pid.chroma_siting_v  = drmu_prop_range_new(du, props_name_to_id(props, "CHROMA_SITING_V"));
++    dp->pid.zpos             = drmu_prop_range_new(du, props_name_to_id(props, "zpos"));
 +
 +    dp->rot_vals[DRMU_PLANE_ROTATION_0] = drmu_prop_bitmask_value(dp->pid.rotation, "rotate-0");
 +    if (dp->rot_vals[DRMU_PLANE_ROTATION_0]) {
@@ -20474,7 +20653,7 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu.h
-@@ -0,0 +1,605 @@
+@@ -0,0 +1,616 @@
 +#ifndef _DRMU_DRMU_H
 +#define _DRMU_DRMU_H
 +
@@ -20702,6 +20881,8 @@
 +void drmu_fb_pre_delete_set(drmu_fb_t *const dfb, drmu_fb_pre_delete_fn fn, void * v);
 +void drmu_fb_pre_delete_unset(drmu_fb_t *const dfb);
 +unsigned int drmu_fb_pixel_bits(const drmu_fb_t * const dfb);
++uint32_t drmu_fb_pixel_format(const drmu_fb_t * const dfb);
++uint64_t drmu_fb_modifier(const drmu_fb_t * const dfb, const unsigned int plane);
 +drmu_fb_t * drmu_fb_new_dumb(drmu_env_t * const du, uint32_t w, uint32_t h, const uint32_t format);
 +drmu_fb_t * drmu_fb_new_dumb_mod(drmu_env_t * const du, uint32_t w, uint32_t h, const uint32_t format, const uint64_t mod);
 +drmu_fb_t * drmu_fb_realloc_dumb(drmu_env_t * const du, drmu_fb_t * dfb, uint32_t w, uint32_t h, const uint32_t format);
@@ -20901,6 +21082,13 @@
 +// Plane
 +
 +uint32_t drmu_plane_id(const drmu_plane_t * const dp);
++
++#define DRMU_PLANE_TYPE_CURSOR  4
++#define DRMU_PLANE_TYPE_PRIMARY 2
++#define DRMU_PLANE_TYPE_OVERLAY 1
++#define DRMU_PLANE_TYPE_UNKNOWN 0
++unsigned int drmu_plane_type(const drmu_plane_t * const dp);
++
 +const uint32_t * drmu_plane_formats(const drmu_plane_t * const dp, unsigned int * const pCount);
 +bool drmu_plane_format_check(const drmu_plane_t * const dp, const uint32_t format, const uint64_t modifier);
 +
@@ -20909,6 +21097,8 @@
 +#define DRMU_PLANE_ALPHA_TRANSPARENT            0
 +#define DRMU_PLANE_ALPHA_OPAQUE                 0xffff
 +int drmu_atomic_plane_add_alpha(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int alpha);
++
++int drmu_atomic_plane_add_zpos(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int zpos);
 +
 +// X, Y & TRANSPOSE can be ORed to get all others
 +#define DRMU_PLANE_ROTATION_0                   0
@@ -20956,11 +21146,11 @@
 +// Returns -EBUSY if plane already associated
 +int drmu_plane_ref_crtc(drmu_plane_t * const dp, drmu_crtc_t * const dc);
 +
-+#define DRMU_PLANE_TYPE_CURSOR  4
-+#define DRMU_PLANE_TYPE_PRIMARY 2
-+#define DRMU_PLANE_TYPE_OVERLAY 1
-+#define DRMU_PLANE_TYPE_UNKNOWN 0
++typedef bool (*drmu_plane_new_find_ok_fn)(const drmu_plane_t * dp, void * v);
 +
++// Find a "free" plane that satisfies (returns true) the ok callback
++// Does not ref
++drmu_plane_t * drmu_plane_new_find(drmu_crtc_t * const dc, const drmu_plane_new_find_ok_fn cb, void * const v);
 +// Find a "free" plane of the given type. Types can be ORed
 +// Does not ref
 +drmu_plane_t * drmu_plane_new_find_type(drmu_crtc_t * const dc, const unsigned int req_type);
@@ -21972,7 +22162,7 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu_output.c
-@@ -0,0 +1,582 @@
+@@ -0,0 +1,613 @@
 +#include "drmu_output.h"
 +#include "drmu_log.h"
 +
@@ -22031,6 +22221,37 @@
 +
 +    return dp;
 +}
++
++struct plane_format_s {
++    unsigned int types;
++    uint32_t fmt;
++    uint64_t mod;
++};
++
++static bool plane_find_format_cb(const drmu_plane_t * dp, void * v)
++{
++    const struct plane_format_s * const f = v;
++    return (f->types & drmu_plane_type(dp)) != 0 &&
++        drmu_plane_format_check(dp, f->fmt, f->mod);
++}
++
++drmu_plane_t *
++drmu_output_plane_ref_format(drmu_output_t * const dout, const unsigned int types, const uint32_t format, const uint64_t mod)
++{
++    struct plane_format_s fm = {
++        .types = (types != 0) ? types : (DRMU_PLANE_TYPE_PRIMARY |  DRMU_PLANE_TYPE_CURSOR | DRMU_PLANE_TYPE_OVERLAY),
++        .fmt = format,
++        .mod = mod
++    };
++
++    drmu_plane_t *const dp = drmu_plane_new_find(dout->dc, plane_find_format_cb, &fm);
++
++    if (dp == NULL || drmu_plane_ref_crtc(dp, dout->dc) != 0)
++        return NULL;
++
++    return dp;
++}
++
 +
 +int
 +drmu_atomic_output_add_props(drmu_atomic_t * const da, drmu_output_t * const dout)
@@ -22557,7 +22778,7 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu_output.h
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,81 @@
 +#ifndef _DRMU_DRMU_OUTPUT_H
 +#define _DRMU_DRMU_OUTPUT_H
 +
@@ -22572,6 +22793,11 @@
 +
 +drmu_plane_t * drmu_output_plane_ref_primary(drmu_output_t * const dout);
 +drmu_plane_t * drmu_output_plane_ref_other(drmu_output_t * const dout);
++// Find and ref a plane that supports the given format & mod on the current crtc
++// Types is a bit field of acceptable plane types (DRMU_PLANE_TYPE_xxx), 0 => any
++//
++// add_output must be called before this (so we have a crtc to check against)
++drmu_plane_t * drmu_output_plane_ref_format(drmu_output_t * const dout, const unsigned int types, const uint32_t format, const uint64_t mod);
 +
 +// Add all props accumulated on the output to the atomic
 +int drmu_atomic_output_add_props(drmu_atomic_t * const da, drmu_output_t * const dout);
@@ -24023,7 +24249,31 @@
  typedef struct vlc_gl_sys_t
  {
      EGLDisplay display;
-@@ -371,6 +373,14 @@ static int Open (vlc_object_t *obj, cons
+@@ -58,6 +60,7 @@ typedef struct vlc_gl_sys_t
+ #endif
+     PFNEGLCREATEIMAGEKHRPROC    eglCreateImageKHR;
+     PFNEGLDESTROYIMAGEKHRPROC   eglDestroyImageKHR;
++    PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT;
+ } vlc_gl_sys_t;
+ 
+ static int MakeCurrent (vlc_gl_t *gl)
+@@ -129,6 +132,15 @@ static bool DestroyImageKHR(vlc_gl_t *gl
+     return sys->eglDestroyImageKHR(sys->display, image);
+ }
+ 
++static bool QueryDmaBufModifiersEXT(vlc_gl_t *gl, uint32_t format,
++                                    unsigned int max_modifiers, uint64_t *modifiers,
++                                    unsigned int *external_only, int32_t *num_modifiers)
++{
++    vlc_gl_sys_t *sys = gl->sys;
++
++    return sys->eglQueryDmaBufModifiersEXT(sys->display, format, max_modifiers, modifiers, external_only, num_modifiers);
++}
++
+ static bool CheckToken(const char *haystack, const char *needle)
+ {
+     size_t len = strlen(needle);
+@@ -371,6 +383,14 @@ static int Open (vlc_object_t *obj, cons
          goto error;
      }
  
@@ -24038,7 +24288,17 @@
      const EGLint conf_attr[] = {
          EGL_RED_SIZE, 5,
          EGL_GREEN_SIZE, 5,
-@@ -463,7 +473,7 @@ vlc_module_begin ()
+@@ -427,6 +447,9 @@ static int Open (vlc_object_t *obj, cons
+         gl->egl.createImageKHR = CreateImageKHR;
+         gl->egl.destroyImageKHR = DestroyImageKHR;
+     }
++    sys->eglQueryDmaBufModifiersEXT = (void *)eglGetProcAddress("eglQueryDmaBufModifiersEXT");
++    if (sys->eglQueryDmaBufModifiersEXT)
++        gl->egl.queryDmaBufModifiersEXT = QueryDmaBufModifiersEXT;
+ 
+     return VLC_SUCCESS;
+ 
+@@ -463,7 +486,7 @@ vlc_module_begin ()
      add_shortcut ("egl")
  
      add_submodule ()
