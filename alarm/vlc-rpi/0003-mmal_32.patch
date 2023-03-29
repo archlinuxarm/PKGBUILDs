@@ -15686,7 +15686,7 @@
 +
 --- a/modules/video_output/Makefile.am
 +++ b/modules/video_output/Makefile.am
-@@ -182,6 +182,26 @@ vout_LTLIBRARIES += libglx_plugin.la
+@@ -182,6 +182,28 @@ vout_LTLIBRARIES += libglx_plugin.la
  endif
  endif
  
@@ -15694,6 +15694,8 @@
 +
 +libdrm_vout_plugin_la_SOURCES = video_output/drmu/drm_vout.c \
 +	video_output/drmu/drmu_vlc.c video_output/drmu/drmu_vlc.h \
++	video_output/drmu/drmu_fmts.c video_output/drmu/drmu_fmts.h \
++	video_output/drmu/drmu_chroma.h \
 +	video_output/drmu/drmu_log.h video_output/drmu/drmu.c \
 +	video_output/drmu/drmu_xlease.c video_output/drmu/drmu_atomic.c \
 +	video_output/drmu/drmu_util.c video_output/drmu/drmu_util.h \
@@ -15715,7 +15717,7 @@
  libwl_shm_plugin_la_SOURCES = video_output/wayland/shm.c
 --- /dev/null
 +++ b/modules/video_output/drmu/drm_vout.c
-@@ -0,0 +1,1016 @@
+@@ -0,0 +1,1033 @@
 +/*****************************************************************************
 + * mmal.c: MMAL-based vout plugin for Raspberry Pi
 + *****************************************************************************
@@ -16510,6 +16512,7 @@
 +    vout_display_t * const vd = (vout_display_t *)object;
 +//    video_format_t * const fmtp = &vd->fmt;
 +    const video_format_t *const fmtp = &vd->source;
++    const uint32_t src_chroma = fmtp->i_chroma;
 +    vout_display_sys_t *sys;
 +    int ret = VLC_EGENERIC;
 +    int rv;
@@ -16568,7 +16571,7 @@
 +            msg_Err(vd, "Failed to find output %s: %s", dname, strerror(-rv));
 +            goto fail;
 +        }
-+        msg_Dbg(vd, "Using conn %s\n", dname);
++        msg_Dbg(vd, "Using conn %s", dname);
 +    }
 +
 +    if ((sys->sub_fb_pool = drmu_pool_new(sys->du, 10)) == NULL)
@@ -16677,9 +16680,22 @@
 +        }
 +        else
 +#endif
-+        if (drmu_format_vlc_to_drm(fmtp) == 0) {
++        if ((drm_fmt = drmu_format_vlc_to_drm(fmtp)) != 0 &&
++            drmu_plane_format_check(sys->dp, drm_fmt, 0)) {
++            // It is a format where simple byte copying works
++        }
++        else {
++            const vlc_fourcc_t *fallback = vlc_fourcc_IsYUV(fmtp->i_chroma) ?
++                vlc_fourcc_GetYUVFallback(fmtp->i_chroma) :
++                vlc_fourcc_GetRGBFallback(fmtp->i_chroma);
++
++            for (; *fallback; ++fallback) {
++                if (drmu_plane_format_check(sys->dp, drmu_format_vlc_chroma_to_drm(*fallback), 0))
++                    break;
++            }
++
 +            // no conversion - ask for something we know we can deal with
-+            vd->fmt.i_chroma = VLC_CODEC_I420;
++            vd->fmt.i_chroma = *fallback ? *fallback : VLC_CODEC_I420;
 +        }
 +    }
 +//    vout_display_SetSizeAndSar(vd, drmu_crtc_width(sys->dc), drmu_crtc_height(sys->dc),
@@ -16701,6 +16717,9 @@
 +                msg_Warn(vd, "Window: '%s': cannot parse (usage: <w>x<h>+<x>+<y>) - using fullscreen", window_str);
 +        }
 +    }
++
++    if (src_chroma != vd->fmt.i_chroma)
++        msg_Warn(vd, "Cannot display %s directly trying %s", drmu_log_fourcc(src_chroma), drmu_log_fourcc(vd->fmt.i_chroma));
 +
 +    set_display_windows(vd, sys);
 +
@@ -16734,8 +16753,13 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu.c
-@@ -0,0 +1,3916 @@
+@@ -0,0 +1,3878 @@
++// Needed to ensure we get a 64-bit offset to mmap when mapping BOs
++#undef _FILE_OFFSET_BITS
++#define _FILE_OFFSET_BITS 64
++
 +#include "drmu.h"
++#include "drmu_fmts.h"
 +#include "drmu_log.h"
 +
 +#include <pthread.h>
@@ -16830,70 +16854,6 @@
 +            x.den = xd;
 +        }
 +    }
-+}
-+
-+//----------------------------------------------------------------------------
-+//
-+// Format properties
-+
-+typedef struct drmu_format_info_s {
-+    uint32_t fourcc;
-+    uint8_t  bpp;  // For dumb BO alloc
-+    uint8_t  bit_depth;  // For display
-+    uint8_t  plane_count;
-+    struct {
-+        uint8_t wdiv;
-+        uint8_t hdiv;
-+    } planes[4];
-+    drmu_chroma_siting_t chroma_siting;  // Default for this format (YUV420 = (0.0, 0.5), otherwise (0, 0)
-+} drmu_format_info_t;
-+
-+static const drmu_format_info_t format_info[] = {
-+    { .fourcc = DRM_FORMAT_XRGB8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_XBGR8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_RGBX8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_BGRX8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_ARGB8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_ABGR8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_RGBA8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_BGRA8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_XRGB2101010, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_XBGR2101010, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_RGBX1010102, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_BGRX1010102, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_ARGB2101010, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_ABGR2101010, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_RGBA1010102, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_BGRA1010102, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_AYUV, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+
-+    { .fourcc = DRM_FORMAT_YUYV, .bpp = 16, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_YVYU, .bpp = 16, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_VYUY, .bpp = 16, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+    { .fourcc = DRM_FORMAT_UYVY, .bpp = 16, .bit_depth = 8, .plane_count = 1, .planes = {{1, 1}}},
-+
-+    { .fourcc = DRM_FORMAT_NV12,   .bpp = 8, .bit_depth = 8, .plane_count = 2, .planes = {{.wdiv = 1, .hdiv = 1}, {.wdiv = 1, .hdiv = 2}},
-+      .chroma_siting = DRMU_CHROMA_SITING_LEFT_I },
-+    { .fourcc = DRM_FORMAT_NV21,   .bpp = 8, .bit_depth = 8, .plane_count = 2, .planes = {{.wdiv = 1, .hdiv = 1}, {.wdiv = 1, .hdiv = 2}},
-+      .chroma_siting = DRMU_CHROMA_SITING_LEFT_I },
-+    { .fourcc = DRM_FORMAT_YUV420, .bpp = 8, .bit_depth = 8, .plane_count = 3, .planes = {{.wdiv = 1, .hdiv = 1}, {.wdiv = 2, .hdiv = 2}, {.wdiv = 2, .hdiv = 2}},
-+      .chroma_siting = DRMU_CHROMA_SITING_LEFT_I },
-+
-+    // 3 pel in 32 bits. So code as 32bpp with wdiv 3.
-+    { .fourcc = DRM_FORMAT_P030,   .bpp = 32, .bit_depth = 10, .plane_count = 2, .planes = {{.wdiv = 3, .hdiv = 1}, {.wdiv = 3, .hdiv = 2}},
-+      .chroma_siting = DRMU_CHROMA_SITING_LEFT_I },
-+
-+    { .fourcc = 0 }
-+};
-+
-+static const drmu_format_info_t *
-+format_info_find(const uint32_t fourcc)
-+{
-+    for (const drmu_format_info_t * p = format_info; p->fourcc; ++p) {
-+        if (p->fourcc == fourcc)
-+            return p;
-+    }
-+    return NULL;
 +}
 +
 +//----------------------------------------------------------------------------
@@ -17357,6 +17317,12 @@
 +    return pra->range[0] <= x && pra->range[1] >= x;
 +}
 +
++bool
++drmu_prop_range_immutable(const drmu_prop_range_t * const pra)
++{
++    return !pra || (pra->flags & DRM_MODE_PROP_IMMUTABLE) != 0;
++}
++
 +uint64_t
 +drmu_prop_range_max(const drmu_prop_range_t * const pra)
 +{
@@ -17373,6 +17339,12 @@
 +drmu_prop_range_id(const drmu_prop_range_t * const pra)
 +{
 +    return pra == NULL ? 0 : pra->id;
++}
++
++const char *
++drmu_prop_range_name(const drmu_prop_range_t * const pra)
++{
++    return pra == NULL ? "{norange}" : pra->name;
 +}
 +
 +drmu_prop_range_t *
@@ -17431,11 +17403,14 @@
 +
 +    rv = !pra ? -ENOENT :
 +        !drmu_prop_range_validate(pra, x) ? -EINVAL :
++        drmu_prop_range_immutable(pra) ? -EPERM :
 +        drmu_atomic_add_prop_generic(da, obj_id, drmu_prop_range_id(pra), x, NULL, NULL);
 +
 +    if (rv != 0)
-+        drmu_warn(drmu_atomic_env(da), "%s: Failed to add range obj_id=%#x, prop_id=%#x, val=%"PRId64": %s", __func__,
-+                  obj_id, drmu_prop_range_id(pra), x, strerror(-rv));
++        drmu_warn(drmu_atomic_env(da),
++                  "%s: Failed to add range %s obj_id=%#x, prop_id=%#x, val=%"PRId64", range=%"PRId64"->%"PRId64": %s",
++                  __func__, drmu_prop_range_name(pra),
++                  obj_id, drmu_prop_range_id(pra), x, drmu_prop_range_min(pra), drmu_prop_range_max(pra), strerror(-rv));
 +
 +    return rv;
 +}
@@ -17741,16 +17716,6 @@
 +
 +//----------------------------------------------------------------------------
 +//
-+// Format info fns
-+
-+unsigned int
-+drmu_format_info_bit_depth(const drmu_format_info_t * const fmt_info)
-+{
-+    return !fmt_info ? 0 : fmt_info->bit_depth;
-+}
-+
-+//----------------------------------------------------------------------------
-+//
 +// FB fns
 +
 +typedef struct drmu_fb_s {
@@ -17760,7 +17725,7 @@
 +
 +    struct drmu_env_s * du;
 +
-+    const struct drmu_format_info_s * fmt_info;
++    const struct drmu_fmt_info_s * fmt_info;
 +
 +    struct drm_mode_fb_cmd2 fb;
 +
@@ -17851,10 +17816,15 @@
 +
 +    // Call on_delete last so we have stopped using anything that might be
 +    // freed by it
-+    if (dfb->on_delete_fn)
-+        dfb->on_delete_fn(dfb, dfb->on_delete_v);
++    {
++        void * const v = dfb->on_delete_v;
++        const drmu_fb_on_delete_fn fn = dfb->on_delete_fn;
 +
-+    free(dfb);
++        free(dfb);
++
++        if (fn)
++            fn(v);
++    }
 +}
 +
 +void
@@ -17989,13 +17959,13 @@
 +void
 +drmu_fb_int_fmt_size_set(drmu_fb_t *const dfb, uint32_t fmt, uint32_t w, uint32_t h, const drmu_rect_t active)
 +{
-+    dfb->fmt_info = format_info_find(fmt);
++    dfb->fmt_info        = drmu_fmt_info_find_fmt(fmt);
 +    dfb->fb.pixel_format = fmt;
 +    dfb->fb.width        = w;
 +    dfb->fb.height       = h;
 +    dfb->active          = active;
 +    dfb->crop            = drmu_rect_shl16(active);
-+    dfb->chroma_siting   = dfb->fmt_info ? dfb->fmt_info->chroma_siting : DRMU_CHROMA_SITING_TOP_LEFT;
++    dfb->chroma_siting   = drmu_fmt_info_chroma_siting(dfb->fmt_info);
 +}
 +
 +void
@@ -18103,7 +18073,7 @@
 +    return dfb->color_range;
 +}
 +
-+const struct drmu_format_info_s *
++const struct drmu_fmt_info_s *
 +drmu_fb_format_info_get(const drmu_fb_t * const dfb)
 +{
 +    return dfb->fmt_info;
@@ -18126,7 +18096,7 @@
 +unsigned int
 +drmu_fb_pixel_bits(const drmu_fb_t * const dfb)
 +{
-+    return dfb->fmt_info->bpp;
++    return drmu_fmt_info_pixel_bits(dfb->fmt_info);
 +}
 +
 +uint32_t
@@ -18169,12 +18139,13 @@
 +fb_total_height(const drmu_fb_t * const dfb, const unsigned int h)
 +{
 +    unsigned int i;
-+    const drmu_format_info_t *const f = dfb->fmt_info;
++    const drmu_fmt_info_t *const f = dfb->fmt_info;
 +    unsigned int t = 0;
-+    unsigned int h0 = h * f->planes[0].wdiv;
++    unsigned int h0 = h * drmu_fmt_info_wdiv(f, 0);
++    const unsigned int c = drmu_fmt_info_plane_count(f);
 +
-+    for (i = 0; i != f->plane_count; ++i)
-+        t += h0 / (f->planes[i].hdiv * f->planes[i].wdiv);
++    for (i = 0; i != c; ++i)
++        t += h0 / (drmu_fmt_info_hdiv(f, i) * drmu_fmt_info_wdiv(f, i));
 +
 +    return t;
 +}
@@ -18182,9 +18153,10 @@
 +static void
 +fb_pitches_set_mod(drmu_fb_t * const dfb, uint64_t mod)
 +{
-+    const drmu_format_info_t *const f = dfb->fmt_info;
-+    const uint32_t pitch0 = dfb->map_pitch * f->planes[0].wdiv;
++    const drmu_fmt_info_t *const f = dfb->fmt_info;
++    const uint32_t pitch0 = dfb->map_pitch * drmu_fmt_info_wdiv(f, 0);
 +    const uint32_t h = drmu_fb_height(dfb);
++    const unsigned int c = drmu_fmt_info_plane_count(f);
 +    uint32_t t = 0;
 +    unsigned int i;
 +
@@ -18197,9 +18169,10 @@
 +        return;
 +    }
 +
-+    for (i = 0; i != f->plane_count; ++i) {
-+        drmu_fb_int_layer_mod_set(dfb, i, 0, pitch0 / f->planes[i].wdiv, t, mod);
-+        t += (pitch0 * h) / (f->planes[i].hdiv * f->planes[i].wdiv);
++    for (i = 0; i != c; ++i) {
++        const unsigned int wdiv = drmu_fmt_info_wdiv(f, i);
++        drmu_fb_int_layer_mod_set(dfb, i, 0, pitch0 / wdiv, t, mod);
++        t += (pitch0 * h) / (drmu_fmt_info_hdiv(f, i) * wdiv);
 +    }
 +}
 +
@@ -18240,7 +18213,7 @@
 +    {
 +        struct drm_mode_create_dumb dumb = {
 +            .height = fb_total_height(dfb, dfb->fb.height),
-+            .width = dfb->fb.width / dfb->fmt_info->planes[0].wdiv,
++            .width = dfb->fb.width / drmu_fmt_info_wdiv(dfb->fmt_info, 0),
 +            .bpp = bpp
 +        };
 +
@@ -18265,9 +18238,9 @@
 +
 +        if ((dfb->map_ptr = mmap(NULL, dfb->map_size,
 +                                 PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
-+                                 drmu_fd(du), (off_t)map_dumb.offset)) == MAP_FAILED) {
-+            drmu_err(du, "%s: mmap failed (size=%zd, fd=%d, off=%zd): %s", __func__,
-+                     dfb->map_size, drmu_fd(du), (size_t)map_dumb.offset, strerror(errno));
++                                 drmu_fd(du), map_dumb.offset)) == MAP_FAILED) {
++            drmu_err(du, "%s: mmap failed (size=%zd, fd=%d, off=%#"PRIx64"): %s", __func__,
++                     dfb->map_size, drmu_fd(du), map_dumb.offset, strerror(errno));
 +            goto fail;
 +        }
 +    }
@@ -19921,7 +19894,15 @@
 +{
 +    const struct drm_format_modifier * const mods = (const struct drm_format_modifier *)((const uint8_t *)dp->formats_in + dp->fmts_hdr->modifiers_offset);
 +    const uint32_t * const fmts = (const uint32_t *)((const uint8_t *)dp->formats_in + dp->fmts_hdr->formats_offset);
++    uint64_t modbase = modifier;
 +    unsigned int i;
++
++    if (!format)
++        return false;
++
++    // If broadcom then remove parameters before checking
++    if ((modbase >> 56) == DRM_FORMAT_MOD_VENDOR_BROADCOM)
++        modbase = fourcc_mod_broadcom_mod(modbase);
 +
 +    // * Simplistic lookup; Could be made much faster
 +
@@ -19930,7 +19911,7 @@
 +        uint64_t fbits;
 +        unsigned int j;
 +
-+        if (mod->modifier != modifier)
++        if (mod->modifier != modbase)
 +            continue;
 +
 +        for (fbits = mod->formats, j = mod->offset; fbits; fbits >>= 1, ++j) {
@@ -20653,7 +20634,7 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu.h
-@@ -0,0 +1,616 @@
+@@ -0,0 +1,591 @@
 +#ifndef _DRMU_DRMU_H
 +#define _DRMU_DRMU_H
 +
@@ -20661,6 +20642,8 @@
 +#include <stdbool.h>
 +#include <stdint.h>
 +#include <stdlib.h>
++
++#include "drmu_chroma.h"
 +
 +#ifdef __cplusplus
 +extern "C" {
@@ -20686,9 +20669,6 @@
 +struct drmu_prop_object_s;
 +typedef struct drmu_prop_object_s drmu_prop_object_t;
 +
-+struct drmu_format_info_s;
-+typedef struct drmu_format_info_s drmu_format_info_t;
-+
 +struct drmu_pool_s;
 +typedef struct drmu_pool_s drmu_pool_t;
 +
@@ -20710,10 +20690,6 @@
 +    int32_t x, y;
 +    uint32_t w, h;
 +} drmu_rect_t;
-+
-+typedef struct drmu_chroma_siting_s {
-+    int32_t x, y;
-+} drmu_chroma_siting_t;
 +
 +typedef struct drmu_ufrac_s {
 +    unsigned int num;
@@ -20800,12 +20776,6 @@
 +    };
 +}
 +
-+static inline bool
-+drmu_chroma_siting_eq(const drmu_chroma_siting_t a, const drmu_chroma_siting_t b)
-+{
-+    return a.x == b.x && a.y == b.y;
-+}
-+
 +// Blob
 +
 +void drmu_blob_unref(drmu_blob_t ** const ppBlob);
@@ -20846,9 +20816,11 @@
 +
 +void drmu_prop_range_delete(drmu_prop_range_t ** pppra);
 +bool drmu_prop_range_validate(const drmu_prop_range_t * const pra, const uint64_t x);
++bool drmu_prop_range_immutable(const drmu_prop_range_t * const pra);
 +uint64_t drmu_prop_range_max(const drmu_prop_range_t * const pra);
 +uint64_t drmu_prop_range_min(const drmu_prop_range_t * const pra);
 +uint32_t drmu_prop_range_id(const drmu_prop_range_t * const pra);
++const char * drmu_prop_range_name(const drmu_prop_range_t * const pra);
 +drmu_prop_range_t * drmu_prop_range_new(drmu_env_t * const du, const uint32_t id);
 +int drmu_atomic_add_prop_range(struct drmu_atomic_s * const da, const uint32_t obj_id, const drmu_prop_range_t * const pra, const uint64_t x);
 +
@@ -20863,20 +20835,18 @@
 +void drmu_bo_env_uninit(drmu_bo_env_t * const boe);
 +void drmu_bo_env_init(drmu_bo_env_t * boe);
 +
-+// format_info
-+
-+unsigned int drmu_format_info_bit_depth(const drmu_format_info_t * const fmt_info);
-+
 +// fb
 +struct hdr_output_metadata;
-+struct drmu_format_info_s;
++struct drmu_fmt_info_s;
 +
 +// Called pre delete.
 +// Zero returned means continue delete.
 +// Non-zero means stop delete - fb will have zero refs so will probably want a new ref
 +//   before next use
 +typedef int (* drmu_fb_pre_delete_fn)(struct drmu_fb_s * dfb, void * v);
-+typedef void (* drmu_fb_on_delete_fn)(struct drmu_fb_s * dfb, void * v);
++// Called after an fb has been deleted and therefore has ceased using any
++// user resources
++typedef void (* drmu_fb_on_delete_fn)(void * v);
 +
 +void drmu_fb_pre_delete_set(drmu_fb_t *const dfb, drmu_fb_pre_delete_fn fn, void * v);
 +void drmu_fb_pre_delete_unset(drmu_fb_t *const dfb);
@@ -20962,7 +20932,7 @@
 +drmu_broadcast_rgb_t drmu_color_range_to_broadcast_rgb(const drmu_color_range_t range);
 +drmu_colorspace_t drmu_fb_colorspace_get(const drmu_fb_t * const dfb);
 +drmu_color_range_t drmu_fb_color_range_get(const drmu_fb_t * const dfb);
-+const struct drmu_format_info_s * drmu_fb_format_info_get(const drmu_fb_t * const dfb);
++const struct drmu_fmt_info_s * drmu_fb_format_info_get(const drmu_fb_t * const dfb);
 +void drmu_fb_hdr_metadata_set(drmu_fb_t *const dfb, const struct hdr_output_metadata * meta);
 +int drmu_fb_int_make(drmu_fb_t *const dfb);
 +
@@ -21112,24 +21082,6 @@
 +#define DRMU_PLANE_ROTATION_180_TRANSPOSE       7  // Rotate 180 & transpose
 +int drmu_atomic_plane_add_rotation(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const int rot);
 +
-+// Init constants - C winges if the struct is specified in a const init (which seems like a silly error)
-+#define drmu_chroma_siting_float_i(_x, _y) {.x = (int32_t)((double)(_x) * 65536 + .5), .y = (int32_t)((double)(_y) * 65536 + .5)}
-+#define DRMU_CHROMA_SITING_BOTTOM_I             drmu_chroma_siting_float_i(0.5, 1.0)
-+#define DRMU_CHROMA_SITING_BOTTOM_LEFT_I        drmu_chroma_siting_float_i(0.0, 1.0)
-+#define DRMU_CHROMA_SITING_CENTER_I             drmu_chroma_siting_float_i(0.5, 0.5)
-+#define DRMU_CHROMA_SITING_LEFT_I               drmu_chroma_siting_float_i(0.0, 0.5)
-+#define DRMU_CHROMA_SITING_TOP_I                drmu_chroma_siting_float_i(0.5, 0.0)
-+#define DRMU_CHROMA_SITING_TOP_LEFT_I           drmu_chroma_siting_float_i(0.0, 0.0)
-+#define DRMU_CHROMA_SITING_UNSPECIFIED_I        {INT32_MIN, INT32_MIN}
-+// Inline constants
-+#define drmu_chroma_siting_float(_x, _y) (drmu_chroma_siting_t)drmu_chroma_siting_float_i(_x, _y)
-+#define DRMU_CHROMA_SITING_BOTTOM               drmu_chroma_siting_float(0.5, 1.0)
-+#define DRMU_CHROMA_SITING_BOTTOM_LEFT          drmu_chroma_siting_float(0.0, 1.0)
-+#define DRMU_CHROMA_SITING_CENTER               drmu_chroma_siting_float(0.5, 0.5)
-+#define DRMU_CHROMA_SITING_LEFT                 drmu_chroma_siting_float(0.0, 0.5)
-+#define DRMU_CHROMA_SITING_TOP                  drmu_chroma_siting_float(0.5, 0.0)
-+#define DRMU_CHROMA_SITING_TOP_LEFT             drmu_chroma_siting_float(0.0, 0.0)
-+#define DRMU_CHROMA_SITING_UNSPECIFIED          (drmu_chroma_siting_t){INT32_MIN, INT32_MIN}
 +int drmu_atomic_plane_add_chroma_siting(struct drmu_atomic_s * const da, const drmu_plane_t * const dp, const drmu_chroma_siting_t siting);
 +
 +// Adds the fb to the plane along with all fb properties that apply to a plane
@@ -21263,6 +21215,10 @@
 +// drmu_xdri3
 +
 +drmu_env_t * drmu_env_new_xdri3(const drmu_log_env_t * const log);
++
++// drmu_waylease
++
++drmu_env_t * drmu_env_new_waylease(const struct drmu_log_env_s * const log);
 +
 +#ifdef __cplusplus
 +}
@@ -22105,6 +22061,342 @@
 +
 +
 --- /dev/null
++++ b/modules/video_output/drmu/drmu_chroma.h
+@@ -0,0 +1,47 @@
++#ifndef _DRMU_DRMU_CHROMA_H
++#define _DRMU_DRMU_CHROMA_H
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#include "drmu_chroma.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef struct drmu_chroma_siting_s {
++    int32_t x, y;
++} drmu_chroma_siting_t;
++
++// Init constants - C winges if the struct is specified in a const init (which seems like a silly error)
++#define drmu_chroma_siting_float_i(_x, _y) {.x = (int32_t)((double)(_x) * 65536 + .5), .y = (int32_t)((double)(_y) * 65536 + .5)}
++#define DRMU_CHROMA_SITING_BOTTOM_I             drmu_chroma_siting_float_i(0.5, 1.0)
++#define DRMU_CHROMA_SITING_BOTTOM_LEFT_I        drmu_chroma_siting_float_i(0.0, 1.0)
++#define DRMU_CHROMA_SITING_CENTER_I             drmu_chroma_siting_float_i(0.5, 0.5)
++#define DRMU_CHROMA_SITING_LEFT_I               drmu_chroma_siting_float_i(0.0, 0.5)
++#define DRMU_CHROMA_SITING_TOP_I                drmu_chroma_siting_float_i(0.5, 0.0)
++#define DRMU_CHROMA_SITING_TOP_LEFT_I           drmu_chroma_siting_float_i(0.0, 0.0)
++#define DRMU_CHROMA_SITING_UNSPECIFIED_I        {INT32_MIN, INT32_MIN}
++// Inline constants
++#define drmu_chroma_siting_float(_x, _y) (drmu_chroma_siting_t)drmu_chroma_siting_float_i(_x, _y)
++#define DRMU_CHROMA_SITING_BOTTOM               drmu_chroma_siting_float(0.5, 1.0)
++#define DRMU_CHROMA_SITING_BOTTOM_LEFT          drmu_chroma_siting_float(0.0, 1.0)
++#define DRMU_CHROMA_SITING_CENTER               drmu_chroma_siting_float(0.5, 0.5)
++#define DRMU_CHROMA_SITING_LEFT                 drmu_chroma_siting_float(0.0, 0.5)
++#define DRMU_CHROMA_SITING_TOP                  drmu_chroma_siting_float(0.5, 0.0)
++#define DRMU_CHROMA_SITING_TOP_LEFT             drmu_chroma_siting_float(0.0, 0.0)
++#define DRMU_CHROMA_SITING_UNSPECIFIED          (drmu_chroma_siting_t){INT32_MIN, INT32_MIN}
++
++static inline bool
++drmu_chroma_siting_eq(const drmu_chroma_siting_t a, const drmu_chroma_siting_t b)
++{
++    return a.x == b.x && a.y == b.y;
++}
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
++
+--- /dev/null
++++ b/modules/video_output/drmu/drmu_fmts.c
+@@ -0,0 +1,249 @@
++#include "drmu_fmts.h"
++
++#include <stddef.h>
++
++#include <libdrm/drm_fourcc.h>
++
++#ifndef HAS_SORTED_FMTS
++#define HAS_SORTED_FMTS 0
++#endif
++#ifndef BUILD_MK_SORTED_FMTS_H
++#define BUILD_MK_SORTED_FMTS_H 0
++#endif
++
++#ifndef DRM_FORMAT_P030
++#define DRM_FORMAT_P030 fourcc_code('P', '0', '3', '0')
++#endif
++
++// Format properties
++
++typedef struct drmu_fmt_info_s {
++    uint32_t fourcc;
++    uint8_t  bpp;  // For dumb BO alloc
++    uint8_t  bit_depth;  // For display
++    uint8_t  plane_count;
++    struct {
++        uint8_t wdiv;
++        uint8_t hdiv;
++    } planes[4];
++    drmu_chroma_siting_t chroma_siting;  // Default for this format (YUV420 = (0.0, 0.5), otherwise (0, 0)
++} drmu_fmt_info_t;
++
++#if BUILD_MK_SORTED_FMTS_H || !HAS_SORTED_FMTS
++
++#define P_ONE       {{.wdiv = 1, .hdiv = 1}}
++#define P_YC420     {{.wdiv = 1, .hdiv = 1}, {.wdiv = 1, .hdiv = 2}}
++#define P_YC422     {{.wdiv = 1, .hdiv = 1}, {.wdiv = 1, .hdiv = 1}}
++#define P_YC444     {{.wdiv = 2, .hdiv = 1}, {.wdiv = 1, .hdiv = 1}}  // Assumes doubled .bpp
++#define P_YUV420    {{.wdiv = 1, .hdiv = 1}, {.wdiv = 2, .hdiv = 2}, {.wdiv = 2, .hdiv = 2}}
++#define P_YUV422    {{.wdiv = 1, .hdiv = 1}, {.wdiv = 2, .hdiv = 1}, {.wdiv = 2, .hdiv = 1}}
++#define P_YUV444    {{.wdiv = 1, .hdiv = 1}, {.wdiv = 1, .hdiv = 1}, {.wdiv = 1, .hdiv = 1}}
++
++// Not const 'cos we sort in place when creating the sorted version
++static drmu_fmt_info_t format_info[] = {
++    { .fourcc = DRM_FORMAT_XRGB1555, .bpp = 16, .bit_depth = 5, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_XBGR1555, .bpp = 16, .bit_depth = 5, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_RGBX5551, .bpp = 16, .bit_depth = 5, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_BGRX5551, .bpp = 16, .bit_depth = 5, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_ARGB1555, .bpp = 16, .bit_depth = 5, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_ABGR1555, .bpp = 16, .bit_depth = 5, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_RGBA5551, .bpp = 16, .bit_depth = 5, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_BGRA5551, .bpp = 16, .bit_depth = 5, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_BGR565, .bpp = 16, .bit_depth = 5, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_RGB565, .bpp = 16, .bit_depth = 5, .plane_count = 1, .planes = P_ONE},
++
++    { .fourcc = DRM_FORMAT_RGB888, .bpp = 24, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_BGR888, .bpp = 24, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++
++    { .fourcc = DRM_FORMAT_XRGB8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_XBGR8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_RGBX8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_BGRX8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_ARGB8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_ABGR8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_RGBA8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_BGRA8888, .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++
++    { .fourcc = DRM_FORMAT_XRGB2101010, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_XBGR2101010, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_RGBX1010102, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_BGRX1010102, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_ARGB2101010, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_ABGR2101010, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_RGBA1010102, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_BGRA1010102, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = P_ONE},
++
++    { .fourcc = DRM_FORMAT_AYUV,        .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_XYUV8888,    .bpp = 32, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_VUY888,      .bpp = 24, .bit_depth = 8, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_XVYU2101010, .bpp = 32, .bit_depth = 10, .plane_count = 1, .planes = P_ONE},
++
++    { .fourcc = DRM_FORMAT_XVYU12_16161616, .bpp = 64, .bit_depth = 12, .plane_count = 1, .planes = P_ONE},
++    { .fourcc = DRM_FORMAT_XVYU16161616, .bpp = 64, .bit_depth = 16, .plane_count = 1, .planes = P_ONE},
++
++    { .fourcc = DRM_FORMAT_YUYV, .bpp = 16, .bit_depth = 8, .plane_count = 1, .planes = P_ONE,
++        .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++    { .fourcc = DRM_FORMAT_YVYU, .bpp = 16, .bit_depth = 8, .plane_count = 1, .planes = P_ONE,
++        .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++    { .fourcc = DRM_FORMAT_VYUY, .bpp = 16, .bit_depth = 8, .plane_count = 1, .planes = P_ONE,
++        .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++    { .fourcc = DRM_FORMAT_UYVY, .bpp = 16, .bit_depth = 8, .plane_count = 1, .planes = P_ONE,
++        .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++
++    { .fourcc = DRM_FORMAT_NV12,   .bpp = 8,  .bit_depth = 8,  .plane_count = 2, .planes = P_YC420,
++      .chroma_siting = DRMU_CHROMA_SITING_LEFT_I },
++    { .fourcc = DRM_FORMAT_NV21,   .bpp = 8,  .bit_depth = 8,  .plane_count = 2, .planes = P_YC420,
++      .chroma_siting = DRMU_CHROMA_SITING_LEFT_I },
++    { .fourcc = DRM_FORMAT_P010,   .bpp = 16, .bit_depth = 10, .plane_count = 2, .planes = P_YC420,
++      .chroma_siting = DRMU_CHROMA_SITING_LEFT_I },
++    { .fourcc = DRM_FORMAT_NV16,   .bpp = 8,  .bit_depth = 8,  .plane_count = 2, .planes = P_YC422,
++      .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++    { .fourcc = DRM_FORMAT_NV61,   .bpp = 8,  .bit_depth = 8,  .plane_count = 2, .planes = P_YC422,
++      .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++    { .fourcc = DRM_FORMAT_NV24,   .bpp = 16, .bit_depth = 8,  .plane_count = 2, .planes = P_YC444,
++      .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++    { .fourcc = DRM_FORMAT_NV42,   .bpp = 16, .bit_depth = 8,  .plane_count = 2, .planes = P_YC444,
++      .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++
++    { .fourcc = DRM_FORMAT_YUV420, .bpp = 8, .bit_depth = 8, .plane_count = 3, .planes = P_YUV420,
++      .chroma_siting = DRMU_CHROMA_SITING_LEFT_I },
++    { .fourcc = DRM_FORMAT_YVU420, .bpp = 8, .bit_depth = 8, .plane_count = 3, .planes = P_YUV420,
++      .chroma_siting = DRMU_CHROMA_SITING_LEFT_I },
++    { .fourcc = DRM_FORMAT_YUV422, .bpp = 8, .bit_depth = 8, .plane_count = 3, .planes = P_YUV422,
++      .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++    { .fourcc = DRM_FORMAT_YUV422, .bpp = 8, .bit_depth = 8, .plane_count = 3, .planes = P_YUV422,
++      .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++    { .fourcc = DRM_FORMAT_YUV444, .bpp = 8, .bit_depth = 8, .plane_count = 3, .planes = P_YUV444,
++      .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++    { .fourcc = DRM_FORMAT_YUV444, .bpp = 8, .bit_depth = 8, .plane_count = 3, .planes = P_YUV444,
++      .chroma_siting = DRMU_CHROMA_SITING_TOP_LEFT_I },
++
++    // 3 pel in 32 bits. So code as 32bpp with wdiv 3.
++    { .fourcc = DRM_FORMAT_P030,   .bpp = 32, .bit_depth = 10, .plane_count = 2,
++      .planes = {{.wdiv = 3, .hdiv = 1}, {.wdiv = 3, .hdiv = 2}},
++      .chroma_siting = DRMU_CHROMA_SITING_LEFT_I },
++
++    { .fourcc = 0 }
++};
++#endif
++
++#if BUILD_MK_SORTED_FMTS_H
++// ---------------------------------------------------------------------------
++//
++// Sort & emit format table (not part of the lib)
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <inttypes.h>
++
++static const unsigned int format_count = sizeof(format_info)/sizeof(format_info[0]) - 1;  // Ignore null term in count
++
++static int sort_fn(const void * va, const void * vb)
++{
++    const drmu_fmt_info_t * a = va;
++    const drmu_fmt_info_t * b = vb;
++    return a->fourcc < b->fourcc ? -1 : a->fourcc == b->fourcc ? 0 : 1;
++}
++
++int
++main(int argc, char * argv[])
++{
++    FILE * f;
++    unsigned int i;
++
++    if (argc != 2) {
++        fprintf(stderr, "Needs output file only\n");
++        return 1;
++    }
++    if ((f = fopen(argv[1], "wt")) == NULL) {
++        fprintf(stderr, "Failed to open'%s'\n", argv[1]);
++        return 1;
++    }
++    qsort(format_info, format_count, sizeof(format_info[0]), sort_fn);
++
++    fprintf(f, "static const drmu_fmt_info_t format_info[] = {\n");
++    for (i = 0; i != format_count; ++i) {
++        const drmu_fmt_info_t * x = format_info + i;
++        unsigned int j;
++        fprintf(f, "{%#"PRIx32",%d,%d,%d,{", x->fourcc, x->bpp, x->bit_depth, x->plane_count);
++        for (j = 0; j != sizeof(x->planes)/sizeof(x->planes[0]); ++j) {
++            fprintf(f, "{%d,%d},", x->planes[j].wdiv, x->planes[j].hdiv);
++        }
++        fprintf(f, "},");
++        fprintf(f, "{%d,%d},", x->chroma_siting.x, x->chroma_siting.y);
++        fprintf(f, "},\n");
++    }
++    fprintf(f, "{0}\n};\n");
++    fprintf(f, "static const unsigned int format_count = %d;\n", format_count);
++
++    fclose(f);
++    return 0;
++}
++
++#else
++// ---------------------------------------------------------------------------
++//
++// Include sorted format table
++#if HAS_SORTED_FMTS
++#include "sorted_fmts.h"
++#endif
++
++const drmu_fmt_info_t *
++drmu_fmt_info_find_fmt(const uint32_t fourcc)
++{
++    if (!fourcc)
++        return NULL;
++#if HAS_SORTED_FMTS
++    unsigned int lo = 0;
++    unsigned int hi = format_count;
++
++    while (lo < hi) {
++        unsigned int x = (hi + lo) / 2;
++        if (format_info[x].fourcc == fourcc)
++            return &format_info[x];
++        if (format_info[x].fourcc < fourcc)
++            lo = x + 1;
++        else
++            hi = x;
++    }
++#else
++    for (const drmu_fmt_info_t * p = format_info; p->fourcc; ++p) {
++        if (p->fourcc == fourcc)
++            return p;
++    }
++#endif
++    return NULL;
++}
++
++unsigned int
++drmu_fmt_info_bit_depth(const drmu_fmt_info_t * const fmt_info)
++{
++    return !fmt_info ? 0 : fmt_info->bit_depth;
++}
++uint32_t drmu_fmt_info_fourcc(const drmu_fmt_info_t * const fmt_info)
++{
++    return fmt_info->fourcc;
++}
++unsigned int drmu_fmt_info_pixel_bits(const drmu_fmt_info_t * const fmt_info)
++{
++    return !fmt_info ? 0 : fmt_info->bpp;
++}
++unsigned int drmu_fmt_info_plane_count(const drmu_fmt_info_t * const fmt_info)
++{
++    return !fmt_info ? 0 : fmt_info->plane_count;
++}
++unsigned int drmu_fmt_info_wdiv(const drmu_fmt_info_t * const fmt_info, const unsigned int plane_n)
++{
++    return fmt_info->planes[plane_n].wdiv;
++}
++unsigned int drmu_fmt_info_hdiv(const drmu_fmt_info_t * const fmt_info, const unsigned int plane_n)
++{
++    return fmt_info->planes[plane_n].hdiv;
++}
++drmu_chroma_siting_t drmu_fmt_info_chroma_siting(const drmu_fmt_info_t * const fmt_info)
++{
++    return !fmt_info ? DRMU_CHROMA_SITING_TOP_LEFT : fmt_info->chroma_siting;
++}
++
++#endif
++
+--- /dev/null
++++ b/modules/video_output/drmu/drmu_fmts.h
+@@ -0,0 +1,31 @@
++#ifndef _DRMU_DRMU_FMTS_H
++#define _DRMU_DRMU_FMTS_H
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#include "drmu_chroma.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct drmu_fmt_info_s;
++typedef struct drmu_fmt_info_s drmu_fmt_info_t;
++
++const drmu_fmt_info_t * drmu_fmt_info_find_fmt(const uint32_t fourcc);
++
++unsigned int drmu_fmt_info_bit_depth(const drmu_fmt_info_t * const fmt_info);
++uint32_t drmu_fmt_info_fourcc(const drmu_fmt_info_t * const fmt_info);
++unsigned int drmu_fmt_info_pixel_bits(const drmu_fmt_info_t * const fmt_info);
++unsigned int drmu_fmt_info_plane_count(const drmu_fmt_info_t * const fmt_info);
++unsigned int drmu_fmt_info_wdiv(const drmu_fmt_info_t * const fmt_info, const unsigned int plane_n);
++unsigned int drmu_fmt_info_hdiv(const drmu_fmt_info_t * const fmt_info, const unsigned int plane_n);
++drmu_chroma_siting_t drmu_fmt_info_chroma_siting(const drmu_fmt_info_t * const fmt_info);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
++
+--- /dev/null
 +++ b/modules/video_output/drmu/drmu_log.h
 @@ -0,0 +1,53 @@
 +#ifndef _DRMU_DRMU_LOG_H
@@ -22162,8 +22454,10 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu_output.c
-@@ -0,0 +1,613 @@
+@@ -0,0 +1,615 @@
 +#include "drmu_output.h"
++
++#include "drmu_fmts.h"
 +#include "drmu_log.h"
 +
 +#include <errno.h>
@@ -22191,7 +22485,7 @@
 +    drmu_mode_simple_params_t mode_params;
 +
 +    // These are expected to be static consts so no copy / no free
-+    const drmu_format_info_t * fmt_info;
++    const drmu_fmt_info_t * fmt_info;
 +    drmu_colorspace_t colorspace;
 +    drmu_broadcast_rgb_t broadcast_rgb;
 +
@@ -22268,7 +22562,7 @@
 +        drmu_conn_t * const dn = dout->dns[i];
 +
 +        if (dout->fmt_info && dout->max_bpc_allow)
-+            rv = rvup(rv, drmu_atomic_conn_add_hi_bpc(da, dn, (drmu_format_info_bit_depth(dout->fmt_info) > 8)));
++            rv = rvup(rv, drmu_atomic_conn_add_hi_bpc(da, dn, (drmu_fmt_info_bit_depth(dout->fmt_info) > 8)));
 +        if (drmu_colorspace_is_set(dout->colorspace))
 +            rv = rvup(rv, drmu_atomic_conn_add_colorspace(da, dn, dout->colorspace));
 +        if (drmu_broadcast_rgb_is_set(dout->broadcast_rgb))
@@ -22291,7 +22585,7 @@
 +drmu_output_fb_info_set(drmu_output_t * const dout, const drmu_fb_t * const fb)
 +{
 +    const drmu_isset_t hdr_isset = drmu_fb_hdr_metadata_isset(fb);
-+    const drmu_format_info_t * fmt_info = drmu_fb_format_info_get(fb);
++    const drmu_fmt_info_t * fmt_info = drmu_fb_format_info_get(fb);
 +    const drmu_colorspace_t colorspace  = drmu_fb_colorspace_get(fb);
 +    const drmu_broadcast_rgb_t broadcast_rgb = drmu_color_range_to_broadcast_rgb(drmu_fb_color_range_get(fb));
 +
@@ -23023,8 +23317,9 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu_vlc.c
-@@ -0,0 +1,533 @@
+@@ -0,0 +1,578 @@
 +#include "drmu_vlc.h"
++#include "drmu_fmts.h"
 +#include "drmu_log.h"
 +
 +#if HAS_ZC_CMA
@@ -23125,8 +23420,27 @@
 +            return DRM_FORMAT_NV12;
 +        case VLC_CODEC_NV21:
 +            return DRM_FORMAT_NV21;
++        case VLC_CODEC_NV16:
++            return DRM_FORMAT_NV16;
++        case VLC_CODEC_NV61:
++            return DRM_FORMAT_NV61;
++        case VLC_CODEC_NV24:
++            return DRM_FORMAT_NV24;
++        case VLC_CODEC_NV42:
++            return DRM_FORMAT_NV42;
++        case VLC_CODEC_P010:
++            return DRM_FORMAT_P010;
++        case VLC_CODEC_J420:
 +        case VLC_CODEC_I420:
 +            return DRM_FORMAT_YUV420;
++        case VLC_CODEC_YV12:
++            return DRM_FORMAT_YVU420;
++        case VLC_CODEC_J422:
++        case VLC_CODEC_I422:
++            return DRM_FORMAT_YUV422;
++        case VLC_CODEC_J444:
++        case VLC_CODEC_I444:
++            return DRM_FORMAT_YUV444;
 +        default:
 +            break;
 +    }
@@ -23158,6 +23472,18 @@
 +                return DRM_FORMAT_BGRX8888;
 +            break;
 +        }
++        case VLC_CODEC_RGB24:
++        {
++            // VLC RGB24 aka RV24 means we have to look at the mask values
++            const uint32_t r = vf_vlc->i_rmask;
++            const uint32_t g = vf_vlc->i_gmask;
++            const uint32_t b = vf_vlc->i_bmask;
++            if (r == 0xff0000 && g == 0xff00 && b == 0xff)
++                return DRM_FORMAT_RGB888;
++            if (r == 0xff && g == 0xff00 && b == 0xff0000)
++                return DRM_FORMAT_BGR888;
++            break;
++        }
 +        case VLC_CODEC_RGB16:
 +        {
 +            // VLC RGB16 aka RV16 means we have to look at the mask values
@@ -23186,6 +23512,9 @@
 +        case DRM_FORMAT_RGBX8888:
 +        case DRM_FORMAT_BGRX8888:
 +            return VLC_CODEC_RGB32;
++        case DRM_FORMAT_RGB888:
++        case DRM_FORMAT_BGR888:
++            return VLC_CODEC_RGB24;
 +        case DRM_FORMAT_BGR565:
 +        case DRM_FORMAT_RGB565:
 +            return VLC_CODEC_RGB16;
@@ -23210,8 +23539,24 @@
 +            return VLC_CODEC_NV12;
 +        case DRM_FORMAT_NV21:
 +            return VLC_CODEC_NV21;
++        case DRM_FORMAT_NV16:
++            return VLC_CODEC_NV16;
++        case DRM_FORMAT_NV61:
++            return VLC_CODEC_NV61;
++        case DRM_FORMAT_NV24:
++            return VLC_CODEC_NV24;
++        case DRM_FORMAT_NV42:
++            return VLC_CODEC_NV42;
++        case DRM_FORMAT_P010:
++            return VLC_CODEC_P010;
 +        case DRM_FORMAT_YUV420:
 +            return VLC_CODEC_I420;
++        case DRM_FORMAT_YVU420:
++            return VLC_CODEC_YV12;
++        case DRM_FORMAT_YUV422:
++            return VLC_CODEC_I422;
++        case DRM_FORMAT_YUV444:
++            return VLC_CODEC_I444;
 +        default:
 +            break;
 +    }
@@ -23223,10 +23568,9 @@
 +} fb_aux_pic_t;
 +
 +static void
-+pic_fb_delete_cb(drmu_fb_t * dfb, void * v)
++pic_fb_delete_cb(void * v)
 +{
 +    fb_aux_pic_t * const aux = v;
-+    VLC_UNUSED(dfb);
 +
 +    aux->pic_ctx->destroy(aux->pic_ctx);
 +    free(aux);
@@ -23511,20 +23855,15 @@
 +plane_t
 +drmu_fb_vlc_plane(drmu_fb_t * const dfb, const unsigned int plane_n)
 +{
-+    const unsigned int bpp = drmu_fb_pixel_bits(dfb);
-+    unsigned int hdiv = 1;
-+    unsigned int wdiv = 1;
++    const drmu_fmt_info_t *const f = drmu_fb_format_info_get(dfb);
++    unsigned int hdiv = drmu_fmt_info_hdiv(f, plane_n);
++    unsigned int wdiv = drmu_fmt_info_wdiv(f, plane_n);
++    const unsigned int bpp = drmu_fmt_info_pixel_bits(f);
 +    const uint32_t pitch_n = drmu_fb_pitch(dfb, plane_n);
 +    const drmu_rect_t crop = drmu_fb_crop_frac(dfb);
 +
 +    if (pitch_n == 0) {
 +        return (plane_t) {.p_pixels = NULL };
-+    }
-+
-+    // Slightly kludgy derivation of height & width divs
-+    if (plane_n > 0) {
-+        wdiv = drmu_fb_pitch(dfb, 0) / pitch_n;
-+        hdiv = 2;
 +    }
 +
 +    return (plane_t){
@@ -23655,7 +23994,7 @@
 +
 --- /dev/null
 +++ b/modules/video_output/drmu/drmu_xlease.c
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,143 @@
 +#include "drmu.h"
 +#include "drmu_log.h"
 +
@@ -23722,6 +24061,7 @@
 +        xcb_randr_get_screen_resources_cookie_t gsr_c = xcb_randr_get_screen_resources(connection, root);
 +
 +        xcb_randr_get_screen_resources_reply_t *gsr_r = xcb_randr_get_screen_resources_reply(connection, gsr_c, NULL);
++        int o;
 +
 +        if (!gsr_r) {
 +            drmu_err_log(log, "get_screen_resources failed");
@@ -23730,7 +24070,7 @@
 +
 +        xcb_randr_output_t * const ro = xcb_randr_get_screen_resources_outputs(gsr_r);
 +
-+        for (int o = 0; output == 0 && o < gsr_r->num_outputs; o++) {
++        for (o = 0; output == 0 && o < gsr_r->num_outputs; o++) {
 +            xcb_randr_get_output_info_cookie_t goi_c = xcb_randr_get_output_info(connection, ro[o], gsr_r->config_timestamp);
 +
 +            xcb_randr_get_output_info_reply_t *goi_r = xcb_randr_get_output_info_reply(connection, goi_c, NULL);
@@ -23750,7 +24090,7 @@
 +        free(gsr_r);
 +
 +        if (output == 0) {
-+            drmu_warn_log(log, "Failed to find active output (outputs=%d)", gsr_r->num_outputs);
++            drmu_warn_log(log, "Failed to find active output (outputs=%d)", o);
 +            return -1;
 +        }
 +    }
