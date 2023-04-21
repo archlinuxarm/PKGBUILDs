@@ -1,4 +1,4 @@
-THIS_JDK='java-19-openjdk'
+THIS_JDK='java-20-openjdk'
 
 fix_default() {
   if [ ! -x /usr/bin/java ]; then
