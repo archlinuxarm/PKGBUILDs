@@ -5,19 +5,17 @@
 # Contributor: Jonathan Wiersma <archaur at jonw dot org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - removed ceph makedepend, libvirt-storage-rbd package
 #  - removed qemu makedepend
 
 pkgname=(libvirt libvirt-storage-gluster libvirt-storage-iscsi-direct)
 epoch=1
-pkgver=7.10.0
-pkgrel=2
+pkgver=9.2.0
+pkgrel=1
 pkgdesc="API for controlling virtualization engines (openvz,kvm,qemu,virtualbox,xen,etc)"
 arch=('x86_64')
 url="https://libvirt.org/"
 license=('LGPL' 'GPL3') #libvirt_parthelper links to libparted which is GPL3 only
-install=libvirt.install
-depends=('libpciaccess' 'yajl' 'fuse2' 'gnutls' 'parted' 'libssh' 'libxml2' 'numactl' 'polkit')
+depends=('libpciaccess' 'yajl' 'fuse3' 'gnutls' 'parted' 'libssh' 'libxml2' 'numactl' 'polkit')
 makedepends=('meson' 'libxslt' 'python-docutils' 'lvm2' 'open-iscsi' 'libiscsi' 'glusterfs'
              'bash-completion' 'rpcsvc-proto' 'dnsmasq' 'iproute2')
 optdepends=('libvirt-storage-gluster: Gluster storage backend'
@@ -27,26 +25,12 @@ optdepends=('libvirt-storage-gluster: Gluster storage backend'
             'dmidecode: DMI system info support'
             'dnsmasq: required for default NAT/DHCP for guests'
             'radvd: IPv6 RAD support'
-            'ebtables: required for default NAT networking'
+            'iptables-nft: required for default NAT networking'
             'lvm2: Logical Volume Manager support'
-            'open-iscsi: iSCSI support via iscsiadm')
+            'open-iscsi: iSCSI support via iscsiadm'
+            'swtpm: TPM emulator support')
 
 backup=(
-  'etc/conf.d/libvirtd'
-  'etc/conf.d/libvirt-guests'
-  'etc/conf.d/virtchd'
-  'etc/conf.d/virtinterfaced'
-  'etc/conf.d/virtlockd'
-  'etc/conf.d/virtlogd'
-  'etc/conf.d/virtlxcd'
-  'etc/conf.d/virtnetworkd'
-  'etc/conf.d/virtnodedevd'
-  'etc/conf.d/virtnwfilterd'
-  'etc/conf.d/virtproxyd'
-  'etc/conf.d/virtqemud'
-  'etc/conf.d/virtsecretd'
-  'etc/conf.d/virtstoraged'
-  'etc/conf.d/virtvboxd'
   'etc/libvirt/libvirt-admin.conf'
   'etc/libvirt/libvirt.conf'
   'etc/libvirt/libvirtd.conf'
@@ -97,8 +81,10 @@ backup=(
   'etc/logrotate.d/libvirtd.qemu'
   'etc/sasl2/libvirt.conf'
 )
-source=("https://libvirt.org/sources/$pkgname-$pkgver.tar.xz"{,.asc})
-sha256sums=('cb318014af097327928c6e3d72922e3be02a3e6401247b2aa52d9ab8e0b480f9'
+source=(
+  "https://libvirt.org/sources/$pkgname-$pkgver.tar.xz"{,.asc}
+)
+sha256sums=('a07f501e99093ac1374888312be32182e799de17407ed7547d0e469fae8188c5'
             'SKIP')
 validpgpkeys=('453B65310595562855471199CA68BE8010084C9C') # Jiří Denemark <jdenemar@redhat.com>
 
@@ -108,13 +94,12 @@ prepare() {
   sed -i 's|/sysconfig/|/conf.d/|g' \
     src/remote/libvirtd.service.in \
     tools/{libvirt-guests.service,libvirt-guests.sh,virt-pki-validate}.in \
+    docs/manpages/libvirt-guests.rst \
     src/locking/virtlockd.service.in \
     src/logging/virtlogd.service.in
   sed -i 's|/usr/libexec/qemu-bridge-helper|/usr/lib/qemu/qemu-bridge-helper|g' \
-    src/qemu/qemu.conf \
+    src/qemu/qemu.conf.in \
     src/qemu/test_libvirtd_qemu.aug.in
-
-  sed -i 's/notify/simple/' src/remote/libvirtd.service.in
 }
 
 build() {
@@ -123,7 +108,8 @@ build() {
   arch-meson build \
     --libexecdir=lib/libvirt \
     -Drunstatedir=/run \
-    -Dqemu_group=kvm \
+    -Dqemu_user=libvirt-qemu \
+    -Dqemu_group=libvirt-qemu \
     -Dnetcf=disabled \
     -Dopenwsman=disabled \
     -Dapparmor=disabled \
@@ -137,11 +123,10 @@ build() {
     -Dsanlock=disabled \
     -Dsecdriver_apparmor=disabled \
     -Dsecdriver_selinux=disabled \
-    -Dstorage_sheepdog=disabled \
     -Dstorage_vstorage=disabled \
     -Ddtrace=disabled \
     -Dnumad=disabled \
-    -Dstorage_zfs=enabled \
+    -Dstorage_zfs=enabled\
     -Dstorage_rbd=disabled
 
   ninja -C build
@@ -158,18 +143,17 @@ package_libvirt() {
   cd "$pkgname-$pkgver"
   DESTDIR="$pkgdir" ninja -C build install
 
-  mv "$pkgdir"/etc/{sysconfig,conf.d}
   mkdir "$pkgdir"/usr/lib/{sysusers,tmpfiles}.d
-  echo "g libvirt - -" > "$pkgdir/usr/lib/sysusers.d/libvirt.conf"
-  echo "z /var/lib/libvirt/qemu 0751" > "$pkgdir/usr/lib/tmpfiles.d/libvirt.conf"
+  echo 'g libvirt - -' > "$pkgdir/usr/lib/sysusers.d/libvirt.conf"
+  echo 'u libvirt-qemu /var/lib/libvirt "Libvirt QEMU user"' >> "$pkgdir/usr/lib/sysusers.d/libvirt.conf"
+  echo 'm libvirt-qemu kvm' >> "$pkgdir/usr/lib/sysusers.d/libvirt.conf"
+  echo 'z /var/lib/libvirt/qemu 0751' > "$pkgdir/usr/lib/tmpfiles.d/libvirt.conf"
 
   chown 0:102 "$pkgdir/usr/share/polkit-1/rules.d"
   chmod 0750 "$pkgdir/usr/share/polkit-1/rules.d"
   chmod 600 "$pkgdir"/etc/libvirt/nwfilter/*.xml \
     "$pkgdir/etc/libvirt/qemu/networks/default.xml"
-
-  # Strip auto-generated UUID, so it will be generated per-install. (reproducible builds)
-  sed -i 's|<uuid>.*</uuid>|<uuid></uuid>|' "$pkgdir"/etc/libvirt/qemu/networks/default.xml
+  chmod 700 "$pkgdir"/etc/libvirt/secrets
 
   rm -rf \
     "$pkgdir/run" \

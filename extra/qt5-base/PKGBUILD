@@ -5,12 +5,14 @@
 #  - -no-reduce-relocations -- not available on ARM
 #  - explicitly disable x86 optimizations
 #  - -no-feature-getentropy for old kernel compatibility
+#  - remove ltcg from qmake-config.patch, CONFIG+=fat-static-lto from qmake call
 
 pkgbase=qt5-base
 pkgname=(qt5-base qt5-xcb-private-headers)
-pkgver=5.15.2+kde+r260
+_basever=5.15.9
+pkgver=5.15.9+kde+r151
 pkgrel=1
-_commit=00e0ffa0297957871ad1f22626524b6bd8e87260
+_commit=84152777a48af444a902bbf4df8b38146171c20d
 arch=('x86_64')
 url='https://www.qt.io'
 license=('GPL3' 'LGPL3' 'FDL' 'custom')
@@ -22,7 +24,6 @@ makedepends=('libfbclient' 'mariadb-libs' 'unixodbc' 'postgresql-libs' 'alsa-lib
              'gtk3' 'libpulse' 'cups' 'freetds' 'vulkan-headers' 'git')
 optdepends=('qt5-svg: to use SVG icon themes'
             'qt5-wayland: to run Qt applications in a Wayland session'
-            'qt5-translations: for some native UI translations'
             'postgresql-libs: PostgreSQL driver'
             'mariadb-libs: MariaDB driver'
             'unixodbc: ODBC driver'
@@ -32,26 +33,25 @@ optdepends=('qt5-svg: to use SVG icon themes'
             'perl: for fixqt4headers and syncqt')
 conflicts=('qtchooser')
 groups=('qt' 'qt5')
-_pkgfqn=qtbase
+_pkgfqn=${pkgbase/5-/}
 source=(git+https://invent.kde.org/qt/qt/$_pkgfqn#commit=$_commit
-        qt5-base-cflags.patch
-        qt5-base-nostrip.patch)
+        qmake-cflags.patch
+        qmake-config.patch)
 sha256sums=('SKIP'
-            'cf707cd970650f8b60f8897692b36708ded9ba116723ec8fcd885576783fe85c'
-            '4b93f6a79039e676a56f9d6990a324a64a36f143916065973ded89adc621e094')
+            '5411edbe215c24b30448fac69bd0ba7c882f545e8cf05027b2b6e2227abc5e78'
+            '4abc22150fa3e06b2fdcec32146abc9be4e316692aa4d5bd5aa53b4b726783fa')
 
 pkgver() {
   cd $_pkgfqn
-  echo "5.15.2+kde+r"`git rev-list --count origin/5.15.2..$_commit`
+  echo "$_basever+kde+r"`git rev-list --count v$_basever-lts-lgpl..$_commit` | sed -e 's|+kde+r0||'
 }
 
 prepare() {
   cd ${_pkgfqn}
+  patch -p1 < ../qmake-cflags.patch # Use system CFLAGS in qmake
+  patch -p1 < ../qmake-config.patch # Don't strip binaries with qmake and use -ltcg, cf. QTBUG-73834
 
-  git revert -n 6344955d17e17e2398720fe60c34cfc2a4a95208 # Revert version bump
-
-  patch -p1 < ../qt5-base-cflags.patch # Use system CFLAGS in qmake
-  patch -p1 < ../qt5-base-nostrip.patch # Don't strip binaries with qmake
+  sed -i 's/ltcg//' mkspecs/common/gcc-base.conf
 }
 
 build() {
@@ -86,11 +86,14 @@ build() {
     -no-avx2 \
     -no-feature-getentropy
 
+# No configure flag for fat static libs with lto
+  bin/qmake -- -redo
   make
 }
 
 package_qt5-base() {
   pkgdesc='A cross-platform application and UI framework'
+  depends+=(qt5-translations)
 
   cd ${_pkgfqn}
   make INSTALL_ROOT="${pkgdir}" install

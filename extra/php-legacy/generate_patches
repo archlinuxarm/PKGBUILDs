@@ -1,0 +1,106 @@
+#!/bin/bash
+
+. PKGBUILD
+
+makepkg -o --nodeps --noprepare --skipinteg
+
+pushd "src/php-${pkgver}"
+
+sed '/APACHE_THREADED_MPM=/d' -i.orig sapi/apache2handler/config.m4
+
+sed 's/.conf.default/.conf/g' -i.orig sapi/fpm/Makefile.frag
+
+sed \
+	-e 's#run/php-fpm.pid#/run/php-fpm-legacy/php-fpm.pid#' \
+	-e 's#^;error_log =.*#error_log = syslog#' \
+	-i.orig sapi/fpm/php-fpm.conf.in
+
+sed \
+	-e 's#^listen =.*#listen = /run/php-fpm-legacy/php-fpm.sock#' \
+	-e 's#^;listen.owner =#listen.owner =#' \
+	-e 's#^;listen.group =#listen.group =#' \
+	-e 's#^;chdir =.*#;chdir = /srv/http#' \
+	-i.orig sapi/fpm/www.conf.in
+
+sed \
+	-e 's#^PIDFile=.*#PIDFile=/run/php-fpm-legacy/php-fpm.pid#' \
+	-e 's#^ExecStart=@EXPANDED_SBINDIR@/php-fpm#ExecStart=@EXPANDED_SBINDIR@/php-fpm-legacy#' \
+	-i.orig sapi/fpm/php-fpm.service.in
+
+# available extensions after build
+# find /var/lib/archbuild/*-x86_64/*/build/php/src/build/modules -name '*.so' -exec basename {} .so \; | sort -u
+availableExtensions=(
+	bcmath
+	bz2
+	calendar
+	curl
+	dba
+	enchant
+	exif
+	ffi
+	ftp
+	gd
+	gettext
+	gmp
+	iconv
+	intl
+	ldap
+	mysqli
+	odbc
+	opcache
+	pdo_dblib
+	pdo_mysql
+	pdo_odbc
+	pdo_pgsql
+	pdo_sqlite
+	pgsql
+	pspell
+	shmop
+	snmp
+	soap
+	sockets
+	sodium
+	sqlite3
+	sysvmsg
+	sysvsem
+	sysvshm
+	tidy
+	xsl
+	zip
+)
+
+extensions=''
+for extension in "${availableExtensions[@]}"; do
+	if [[ $extension == 'curl' ]]; then
+		extensions+="extension=${extension}\n"
+	elif [[ $extension == 'opcache' ]]; then
+		extensions+=";zend_extension=${extension}\n"
+	elif [[ $extension == 'zip' ]]; then
+		extensions+="extension=${extension}\n"
+	else
+		extensions+=";extension=${extension}\n"
+	fi
+done
+
+sed \
+	-r ":a;N;\$!ba;s/; Notes for Windows environments :\n.+;?extension=\w+\n/${extensions}/g" \
+	-i.orig php.ini-production
+sed \
+	-e 's#^;extension_dir = "\./"$#extension_dir = "/usr/lib/php-legacy/modules/"#g' \
+	-i php.ini-production
+
+diff -u sapi/apache2handler/config.m4.orig sapi/apache2handler/config.m4 | filterdiff --clean --remove-timestamps > ../../apache.patch
+
+{
+	diff -u sapi/fpm/Makefile.frag.orig sapi/fpm/Makefile.frag
+	diff -u sapi/fpm/php-fpm.conf.in.orig sapi/fpm/php-fpm.conf.in
+	diff -u sapi/fpm/www.conf.in.orig sapi/fpm/www.conf.in
+	diff -u sapi/fpm/php-fpm.service.in.orig sapi/fpm/php-fpm.service.in
+} | filterdiff --clean --remove-timestamps > ../../php-fpm.patch
+
+diff -u php.ini-production.orig php.ini-production | filterdiff --clean --remove-timestamps > ../../php.ini.patch
+
+sed -i.orig 's/  \[php-config\],/  [php-config-legacy],/g' scripts/phpize.m4
+diff -u scripts/phpize.m4.orig scripts/phpize.m4 | filterdiff --clean --remove-timestamps > ../../php-legacy.patch
+
+popd

@@ -1,0 +1,85 @@
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+# ALARM: David Beauchamp <david@archlinuxarm.org>
+#  - disable distcc - configure checks for clang first
+
+highmem=1
+
+pkgname=element
+_commit=70135d89febc8bd3a46ad874b8338350ec5e9c49  # refs/tags/0.46.6
+pkgver=0.46.6
+pkgrel=1
+pkgdesc="A modular LV2/VST3 audio plugin host"
+arch=(x86_64)
+url="https://github.com/kushview/element"
+license=(GPL3)
+groups=(pro-audio)
+depends=(gcc-libs glibc hicolor-icon-theme libx11 libxext)
+makedepends=(alsa-lib boost curl freetype2 git gtk3 imagemagick jack juce
+ladspa ldoc libxcomposite libxcursor libxinerama lilv lua lv2 pango readline
+serd sord sratom suil waf xorg-xrandr)
+checkdepends=(xorg-server-xvfb)
+optdepends=('lua: for LUA scripting')
+provides=(ladspa-host lv2-host vst3-host)
+options=(!distcc debug)
+source=(
+  git+https://github.com/kushview/$pkgname#tag=$_commit?signed
+  git+https://github.com/kushview/kv-modules
+  git+https://github.com/kushview/JUCE
+  git+https://github.com/lvtk/jlv2
+  git+https://github.com/kushview/lua-kv
+)
+sha512sums=('SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP')
+b2sums=('SKIP'
+        'SKIP'
+        'SKIP'
+        'SKIP'
+        'SKIP')
+validpgpkeys=('52CB000FABB9DBE345CD478980A5F4BE60360CDE') # Michael Fisher <mfisher@kushview.net>
+
+prepare() {
+  cd $pkgname
+  git submodule init
+  git submodule deinit "libs/JUCE"
+  git config submodule.libs/kv.url "$srcdir/kv-modules"
+  git config submodule.libs/JUCE.url "$srcdir/JUCE"
+  git config submodule.libs/jlv2.url "$srcdir/jlv2"
+  git config submodule.libs/lua-kv.url "$srcdir/lua-kv"
+  git submodule update
+
+  rm -frv waflib
+}
+
+build() {
+  export LINKFLAGS="$LDFLAGS"
+  CFLAGS+=" -I/usr/share/juce/modules/"
+
+  cd $pkgname
+  waf configure \
+    --prefix=/usr \
+    --enable-docking \
+    --juce-path "/usr/share/juce/modules/" \
+    --test
+  waf build -vv
+}
+
+check() {
+  cd $pkgname
+  LD_LIBRARY_PATH="$PWD/build/lib:$LD_LIBRARY_PATH" xvfb-run waf check \
+  || echo "Known issues with LUA related tests: https://github.com/kushview/Element/issues/439"
+}
+
+package() {
+  depends+=(libasound.so libcurl.so libfreetype.so libjack.so liblilv-0.so
+  libsuil-0.so)
+
+  cd $pkgname
+  waf install --destdir="$pkgdir"
+  install -vDm 644 {AUTHORS,CODE_OF_CONDUCT,CONTRIBUTING,README}.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 docs/*.md -t "$pkgdir/usr/share/doc/$pkgname/docs"
+  install -vDm 644 docs/img/*.png -t "$pkgdir/usr/share/doc/$pkgname/docs/img"
+}

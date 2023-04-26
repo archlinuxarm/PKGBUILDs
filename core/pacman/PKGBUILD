@@ -1,5 +1,6 @@
 # vim: set ts=2 sw=2 et:
-# Maintainer: 
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Morten Linderud <foxboron@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - arch/host/flags for arm, armv6h, armv7h, and aarch64
@@ -10,44 +11,57 @@
 #  - patch to fix application/gzip change in file 5.37
 
 pkgname=pacman
-pkgver=6.0.1
-pkgrel=2
+pkgver=6.0.2
+pkgrel=6
 pkgdesc="A library-based package manager with dependency support"
 arch=('x86_64')
 url="https://www.archlinux.org/pacman/"
 license=('GPL')
-groups=('base-devel')
-depends=('bash' 'glibc' 'libarchive' 'curl'
-         'gpgme' 'pacman-mirrorlist' 'archlinuxarm-keyring')
+depends=('bash' 'glibc' 'libarchive' 'curl' 'gpgme' 'pacman-mirrorlist'
+         'gettext' 'gawk' 'coreutils' 'gnupg' 'grep')
 makedepends=('meson' 'asciidoc' 'doxygen')
 checkdepends=('python' 'fakechroot')
 optdepends=('perl-locale-gettext: translation support in makepkg-template')
 provides=('libalpm.so')
 backup=(etc/pacman.conf
         etc/makepkg.conf)
-options=('strip' 'debug')
+options=('strip')
 validpgpkeys=('6645B0A8C7005E78DB1D7864F99FFE0FEAE999BD'  # Allan McRae <allan@archlinux.org>
               'B8151B117037781095514CA7BBDFFC92306B1121') # Andrew Gregory (pacman) <andrew@archlinux.org>
 source=(https://sources.archlinux.org/other/pacman/$pkgname-$pkgver.tar.xz{,.sig}
+        pacman-always-create-directories-from-debugedit.patch::https://gitlab.archlinux.org/pacman/pacman/-/commit/efd0c24c07b86be014a4edb5a8ece021b87e3900.patch
+        pacman-always-create-directories-from-debugedit-fixup.patch::https://gitlab.archlinux.org/pacman/pacman/-/commit/86981383a2f4380bda26311831be94cdc743649b.patch
+        pacman-fix-unique-source-paths.patch::https://gitlab.archlinux.org/pacman/pacman/-/commit/478af273dfe24ded197ec54ae977ddc3719d74a0.patch
+        pacman-strip-include-o-files-similar-to-kernel-modules.patch::https://gitlab.archlinux.org/pacman/pacman/-/commit/de11824527ec4e2561e161ac40a5714ec943543c.patch
         0001-Sychronize-filesystem.patch
         0002-Revert-close-stdin-before-running-install-scripts.patch
         0003-Revert-alpm_run_chroot-always-connect-parent2child-p.patch
         pacman.conf
         makepkg.conf)
-sha256sums=('0db61456e56aa49e260e891c0b025be210319e62b15521f29d3e93b00d3bf731'
+sha256sums=('7d8e3e8c5121aec0965df71f59bedf46052c6cf14f96365c4411ec3de0a4c1a5'
             'SKIP'
-            'f9a8ae2805cc995ef1b787e10f402d574aaee183cc3a23fe26805555b7d87fea'
-            '7beb2faec0ec37dcb2050d9ed3c95353fb7f73da7e3bbe0e226e9e3f7858a01f'
-            '0fdbdc3c86b826fe87d8051a5d34db23b366b0a7bdc22f3701b1bf2b01218d59'
+            '6fed94326b9ecfbb438ab17a4576b5e9d52ecc0f4574f29d46adfde3886dee03'
+            'd2bc104788290e3de829a232590b66ad745cf5b4762a01acc1191ebf70fef114'
+            'f3d4f39ef24e312f610cbb3439fb02bc6b8829e37bcf1a50ae50cd0a69bde5d0'
+            'd87d0c9957c613fda272553bee58140349d151ae399f346ddaf6d75ee5916312'
+            'ba91c92fbae492be13df12dd34e22b00e1a63c706fdd328e8d9a907c5d517e71'
+            'bb8d53dd1136c314aacbc275f36936112d04ec6c0ebc882eefe6e46bd86e6db5'
+            '11b3ed535d0cb981ce5927ed9b308615e4f6b6a8e2aef6e2e15a59df956bfdab'
             '19f189accab294af7085cb709417eb41784d21aa8da07a8aa24bf7591ec3ce94'
-            '21d75a0d0399d755002deeeddcc4973615a3b6423186d22ab0bd7770b84c6b25')
+            'd001efcbcbe97e4be27639cb7709813a40803e8aead8f544fc7c5b92fb64b062')
 
 prepare() {
   cd "$pkgname-$pkgver"
-
-  patch -p1 -i ../0001-Sychronize-filesystem.patch
-  patch -p1 -i ../0002-Revert-close-stdin-before-running-install-scripts.patch
-  patch -p1 -i ../0003-Revert-alpm_run_chroot-always-connect-parent2child-p.patch
+  # we backport way too often in pacman
+  # lets at least make it more convenient
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    [[ $src = *.patch ]] || continue
+    msg2 "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
 }
 
 build() {
@@ -80,20 +94,10 @@ package() {
   install -m644 "$srcdir/pacman.conf" "$pkgdir/etc"
 
   case $CARCH in
-    arm)
-      mycarch="arm"
-      mychost="armv5tel-unknown-linux-gnueabi"
-      myflags="-march=armv5te "
-      ;;
-    armv6h)
-      mycarch="armv6h"
-      mychost="armv6l-unknown-linux-gnueabihf"
-      myflags="-march=armv6 -mfloat-abi=hard -mfpu=vfp "
-      ;;
     armv7h)
       mycarch="armv7h"
       mychost="armv7l-unknown-linux-gnueabihf"
-      myflags="-march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16 "
+      myflags="-march=armv7-a -mfloat-abi=hard -mfpu=neon "
       ;;
     aarch64)
       mycarch="aarch64"

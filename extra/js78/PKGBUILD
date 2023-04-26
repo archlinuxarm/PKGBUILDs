@@ -6,21 +6,26 @@
 
 pkgname=js78
 pkgver=78.15.0
-pkgrel=1
+pkgrel=4
 pkgdesc="JavaScript interpreter and libraries - Version 78"
 arch=(x86_64)
-url="https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey"
+url="https://spidermonkey.dev/"
 license=(MPL)
 depends=(gcc-libs readline zlib sh)
 makedepends=(zip autoconf2.13 python-setuptools python-psutil rust llvm clang lld)
 checkdepends=(mercurial git)
+options=(!lto debug)
 _relver=${pkgver}esr
 source=(https://archive.mozilla.org/pub/firefox/releases/$_relver/source/firefox-$_relver.source.tar.xz{,.asc}
         0001-Fixes-for-LTO-PGO-support.patch
+        0002-Fixes-for-Python-3.10.patch
+        0003-Fixes-for-Rust-1.56.patch
         arm.patch)
 sha256sums=('a4438d84d95171a6d4fea9c9f02c2edbf0475a9c614d968ebe2eedc25a672151'
             'SKIP'
-            '926a573eabe3b6177363b795ed5e5641b4a4ebc6d7cfa093f11e1779ac0f897c'
+            '606ef0a2faeffd52cd3d4564146a95eef2b0e58e610d3af8d203753ed27e5a00'
+            'b723277864c8afad1db007963f8e1090b352ced7bb312b2e7e2f11f448e8432d'
+            'cb5f1a0551f55c12562c1f384e9d0a011dd13993039e65aa69b5345a5951af9f'
             'bc00516032330760444939c516a60c78f868631e1b37f075f0fe71a53737b966')
 validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
 
@@ -28,55 +33,66 @@ validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Rel
 COMPRESSZST+=(--long)
 
 prepare() {
+  mkdir mozbuild
   cd firefox-$pkgver
-  mkdir obj
   patch -p1 -i ../arm.patch
 
   # Post-78 fixes to fix LTO with LLVM 11
   patch -Np1 -i ../0001-Fixes-for-LTO-PGO-support.patch
+
+  # Fix build with Python 3.10
+  patch -Np1 -i ../0002-Fixes-for-Python-3.10.patch
+
+  # Fix build with Rust 1.56
+  patch -Np1 -i ../0003-Fixes-for-Rust-1.56.patch
+
+  cat >../mozconfig <<END
+ac_add_options --enable-application=js
+mk_add_options MOZ_OBJDIR=${PWD@Q}/obj
+
+ac_add_options --prefix=/usr
+ac_add_options --enable-release
+ac_add_options --enable-hardening
+ac_add_options --disable-lto
+ac_add_options --enable-optimize
+ac_add_options --disable-rust-simd
+ac_add_options --enable-linker=lld
+ac_add_options --disable-debug
+ac_add_options --disable-debug-symbols
+ac_add_options --disable-jemalloc
+ac_add_options --disable-strip
+
+# System libraries
+ac_add_options --with-system-zlib
+ac_add_options --without-system-icu
+
+# Features
+ac_add_options --enable-readline
+ac_add_options --enable-shared-js
+ac_add_options --enable-tests
+ac_add_options --with-intl-api
+END
 }
 
 build() {
-  local configure_args=(
-    --prefix=/usr
-    --disable-debug
-    --disable-debug-symbols
-    --disable-jemalloc
-    --disable-strip
-    --enable-hardening
-    --disable-lto
-    --enable-linker=lld
-    --enable-optimize
-    --enable-readline
-    --enable-release
-    --disable-rust-simd
-    --enable-shared-js
-    --enable-tests
-    --with-intl-api
-    --with-system-zlib
-    --without-system-icu
-  )
+  cd firefox-$pkgver
 
-  export CC='clang'
-  export CXX='clang++'
-  export AR=llvm-ar
-  export NM=llvm-nm
-  export RANLIB=llvm-ranlib
-
-  cd firefox-$pkgver/obj
+  export MOZ_NOSPAM=1
+  export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
 
   # Do 3-tier PGO
   echo "Building instrumented JS..."
-  sh ../js/src/configure "${configure_args[@]}" \
-    --enable-profile-generate=cross
-  make
+  cat >.mozconfig ../mozconfig - <<END
+ac_add_options --enable-profile-generate=cross
+END
+  ./mach build
 
   echo "Profiling instrumented JS..."
   (
-    local js="$PWD/dist/bin/js"
+    local js="$PWD/obj/dist/bin/js"
     export LLVM_PROFILE_FILE="$PWD/js-%p-%m.profraw"
 
-    cd ../js/src/octane
+    cd js/src/octane
     "$js" run.js
 
     cd ../../../third_party/webkit/PerformanceTests/ARES-6
@@ -92,13 +108,14 @@ build() {
   test -s merged.profdata
 
   echo "Removing instrumented JS..."
-  make clobber
+  ./mach clobber
 
   echo "Building optimized JS..."
-  sh ../js/src/configure "${configure_args[@]}" \
-    --enable-profile-use=cross \
-    --with-pgo-profile-path="$PWD/merged.profdata"
-  make
+  cat >.mozconfig ../mozconfig - <<END
+ac_add_options --enable-profile-use=cross
+ac_add_options --with-pgo-profile-path=${PWD@Q}/merged.profdata
+END
+  ./mach build
 }
 
 check() {
@@ -127,4 +144,4 @@ package() {
   find "$pkgdir"/usr/{lib/pkgconfig,include} -type f -exec chmod -c a-x {} +
 }
 
-# vim:set ts=2 sw=2 et:
+# vim:set sw=2 et:

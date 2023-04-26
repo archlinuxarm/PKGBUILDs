@@ -3,13 +3,13 @@
 # Contributor: Andrea Scarpino <andrea@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - explicitly link v5/v6 with libatomic
 #  - disable ibase for now, FTBFS
+#  - removed -DFEATURE_no_direct_extern_access=ON
 
 pkgname=qt6-base
-_qtver=6.2.2
+_qtver=6.5.0
 pkgver=${_qtver/-/}
-pkgrel=1
+pkgrel=3
 arch=(x86_64)
 url='https://www.qt.io'
 license=(GPL3 LGPL3 FDL custom)
@@ -19,7 +19,8 @@ depends=(libjpeg-turbo xcb-util-keysyms xcb-util-cursor libgl fontconfig xdg-uti
          tslib libinput libxkbcommon-x11 libproxy libcups double-conversion brotli libb2 md4c)
 makedepends=(cmake ninja libfbclient mariadb-libs unixodbc postgresql alsa-lib gst-plugins-base-libs
              gtk3 libpulse cups freetds xmlstarlet)
-optdepends=('postgresql-libs: PostgreSQL driver'
+optdepends=('qt6-wayland: to run Qt6 applications in a Wayland session'
+            'postgresql-libs: PostgreSQL driver'
             'mariadb-libs: MariaDB driver'
             'unixodbc: ODBC driver'
             'libfbclient: Firebird/iBase driver'
@@ -27,12 +28,12 @@ optdepends=('postgresql-libs: PostgreSQL driver'
             'gtk3: GTK platform plugin'
             'perl: for syncqt')
 groups=(qt6)
-_pkgfn="${pkgname/6-/}-everywhere-src-$_qtver"
+_pkgfn=${pkgname/6-/}-everywhere-src-$_qtver
 source=(https://download.qt.io/official_releases/qt/${pkgver%.*}/$_qtver/submodules/$_pkgfn.tar.xz
         qt6-base-cflags.patch
         qt6-base-nostrip.patch)
-sha256sums=('85ab9180180c2eaf84cd11ae4c6d5a6a69f2f8fd7260aaccfd91a3e7e7232c1a'
-            'cf707cd970650f8b60f8897692b36708ded9ba116723ec8fcd885576783fe85c'
+sha256sums=('fde1aa7b4fbe64ec1b4fc576a57f4688ad1453d2fab59cbadd948a10a6eaf5ef'
+            '5411edbe215c24b30448fac69bd0ba7c882f545e8cf05027b2b6e2227abc5e78'
             '4b93f6a79039e676a56f9d6990a324a64a36f143916065973ded89adc621e094')
 
 prepare() {
@@ -41,10 +42,9 @@ prepare() {
 }
 
 build() {
-  [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && echo "target_link_libraries(Core PRIVATE atomic)" >> ${_pkgfn}/src/corelib/CMakeLists.txt
-  [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && echo "target_link_libraries(Gui PRIVATE atomic)" >> ${_pkgfn}/src/gui/CMakeLists.txt
   cmake -B build -S $_pkgfn -G Ninja \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DINSTALL_BINDIR=lib/qt6/bin \
     -DINSTALL_PUBLICBINDIR=usr/bin \
     -DINSTALL_LIBEXECDIR=lib/qt6 \
@@ -54,18 +54,20 @@ build() {
     -DINSTALL_INCLUDEDIR=include/qt6 \
     -DINSTALL_MKSPECSDIR=lib/qt6/mkspecs \
     -DINSTALL_EXAMPLESDIR=share/doc/qt6/examples \
-    -DQT_FEATURE_journald=ON \
-    -DQT_FEATURE_openssl_linked=ON \
-    -DQT_FEATURE_system_sqlite=ON \
+    -DFEATURE_journald=ON \
+    -DFEATURE_openssl_linked=ON \
+    -DFEATURE_system_sqlite=ON \
+    -DFEATURE_system_xcb_xinput=ON \
     -DQT_FEATURE_sql_ibase=OFF \
-    -DCMAKE_CXX_FLAGS="${CXXFLAGS} -DUSE_X11" # https://bugreports.qt.io/browse/QTBUG-96392
+    -DCMAKE_MESSAGE_LOG_LEVEL=STATUS
   cmake --build build
 }
 
 package() {
+  depends+=(qt6-translations)
   DESTDIR="$pkgdir" cmake --install build
 
-  install -Dm644 $_pkgfn/LICENSE* -t "$pkgdir"/usr/share/licenses/$pkgbase
+  install -Dm644 $_pkgfn/LICENSES/* -t "$pkgdir"/usr/share/licenses/$pkgbase
 
 # Install symlinks for user-facing tools
   cd "$pkgdir"

@@ -4,18 +4,18 @@
 buildarch=8
 
 pkgbase=linux-aarch64
-_srcname=linux-5.15
+_srcname=linux-6.2
 _kernelname=${pkgbase#linux}
 _desc="AArch64 multi-platform"
-pkgver=5.15.5
+pkgver=6.2.10
 pkgrel=1
 arch=('aarch64')
 url="http://www.kernel.org/"
 license=('GPL2')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' 'vboot-utils' 'dtc')
 options=('!strip')
-source=("http://www.kernel.org/pub/linux/kernel/v5.x/${_srcname}.tar.xz"
-        "http://www.kernel.org/pub/linux/kernel/v5.x/patch-${pkgver}.xz"
+source=("http://www.kernel.org/pub/linux/kernel/v6.x/${_srcname}.tar.xz"
+        "http://www.kernel.org/pub/linux/kernel/v6.x/patch-${pkgver}.xz"
         '0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch'
         '0002-arm64-dts-rockchip-disable-pwm0-on-rk3399-firefly.patch'
         'config'
@@ -25,20 +25,25 @@ source=("http://www.kernel.org/pub/linux/kernel/v5.x/${_srcname}.tar.xz"
         'linux.preset'
         '60-linux.hook'
         '90-linux.hook')
-md5sums=('071d49ff4e020d58c04f9f3f76d3b594'
-         '532a136dcabc2a416afeaedc4108209f'
-         '21d3e833437461aed3b6ca68b5d8afa0'
-         'd679f49645578a193d6e3c220787a40d'
-         '2f0cb91f0749c9947ef8fcd5063e888a'
+md5sums=('787862593d7bf354cf1a5c37e21fc147'
+         'e0221ea0e6eeb147c29d2fd72e987ed5'
+         '7b08a199a97e3e2288e5c03d8e8ded2d'
+         'c9d4e392555b77034e24e9f87c5ff0b3'
+         'f1379ae267804a7820963dd0527f11a8'
          '7c97cf141750ad810235b1ad06eb9f75'
          '61c5ff73c136ed07a7aadbf58db3d96a'
          '584777ae88bce2c5659960151b64c7d8'
          '41cb5fef62715ead2dd109dbea8413d6'
-         'ce6c81ad1ad1f8b333fd6077d47abdaf'
+         '0a5f16bfec6ad982a2f6782724cca8ba'
          '3dc88030a8f2f5a5f97266d99b149f77')
 
 prepare() {
-  cd ${_srcname}
+  cd $_srcname
+
+  echo "Setting version..."
+  scripts/setlocalversion --save-scmversion
+  echo "-$pkgrel" > localversion.10-pkgrel
+  echo "${pkgbase#linux}" > localversion.20-pkgname
 
   # add upstream patch
   git apply --whitespace=nowarn ../patch-${pkgver}
@@ -48,12 +53,6 @@ prepare() {
   git apply ../0002-arm64-dts-rockchip-disable-pwm0-on-rk3399-firefly.patch
 
   cat "${srcdir}/config" > ./.config
-
-  # add pkgrel to extraversion
-  sed -ri "s|^(EXTRAVERSION =)(.*)|\1 \2-${pkgrel}|" Makefile
-
-  # don't run depmod on 'make install'. We'll do this ourselves in packaging
-  sed -i '2iexit 0' scripts/depmod.sh
 }
 
 build() {
@@ -61,26 +60,7 @@ build() {
 
   # get kernel version
   make prepare
-
-  # load configuration
-  # Configure the kernel. Replace the line below with one of your choice.
-  #make menuconfig # CLI menu for configuration
-  #make nconfig # new CLI menu for configuration
-  #make xconfig # X-based configuration
-  #make oldconfig # using old config from previous kernel version
-  # ... or manually edit .config
-
-  # Copy back our configuration (use with new kernel version)
-  #cp ./.config ../${pkgbase}.config
-
-  ####################
-  # stop here
-  # this is useful to configure the kernel
-  #msg "Stopping build"
-  #return 1
-  ####################
-
-  #yes "" | make config
+  make -s kernelrelease > version
 
   # build!
   unset LDFLAGS
@@ -92,46 +72,30 @@ build() {
 _package() {
   pkgdesc="The Linux Kernel and modules - ${_desc}"
   depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
-  optdepends=('crda: to set the correct wireless channels of your country')
+  optdepends=('wireless-regdb: to set the correct wireless channels of your country')
   provides=("linux=${pkgver}" "WIREGUARD-MODULE")
-  replaces=('linux-armv8')
   conflicts=('linux')
   backup=("etc/mkinitcpio.d/${pkgbase}.preset")
   install=${pkgname}.install
 
-  cd ${_srcname}
+  cd $_srcname
+  local kernver="$(<version)"
+  local modulesdir="$pkgdir/usr/lib/modules/$kernver"
 
-  KARCH=arm64
-
-  # get kernel version
-  _kernver="$(make kernelrelease)"
-  _basekernel=${_kernver%%-*}
-  _basekernel=${_basekernel%.*}
-
-  mkdir -p "${pkgdir}"/{boot,usr/lib/modules}
-  make INSTALL_MOD_PATH="${pkgdir}/usr" modules_install
+  echo "Installing boot image and dtbs..."
+  install -Dm644 arch/arm64/boot/Image{,.gz} -t "${pkgdir}/boot"
   make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
-  cp arch/$KARCH/boot/Image{,.gz} "${pkgdir}/boot"
 
-  # make room for external modules
-  local _extramodules="extramodules-${_basekernel}${_kernelname}"
-  ln -s "../${_extramodules}" "${pkgdir}/usr/lib/modules/${_kernver}/extramodules"
-
-  # add real version for building modules and running depmod from hook
-  echo "${_kernver}" |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/lib/modules/${_extramodules}/version"
+  echo "Installing modules..."
+  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
 
   # remove build and source links
-  rm "${pkgdir}"/usr/lib/modules/${_kernver}/{source,build}
-
-  # now we call depmod...
-  depmod -b "${pkgdir}/usr" -F System.map "${_kernver}"
+  rm "$modulesdir"/{source,build}
 
   # sed expression for following substitutions
   local _subst="
     s|%PKGBASE%|${pkgbase}|g
-    s|%KERNVER%|${_kernver}|g
-    s|%EXTRAMODULES%|${_extramodules}|g
+    s|%KERNVER%|${kernver}|g
   "
 
   # install mkinitcpio preset file
@@ -150,13 +114,14 @@ _package-headers() {
   provides=("linux-headers=${pkgver}")
   conflicts=('linux-headers')
 
-  cd ${_srcname}
-  local builddir="${pkgdir}/usr/lib/modules/${_kernver}/build"
+  cd $_srcname
+  local builddir="$pkgdir/usr/lib/modules/$(<version)/build"
 
   echo "Installing build files..."
-  install -Dt "$builddir" -m644 .config Makefile Module.symvers System.map vmlinux
+  install -Dt "$builddir" -m644 .config Makefile Module.symvers System.map \
+    localversion.* version vmlinux
   install -Dt "$builddir/kernel" -m644 kernel/Makefile
-  install -Dt "$builddir/arch/${KARCH}" -m644 arch/${KARCH}/Makefile
+  install -Dt "$builddir/arch/arm64" -m644 arch/arm64/Makefile
   cp -t "$builddir" -a scripts
 
   # add xfs and shmem for aufs building
@@ -164,8 +129,8 @@ _package-headers() {
 
   echo "Installing headers..."
   cp -t "$builddir" -a include
-  cp -t "$builddir/arch/${KARCH}" -a arch/${KARCH}/include
-  install -Dt "$builddir/arch/${KARCH}/kernel" -m644 arch/${KARCH}/kernel/asm-offsets.s
+  cp -t "$builddir/arch/arm64" -a arch/arm64/include
+  install -Dt "$builddir/arch/arm64/kernel" -m644 arch/arm64/kernel/asm-offsets.s
   mkdir -p "$builddir/arch/arm"
   cp -t "$builddir/arch/arm" -a arch/arm/include
 
@@ -189,7 +154,7 @@ _package-headers() {
   echo "Removing unneeded architectures..."
   local arch
   for arch in "$builddir"/arch/*/; do
-    [[ $arch = */${KARCH}/ || $arch == */arm/ ]] && continue
+    [[ $arch = */arm64/ || $arch == */arm/ ]] && continue
     echo "Removing $(basename "$arch")"
     rm -r "$arch"
   done
@@ -233,8 +198,7 @@ _package-chromebook() {
 
   mkdir -p "${pkgdir}/boot"
 
-  KARCH=arm64
-  image=arch/${KARCH}/boot/Image
+  image=arch/arm64/boot/Image
 
   chromeos_boards=(
     'elm'
@@ -243,10 +207,10 @@ _package-chromebook() {
     'trogdor'
     'asurada'
   )
-  chromebook_dtbs=($(for b in ${chromeos_boards[@]}; do find arch/${KARCH}/boot -name "*${b}*.dtb" | LC_COLLATE=C sort; done))
+  chromebook_dtbs=($(for b in ${chromeos_boards[@]}; do find arch/arm64/boot -name "*${b}*.dtb" | LC_COLLATE=C sort; done))
 
-  lz4 -20 -z -f ${image}
-  echo ${chromebook_dtbs[@]} | ../generate_chromebook_its.sh ${image}.lz4 ${KARCH} lz4 > kernel.its
+  lz4 -20 -z -f -m ${image}
+  echo ${chromebook_dtbs[@]} | ../generate_chromebook_its.sh ${image}.lz4 arm64 lz4 > kernel.its
 
   mkimage -D "-I dts -O dtb -p 2048" -f kernel.its vmlinux.uimg
   dd if=/dev/zero of=bootloader.bin bs=512 count=1

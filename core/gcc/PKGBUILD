@@ -1,8 +1,10 @@
-# Maintainer:  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Maintainer: Giancarlo Razzolini <grazzolini@archlinux.org>
+# Maintainer: Frederik Schwan <freswa at archlinux dot org>
+# Contributor:  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Allan McRae <allan@archlinux.org>
 # Contributor: Daniel Kozak <kozzi11@gmail.com>
 
-# toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
+# toolchain build order: linux-api-headers->glibc->binutils->gcc->glibc->binutils->gcc
 # NOTE: libtool requires rebuilt with each new gcc version
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
@@ -11,58 +13,58 @@
 #  - disabled make check, too much stress, kills plugs :(
 #  - specifid build host, disabled distcc
 #  - replaced bugurl with our GitHub issue page
-#  - patch to disable LDRD/STRD instructions on ARMv5
+#  - upstream patch to fix bctoolbox FTBFS
 
 noautobuild=1
 
-pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go gcc-d)
-pkgver=11.1.0
+pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go gcc-d lto-dump libgccjit)
+pkgver=12.2.1
 _majorver=${pkgver%%.*}
-_islver=0.24
-pkgrel=1
+_commit=fb2d50f72caf3b84b315bc760368670680999749
+pkgrel=2
 pkgdesc='The GNU Compiler Collection'
 arch=(x86_64)
-license=(GPL LGPL FDL custom)
+license=(GPL3 LGPL FDL custom)
 url='https://gcc.gnu.org'
-makedepends=(binutils libmpc doxygen python git libxcrypt)
-checkdepends=(dejagnu inetutils)
-options=(!emptydirs !distcc)
+makedepends=(binutils libmpc doxygen python git libxcrypt zstd)
+checkdepends=(dejagnu inetutils tcl expect python-pytest)
+makedepends=(
+  binutils
+  doxygen
+  gcc-d
+  git
+  libisl
+  libmpc
+  python
+  zstd
+)
+checkdepends=(
+  dejagnu
+  expect
+  inetutils
+  python-pytest
+  tcl
+)
+options=(!emptydirs !lto !distcc)
 _libdir=usr/lib/gcc/$CHOST/${pkgver%%+*}
-# _commit=6beb39ee6c465c21d0cc547fd66b445100cdcc35
-# source=(git://gcc.gnu.org/git/gcc.git#commit=$_commit
-source=(https://sourceware.org/pub/gcc/releases/gcc-${pkgver}/gcc-${pkgver}.tar.xz{,.sig}
-        http://isl.gforge.inria.fr/isl-${_islver}.tar.xz
+source=(git+https://sourceware.org/git/gcc.git#commit=${_commit}
         c89 c99
-        gdc_phobos_path.patch
-        fs64270.patch
-        ipa-fix-bit-CPP-when-combined-with-IPA-bit-CP.patch
-        ipa-fix-ICE-in-get_default_value.patch
         gcc-ada-repro.patch
-        gcc11-Wno-format-security.patch
-        0001-ARMv5-disable-LDRD-STRD.patch)
+        844a5c8ca.patch::'https://gcc.gnu.org/git/?p=gcc.git;a=patch;h=844a5c8ca768dc0cc90c1a943756610832d686a8'
+)
 validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.org
               86CFFCA918CF3AF47147588051E8B148A9999C34  # evangelos@foutrelis.com
               13975A70E63C361C73AE69EF6EEB81F8981C74C7  # richard.guenther@gmail.com
               D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62) # Jakub Jelinek <jakub@redhat.com>
-sha256sums=('4c4a6fb8a8396059241c2e674b85b351c26a5d678274007f076957afa1cc9ddf'
-            'SKIP'
-            '043105cc544f416b48736fff8caf077fb0663a717d06b1113f16e391ac99ebad'
+sha256sums=('SKIP'
             'de48736f6e4153f03d0a5d38ceb6c6fdb7f054e8f47ddd6af0a3dbf14f27b931'
             '2513c6d9984dd0a2058557bf00f06d8d5181734e41dcfe07be7ed86f2959622a'
-            'c86372c207d174c0918d4aedf1cb79f7fc093649eb1ad8d9450dccc46849d308'
-            '1ef190ed4562c4db8c1196952616cd201cfdd788b65f302ac2cc4dabb4d72cee'
-            'fcb11c9bcea320afd202b031b48f8750aeaedaa4b0c5dddcd2c0a16381e927e4'
-            '42865f2af3f48140580c4ae70b6ea03b5bdca0f29654773ef0d42ce00d60ea16'
             '1773f5137f08ac1f48f0f7297e324d5d868d55201c03068670ee4602babdef2f'
-            '504e4b5a08eb25b6c35f19fdbe0c743ae4e9015d0af4759e74150006c283585e'
-            'ac6663528a1cbea30ed9627ef41ef13f25b3cd49c31e22b45b04aa911e6f562f')
+            '6dc8d32e76bc6c7c1a24ae527062ec1b4f393c9f7e0e25f6ab4acc98f622a80f')
 
 prepare() {
   [[ ! -d gcc ]] && ln -s gcc-${pkgver/+/-} gcc
   cd gcc
-
-  # link isl for in-tree build
-  ln -s ../isl-${_islver} isl
 
   # Do not run fixincludes
   sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
@@ -73,96 +75,114 @@ prepare() {
   # Arch Linux ARM installs aarch64 libraries /lib
   [[ $CARCH == "aarch64" ]] && sed -i '/lp64=/s/lib64/lib/' gcc/config/aarch64/t-aarch64-linux
 
-  # hack! - some configure tests for header files using "$CPP $CPPFLAGS"
-  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" {libiberty,gcc}/configure
-
-  # D hacks
-  patch -p1 -i "$srcdir/gdc_phobos_path.patch"
-
   # Reproducible gcc-ada
   patch -Np0 < "$srcdir/gcc-ada-repro.patch"
 
-  # configure.ac: When adding -Wno-format, also add -Wno-format-security
-  patch -Np0 < "$srcdir/gcc11-Wno-format-security.patch"
+  # tree-optimization/105562 - avoid uninit diagnostic with better FRE
+  patch -Np1 < "$srcdir/844a5c8ca.patch"
 
   # ALARM: Specify build host types, triplet patch
-  [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=armv5tel-unknown-linux-gnueabi --build=armv5tel-unknown-linux-gnueabi --with-arch=armv5te --with-float=soft"
-  [[ $CARCH == "armv6h" ]] && CONFIGFLAG="--host=armv6l-unknown-linux-gnueabihf --build=armv6l-unknown-linux-gnueabihf --with-arch=armv6 --with-float=hard --with-fpu=vfp"
-  [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf --with-arch=armv7-a --with-float=hard --with-fpu=vfpv3-d16"
+  [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf --with-arch=armv7-a --with-float=hard --with-fpu=neon"
   [[ $CARCH == "aarch64" ]] && CONFIGFLAG="--host=aarch64-unknown-linux-gnu --build=aarch64-unknown-linux-gnu --with-arch=armv8-a --enable-fix-cortex-a53-835769 --enable-fix-cortex-a53-843419"
 
   mkdir -p "$srcdir/gcc-build"
-
-  # Disable LDRD/STRD on ARMv5 (64-bit alignment issues)
-  patch -p1 -i ../0001-ARMv5-disable-LDRD-STRD.patch
+  mkdir -p "$srcdir/libgccjit-build"
 }
 
 build() {
+  local _confflags=(
+      --prefix=/usr
+      --libdir=/usr/lib
+      --libexecdir=/usr/lib
+      --mandir=/usr/share/man
+      --infodir=/usr/share/info
+      --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues
+      --with-linker-hash-style=gnu
+      --with-system-zlib
+      --enable-__cxa_atexit
+      --enable-checking=release
+      --enable-clocale=gnu
+      --enable-default-pie
+      --enable-default-ssp
+      --enable-gnu-indirect-function
+      --enable-gnu-unique-object
+      --enable-libstdcxx-backtrace
+      --enable-linker-build-id
+      --enable-lto
+      --enable-plugin
+      --enable-shared
+      --enable-threads=posix
+      --disable-libssp
+      --disable-libstdcxx-pch
+      --disable-multilib
+      --disable-werror
+      $CONFIGFLAG
+  )
+
   cd gcc-build
 
-  # using -pipe causes spurious test-suite failures
-  # http://gcc.gnu.org/bugzilla/show_bug.cgi?id=48565
-  CFLAGS=${CFLAGS/-pipe/}
-  CXXFLAGS=${CXXFLAGS/-pipe/}
+  # Credits @allanmcrae
+  # https://github.com/allanmcrae/toolchain/blob/f18604d70c5933c31b51a320978711e4e6791cf1/gcc/PKGBUILD
+  # TODO: properly deal with the build issues resulting from this
+  CFLAGS=${CFLAGS/-Werror=format-security/}
+  CXXFLAGS=${CXXFLAGS/-Werror=format-security/}
 
-  "$srcdir/gcc/configure" --prefix=/usr \
-      --libdir=/usr/lib \
-      --libexecdir=/usr/lib \
-      --mandir=/usr/share/man \
-      --infodir=/usr/share/info \
-      --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
-      --enable-languages=c,c++,fortran,go,lto,objc,obj-c++,d \
-      --with-isl \
-      --with-linker-hash-style=gnu \
-      --with-system-zlib \
-      --enable-__cxa_atexit \
-      --enable-checking=release \
-      --enable-clocale=gnu \
-      --enable-default-pie \
-      --enable-default-ssp \
-      --enable-gnu-indirect-function \
-      --enable-gnu-unique-object \
-      --enable-install-libiberty \
-      --enable-linker-build-id \
-      --enable-lto \
-      --enable-plugin \
-      --enable-shared \
-      --enable-threads=posix \
-      --disable-libssp \
-      --disable-libstdcxx-pch \
-      --disable-libunwind-exceptions \
-      --disable-multilib \
-      --disable-werror \
-      $CONFIGFLAG \
-      gdc_include_dir=/usr/include/dlang/gdc
+  "$srcdir/gcc/configure" \
+    --enable-languages=c,c++,fortran,go,lto,objc,obj-c++,d \
+    --enable-bootstrap \
+    "${_confflags[@]:?_confflags unset}"
 
-  make
+  # see https://bugs.archlinux.org/task/71777 for rationale re *FLAGS handling
+  make -O STAGE1_CFLAGS="-O2" \
+          BOOT_CFLAGS="$CFLAGS" \
+          BOOT_LDFLAGS="$LDFLAGS" \
+          LDFLAGS_FOR_TARGET="$LDFLAGS" \
+          bootstrap
 
   # make documentation
-  make -C $CHOST/libstdc++-v3/doc doc-man-doxygen
+  make -O -C $CHOST/libstdc++-v3/doc doc-man-doxygen
+
+  # Build libgccjit separately, to avoid building all compilers with --enable-host-shared
+  # which brings a performance penalty
+  cd "${srcdir}"/libgccjit-build
+
+  "$srcdir/gcc/configure" \
+    --enable-languages=jit \
+    --disable-bootstrap \
+    --enable-host-shared \
+    "${_confflags[@]:?_confflags unset}"
+
+  # see https://bugs.archlinux.org/task/71777 for rationale re *FLAGS handling
+  make -O STAGE1_CFLAGS="-O2" \
+          BOOT_CFLAGS="$CFLAGS" \
+          BOOT_LDFLAGS="$LDFLAGS" \
+          LDFLAGS_FOR_TARGET="$LDFLAGS" \
+          all-gcc
+
+  cp -a gcc/libgccjit.so* ../gcc-build/gcc/
 }
 
 check() {
   cd gcc-build
 
-  # disable libphobos test to avoid segfaults and other unfunny ways to waste my time  
-  sed -i '/maybe-check-target-libphobos \\/d' Makefile 
+  # disable libphobos test to avoid segfaults
+  sed -i '/maybe-check-target-libphobos \\/d' Makefile
 
   # do not abort on error as some are "expected"
-  make -k check || true
+  make -O -k check || true
   "$srcdir/gcc/contrib/test_summary"
 }
 
 package_gcc-libs() {
   pkgdesc='Runtime libraries shipped by GCC'
   depends=('glibc>=2.27')
-  options+=(!strip)
+  options=(!emptydirs !strip)
   provides=(libgo.so libgfortran.so libgphobos.so
             libubsan.so libasan.so liblsan.so)
-  replaces=(libgphobos)
   if [[ $CARCH == "aarch64" ]]; then
     provides+=(libtsan.so)
   fi
+  replaces=(libgphobos)
 
   cd gcc-build
   make -C $CHOST/libgcc DESTDIR="$pkgdir" install-shared
@@ -204,9 +224,9 @@ package_gcc-libs() {
 
 package_gcc() {
   pkgdesc="The GNU Compiler Collection - C and C++ frontends"
-  depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.28' libmpc)
+  depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.28' libmpc zstd libisl.so)
   groups=('base-devel')
-  options+=(staticlibs)
+  options=(!emptydirs staticlibs)
 
   cd gcc-build
 
@@ -248,11 +268,8 @@ package_gcc() {
   fi
   make -C $CHOST/libsanitizer/lsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
 
-  make -C libiberty DESTDIR="$pkgdir" install
-  install -m644 libiberty/pic/libiberty.a "$pkgdir/usr/lib"
-
   make -C gcc DESTDIR="$pkgdir" install-man install-info
-  rm "$pkgdir"/usr/share/man/man1/{gccgo,gfortran,gdc}.1
+  rm "$pkgdir"/usr/share/man/man1/{gccgo,gfortran,lto-dump,gdc}.1
   rm "$pkgdir"/usr/share/info/{gccgo,gfortran,gdc}.info
 
   make -C libcpp DESTDIR="$pkgdir" install
@@ -280,7 +297,7 @@ package_gcc() {
 
 package_gcc-fortran() {
   pkgdesc='Fortran front-end for GCC'
-  depends=("gcc=$pkgver-$pkgrel")
+  depends=("gcc=$pkgver-$pkgrel" libisl.so)
 
   cd gcc-build
   make -C $CHOST/libgfortran DESTDIR="$pkgdir" install-cafexeclibLTLIBRARIES \
@@ -299,7 +316,7 @@ package_gcc-fortran() {
 
 package_gcc-objc() {
   pkgdesc='Objective-C front-end for GCC'
-  depends=("gcc=$pkgver-$pkgrel")
+  depends=("gcc=$pkgver-$pkgrel" libisl.so)
 
   cd gcc-build
   make DESTDIR="$pkgdir" -C $CHOST/libobjc install-headers
@@ -314,8 +331,8 @@ package_gcc-objc() {
 
 package_gcc-go() {
   pkgdesc='Go front-end for GCC'
-  depends=("gcc=$pkgver-$pkgrel")
-  provides=("go=1.12.2")
+  depends=("gcc=$pkgver-$pkgrel" libisl.so)
+  provides=("go=1.18")
   conflicts=(go)
 
   cd gcc-build
@@ -334,10 +351,10 @@ package_gcc-go() {
 
 package_gcc-d() {
   pkgdesc="D frontend for GCC"
-  depends=("gcc=$pkgver-$pkgrel")
+  depends=("gcc=$pkgver-$pkgrel" libisl.so)
   provides=(gdc)
   replaces=(gdc)
-  options=('staticlibs')
+  options=(staticlibs)
 
   cd gcc-build
   make -C gcc DESTDIR="$pkgdir" d.install-{common,man,info}
@@ -349,8 +366,31 @@ package_gcc-d() {
   rm -f "$pkgdir/usr/lib/"lib{gphobos,gdruntime}.so*
   rm -f "$pkgdir/usr/lib32/"lib{gphobos,gdruntime}.so*
 
-  install -d "$pkgdir"/usr/include/dlang
-  ln -s /"${_libdir}"/include/d "$pkgdir"/usr/include/dlang/gdc
+  # Install Runtime Library Exception
+  install -d "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+    "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_lto-dump() {
+  pkgdesc="Dump link time optimization object files"
+  depends=("gcc=$pkgver-$pkgrel" libisl.so)
+
+  cd gcc-build
+  make -C gcc DESTDIR="$pkgdir" lto.install-{common,man,info}
+
+  # Install Runtime Library Exception
+  install -d "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+    "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_libgccjit() {
+  pkgdesc="Just-In-Time Compilation with GCC backend"
+  depends=("gcc=$pkgver-$pkgrel" libisl.so)
+
+  cd gcc-build
+  make -C gcc DESTDIR="$pkgdir" jit.install-common jit.install-info
 
   # Install Runtime Library Exception
   install -d "$pkgdir/usr/share/licenses/$pkgname/"

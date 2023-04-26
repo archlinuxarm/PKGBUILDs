@@ -1,0 +1,104 @@
+From 9e17ab5b4345d90aa5e01a2379ae0ce29c3a3cf3 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marco=20Trevisan=20=28Trevi=C3=B1o=29?= <mail@3v1n0.net>
+Date: Fri, 27 Sep 2013 19:32:51 +0200
+Subject: WindowActionMenu: unset window and stop async events on dispose
+
+Finalize function can be never called here, so it's better to do this
+when the widget gets destroyed.
+
+diff --git a/libwnck/window-action-menu.c b/libwnck/window-action-menu.c
+index e687cff..1e4b27e 100644
+--- a/libwnck/window-action-menu.c
++++ b/libwnck/window-action-menu.c
+@@ -104,10 +104,8 @@ enum {
+ G_DEFINE_TYPE (WnckActionMenu, wnck_action_menu, GTK_TYPE_MENU);
+ #define WNCK_ACTION_MENU_GET_PRIVATE(o) (G_TYPE_INSTANCE_GET_PRIVATE ((o), WNCK_TYPE_ACTION_MENU, WnckActionMenuPrivate))
+ 
+-static void wnck_action_menu_finalize (GObject *object);
++static void wnck_action_menu_dispose (GObject *object);
+ 
+-static void object_weak_notify (gpointer data,
+-                                GObject *obj);
+ static void window_weak_notify (gpointer data,
+                                 GObject *window);
+ 
+@@ -118,23 +116,10 @@ static void
+ window_weak_notify (gpointer data,
+                     GObject *window)
+ {
+-  g_object_weak_unref (G_OBJECT (data),
+-                       object_weak_notify,
+-                       window);
+-
++  WNCK_ACTION_MENU(data)->priv->window = NULL;
+   gtk_widget_destroy (GTK_WIDGET (data));
+ }
+ 
+-
+-static void
+-object_weak_notify (gpointer data,
+-                    GObject *obj)
+-{
+-  g_object_weak_unref (G_OBJECT (data),
+-                       window_weak_notify,
+-                       obj);
+-}
+-
+ static WnckActionMenu*
+ get_action_menu (GtkWidget *widget)
+ {
+@@ -1030,7 +1015,6 @@ wnck_action_menu_constructor (GType                  type,
+     }
+ 
+   g_object_weak_ref (G_OBJECT (priv->window), window_weak_notify, menu);
+-  g_object_weak_ref (G_OBJECT (menu), object_weak_notify, priv->window);
+ 
+   priv->minimize_item = make_menu_item (MINIMIZE);
+ 
+@@ -1181,7 +1165,7 @@ wnck_action_menu_class_init (WnckActionMenuClass *klass)
+   object_class->constructor = wnck_action_menu_constructor;
+   object_class->get_property = wnck_action_menu_get_property;
+   object_class->set_property = wnck_action_menu_set_property;
+-  object_class->finalize = wnck_action_menu_finalize;
++  object_class->dispose = wnck_action_menu_dispose;
+ 
+   g_object_class_install_property (object_class,
+                                    PROP_WINDOW,
+@@ -1192,17 +1176,30 @@ wnck_action_menu_class_init (WnckActionMenuClass *klass)
+ }
+ 
+ static void
+-wnck_action_menu_finalize (GObject *object)
++wnck_action_menu_dispose (GObject *object)
+ {
+   WnckActionMenu *menu;
+ 
+   menu = WNCK_ACTION_MENU (object);
+ 
+   if (menu->priv->idle_handler)
+-    g_source_remove (menu->priv->idle_handler);
+-  menu->priv->idle_handler = 0;
++    {
++      g_source_remove (menu->priv->idle_handler);
++      menu->priv->idle_handler = 0;
++    }
++
++  if (WNCK_IS_WINDOW (menu->priv->window))
++    {
++      g_object_weak_unref (G_OBJECT (menu->priv->window), window_weak_notify, menu);
++      g_signal_handlers_disconnect_by_data (menu->priv->window, menu);
++
++      WnckScreen *screen = wnck_window_get_screen (menu->priv->window);
++      g_signal_handlers_disconnect_by_data (screen, menu);
++
++      menu->priv->window = NULL;
++    }
+ 
+-  G_OBJECT_CLASS (wnck_action_menu_parent_class)->finalize (object);
++  G_OBJECT_CLASS (wnck_action_menu_parent_class)->dispose (object);
+ }
+ 
+ /**
+-- 
+cgit v0.10.2
+

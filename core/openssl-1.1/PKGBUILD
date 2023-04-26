@@ -1,0 +1,89 @@
+# Maintainer: Pierre Schmitz <pierre@archlinux.de>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - set ARM architecture targets
+
+pkgname=openssl-1.1
+_pkgname=openssl
+_ver=1.1.1t
+# use a pacman compatible version scheme
+pkgver=${_ver/[a-z]/.${_ver//[0-9.]/}}
+pkgrel=1
+pkgdesc='The Open Source toolkit for Secure Sockets Layer and Transport Layer Security'
+arch=('x86_64')
+url='https://www.openssl.org'
+license=('custom:BSD')
+depends=('glibc')
+provides=('libcrypto.so' 'libssl.so')
+makedepends=('perl')
+source=("https://www.openssl.org/source/${_pkgname}-${_ver}.tar.gz"{,.asc}
+        'ca-dir.patch')
+sha256sums=('8dee9b24bdb1dcbf0c3d1e9b02fb8f6bf22165e807f45adeb7c9677536859d3b'
+            'SKIP'
+            '75aa8c2c638c8a3ebfd9fa146fc61c7ff878fc997dc6aa10d39e4b2415d669b2')
+validpgpkeys=('8657ABB260F056B1E5190839D9C4D26D0E604491'
+              '7953AC1FBC3DC8B3B292393ED5E9E43F7DF9EE8C'
+              'A21FAB74B0088AA361152586B8EF1A6BA9DA2D5C')
+
+prepare() {
+	cd "$srcdir/$_pkgname-$_ver"
+
+	# set ca dir to /etc/ssl by default
+	patch -p0 -i "$srcdir/ca-dir.patch"
+}
+
+build() {
+	cd "$srcdir/$_pkgname-$_ver"
+
+	if [ "${CARCH}" == 'armv7h' ]; then
+		openssltarget='linux-armv4'
+		optflags=''
+	elif [ "${CARCH}" == 'aarch64' ]; then
+		openssltarget='linux-aarch64'
+		optflags='no-afalgeng'
+	fi
+
+	# mark stack as non-executable: http://bugs.archlinux.org/task/12434
+	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib/openssl-1.1 \
+		shared no-ssl3-method ${optflags} "${openssltarget}" \
+		"-Wa,--noexecstack ${CPPFLAGS} ${CFLAGS} ${LDFLAGS}"
+
+	make depend
+	make
+}
+
+check() {
+	cd "$srcdir/$_pkgname-$_ver"
+
+	# the test fails due to missing write permissions in /etc/ssl
+	# revert this patch for make test
+	patch -p0 -R -i "$srcdir/ca-dir.patch"
+
+	make test
+
+	patch -p0 -i "$srcdir/ca-dir.patch"
+	# re-run make to re-generate CA.pl from th patched .in file.
+	make apps/CA.pl
+}
+
+package() {
+	cd "$srcdir/$_pkgname-$_ver"
+
+	make DESTDIR="$pkgdir" install_sw
+
+	# Move some files around
+	install -m755 -d "$pkgdir/usr/include/openssl-1.1"
+	mv "$pkgdir/usr/include/openssl" "$pkgdir/usr/include/openssl-1.1/"
+	mv "$pkgdir/usr/lib/openssl-1.1/libcrypto.so.1.1" "$pkgdir/usr/lib/"
+	mv "$pkgdir/usr/lib/openssl-1.1/libssl.so.1.1" "$pkgdir/usr/lib/"
+	ln -sf ../libssl.so.1.1 "$pkgdir/usr/lib/openssl-1.1/libssl.so"
+    ln -sf ../libcrypto.so.1.1 "$pkgdir/usr/lib/openssl-1.1/libcrypto.so"
+	mv "$pkgdir/usr/bin/openssl" "$pkgdir/usr/bin/openssl-1.1"
+
+	# Update includedir in .pc files
+	sed -e 's|/include$|/include/openssl-1.1|' -i "$pkgdir"/usr/lib/openssl-1.1/pkgconfig/*.pc
+
+	rm -rf "$pkgdir"/{etc,usr/bin/c_rehash}
+
+	install -D -m644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

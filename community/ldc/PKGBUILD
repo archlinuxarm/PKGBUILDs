@@ -1,42 +1,40 @@
-# Maintainer: Dan Printzell <arch@vild.io>
+# Maintainer: Dan Printzell <wild@archlinux.org>
 # Contributor: Mihails Strasuns <public@dicebot.lv>
 # Contributor: Sven-Hendrik Haase <sh@lutzhaase.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - -DBUILD_LTO_LIBS=OFF
 #  - -DLDC_BUILD_WITH_LTO=OFF
-#  - removed "-linker=gold -flto=full" from -DD_COMPILER_FLAGS
+#  - removed "-linker=gold -flto=thin" from -DD_COMPILER_FLAGS
 #  - ninja -j2 due to RAM constraints
-
-buildarch=12
 
 pkgname=('ldc' 'liblphobos')
 groups=('dlang' 'dlang-ldc')
-pkgver=1.28.0
-_pkgcommit=6a240b66fd5fcaccd85fb50a2717767dd37ef17a
-_dversion=2.098.0
-_clangversion=13.0.0 # related to where ldc2 looks for compiler-rt sanitizers
+pkgver=1.32.1
+_pkgcommit=a71625b3730855402d87b746d7fdc523119e84d7
+_dversion=2.102.2
+_clangversion=15.0.7 # related to where ldc2 looks for compiler-rt sanitizers
 epoch=3
-pkgrel=3
+pkgrel=1
 pkgdesc="A D Compiler based on the LLVM Compiler Infrastructure including D runtime and libphobos2"
 arch=('x86_64')
 url="https://github.com/ldc-developers/ldc"
 license=('BSD')
 makedepends=('git' 'cmake' 'llvm' 'ldc' 'ninja')
+# Disable lto as linking the ldc2 binary fails
+options=(!lto)
 
 source=(
     "git+https://github.com/ldc-developers/ldc#commit=$_pkgcommit"
     "ldc-druntime::git+https://github.com/ldc-developers/druntime.git"
     "ldc-phobos::git+https://github.com/ldc-developers/phobos.git"
     "ldc-testsuite::git+https://github.com/ldc-developers/dmd-testsuite.git"
-    "keep-default-alignment-for-atomic-instructions.patch"
 )
 
 sha256sums=('SKIP'
             'SKIP'
             'SKIP'
-            'SKIP'
-            '7d33b18c517e7155a44efad984f8226d6bdaa7afae121e3e905727eb73299bbf')
+            'SKIP')
 
 prepare() {
     cd "$srcdir/ldc"
@@ -45,10 +43,7 @@ prepare() {
     git config submodule.druntime.url "$srcdir/ldc-druntime"
     git config submodule.phobos.url "$srcdir/ldc-phobos"
     git config submodule.tests/d2/dmd-testsuite.url "$srcdir/ldc-testsuite"
-    git submodule update
-
-    # https://github.com/ldc-developers/ldc/pull/3842
-    patch -Np1 -i ../keep-default-alignment-for-atomic-instructions.patch
+    git -c protocol.file.allow=always submodule update
 
     # Set version used for path construction in getFullClangCompilerRTLibPath()
     sed -i "s/ldc::llvm_version_base/\"$_clangversion\"/" driver/linker-gcc.cpp
@@ -70,6 +65,7 @@ build() {
     -DLDC_WITH_LLD=OFF \
     -DD_COMPILER_FLAGS="-link-defaultlib-shared=false" \
     -DADDITIONAL_DEFAULT_LDC_SWITCHES="\"-link-defaultlib-shared\"" \
+    -DCMAKE_PREFIX_PATH=/usr/lib/llvm \
     ..
     ninja -j2
 }

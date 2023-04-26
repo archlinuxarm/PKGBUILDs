@@ -14,12 +14,12 @@ buildarch=8
 pkgname=('jre8-openjdk-headless' 'jre8-openjdk' 'jdk8-openjdk' 'openjdk8-src')
 pkgbase=java8-openjdk-aarch64
 _java_ver=8
-_jdk_update=292
-_jdk_build=10
+_jdk_update=322
+_jdk_build=04
 pkgver=${_java_ver}.u${_jdk_update}
 _repo_ver=aarch64-shenandoah-jdk${_java_ver}u${_jdk_update}-b${_jdk_build}
 _jdk8u_repo_ver=shenandoah-aarch64-shenandoah-jdk${_java_ver}u${_jdk_update}-b${_jdk_build}
-pkgrel=1.1
+pkgrel=1
 arch=('x86_64')
 url='https://openjdk.java.net/'
 license=('custom')
@@ -35,16 +35,18 @@ source=(jdk8u-${_repo_ver}.tar.gz::${_url_src}/archive/${_repo_ver}.tar.gz
         jaxp-${_repo_ver}.tar.gz::${_url_src}/jaxp/archive/${_repo_ver}.tar.gz
         langtools-${_repo_ver}.tar.gz::${_url_src}/langtools/archive/${_repo_ver}.tar.gz
         nashorn-${_repo_ver}.tar.gz::${_url_src}/nashorn/archive/${_repo_ver}.tar.gz
+        gcc11.patch
         8143245-pr3548.patch)
-
-sha256sums=('de8735553c00b39ca33c01808d2e230723b71f93ed00469a6039aa8758711304'
-            'c7f95d86adcc70faeac923fb044c7aae48280bfe6f53bfb275f1e2d0b5d93d20'
-            '216c88ad55af24a8043c747a0bf0d9e6afd2bf40ad435e5b4148be790e12090d'
-            '4fa0e1f51d8d0dd1181e95a68ebcd4988684d587509f19e373e64f0e8b4ed1f0'
-            '44b559bb615b9a15c49ee5d61cb8feb747e90066ac0f35514e674ce5744309a8'
-            '0b5ebd40b7632094c5616153a48681a75f7bd7453c26c2b0a33ea2b3b5a4a2fb'
-            'a21c62943d2949033143c40092f4a1b2f2e7dbd1313954114678c90c6bafb341'
-            '0cc6591e5545b9b9edfb0e8b57dbb686017603be0161861c75c1dfb8fe0a5dd9'
+options=(!lto)
+sha256sums=('1b93adf81488be199243f684398d616c20e68bd3bef990d9eafb3d607ab3d02e'
+            '03a7e0fc8ce0ed938c80c69890812e1dbad423df1718115e28f930908a9b5f9b'
+            '2213194f9b3aef81340710ca63fd00fbabc42a82b6b30d6955640e66293ab497'
+            '80646bf709598067622227c982efdbd88b3c6e8da0024e6f9a264145d942a99c'
+            '8c8fc97a8c056cc520472d292b85dbe25a7edbfa4545a8c45275b7b378b0fb65'
+            '2d659ba2c64b19dba192ed1be1e6033efb7445809f8e6966439619a417975a73'
+            '16cc13cc5234ac1ed3dcebc8c8586a4e31b43cf5c9a4b496fd1f29279fa6b827'
+            '68357e18386d833a882a9a988bf4535e5ce8dfa90beeeed7a1939aa75c0e991f'
+            'e1e9452b2078c3e9b45aa73491f3f187e7a9abbc40b6a7fc9239d4e5e525569e'
             'cebae4e056c738d54833c086e9379d2054ff80887c1f4e4ad14496c7ec65f665')
 
 case "${CARCH}" in
@@ -64,6 +66,9 @@ _nonheadless=(bin/policytool
               lib/${_JARCH}/libsplashscreen.so)
 
 prepare() {
+# Fix build with C++17 (Fedora)
+  patch -d hotspot-${_repo_ver} -p2 < gcc11.patch
+
   cd jdk8u-${_jdk8u_repo_ver}
   for subrepo in corba hotspot jdk jaxws jaxp langtools nashorn; do
     ln -s ../${subrepo}-${_repo_ver} ${subrepo}
@@ -82,8 +87,9 @@ build() {
   export MAKEFLAGS=${MAKEFLAGS/-j*}
 
   # Avoid optimization of HotSpot being lowered from O3 to O2
-  export CFLAGS="${CFLAGS//-O2/-O3} ${CPPFLAGS} -Wno-error=deprecated-declarations -Wno-error=stringop-overflow= -Wno-error=return-type -Wno-error=cpp -fno-lifetime-dse -fno-delete-null-pointer-checks -fcommon -Wno-error=format-overflow="
-  export CXXFLAGS="${CXXFLAGS} ${CPPFLAGS} -fcommon"
+  # -fno-exceptions for FS#73134
+  export CFLAGS="${CFLAGS//-O2/-O3} -Wno-error=nonnull -Wno-error=deprecated-declarations -Wno-error=stringop-overflow= -Wno-error=return-type -Wno-error=cpp -fno-lifetime-dse -fno-delete-null-pointer-checks -fcommon -fno-exceptions -Wno-error=format-overflow="
+  export CXXFLAGS="${CXXFLAGS} -fcommon -fno-exceptions"
 
   install -d -m 755 "${srcdir}/${_prefix}/"
   sh configure \

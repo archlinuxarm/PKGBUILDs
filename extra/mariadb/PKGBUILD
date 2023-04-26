@@ -3,27 +3,26 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - disable mroonga storage engine (doesn't build on ARM)
-#  - atomic fix for v5/v6
+#  - build v7 with -j1
 
 pkgbase=mariadb
 pkgname=('mariadb-libs' 'mariadb-clients' 'mariadb' 'mytop')
 pkgdesc='Fast SQL database server, derived from MySQL'
-pkgver=10.6.5
-pkgrel=1
+pkgver=10.11.2
+pkgrel=2
 arch=('x86_64')
 license=('GPL')
 url='https://mariadb.org/'
-makedepends=('boost' 'bzip2' 'cmake' 'jemalloc' 'libaio' 'libxcrypt'
-             'libxml2' 'lz4' 'lzo' 'openssl' 'systemd' 'zlib' 'zstd' 'curl'
-             'krb5' 'cracklib')
-validpgpkeys=('199369E5404BD5FC7D2FE43BCBCB082A1BB943DB') # MariaDB Package Signing Key <package-signing-key@mariadb.org>
+makedepends=('boost' 'bzip2' 'cmake' 'cracklib' 'curl' 'jemalloc' 'judy' 'krb5' 'liburing'
+             'libxcrypt' 'libxml2' 'lz4' 'openssl' 'systemd' 'zlib' 'zstd' 'xz')
+validpgpkeys=('177F4010FE56CA3336300305F1656F24C74CD1D8') # MariaDB Signing Key <signing-key@mariadb.org>
 # The default links with mirror redirection fail for signatures, specific
 # mirrors may be out of date every now and then. Let's use the upstream
 # rsync source via https and hope it does not hurt them too much.
 # https://mariadb.com/kb/en/library/mirror-sites-for-mariadb/
 source=("https://rsync.osuosl.org/pub/mariadb/mariadb-${pkgver}/source/mariadb-${pkgver}.tar.gz"{,.asc}
         '0001-arch-specific.patch')
-sha256sums=('e0be040428d9a42a8bb4bd221b567ff2522cd6fa8906386273da4f03c5c20a8f'
+sha256sums=('1c89dee0caed0f68bc2a1d203eb98a123150e6a179f6ee0f1fc0ba3f08dc71dc'
             'SKIP'
             '3289efb3452d199aec872115f35da3f1d6fd4ce774615076690e9bc8afae1460')
 
@@ -35,13 +34,10 @@ prepare() {
   #  * force preloading jemalloc for memory management
   #  * make systemd-tmpfiles create MYSQL_DATADIR
   patch -Np1 < ../0001-arch-specific.patch
-
-  if [[ $CARCH == arm || $CARCH == armv6h ]]; then
-    echo "target_link_libraries(rocksdblib atomic)" >> storage/rocksdb/build_rocksdb.cmake
-  fi
 }
 
 build() {
+  [[ $CARCH == "armv7h" ]] && MAKEFLAGS="-j1"
   local _cmake_options=(
     # build options
     -DCOMPILATION_COMMENT="Arch Linux"
@@ -113,7 +109,7 @@ check() {
 
 package_mariadb-libs() {
   pkgdesc='MariaDB libraries'
-  depends=('bzip2' 'libaio' 'libxcrypt' 'libcrypt.so' 'lz4' 'lzo' 'openssl' 'xz' 'zlib')
+  depends=('liburing' 'libxcrypt' 'libcrypt.so' 'openssl' 'zlib' 'zstd')
   optdepends=('krb5: for gssapi authentication')
   conflicts=('libmysqlclient' 'libmariadbclient' 'mariadb-connector-c')
   provides=('libmariadbclient' 'mariadb-connector-c' 'libmariadb.so' 'libmariadbd.so')
@@ -125,36 +121,37 @@ package_mariadb-libs() {
     make -C "$dir" DESTDIR="$pkgdir" install
   done
 
+  # remove static libraries
+  rm "${pkgdir}"/usr/lib/*.a
+
+  # remove man pages
+  rm -r "${pkgdir}"/usr/share/man
+  
   ln -s mariadb_config "$pkgdir"/usr/bin/mariadb-config
   ln -s mariadb_config "$pkgdir"/usr/bin/mysql_config
   install -D -m0644 "$srcdir"/"$pkgbase-$pkgver"/man/mysql_config.1 "$pkgdir"/usr/share/man/man1/mysql_config.1
+  ln -s mysql_config.1 "$pkgdir"/usr/share/man/man1/mariadb_config.1
+  ln -s mysql_config.1 "$pkgdir"/usr/share/man/man1/mariadb-config.1
 
   install -D -m0644 support-files/mariadb.pc "$pkgdir"/usr/share/pkgconfig/mariadb.pc
   install -D -m0644 "$srcdir"/"$pkgbase-$pkgver"/support-files/mysql.m4 "$pkgdir"/usr/share/aclocal/mysql.m4
 
-  cd "$pkgdir"
-
-  # remove static libraries
-  rm usr/lib/*.a
-
-  # remove man pages
-  rm -r usr/share/man
 }
 
 package_mariadb-clients() {
   pkgdesc='MariaDB client tools'
-  depends=("mariadb-libs=${pkgver}" 'jemalloc')
+  depends=("mariadb-libs=${pkgver}" 'jemalloc' 'ncurses')
   conflicts=('mysql-clients')
   provides=("mysql-clients=$pkgver")
 
-  cd build
-
-  make -C client DESTDIR="$pkgdir" install
-
+  make -C build/client DESTDIR="${pkgdir}" install
+  
   # install man pages
-  for man in mysql mysql_plugin mysql_upgrade mysqladmin mysqlbinlog mysqlcheck mysqldump mysqlimport mysqlshow mysqlslap mysqltest; do
-    install -D -m0644 "$srcdir"/"$pkgbase-$pkgver"/man/"$man.1" "$pkgdir"/usr/share/man/man1/"$man.1"
-  done
+  make -C build/man DESTDIR="${srcdir}"/client-man install
+  install -d -m0755 "${pkgdir}"/usr/share/man/man1/
+  for man in $(find "${pkgdir}"/usr/bin/ ! -type d); do
+    install -D -m0644 -t "${pkgdir}"/usr/share/man/man1/ "${srcdir}"/client-man/usr/share/man/man1/"$(basename "${man}")".1
+  done    
 }
 
 package_mariadb() {
@@ -163,17 +160,22 @@ package_mariadb() {
           'etc/my.cnf.d/client.cnf'
           'etc/my.cnf.d/enable_encryption.preset'
           'etc/my.cnf.d/mysql-clients.cnf'
-          'etc/my.cnf.d/server.cnf'
+          'etc/my.cnf.d/provider_bzip2.cnf'
+          'etc/my.cnf.d/provider_lz4.cnf'
+          'etc/my.cnf.d/provider_lzma.cnf'
           'etc/my.cnf.d/s3.cnf'
+          'etc/my.cnf.d/server.cnf'
           'etc/my.cnf.d/spider.cnf'
           'etc/security/user_map.conf')
   install=mariadb.install
-  depends=("mariadb-clients=${pkgver}" 'systemd-libs' 'libxml2' 'zstd')
+  depends=("mariadb-clients=${pkgver}" 'bzip2' 'libxml2' 'lz4' 'systemd-libs' 'libxml2' 'zstd')
   optdepends=('cracklib: for cracklib plugin'
               'curl: for ha_s3 plugin'
               'galera: for MariaDB cluster with Galera WSREP'
+              'judy: for Open Query GRAPH (OQGraph) computation engine'
+              'perl-dbd-mariadb: for mariadb-hotcopy, mariadb-convert-table-format and mariadb-setpermission'
               'python-mysqlclient: for myrocks_hotbackup'
-              'perl-dbd-mariadb: for mariadb-hotcopy, mariadb-convert-table-format and mariadb-setpermission')
+              'xz: lzma provider')
   conflicts=('mysql')
   provides=("mysql=$pkgver")
   options=('emptydirs')
@@ -208,16 +210,16 @@ package_mariadb() {
   # provided by mariadb-libs
   rm usr/bin/{mariadb{_,-},mysql_}config
   rm -r usr/include/
-  rm usr/share/man/man1/mysql_config.1
+  rm usr/share/man/man1/{mariadb,mysql}_config.1
   rm -r usr/share/aclocal
   rm usr/lib/lib*
   rm -r usr/lib/pkgconfig
-  rm usr/lib/mysql/plugin/{auth_gssapi_client,caching_sha2_password,client_ed25519,dialog,mysql_clear_password,sha256_password}.so
+  rm usr/lib/mysql/plugin/{auth_gssapi_client,caching_sha2_password,client_ed25519,dialog,mysql_clear_password,sha256_password,zstd}.so
 
   # provided by mariadb-clients
-  rm usr/bin/mysql{,_plugin,_upgrade,admin,binlog,check,dump,import,show,slap,test}
-  rm usr/bin/mariadb{,-{admin,binlog,check,conv,dump,import,plugin,show,slap,test,upgrade}}
-  rm usr/share/man/man1/mysql{,_plugin,_upgrade,admin,binlog,check,dump,import,show,slap,test}.1
+  for bin in $(find "${pkgdir}"/../mariadb-clients/usr/bin/ ! -type d); do
+    rm "${pkgdir}"/usr/bin/"$(basename "${bin}")" "${pkgdir}"/usr/share/man/man1/"$(basename "${bin}")".1
+  done
 
   # provided by mytop
   rm usr/bin/mytop

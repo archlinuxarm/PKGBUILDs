@@ -31,7 +31,7 @@ for i in ${!dtb_list[@]}; do
 	            data = /incbin/("${dtb}");
 	            type = "flat_dt";
 	            arch = "${arch}";
-	            compression = "${compression}";
+	            compression = "none";
 	            hash {
 	                algo = "sha1";
 	            };

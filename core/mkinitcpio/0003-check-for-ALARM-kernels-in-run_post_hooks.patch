@@ -1,0 +1,73 @@
+From b6fc34928a69f9e0498589c3e001730bc105539e Mon Sep 17 00:00:00 2001
+From: Kevin Mihelich <kevin@archlinuxarm.org>
+Date: Tue, 21 Mar 2023 17:56:32 -0600
+Subject: [PATCH 3/3] check for ALARM kernels in run_post_hooks
+
+---
+ functions  | 25 ++++++++++++++++++++-----
+ mkinitcpio | 11 +++++++++++
+ 2 files changed, 31 insertions(+), 5 deletions(-)
+
+diff --git a/functions b/functions
+index eb3e18a..8742ef4 100644
+--- a/functions
++++ b/functions
+@@ -219,13 +219,28 @@ kver_generic() {
+     # https://elixir.bootlin.com/linux/v5.7.2/source/init/version.c#L46
+     local kver='' reader='cat'
+     
+-    [[ "$(detect_compression "$1")" == 'gzip' ]] && reader='zcat'
++    if [[ $1 =~ "/zImage" || $1 =~ /kernel7.img ]]; then
++        # Check for xz zImage
++        skip=$(LC_ALL=C grep -a -b -o $'\xFD\x37\x7A\x58\x5A\x00' $1 | tail -n 1 | cut -d ':' -f 1)
++        if [[ ! -z $skip ]]; then
++            read -r _ _ kver _ < <(dd if=$1 iflag=skip_bytes skip=$skip | xzcat | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]+]+)+')
++        fi
++        if [[ -z "$kver" ]]; then
++            # Check for gzip zImage
++            skip=$(LC_ALL=C grep -a -b -o $'\x1f\x8b\x08\x00\x00\x00\x00\x00' $1 | head -n 1 | cut -d ':' -f 1)
++            if [[ ! -z $skip ]]; then
++              read -r _ _ kver _ < <(dd if=$1 iflag=skip_bytes skip=$skip | zcat | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]+]+)+')
++            fi
++        fi
++    else
++        [[ "$(detect_compression "$1")" == 'gzip' ]] && reader='zcat'
+ 
+-    read -r _ _ kver _ < <($reader "$1" | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]+]+)+')
++        read -r _ _ kver _ < <($reader "$1" | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]+]+)+')
+ 
+-    # try if the image is gzip compressed
+-    if [[ -z "$kver" ]]; then
+-        read _ _ kver _ < <(gzip -c -d "$1" | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]]+)+')
++        # try if the image is gzip compressed
++        if [[ -z "$kver" ]]; then
++            read _ _ kver _ < <(gzip -c -d "$1" | grep -m1 -aoE 'Linux version .(\.[-[:alnum:]]+)+')
++        fi
+     fi
+ 
+     printf '%s' "$kver"
+diff --git a/mkinitcpio b/mkinitcpio
+index f68d70c..2ca3636 100755
+--- a/mkinitcpio
++++ b/mkinitcpio
+@@ -801,6 +801,17 @@ if [[ "$KERNELVERSION" != 'none' ]]; then
+         done
+     fi
+ 
++    if [[ -z "$KERNELIMAGE" ]]; then
++        # check version of ALARM kernels in /boot
++        for img in /boot/*Image* /boot/kernel*.img; do
++            if [[ -f $img && "$(kver "$img")" == "$KERNELVERSION" ]]; then
++                KERNELIMAGE="$img"
++                quiet "located kernel image: '%s'" "$KERNELIMAGE"
++                break
++            fi
++        done
++    fi
++
+     if [[ -z "$KERNELIMAGE" ]]; then
+         # check version of all kernels in /boot
+         for img in /boot/vmlinuz-*; do
+-- 
+2.36.1
+

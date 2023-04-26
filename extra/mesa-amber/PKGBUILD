@@ -1,0 +1,76 @@
+# Maintainer: Laurent Carlier <lordheavym@gmail.com>
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Jan de Groot <jgc@archlinux.org>
+# Contributor: Andreas Radke <andyrtr@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - removed intel DRI drivers
+#  - enable lto for aarch64
+
+highmem=1
+
+pkgname=mesa-amber
+pkgdesc="classic OpenGL (non-Gallium3D) drivers"
+pkgver=21.3.9
+pkgrel=4
+arch=('x86_64')
+makedepends=('python-mako' 'libxml2' 'libx11' 'xorgproto' 'libdrm' 'libxshmfence' 'libxxf86vm'
+             'libxdamage' 'wayland' 'wayland-protocols' 'zstd' 'elfutils'
+             'libglvnd' 'libunwind' 'libxrandr' 'valgrind' 'cmake' 'meson')
+url="https://www.mesa3d.org/"
+license=('custom')
+source=(https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
+        LICENSE)
+sha512sums=('4cec6f4f50f444fcd327f7c40f8899c2f265e348e121455262b540b1f890a1468bbea59965af0876c548fa97aa0a05a1b23fa6ca7d308bd60328cfdeab757684'
+            'SKIP'
+            'f9f0d0ccf166fe6cb684478b6f1e1ab1f2850431c06aa041738563eb1808a004e52cdec823c103c9e180f03ffc083e95974d291353f0220fe52ae6d4897fecc7')
+#validpgpkeys=('57551DE15B968F6341C248F68D8E31AFC32428A6') # Eric Engestrom <eric@engestrom.ch>
+validpgpkeys=('71C4B75620BC75708B4BDB254C95FAAB3EB073EC') # Dylan Baker <dylan@pnwbakers.com>
+
+prepare() {
+  cd mesa-$pkgver
+}
+
+build() {
+  arch-meson mesa-$pkgver build \
+    -D b_lto=$([[ $CARCH == aarch64 ]] && echo true || echo false) \
+    -D b_ndebug=true \
+    -D amber=true \
+    -D platforms=auto \
+    -D dri-drivers=r100,r200,nouveau \
+    -D gallium-drivers=swrast \
+    -D vulkan-drivers=auto \
+    -D dri3=enabled \
+    -D egl=enabled \
+    -D gbm=enabled \
+    -D gles1=disabled \
+    -D gles2=enabled \
+    -D glvnd=auto \
+    -D glx=dri \
+    -D libunwind=enabled \
+    -D llvm=disabled \
+    -D lmsensors=disabled \
+    -D osmesa=true \
+    -D shared-glapi=enabled \
+    -D microsoft-clc=disabled \
+    -D valgrind=enabled
+
+  # Print config
+  meson configure build
+
+  ninja -C build
+  meson compile -C build
+}
+
+package() {
+  depends=('libglvnd' 'libdrm' 'zstd' 'wayland' 'libxshmfence' 'libxxf86vm' 'libxfixes')
+  conflicts=('mesa')
+  provides=("mesa=${pkgver}" "opengl-driver")
+
+  DESTDIR="${pkgdir}" meson install -C build
+
+  # indirect rendering
+  ln -s /usr/lib/libGLX_amber.so.0 "${pkgdir}/usr/lib/libGLX_indirect.so.0"
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+}

@@ -4,14 +4,13 @@
 # Maintainer: Dave Higham <pepedog@archlinuxarm.org>
 # Contributer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
-buildarch=12
-
 pkgbase=linux-rpi
-_commit=0f6b9a3650b6823de5cc5362f338bfcb2fb863c3
+_commit=a449e9f6e1429ee29bf42174e55ef8f24b1ff408
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
-pkgver=5.10.82
-pkgrel=4
+_regen=
+pkgver=6.1.24
+pkgrel=2
 pkgdesc='Linux'
 url="http://www.kernel.org/"
 arch=(armv7h aarch64)
@@ -22,23 +21,25 @@ makedepends=(
 options=('!strip')
 source_armv7h=('config' 'config.txt')
 source_aarch64=('config8' 'config8.txt')
-source=("linux-$pkgver-$pkgrel-${_commit:0:10}.tar.gz::https://github.com/raspberrypi/linux/archive/${_commit}.tar.gz"
+source=("linux-$pkgver-${_commit:0:10}.tar.gz::https://github.com/raspberrypi/linux/archive/${_commit}.tar.gz"
         cmdline.txt
         0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
         linux.preset
         60-linux.hook
         90-linux.hook
+        archarm.diffconfig
 )
-md5sums=('df48abeaef82f1cb308fa98ff00ed61a'
-         '31c02f4518d46deb5f0c2ad1f8b083cd'
+md5sums=('a503b2f770d2b62cd1ba9e168ac69930'
+         '3bab7426d8c8818dda8353da3892a41f'
          'f66a7ea3feb708d398ef57e4da4815e9'
          '86d4a35722b5410e3b29fc92dae15d4b'
          '0a5f16bfec6ad982a2f6782724cca8ba'
-         '441ec084c47cddc53e592fb0cbce4edf')
-md5sums_armv7h=('5ec205f35bac1cc4df6436ba3cb83b07'
-                'e302936d860e78ca8e965459e64b2e5b')
-md5sums_aarch64=('f460711568c3dc02505000b83703d024'
-                 'e302936d860e78ca8e965459e64b2e5b')
+         '441ec084c47cddc53e592fb0cbce4edf'
+         '1ba398db86c6889e23099572fea17088')
+md5sums_armv7h=('ede3d663465d083ed9a0382e62ff7d75'
+                '177bbdbe1baa46a04dcba86352cfa3fe')
+md5sums_aarch64=('6e5147f24ea65b1264f79f8e32a24623'
+                 '7e4403dea857e40005bf76beda9927ff')
 
 # setup vars
 if [[ $CARCH == "armv7h" ]]; then
@@ -51,19 +52,38 @@ prepare() {
   cd "${srcdir}/${_srcname}"
 
   # consistent behavior of lscpu on arm/arm64
-  patch -Np1 -i ../0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
+  patch -p1 -i ../0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
 
   echo "Setting version..."
   scripts/setlocalversion --save-scmversion
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
-  echo "Setting config..."
-  cp ../"$_config" .config
-  make olddefconfig
+  if [[ $_regen -eq 1 ]]; then
+    # useful on two point releases to keep shit straight
+    echo "Applying custom shit to bcm2711_defconfig"
+    make bcm2711_defconfig
+    cat ../archarm.diffconfig >> .config
+    make oldconfig
+    if [[ $CARCH == "armv7h" ]]; then
+      # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16373
+      scripts/config --enable CONFIG_BCM2835_THERMAL
+      # workaround OOM killer issue
+      # https://github.com/raspberrypi/linux/issues/5395
+      # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16377
+      scripts/config --disable CONFIG_LRU_GEN_ENABLED
+    fi
+    sed '/^CONFIG_LOCALVERSION=/s,.*$,CONFIG_LOCALVERSION="-ARCH",' .config >$startdir/newconfig.$_config
+    echo "verify that newconfig.$_config is fit for purpose then redefine $_config"
+    exit
+  else
+    echo "Setting config..."
+    cp ../"$_config" .config
+    make olddefconfig
+    make -s kernelrelease > version
+    echo "Prepared $pkgbase version $(<version)"
+  fi
 
-  make -s kernelrelease > version
-  echo "Prepared $pkgbase version $(<version)"
 }
 
 build() {
@@ -75,9 +95,9 @@ build() {
 _package() {
   pkgdesc="RPi Foundation patched Linux kernel and modules"
   depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7' 'firmware-raspberrypi')
-  optdepends=('crda: to set the correct wireless channels of your country')
-  provides=('kernel26' "linux=${pkgver}" 'WIREGUARD-MODULE')
-  conflicts=('kernel26' 'linux' 'uboot-raspberrypi')
+  optdepends=('wireless-regdb: to set the correct wireless channels of your country')
+  provides=("linux=${pkgver}" 'WIREGUARD-MODULE')
+  conflicts=('linux' 'uboot-raspberrypi')
   install=${pkgname}.install
   backup=('boot/config.txt' 'boot/cmdline.txt')
   replaces=('linux-raspberrypi-latest' 'linux-raspberrypi4')
@@ -89,9 +109,9 @@ _package() {
 
   # Used by mkinitcpio to name the kernel
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
-
   echo "Installing modules..."
-  make INSTALL_MOD_PATH="$pkgdir/usr" modules_install
+  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+    DEPMOD=/doesnt/exist modules_install  # Suppress depmod
 
   # remove build and source links
   rm "$modulesdir"/{source,build}
@@ -181,6 +201,12 @@ _package-headers() {
     echo "Removing $(basename "$_arch")"
     rm -r "$_arch"
   done
+
+  echo "Symlinking common aliases..."
+  # https://archlinuxarm.org/forum/viewtopic.php?f=60&t=16354
+  ln -sr arm "$builddir/arch/armv7h"
+  ln -sr arm "$builddir/arch/armv7l"
+  ln -sr arm64 "$builddir/arch/aarch64"
 
   echo "Removing documentation..."
   rm -r "$builddir/Documentation"

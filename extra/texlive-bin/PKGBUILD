@@ -8,8 +8,8 @@
 #  drop clisp and ffcall makedepends
 
 pkgname=('texlive-bin' 'libsynctex')
-pkgver=2021.58686
-pkgrel=4
+pkgver=2023.66539
+pkgrel=1
 license=('GPL')
 arch=('x86_64')
 makedepends=('git' 'cairo' 'pixman' 'graphite' 't1lib' 'gd'
@@ -17,15 +17,22 @@ makedepends=('git' 'cairo' 'pixman' 'graphite' 't1lib' 'gd'
          'icu' 'harfbuzz' 'harfbuzz-icu' 'gmp' 'mpfr' 'potrace' 'libpaper'
          'perl' 'libxcrypt')
 url='https://tug.org/texlive/'
-_commit=ccb6338507149edf2772bfccb9933b72761f4cc4 # svn://tug.org/texlive/trunk/Build/source@58686
-source=("git+https://github.com/Tex-Live/texlive-source.git#commit=${_commit}")
-sha256sums=('SKIP')
+_commit=0d0bb3a2401e8825b4987eee51e8ef469eb8c3fc # tags/texlive-2023.0
+source=("git+https://github.com/Tex-Live/texlive-source.git#commit=${_commit}"
+        "ptex-debug-print.patch")
+sha256sums=('SKIP'
+            'aa838f09003c62c2efb5770a8de66f99b409df049fbd65098d80fd1957d06c50')
 
 prepare() {
     cd "$srcdir/texlive-source"
 
+    # bibtex-x needs kpathsea flags
+    sed -i '/AC_SEARCH_LIBS/a KPSE_KPATHSEA_FLAGS' texk/bibtex-x/configure.ac
+    (cd texk/bibtex-x && autoreconf)
     # t4ht expects to be un /usr/share/texmf/bin/t4ht (FS#27251)
     sed -i s/SELFAUTOPARENT/TEXMFROOT/ texk/tex4htk/t4ht.c
+    # remove spurious ptex "guessed encoding" print
+    patch -Np1 -i "${srcdir}/ptex-debug-print.patch"
 }
 
 build() {
@@ -38,7 +45,11 @@ build() {
    echo "--> Initial configuration..."
    # we use temporary prefix to avoid messing the existing
    # $pkgdir/usr/share/texmf tree
-   ../configure --prefix=/usr -C \
+   #
+   # Preset float endianness to avoid a crash in cairo configure
+   # with recent toolchains. We are not building cairo anyway.
+   ax_cv_c_float_words_bigendian=no \
+     ../configure --prefix=/usr -C \
      --sysconfdir=/etc \
      --datarootdir=/usr/share \
      --datadir=/usr/share \
@@ -93,6 +104,8 @@ package_libsynctex() {
     cd "${srcdir}/texlive-source/Work"
     make -C texk/web2c DESTDIR="${pkgdir}" \
         install-data-am install-libLTLIBRARIES
+
+    rm -f "$pkgdir"/usr/share/man/man1/hi*.*
 }
 
 package_texlive-bin() {
@@ -104,7 +117,6 @@ package_texlive-bin() {
    provides=('lcdf-typetools' 'kpathsea' 'xindy')
    optdepends=('ed: for texconfig'
                'biber: for bibliography processing')
-   options=('!strip')
 
    cd "$srcdir/texlive-source"
 
@@ -155,11 +167,13 @@ package_texlive-bin() {
    _bibtexextra_scripts="
 bbl2bib
 bib2gls
+bibcop
 bibdoiadd
 bibexport
 bibmradd
 biburl2doi
 bibzbladd
+citeproc-lua
 convertgls2bib
 listbib
 ltx2crossrefxml
@@ -187,8 +201,6 @@ cjk-gs-integrate
 cluttex
 cllualatex
 clxelatex
-context
-contextjit
 ctanbib
 ctanify
 ctanupload
@@ -196,6 +208,7 @@ ctan-o-mat
 de-macro
 depythontex
 deweb
+digestif
 dosepsbin
 dtxgen
 dvi2fax
@@ -242,8 +255,8 @@ listings-ext.sh
 llmk
 ltxfileinfo
 ltximg
+luafindfont
 luaotfload-tool
-luatools
 lwarpmk
 make4ht
 match_parens
@@ -257,8 +270,7 @@ mktexmf
 mktexpk
 mktextfm
 mptopdf
-mtxrun
-mtxrunjit
+optexcount
 ot2kpx
 pamphletangler
 pdfatfi
@@ -284,6 +296,7 @@ spix
 srcredact
 sty2dtx
 tex4ebook
+texaccents
 texconfig
 texconfig-dialog
 texconfig-sys
@@ -293,13 +306,13 @@ texdiff
 texdirflatten
 texdoc
 texdoctk
-texexec
 texfot
 texhash
 texlinks
 texliveonfly
 texloganalyser
-texmfstart
+texlogfilter
+texlogsieve
 texosquery
 texosquery-jre5
 texosquery-jre8
@@ -313,6 +326,8 @@ updmap-sys
 updmap-user
 vpl2ovp
 vpl2vpl
+xelatex-unsafe
+xetex-unsafe
 xhlatex
 xindex
 "
@@ -336,11 +351,13 @@ l3build
 makedtx
 makeglossaries
 makeglossaries-lite
+pagelayoutapi
 pdfannotextractor
 perltex
 ps4pdf
 splitindex
 svn-multi
+textestvis
 vpe
 webquiz
 wordcount
@@ -380,8 +397,17 @@ tikztosvg"
         ${_science_scripts}    \
         tlmgr; do
        ! readlink -e "$pkgdir"/usr/bin/$s && rm "$pkgdir"/usr/bin/$s
+       if [[ -f "$pkgdir/usr/share/man/man1/${s%.*}.1" ]]; then
+           rm -vf "$pkgdir/usr/share/man/man1/${s%.*}.1"
+       fi
    done
    ###################################################################
+
+   # Install old ConTeXt stubs
+   cd "$srcdir/texlive-source"
+   for stub in context contextjit luatools mtxrun mtxrunjit texexec texmfstart; do
+       install -m755 texk/texlive/linked_scripts/context/stubs/unix/"$stub" "$pkgdir/usr/bin/$stub"
+   done
 
    # remove libsynctex
    rm -f "$pkgdir"/usr/include/synctex/*

@@ -2,62 +2,141 @@
 # Contributor: Eric Bélanger <eric@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - do not use LLINT assembly for v5/v6
+#  - build v7 with vfpv3, neon is broken
 
 highmem=1
 
-pkgname=webkit2gtk-5.0
-pkgver=2.34.2
+pkgbase=webkit2gtk-5.0
+pkgname=(
+  webkit2gtk-5.0
+  webkit2gtk-5.0-docs
+)
+pkgver=2.38.6
 pkgrel=1
 pkgdesc="Web content engine for GTK"
 url="https://webkitgtk.org"
 arch=(x86_64)
 license=(custom)
-depends=(cairo fontconfig freetype2 libgcrypt glib2 gtk4 harfbuzz harfbuzz-icu
-         icu libjpeg libsoup3 libxml2 zlib libpng sqlite atk libwebp at-spi2-core
-         libegl libgl libgles libwpe wpebackend-fdo libxslt libsecret libtasn1
-         enchant libx11 libxext libice libxt wayland libnotify hyphen openjpeg2
-         woff2 libsystemd bubblewrap libseccomp xdg-dbus-proxy gstreamer
-         gst-plugins-base-libs libmanette libxcomposite)
-makedepends=(cmake ninja python ruby gobject-introspection
-             wayland-protocols systemd gst-plugins-bad gperf)
-optdepends=('geoclue: Geolocation support'
-            'gst-plugins-good: media decoding'
-            'gst-plugins-bad: media decoding'
-            'gst-libav: nonfree media decoding')
-source=($url/releases/webkitgtk-$pkgver.tar.xz{,.asc})
-sha256sums=('584677d6e7cae12e27cdcc8e05b4cf73b54849a24afc3d7a40cec91016deff00'
+depends=(
+  at-spi2-core
+  atk
+  bubblewrap
+  cairo
+  enchant
+  fontconfig
+  freetype2
+  glib2
+  gst-plugins-base-libs
+  gstreamer
+  gtk4
+  harfbuzz
+  harfbuzz-icu
+  hyphen
+  icu
+  libavif
+  libegl
+  libgcrypt
+  libgl
+  libgles
+  libice
+  libjpeg
+  libmanette
+  libnotify
+  libpng
+  libseccomp
+  libsecret
+  libsoup3
+  libsystemd
+  libtasn1
+  libwebp
+  libwpe
+  libx11
+  libxcomposite
+  libxext
+  libxml2
+  libxslt
+  libxt
+  openjpeg2
+  sqlite
+  wayland
+  woff2
+  wpebackend-fdo
+  xdg-dbus-proxy
+  zlib
+)
+makedepends=(
+  cmake
+  gi-docgen
+  gobject-introspection
+  gperf
+  gst-plugins-bad
+  ninja
+  python
+  ruby
+  systemd
+  wayland-protocols
+)
+source=(
+  $url/releases/webkitgtk-$pkgver.tar.xz{,.asc}
+)
+sha256sums=('1c614c9589389db1a79ea9ba4293bbe8ac3ab0a2234cac700935fae0724ad48b'
             'SKIP')
-validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
-              '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
+validpgpkeys=(
+  'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
+  '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
+)
 
 prepare() {
   cd webkitgtk-$pkgver
 }
 
 build() {
-  # do not use LLINT assembly for v5/v6
-  [[ $CARCH == "arm" || $CARCH == "armv6h" ]] && CONFIG="-DENABLE_JIT=OFF"
+  local cmake_options=(
+    -DPORT=GTK
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_INSTALL_LIBDIR=lib
+    -DCMAKE_INSTALL_LIBEXECDIR=lib
+    -DCMAKE_SKIP_RPATH=ON
+    -DUSE_AVIF=ON
+    -DUSE_GTK4=ON
+    -DENABLE_DOCUMENTATION=ON
+    -DENABLE_MINIBROWSER=ON
+  )
 
-  cmake -S webkitgtk-$pkgver -B build -G Ninja \
-    -DPORT=GTK \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_LIBDIR=lib \
-    -DCMAKE_INSTALL_LIBEXECDIR=lib \
-    -DCMAKE_SKIP_RPATH=ON \
-    -DUSE_GTK4=ON \
-    -DENABLE_GTKDOC=OFF \
-    -DENABLE_MINIBROWSER=ON \
-    $CONFIG
+  # Produce minimal debug info: 4.3 GB of debug data makes the
+  # build too slow and is too much to package for debuginfod
+  CFLAGS+=' -g1'
+  CXXFLAGS+=' -g1'
+
+  [[ $CARCH == "armv7h" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/neon/vfpv3/'` && CXXFLAGS="$CFLAGS"
+
+  cmake -S webkitgtk-$pkgver -B build -G Ninja "${cmake_options[@]}"
   cmake --build build
 }
 
-package() {
-  depends+=(libwpe-1.0.so libWPEBackend-fdo-1.0.so)
-  provides+=(libjavascriptcoregtk-5.0.so libwebkit2gtk-5.0.so)
+package_webkit2gtk-5.0() {
+  depends+=(
+    libWPEBackend-fdo-1.0.so
+    libwpe-1.0.so
+  )
+  provides+=(
+    libjavascriptcoregtk-5.0.so
+    libwebkit2gtk-5.0.so
+  )
+  optdepends=(
+    'geoclue: Geolocation support'
+    'gst-libav: nonfree media decoding'
+    'gst-plugins-bad: media decoding'
+    'gst-plugins-good: media decoding'
+  )
 
   DESTDIR="$pkgdir" cmake --install build
+
+  rm -r "$pkgdir/usr/bin"
+
+  mkdir -p doc/usr/share
+  mv {"$pkgdir",doc}/usr/share/gtk-doc
 
   cd webkitgtk-$pkgver
   find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | sort -z |
@@ -69,4 +148,11 @@ package() {
     install -Dm644 /dev/stdin "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
-# vim:set sw=2 et:
+package_webkit2gtk-5.0-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv doc/* "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:

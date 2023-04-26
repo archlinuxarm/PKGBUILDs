@@ -1,0 +1,83 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove cuda make/optdepends
+#  - move python-pyaml to makedepends
+#  - add python-setuptools to makedepends
+
+_pkgname=awkward
+pkgbase="python-${_pkgname}"
+pkgname=("${pkgbase}" "${pkgbase}-docs")
+pkgver=1.10.2
+pkgrel=1
+pkgdesc="Manipulate jagged, chunky, and/or bitmasked arrays as easily as Numpy"
+url="https://github.com/scikit-hep/awkward"
+license=('BSD')
+arch=('x86_64')
+depends=('python-numpy' 'python-packaging' 'python-importlib_resources')
+optdepends=('python-pyarrow: pyArrow connector'
+            'python-numexpr: numexpr connector'
+            'python-pandas: pandas connector')
+makedepends=('cmake' 'git' 'python-build' 'python-installer' 'python-wheel' 'doxygen' 'python-sphinx' 'python-sphinx_rtd_theme' 'python-pyaml' 'python-setuptools')
+checkdepends=('python-pytest' 'python-pytest-cov' 'python-hist' 'python-pandas' 'python-numexpr' 'python-pyarrow' 'python-scikit-hep-testdata' 'python-vector'
+              'root' 'pybind11' 'rapidjson')
+source=(
+  "${pkgname}::git+https://github.com/scikit-hep/${_pkgname}#tag=v${pkgver}"
+  "${pkgname}-dlpack::git+https://github.com/dmlc/dlpack.git"
+  "${pkgname}-rapidjson::git+https://github.com/Tencent/rapidjson.git"
+  "${pkgname}-pybind11::git+https://github.com/pybind/pybind11.git"
+)
+
+sha512sums=('SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP')
+
+get_pyver () {
+    python -c 'import sys; print(str(sys.version_info[0]) + "." + str(sys.version_info[1]))'
+}
+
+prepare() {
+  cd "${srcdir}/${pkgbase}"
+  git submodule init
+
+  git config submodule."pybind11".url "${srcdir}/${pkgname}"-pybind11
+  git config submodule."rapidjson".url "${srcdir}/${pkgname}"-rapidjson
+  git config submodule."dlpack".url "${srcdir}/${pkgname}"-dlpack
+
+  git -c protocol.file.allow=always submodule update --init --recursive
+
+  sed '/cmake/d' -i pyproject.toml
+  sed \
+    -e 's/setuptools.extern.packaging.version.parse/packaging.version.parse/' \
+    -e 's/import setuptools/import packaging/' \
+    -i src/awkward/_v2/_util.py tests/test_0080-flatpandas-multiindex-rows-and-columns.py
+}
+
+build() {
+  cd "${srcdir}/${pkgbase}"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "${srcdir}/${pkgbase}"
+  local python_version=$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')
+  PYTHONPATH="$PWD/build/lib.linux-$CARCH-cpython-${python_version}" pytest || echo 'some tests fail'
+}
+
+package_python-awkward() {
+  optdepends+=("${pkgbase}-docs: docs")
+  cd "${srcdir}/${pkgbase}"
+  python -m installer --destdir="${pkgdir}" dist/*.whl
+  install -Dm644 LICENSE "${pkgdir}"/usr/share/licenses/"${pkgname}"/LICENSE
+}
+
+package_python-awkward-docs() {
+  cd "${srcdir}/${pkgbase}"
+
+  install -D LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -D README.md "${pkgdir}/usr/share/${pkgbase}/README.md"
+
+  install -d "${pkgdir}/usr/share/doc/${pkgbase}"
+  PYTHONPATH="${PWD}/build/lib" sphinx-build "${PWD}/docs-sphinx" "${pkgdir}/usr/share/doc/${pkgbase}"
+}

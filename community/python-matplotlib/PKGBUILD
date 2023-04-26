@@ -6,17 +6,17 @@
 # Contributor: Douglas Soares de Andrade <dsa@aur.archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - replace make/optdepends on python{,2}-cairocffi with python{,2}-cairo (cffi has haskell dep)
+#  - replace make/optdepends on pytho-cairocffi with python-cairo (cffi has haskell dep)
 #  - disable lto via setup.cfg
 
 pkgname=python-matplotlib
-pkgver=3.5.0
-pkgrel=1
+pkgver=3.7.1
+pkgrel=3
 pkgdesc="A python plotting library, making publication quality plots"
 arch=(x86_64)
 url="https://matplotlib.org"
 license=(custom)
-depends=(freetype2 python-cycler python-dateutil python-fonttools python-kiwisolver python-numpy
+depends=(freetype2 python-contourpy python-cycler python-dateutil python-fonttools python-kiwisolver python-numpy
          python-packaging python-pillow python-pyparsing qhull)
 optdepends=('tk: Tk{Agg,Cairo} backends'
             'pyside2: alternative for Qt5{Agg,Cairo} backends'
@@ -33,60 +33,71 @@ optdepends=('tk: Tk{Agg,Cairo} backends'
             'texlive-bin: usetex dependencies'
             'texlive-latexextra: usetex usage with pdflatex'
             'python-certifi: https support')
-makedepends=(git python-setuptools-scm-git-archive python-certifi)
+makedepends=(git python-build python-installer python-certifi python-setuptools-scm pybind11 python-wheel)
 checkdepends=(python-pytest python-pytest-xdist python-pytest-runner python-pytest-rerunfailures xorg-server-xvfb
-              texlive-bin texlive-core texlive-latexextra texlive-pictures ghostscript inkscape ffmpeg imagemagick
-              gtk4 python-cairo python-gobject python-pyqt5 pyside2 python-pyqt6 pyside6 python-tornado python-wxpython tk
-              jupyter-nbconvert jupyter-nbformat python-ipykernel python-pandas python-pikepdf python-pytz)
-_tag=7a9ee717ecfa24ae4029abac0c7939076c2b0eb7 # git rev-parse v${pkgver}
-_ftver=2.11.0
+              texlive-bin texlive-core texlive-latexextra texlive-pictures
+              ghostscript inkscape ffmpeg imagemagick gtk4
+              python-cairo python-gobject python-pyqt5 pyside2
+              python-pyqt6 pyside6 python-tornado python-wxpython tk
+              jupyter-nbconvert jupyter-nbformat python-ipykernel
+              python-pandas python-pikepdf python-pytz python-xarray
+              noto-fonts-cjk wqy-zenhei)
+_tag=8dcbd965f3008b6dc324f4a45b65ff580e55090e # git rev-parse v${pkgver}
+_ftver=2.12.1
 source=(git+https://github.com/matplotlib/matplotlib.git#tag=${_tag}?signed
-        https://github.com/QuLogic/mpl-images/archive/v${pkgver}rc1-with-freetype-${_ftver}/mpl-images-${pkgver}rc1-ft${_ftver}.tar.gz
-        freetype.patch)
-b2sums=(SKIP
-        29e87a2dd2fc37c3d33e7e0463ca02b468953abe896ac658a6764e78f61a56bb486f5fec51403b2bda726031c5352b4270049256ac8f630eef56ffb3071b870a
-        514324b3e17e832d5199eaa6592c05ca662b1164ddc95f16ea076d6a1063b06e6a8fa4eac7740e5f73afbcc9d17244c5cc41373d5787f62cd58eab10249302c9)
+        https://github.com/QuLogic/mpl-images/archive/v${pkgver}-with-freetype-${_ftver}/mpl-images-${pkgver}-ft${_ftver}.tar.gz
+        freetype.patch
+        matplotlib-fix-pgf-tests.patch::https://github.com/matplotlib/matplotlib/pull/25068.patch)
+b2sums=('SKIP'
+        'bcbf789be86c399e7bf08b8647622c4b97e905da7e58a41f5fce9cfdf3941aadf3cf5cb9bb8a417c5640c7e2d5409abffa63fe5a6e68a4b543caf0855acf25e9'
+        'b821f938cace434932a43b15b42b93d0f8eaffea4e28fbf1d5a7263ec947c26252bafccaea60c1a1cb2fad4c71280ca2cf62527994f270af2467a242287470bb'
+        'fcbc1a8a73f37549fd0f9d62b6312f51d3c00ce64f325498b997977db2ce1f57d2edd7b94fca78849c0a0677bc14fa424bbb5e0ef1556e8a0626d8756191f7ad')
 validpgpkeys=(23CAB59E3332F94D26BEF0378D86E7FAE5EB0C10) # Elliott Sales de Andrade <quantum.analyst@gmail.com>
 
 prepare() {
   cd matplotlib
   # Fix SCM detected version
   rm -r .git
-  echo "Version: ${pkgver}" > PKG-INFO
-  # Use system freetype and qhull, disable LTO
-  sed -e 's|#system_freetype = False|system_freetype = True|' -e 's|#system_qhull = False|system_qhull = True|' -e 's|#enable_lto = True|enable_lto = False|' mplsetup.cfg.template > mplsetup.cfg
+  # Don't require oldest-supported-numpy
+  sed -e 's|oldest-supported-numpy|numpy|' -i pyproject.toml
+  # Use system freetype and qhull
+  sed -e 's|#system_freetype = False|system_freetype = True|' -e 's|#system_qhull = False|system_qhull = True|' mplsetup.cfg.template > mplsetup.cfg
   patch -p1 < ../freetype.patch # From Fedora/upstream
+  sed -e 's|2_000_000|2_500_000|' -i lib/matplotlib/tests/test_backends_interactive.py
   # Install tests for check()
   sed -i 's|#tests = False|tests = True|' mplsetup.cfg
   # Use appropriate baseline images for tests
-  cp lib/matplotlib/tests/baseline_images/test_image/uint16.tif .
   for _module in matplotlib mpl_toolkits
   do
-    rm -r lib/${_module}/tests/baseline_images/test*
-    mv ../mpl-images-${pkgver}rc1-with-freetype-${_ftver}/${_module}/* lib/${_module}/tests/baseline_images/
+    cp -r ../mpl-images-${pkgver}-with-freetype-${_ftver}/lib/${_module}/* lib/${_module}
   done
-  # https://github.com/QuLogic/mpl-images/issues/1
-  cp uint16.tif lib/matplotlib/tests/baseline_images/test_image/
+  git apply ../matplotlib-fix-pgf-tests.patch
 }
 
 build() {
   cd matplotlib
-  python setup.py build
+  export SETUPTOOLS_SCM_PRETEND_VERSION=${pkgver}
+  python -m build --wheel --no-isolation
 }
 
 check() {
   cd matplotlib
+  export SETUPTOOLS_SCM_PRETEND_VERSION=${pkgver}
   python -m venv --system-site-packages test-env
-  test-env/bin/python setup.py install --skip-build
-  # https://github.com/matplotlib/matplotlib/issues/21654
+  test-env/bin/python -m installer dist/*.whl
+  # test_ipynb: https://github.com/matplotlib/matplotlib/issues/21654 fixed but `ModuleNotFoundError: No module named 'matplotlib'`
+  # test_compressed1: https://github.com/QuLogic/mpl-images/issues/4
+  XDG_RUNTIME_DIR=/tmp/runtime-build \
   xvfb-run -a -s "-screen 0 640x480x24" \
-    test-env/bin/python -m pytest -ra -n auto -v --color=yes --pyargs matplotlib mpl_toolkits.tests -k 'not test_ipynb'
+    test-env/bin/python -m pytest -ra -n auto -v --color=yes --pyargs matplotlib mpl_toolkits.{axes_grid1,axisartist,mplot3d} \
+      -k 'not test_ipynb and not test_compressed1 and not test_multi_font_type3 and not test_multi_font_type42 and not test_figure_legend_outside' || true
 }
 
 package() {
   cd matplotlib
-  python setup.py install --root "${pkgdir}" --prefix=/usr --optimize=1 --skip-build
+  export SETUPTOOLS_SCM_PRETEND_VERSION=${pkgver}
+  python -m installer --destdir="${pkgdir}" dist/*.whl
   install -Dm644 doc/users/project/license.rst -t "${pkgdir}"/usr/share/licenses/${pkgname}/
   # Remove tests
-  rm -r "${pkgdir}"$(python -c "import site; print(site.getsitepackages()[0])")/{matplotlib,mpl_toolkits}/tests/
+  rm -r "${pkgdir}"$(python -c "import site; print(site.getsitepackages()[0])")/{matplotlib,mpl_toolkits/*}/tests/
 }

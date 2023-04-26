@@ -1,34 +1,38 @@
-# Maintainer:  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Maintainer: Giancarlo Razzolini <grazzolini@archlinux.org>
+# Maintainer: Frederik Schwan <freswa at archlinux dot org>
+# Contributor:  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Allan McRae <allan@archlinux.org>
 
-# toolchain build order: linux-api-headers->glibc->binutils->gcc->binutils->glibc
+# toolchain build order: linux-api-headers->glibc->binutils->gcc->glibc->binutils->gcc
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - Added a CONFIGFLAG for ARM, defining our build hosts
-#  - --disable-sim, files provided by gdb
 
 noautobuild=1
 
 pkgname=binutils
-pkgver=2.36.1
-pkgrel=3
+pkgver=2.40
+_commit=65dbb94214516c915df5e0fe554ea165557e7ec7
+pkgrel=4
 pkgdesc='A set of programs to assemble and manipulate binary and object files'
 arch=(x86_64)
 url='https://www.gnu.org/software/binutils/'
-license=(GPL)
+license=('GPL3' 'GPL' 'FDL1.3' 'custom:FSFAP')
 groups=(base-devel)
-depends=(glibc zlib elfutils)
-makedepends=(elfutils git)
+depends=(glibc jansson libelf zlib zstd)
+makedepends=(git)
+checkdepends=(dejagnu debuginfod bc)
+optdepends=('debuginfod: for debuginfod server/client functionality')
+backup=('etc/gprofng.rc')
 options=(staticlibs !distcc !ccache)
-#_commit=cb5f6a3e146cc70bc2d864989386df80acec5d3e
-#source=(git+https://sourceware.org/git/binutils-gdb.git#commit=$_commit)
-source=(https://ftp.gnu.org/gnu/binutils/binutils-$pkgver.tar.xz{,.sig})
-sha256sums=('e81d9edf373f193af428a0f256674aea62a9d74dfe93f65192d4eae030b0f3b0'
-            'SKIP')
+source=(git+https://sourceware.org/git/binutils-gdb.git#commit=${_commit}
+        gold-warn-unsupported.patch)
+sha256sums=('SKIP'
+            '2d430b66f84a19c154725ec535280c493be1d34f1a90f95208dce02fecd0e4e4')
 validpgpkeys=(3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F)
 
 prepare() {
-  [[ ! -d binutils-gdb ]] && ln -s binutils-$pkgver binutils-gdb
+  [[ ! -d binutils-gdb ]] && ln -s binutils-${pkgver} binutils-gdb
   mkdir -p binutils-build
 
   cd binutils-gdb
@@ -36,59 +40,94 @@ prepare() {
   # Turn off development mode (-Werror, gas run-time checks, date in sonames)
   sed -i '/^development=/s/true/false/' bfd/development.sh
 
-  # hack! - libiberty configure tests for header files using "$CPP $CPPFLAGS"
-  sed -i "/ac_cpp=/s/\$CPPFLAGS/\$CPPFLAGS -O2/" libiberty/configure
+  # Creds @Fedora
+  # Change the gold configuration script to only warn about
+  # unsupported targets.  This allows the binutils to be built with
+  # BPF support enabled.
+  patch -Np1 -i "${srcdir}"/gold-warn-unsupported.patch
 }
 
 build() {
   cd binutils-build
 
   # ALARM: Specify build host types
-  [[ $CARCH == "arm" ]] && CONFIGFLAG="--host=armv5tel-unknown-linux-gnueabi --build=armv5tel-unknown-linux-gnueabi"
-  [[ $CARCH == "armv6h" ]] && CONFIGFLAG="--host=armv6l-unknown-linux-gnueabihf --build=armv6l-unknown-linux-gnueabihf"
   [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf"
   [[ $CARCH == "aarch64" ]] && CONFIGFLAG="--host=aarch64-unknown-linux-gnu --build=aarch64-unknown-linux-gnu"
 
-  "$srcdir/binutils-gdb/configure" \
+  "${srcdir}"/binutils-gdb/configure \
     --prefix=/usr \
+    --sysconfdir="${pkgdir}"/etc \
     --with-lib-path=/usr/lib:/usr/local/lib \
     --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
+    --enable-colored-disassembly \
+    --enable-default-execstack=no \
     --enable-deterministic-archives \
     --enable-gold \
+    --enable-install-libiberty \
+    --enable-jansson \
     --enable-ld=default \
-    --enable-lto \
+    --enable-new-dtags \
     --enable-plugins \
     --enable-relro \
+    --enable-shared \
+    --enable-targets=bpf-unknown-none \
     --enable-threads \
     --disable-gdb \
+    --disable-gdbserver \
+    --disable-libdecnumber \
+    --disable-readline \
+    --disable-sim \
     --disable-werror \
     --with-debuginfod \
     --with-pic \
     --with-system-zlib \
-    --disable-sim \
     $CONFIGFLAG
 
-  make configure-host
-  make tooldir=/usr
+  make -O tooldir=/usr
+
+  # Extract the FSF All Permissive License
+  # <https://www.gnu.org/prep/maintain/html_node/License-Notices-for-Other-Files.html>
+  # used for some linker scripts.
+  tail -n 5 "${srcdir}"/binutils-gdb/ld/scripttempl/README > FSFAP
 }
 
 check() {
   cd binutils-build
 
-  # unset LDFLAGS as testsuite makes assumptions about which ones are active
-  # ignore failures in gold testsuite...
-  make -k LDFLAGS="" check || true
+  # Use minimal flags for testsuite
+  # ld testsuite uses CFLAGS_FOR_TARGET and requires -g
+  # gold testsuite requires CXXFLAGS/CFLAGS with default PIE/PIC disabled
+  make -O CFLAGS_FOR_TARGET="-O2 -g" \
+          CXXFLAGS="-O2 -no-pie -fno-PIC" \
+          CFLAGS="-O2 -no-pie" \
+          LDFLAGS="" \
+          check || true
 }
 
 package() {
   cd binutils-build
-  make prefix="$pkgdir/usr" tooldir="$pkgdir/usr" install
+  make prefix="${pkgdir}"/usr tooldir="${pkgdir}"/usr install
+
+  # install PIC version of libiberty
+  install -m644 libiberty/pic/libiberty.a "${pkgdir}"/usr/lib
 
   # Remove unwanted files
-  rm -f "$pkgdir"/usr/share/man/man1/{dlltool,nlmconv,windres,windmc}*
+  rm -f "${pkgdir}"/usr/share/man/man1/{dlltool,windres,windmc}*
 
   # No shared linking to these files outside binutils
-  rm -f "$pkgdir"/usr/lib/lib{bfd,opcodes}.so
-  echo 'INPUT( /usr/lib/libbfd.a -liberty -lz -ldl )' > "$pkgdir/usr/lib/libbfd.so"
-  echo 'INPUT( /usr/lib/libopcodes.a -lbfd )' > "$pkgdir/usr/lib/libopcodes.so"
+  rm -f "${pkgdir}"/usr/lib/lib{bfd,opcodes}.so
+  tee "${pkgdir}"/usr/lib/libbfd.so << EOS
+/* GNU ld script */
+
+INPUT( /usr/lib/libbfd.a -lsframe -liberty -lz -lzstd -ldl )
+EOS
+
+  tee "${pkgdir}"/usr/lib/libopcodes.so << EOS
+/* GNU ld script */
+
+INPUT( /usr/lib/libopcodes.a -lbfd )
+EOS
+
+  # install FSF All Permissive License
+  install -Dm644 -t "${pkgdir}"/usr/share/licenses/${pkgname}/ FSFAP
 }

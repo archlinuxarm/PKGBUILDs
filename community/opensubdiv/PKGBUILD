@@ -1,51 +1,63 @@
-# Maintainer: Sven-Hendrik Haase <svenstaro@gmail.com>
+# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - remove makedepend on cuda
 
 pkgname=opensubdiv
-pkgver=3.4.4
-pkgrel=7
+pkgver=3.5.0
+pkgrel=2
 pkgdesc="An Open-Source subdivision surface library"
 arch=(x86_64)
 url="http://graphics.pixar.com/opensubdiv"
 license=('APACHE')
-depends=('ptex' 'intel-tbb' 'libxcursor' 'xorg-xrandr' 'libxinerama')
-makedepends=('cmake' 'doxygen' 'glfw' 'glew' 'python' 'python-pygments' 'python-docutils' 'opencl-headers')
+depends=('ptex' 'intel-tbb' 'libxcursor' 'xorg-xrandr' 'libxinerama' 'libxi')
+makedepends=('cmake' 'doxygen' 'glfw' 'glew' 'python' 'python-pygments' 'python-docutils' 'opencl-headers' 'libglvnd')
 source=("https://github.com/PixarAnimationStudios/OpenSubdiv/archive/v${pkgver//./_}.tar.gz"
-        python3.patch
-        cuda11.patch)
-sha512sums=('fc8f28b79347015c8991150535c1339e695d96947c72fadd4fa27b546a0813c1125cd175ee03bed5aacdb3609f74c4e526ef70103d1195ba9f7df041e73ea9fb'
-            '10f1f63e07d59deb4d91ba04448bb360efff0e41202bb6737caffbce09ba244efb349fe25b24880420b80fdadb268aed84923464af0d66ee1a36e4ba8f96cfd5'
-            '9006762976c15a57d30607189d52d0e620b5024da478dcd41a79a88b350740144a88c1a4f455bfb1b79a9f605e0587c1c828a9b0813301acec8bbb516c2bb292')
+        cuda11.patch
+        opensubdiv-tbb2021.patch::https://github.com/PixarAnimationStudios/OpenSubdiv/commit/9079a517.patch)
+sha512sums=('7ede8f3f335a6306486d649199117401ab4285d360a3b53a536f25046d94741b5e7eacbc06a55d8a0bd5798c810c1b3cfd7964859f04f95363ad26411310b320'
+            '9006762976c15a57d30607189d52d0e620b5024da478dcd41a79a88b350740144a88c1a4f455bfb1b79a9f605e0587c1c828a9b0813301acec8bbb516c2bb292'
+            'c65770d3e65a63c88aa1061e10c5dd6be8616a2479bd5f6d3928c97a5895cfa7d0aac455121db7ee610b9731bfbf07c3f8a26e9cd47623cd1baa046d9aa68cdf')
+options=(!lto)
 
 prepare() {
   cd "OpenSubdiv-${pkgver//./_}"
 
-  patch -Np1 -i "${srcdir}"/python3.patch
   patch -Np1 -i "${srcdir}"/cuda11.patch
-  mkdir build
+  patch -Np1 -i "${srcdir}"/opensubdiv-tbb2021.patch # Support TBB 2021
 }
 
 build() {
-  cd "OpenSubdiv-${pkgver//./_}"/build
+  cd "OpenSubdiv-${pkgver//./_}"
 
-  # wtf
-  mkdir -p CMakeFiles/osd_static_gpu.dir/osd
-
-  cmake .. \
+  cmake \
+      -Bbuild \
+      -DNO_EXAMPLES=ON \
+      -DNO_REGRESSION=ON \
+      -DNO_TUTORIALS=ON \
       -DCMAKE_BUILD_TYPE=Release \
-      -DOSD_CUDA_NVCC_FLAGS='--gpu-architecture=compute_53' \
+      -DOSD_CUDA_NVCC_FLAGS="-gencode=arch=compute_52,code=sm_52 \
+                             -gencode=arch=compute_53,code=sm_53 \
+                             -gencode=arch=compute_60,code=sm_60 \
+                             -gencode=arch=compute_61,code=sm_61 \
+                             -gencode=arch=compute_62,code=sm_62 \
+                             -gencode=arch=compute_70,code=sm_70 \
+                             -gencode=arch=compute_72,code=sm_72 \
+                             -gencode=arch=compute_75,code=sm_75 \
+                             -gencode=arch=compute_80,code=sm_80 \
+                             -gencode=arch=compute_86,code=sm_86 \
+                             -gencode=arch=compute_87,code=sm_87 \
+                             -gencode=arch=compute_89,code=sm_89 \
+                             -gencode=arch=compute_90,code=sm_90 \
+                             -gencode=arch=compute_90,code=compute_90" \
       -DCUDA_HOST_COMPILER=/usr/bin/g++ \
       -DCMAKE_INSTALL_PREFIX=/usr
 
-  make
+  make -C build
 }
 
 package() {
-  cd "OpenSubdiv-${pkgver//./_}"/build
+  cd "OpenSubdiv-${pkgver//./_}"
 
-  DESTDIR="$pkgdir/" make install
-
-  rm -rf "${pkgdir}"/usr/bin
+  DESTDIR="$pkgdir/" make -C build install
 }

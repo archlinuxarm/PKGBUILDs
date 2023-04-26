@@ -1,19 +1,24 @@
 # Maintainer: Jiachen YANG <farseerfc at archlinux dot org>
-# Maintainer: Sven-Hendrik Haase <svenstaro@gmail.com>
+# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - disable neon (-DTG_OWT_ARCH_ARMV7_USE_NEON=OFF)
+#  - disable neon on v7 with -DTG_OWT_ARCH_ARMV7_USE_NEON=OFF
 
 pkgname=libtg_owt
-_commit=d578c76
-pkgver=0.git8.${_commit}
+# It seems the currently desired version can be gotten from
+# https://github.com/telegramdesktop/tdesktop/blob/dev/Telegram/build/docker/centos_env/Dockerfile
+_commit=5098730b9eb6173f0b52068fe2555b7c1015123a
+pkgver=0.git20.${_commit:0:7}
 pkgrel=1
 pkgdesc='WebRTC library'
 arch=('x86_64')
 url='https://github.com/desktop-app/tg_owt'
 license=('BSD')
-depends=('protobuf' 'libxrandr' 'libxcomposite' 'openssl' 'glibc' 'ffmpeg' 'libva' 'opus' 'yasm' 'libjpeg-turbo' 'pipewire' 'libxtst')
-makedepends=('git' 'ninja' 'unzip' 'cmake')
+# libdrm is dynamically loaded via dlopen
+depends=('libdrm')
+makedepends=('git' 'ninja' 'unzip' 'cmake' 'protobuf' 'libxrandr' 'libxcomposite' 'openssl-1.1' 'glibc'
+             'ffmpeg' 'libva' 'opus' 'yasm' 'libjpeg-turbo' 'pipewire' 'libxtst' 'libepoxy')
+options=('staticlibs')
 source=("tg_owt::git+${url}.git#commit=${_commit}"
         "libvpx::git+https://chromium.googlesource.com/webm/libvpx.git"
         "libyuv::git+https://chromium.googlesource.com/libyuv/libyuv.git"
@@ -22,7 +27,6 @@ b2sums=('SKIP'
         'SKIP'
         'SKIP'
         'SKIP')
-replaces=('libwebrtc')
 
 prepare() {
   cd tg_owt
@@ -30,16 +34,23 @@ prepare() {
   git config submodule.src/third_party/libvpx/source/libvpx.url "$srcdir"/libvpx
   git config submodule.src/third_party/libyuv.url "$srcdir"/libyuv
   git config submodule.src/third_party/pipewire.url "$srcdir"/pipewire
-  git submodule update
+  git -c protocol.file.allow=always submodule update
 }
 
 build() {
   cd tg_owt
+
+  export CFLAGS+=" -ffat-lto-objects"
+  export CXXFLAGS+=" -ffat-lto-objects -I/usr/include/libdrm"
+  export PKG_CONFIG_PATH='/usr/lib/openssl-1.1/pkgconfig'
+  # Upstream stated that only static builds are really supported so that's what we'll do.
+  # https://github.com/desktop-app/tg_owt/issues/75#issuecomment-992061171
   cmake \
     -B build \
     -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_SHARED_LIBS=OFF \
     -DTG_OWT_ARCH_ARMV7_USE_NEON=OFF
   ninja -C build
 }

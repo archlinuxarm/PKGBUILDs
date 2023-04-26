@@ -1,0 +1,253 @@
+# Maintainer: graysky <therealgraysky AT proton DOT me>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Ionut Biru <ibiru@archlinux.org>
+# Contributor: Tom Newsom <Jeepster@gmx.co.uk>
+# Contributor: Paul Mattal <paul@archlinux.org>
+
+pkgbase=ffmpeg-rpi
+pkgname=($pkgbase $pkgbase-bin)
+pkgver=4.4.4
+pkgrel=1
+arch=(aarch64)
+url=https://ffmpeg.org/
+license=(GPL3)
+makedepends=(
+  amf-headers
+  avisynthplus
+  clang
+  debugedit
+  ffnvcodec-headers
+  git
+  ladspa
+  nasm
+)
+depends=(
+    alsa-lib
+    bzip2
+    fontconfig
+    fribidi
+    gmp
+    gnutls
+    gsm
+    jack
+    lame
+    libass.so
+    libavc1394
+    libbluray.so
+    libepoxy
+    libdav1d.so
+    libdrm
+    libfreetype.so
+    libiec61883
+    libmodplug
+    libpulse
+    libraw1394
+    librsvg-2.so
+    libsoxr
+    libssh
+    libtheora
+    libva.so
+    libva-drm.so
+    libva-x11.so
+    libvdpau
+    libvidstab.so
+    libvorbisenc.so
+    libvorbis.so
+    libvpx.so
+    libwebp
+    libx11
+    libx264.so
+    libx265.so
+    libxcb
+    libxext
+    libxml2
+    libxv
+    libxvidcore.so
+    libzimg.so
+    opencore-amr
+    openjpeg2
+    opus
+    sdl2
+    speex
+    srt
+    v4l-utils
+    xz
+    zlib
+)
+options=(debug)
+source=(https://ffmpeg.org/releases/${pkgname/-rpi}-$pkgver.tar.xz{,.asc}
+    0001-vmaf-model-path.patch
+    0002-ffmpeg-4.4.4n-rpi.patch
+    0003-fix_flags.patch
+)
+sha256sums=('e80b380d595c809060f66f96a5d849511ef4a76a26b76eacf5778b94c3570309'
+            'SKIP'
+            '2e8d885de789b461ddf63c10646cdb16ad5519b671efd1624bf5a8e7da43dbf3'
+            '316f5b7a2cad9efbc84cf0148d9a5b99e9a9e2543c62ebc7a02f0924da096542'
+            '42f57e7a55f250811515571c870372d6ed0ed504f823b341d26f383c082ce0a0')
+validpgpkeys=('FCF986EA15E6E293A5644F10B4322F04D67658D8')
+
+prepare() {
+  cd "${pkgname/-rpi}-$pkgver"
+
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    [[ $src = *.patch ]] || continue
+    echo "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
+}
+
+build() {
+  cd "${pkgname/-rpi}-$pkgver"
+
+  # -march= defined in /etc/makepkg.conf will override the value for -mcpu we
+  # uses here so unset them and redefine below
+  unset CFLAGS CXXFLAGS
+
+  if [[ $CARCH = "armv7h" ]]; then
+    # we use -mcpu=cortex-a53 rather than cortex-a72 to maximize RPi 3B and RPi 4B/400 compatibility
+    CFLAGS="-mcpu=cortex-a53 -mfpu=neon-fp-armv8 -mfloat-abi=hard"
+  elif [[ $CARCH = "aarch64" ]]; then
+    # note that we use a value of cortex-a53 here to allow RPi3 and RPi4 to use the same package
+    # consistent with rationale of previous comment
+    CFLAGS="-mcpu=cortex-a53"
+  fi
+
+  export CFLAGS+=" -O2 -pipe -fstack-protector-strong -fno-plt -fexceptions -Wp,-D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security -fstack-clash-protection"
+  export CXXFLAGS+="${CFLAGS} -Wp,-D_GLIBCXX_ASSERTIONS"
+
+  _args=(
+    --prefix=/usr
+    --incdir=/usr/include/ffmpeg-rpi
+    --libdir=/usr/lib/ffmpeg-rpi
+    --disable-debug
+    --disable-static
+    --disable-stripping
+    --enable-amf
+    --enable-avisynth
+    --enable-cuda-llvm
+    --enable-fontconfig
+    --enable-gmp
+    --enable-gnutls
+    --enable-gpl
+    --enable-ladspa
+    --enable-libass
+    --enable-libbluray
+    --enable-libdav1d
+    --enable-libdrm
+    --enable-libfreetype
+    --enable-libfribidi
+    --enable-libgsm
+    --enable-libiec61883
+    --enable-libjack
+    --enable-libmodplug
+    --enable-libmp3lame
+    --enable-libopencore_amrnb
+    --enable-libopencore_amrwb
+    --enable-libopenjpeg
+    --enable-libopus
+    --enable-libpulse
+    --enable-librsvg
+    --enable-libsoxr
+    --enable-libspeex
+    --enable-libsrt
+    --enable-libssh
+    --enable-libtheora
+    --enable-libv4l2
+    --enable-libvidstab
+    --enable-libvorbis
+    --enable-libvpx
+    --enable-libwebp
+    --enable-libx264
+    --enable-libx265
+    --enable-libxcb
+    --enable-libxml2
+    --enable-libxvid
+    --enable-libzimg
+    --enable-libxvid
+    --enable-libzimg
+    --enable-shared
+    --enable-version3
+    --host-cflags="-fPIC"
+)
+ 
+  # for hw decoding
+  _args+=(
+    --disable-mmal
+    --enable-neon
+    --enable-v4l2-request
+    --enable-libudev
+    --enable-epoxy
+    --enable-sand
+    )
+
+  ./configure "${_args[@]}"
+  make
+  make tools/qt-faststart
+  make doc/ffmpeg.1
+}
+
+package_ffmpeg-rpi() {
+  pkgdesc='FFmpeg from the release/4.4 branch with hw accel for RPi 3/4/400'
+  optdepends=(
+    'avisynthplus: AviSynthPlus support'
+    'ffmpeg-rpi-bin: binaries and man pages'
+    'ladspa: LADSPA filters'
+  )
+  provides=(
+    libavcodec.so
+    libavdevice.so
+    libavfilter.so
+    libavformat.so
+    libavutil.so
+    libpostproc.so
+    libswresample.so
+    libswscale.so
+  )
+  conflicts=(ffmpeg4.4 ffmpeg-shinobi)
+
+  make DESTDIR="${pkgdir}" -C "${pkgname/-rpi}-$pkgver" install
+
+  cd "${pkgdir}"
+
+  # Move libs to /usr/lib, except the .so symlinks
+  local f
+  for f in usr/lib/ffmpeg-rpi/*; do
+    if [[ $f == *.so ]]; then
+      ln -srf -- usr/lib/"$(readlink "$f")" "$f"
+    elif [[ ! -d $f ]]; then
+      mv "$f" usr/lib
+    fi
+  done
+
+  # these go in ffmpeg-rpi-bin
+  rm -r usr/share usr/bin
+}
+
+package_ffmpeg-rpi-bin() {
+  pkgdesc='binaries and man pages'
+  depends=(ffmpeg-rpi)
+  conflicts=(ffmpeg4.4 ffmpeg-shinobi ffmpeg)
+  provides=(ffmpeg)
+
+  make DESTDIR="${pkgdir}" -C "${pkgname/-rpi-bin}-$pkgver" install install-man
+
+  cd "${pkgdir}"
+
+  # Move libs to /usr/lib, except the .so symlinks
+  local f
+  for f in usr/lib/ffmpeg-rpi/*; do
+    if [[ $f == *.so ]]; then
+      ln -srf -- usr/lib/"$(readlink "$f")" "$f"
+    elif [[ ! -d $f ]]; then
+      mv "$f" usr/lib
+    fi
+  done
+
+  # these are provided by ffmpeg-rpi
+  rm -r usr/include usr/lib
+}
+# vim:set sw=2 et:

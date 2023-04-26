@@ -8,26 +8,28 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - remove make/optdepends on adios2, openimagedenoise, ospray
 #  - add makedepend on tbb, previously pulled in by ospray
+#  - add makedepend on nlohmann-json, previously pulled in by adios2
 #  - explicitly disable the fides, adios2 modules due to -DVTK_BUILD_ALL_MODULES=ON
 #  - generalize moving .so files in install
-#  - explicitly link v5/v6 with libatomic
+#  - removed -ffat-lto-objects from CFLAGS
 
 pkgname=vtk
-pkgver=9.1.0
-pkgrel=2
+pkgver=9.2.6
+pkgrel=4
 pkgdesc="Software system for 3D computer graphics, image processing, and visualization"
 arch=(x86_64)
 url="https://www.vtk.org/"
 license=(BSD)
-depends=(gcc-libs double-conversion)
+depends=(gcc-libs double-conversion pugixml tbb libtiff)
 makedepends=(cmake boost doxygen ffmpeg gdal git gnuplot java-environment=11
-             liblas libxt openmp openmpi openvdb openvr pdal
-             postgresql python-matplotlib qt5-base qt5-tools qt5-webkit
-             qt5-x11extras tk unixodbc wget
-             cgns double-conversion eigen expat fmt freetype2 gl2ps glew hdf5 libjpeg
-             jsoncpp libharu proj libxml2 lz4 xz python-mpi4py netcdf libogg
-             libpng pugixml rapidjson sqlite libtheora libtiff utf8cpp zfp zlib)
-# pegtl https://gitlab.kitware.com/vtk/vtk/-/issues/18151
+             liblas libxt mariadb-libs openmp openmpi openvdb
+             openvr pdal postgresql-libs python-matplotlib qt5-base
+             qt5-tools qt5-declarative tk unixodbc wget
+             cgns cli11 eigen expat fmt freetype2 gl2ps glew hdf5 libjpeg
+             jsoncpp libjsoncpp.so libharu proj libxml2 lz4 xz python-mpi4py
+             netcdf libogg libpng rapidjson sqlite libtheora utf8cpp zfp zlib openxr verdict nlohmann-json)
+# pegtl: https://gitlab.kitware.com/vtk/vtk/-/issues/18151
+# exprtk, ioss: not packaged
 optdepends=('gnuplot: plotting tools'
             'graphviz: drawing tools'
             'java-runtime=11: java bindings'
@@ -35,11 +37,11 @@ optdepends=('gnuplot: plotting tools'
             'python-mpi4py: OpenMPI python support'
             'python-matplotlib: for Matplotlib rendering'
             'openmpi: OpenMPI support'
-            'qt5-x11extras'
-            'qt5-webkit: WebKit support'
+            'qt5-declarative: QML plugin'
             'tk: tcl bindings'
             cgns
             ffmpeg
+            fmt
             gdal
             gl2ps
             glew
@@ -49,33 +51,26 @@ optdepends=('gnuplot: plotting tools'
             libharu
             liblas
             lz4
+            mariadb-libs
             netcdf
             openvdb
             openvr
+            openxr
             pdal
-            postgresql
-            pugixml
+            postgresql-libs
             proj
             sqlite
-            unixodbc)
+            unixodbc
+            verdict)
 source=(${url}/files/release/${pkgver%.*}/VTK-${pkgver}.tar.gz
-        vtk-tbb-export.patch::https://gitlab.kitware.com/vtk/vtk-m/-/commit/3be3529f.patch)
+      )
 options=(staticlibs)
-sha256sums=('8fed42f4f8f1eb8083107b68eaa9ad71da07110161a3116ad807f43e5ca5ce96'
-            '883ce14c48c46ac8343afe3950e468021a4913352b40f32c22970665c9a669fc')
+sha256sums=('06fc8d49c4e56f498c40fcb38a563ed8d4ec31358d0101e8988f0bb4d539dd12')
 
 prepare() {
   cd VTK-${pkgver}
-  # We have a patched libharu
-  sed -i "s|2.4.0|2.3.0|" ThirdParty/libharu/CMakeLists.txt
   # We have a patched fmt
-  sed -i "s|8.1.0|8.0.1|" ThirdParty/fmt/CMakeLists.txt
-  # Namespace the exported tbb target to fix conflicts
-  patch -d ThirdParty/vtkm/vtkvtkm/vtk-m -p1 -i "$srcdir"/vtk-tbb-export.patch
-  # explicitly link with libatomic
-  if [[ $CARCH == "arm" || $CARCH == "armv6h" ]]; then
-    echo "vtk_module_link(VTK::CommonDataModel PUBLIC atomic)" >> Common/DataModel/CMakeLists.txt
-  fi
+  sed -i "s|8.1.0|9.0.0|" ThirdParty/fmt/CMakeLists.txt
 }
 
 build() {
@@ -83,13 +78,13 @@ build() {
   export JAVA_HOME=/usr/lib/jvm/default
   # To set tcl lib path
   local _tkver=$(echo 'puts $tcl_version' | tclsh)
-  # We do not have packages for cli11, exprtk, ioss
   cmake -B build -S VTK-${pkgver} \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_LICENSEDIR=share/licenses/vtk \
     -DCMAKE_SKIP_RPATH=OFF \
     -DCMAKE_SKIP_INSTALL_RPATH=ON \
+    -DCMAKE_JAVA_COMPILE_FLAGS="-Xlint:-options" \
     -DBUILD_SHARED_LIBS=ON \
     -DVTK_BUILD_ALL_MODULES=ON \
     -DVTK_MODULE_ENABLE_VTK_IOADIOS2:STRING=NO \
@@ -110,13 +105,12 @@ build() {
     -DVTKm_ENABLE_OPENMP=ON \
     -DVTK_ENABLE_OSPRAY=OFF \
     -DVTK_USE_EXTERNAL=ON \
-    -DVTK_MODULE_USE_EXTERNAL_VTK_cli11=OFF \
     -DVTK_MODULE_USE_EXTERNAL_VTK_exprtk=OFF \
     -DVTK_MODULE_USE_EXTERNAL_VTK_ioss=OFF \
     -DVTK_MODULE_USE_EXTERNAL_VTK_pegtl=OFF \
     -DVTK_MODULE_ENABLE_VTK_DomainsMicroscopy=NO \
     -DVTK_MODULE_ENABLE_VTK_FiltersOpenTURNS=NO \
-    -DOpenVDB_CMAKE_PATH=/usr/lib/cmake/OpenVDB \
+    -DOpenGL_GL_PREFERENCE=LEGACY \
     -Wno-dev
 #    -DFIDES_USE_EXTERNAL_RAPIDJSON=ON \
   make -C build
@@ -132,8 +126,12 @@ package() {
   mv "${pkgdir}"/usr/lib/java/vtk-Linux-*/*.so "${pkgdir}"/usr/lib/
   rmdir "${pkgdir}"/usr/lib/java/{vtk-Linux-*/,}
 
+  # byte-compile python modules since the CMake build does not do it
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  python -m compileall -o 0 -o 1 -o 2 --hardlink-dupes -s "${pkgdir}" "${pkgdir}"${site_packages}
+
   # Remove third party CMake patching for older versions than ours
-  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/patches/3.{1{3,6,8,9},20}
+  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/patches/3.{1{3,6,9},20}
   # … as well as duplicate copies
-  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/vtkm/cmake/{Find*.cmake,3.15}
+  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/vtkm/{Find*.cmake,cmake/{Find*.cmake,3.15}}
 }

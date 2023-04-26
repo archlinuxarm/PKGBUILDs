@@ -5,54 +5,52 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - removed makedepends on nasm and java, -DWITH_JAVA=OFF
-#  - added -DWITH_SIMD=FALSE to configure for !AArch64
 
 pkgname=libjpeg-turbo
-pkgver=2.1.2
+pkgver=2.1.5.1
 pkgrel=1
-pkgdesc='JPEG image codec with accelerated baseline compression and decompression'
+pkgdesc="JPEG image codec with accelerated baseline compression and decompression"
 url="https://libjpeg-turbo.org/"
 arch=(x86_64)
 license=(BSD)
 depends=(glibc)
-makedepends=(cmake)
+makedepends=(cmake ninja)
 provides=(libjpeg libjpeg.so libturbojpeg.so)
-source=("https://sourceforge.net/projects/${pkgname}/files/${pkgver}/${pkgname}-${pkgver}.tar.gz"{,.sig})
-sha512sums=('f0377b58d00310b2e644da31f807ac6c3425823f362ea88bcbed32991dddbea4e7a478676a7c1c4874a34bc578f262bf1d32c925e2f14fa517a50fd911ba8dd5'
+source=(https://sourceforge.net/projects/$pkgname/files/$pkgver/$pkgname-$pkgver.tar.gz{,.sig})
+sha512sums=('86a7248d064043b26b09755633ef4872a2a6133c9e677a9fe4be6645b2e0fde102cf01e09119967b3b6b85f4cb93f3f7c49ec4973944d5eff99b5b90ce8b0be6'
             'SKIP')
-b2sums=('ae8b7db9fd634b3b29a916098e2b54a8e045cb7a9d883de1f2e8a34542154a724e5d7788fb4b4d816c36d6503fc2a7427165dc3af9d47c77bfb7c51a42bc1d51'
+b2sums=('9583a0a91e45347d651de6bf5192a23bfe4e64cef67cdbb18f5b578b424fc46fc114e5649e93a467906cf047948e43a11b6d17b48c47f879c51cff1a4ef356ff'
         'SKIP')
 validpgpkeys=('0338C8D8D9FDA62CF9C421BD7EC2DBB6F4DBF434') # The libjpeg-turbo Project (Signing key for official binaries) <information@libjpeg-turbo.org>
 
 build() {
-  cd "${pkgname}-${pkgver}"
-  [[ $CARCH != "aarch64" ]] && CONFIG="-DWITH_SIMD=FALSE"
-  cmake -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_INSTALL_LIBDIR=/usr/lib \
-        -DCMAKE_BUILD_TYPE=None \
-        -DWITH_JAVA=OFF \
-        -DWITH_JPEG8=ON \
-        -W no-dev \
-        -B build $CONFIG \
-        -S .
-  make VERBOSE=1 -C build
+  local cmake_options=(
+    -B build
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_INSTALL_LIBDIR=/usr/lib
+    -DCMAKE_BUILD_TYPE=None
+    -DENABLE_STATIC=OFF
+    -DWITH_JAVA=OFF
+    -DWITH_JPEG8=ON
+    -G Ninja
+    -S $pkgname-$pkgver
+    -W no-dev
+  )
+
+  cmake "${cmake_options[@]}"
+  cmake --build build -v
 }
 
 check() {
-  cd "${pkgname}-${pkgver}"
-  make test -C build
+  ctest --test-dir build --output-on-failure --stop-on-failure -j$(nproc)
 }
 
 package() {
-  cd "${pkgname}-${pkgver}"
-  make VERBOSE=1 DESTDIR="${pkgdir}" \
-       docdir="/usr/share/doc/${pkgname}" \
-       exampledir="/usr/share/doc/${pkgname}" \
-       install -C build
+  DESTDIR="$pkgdir" cmake --install build -v
 
-  install -d "${pkgdir}/usr/share/licenses/${pkgname}"
-  ln -s ../../doc/${pkgname}/LICENSE.md "${pkgdir}/usr/share/licenses/${pkgname}"
-  # header required by some dependants
+  # header required by some dependents
   # https://bugs.archlinux.org/task/24787
-  install -m 644 jpegint.h "${pkgdir}/usr/include"
+  install -vDm 644 $pkgname-$pkgver/jpegint.h "$pkgdir/usr/include"
+
+  install -vDm 644 $pkgname-$pkgver/LICENSE.md -t "$pkgdir/usr/share/licenses/$pkgname"
 }

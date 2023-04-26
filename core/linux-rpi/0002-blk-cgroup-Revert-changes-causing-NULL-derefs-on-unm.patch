@@ -1,0 +1,130 @@
+From b52602c6b36f687afa37076dca4ae61b264e31e3 Mon Sep 17 00:00:00 2001
+Date: Sat, 11 Mar 2023 06:32:06 -0500
+Subject: [PATCH] blk-cgroup: Revert changes causing NULL derefs on unmount
+
+This reverts
+
+- commit bfe46d2efe46 (blk-cgroup: synchronize pd_free_fn() from
+  blkg_free_workfn() and blkcg_deactivate_policy(), 2023-01-19) and
+- commit 57a425badc05 (blk-cgroup: dropping parent refcount after
+  pd_free_fn() is done, 2023-01-19).
+
+For: https://bugs.archlinux.org/task/77811
+---
+ block/blk-cgroup.c     | 39 ++++++++-------------------------------
+ include/linux/blkdev.h |  1 -
+ 2 files changed, 8 insertions(+), 32 deletions(-)
+
+diff --git a/block/blk-cgroup.c b/block/blk-cgroup.c
+index f8b21be..7c91d91 100644
+--- a/block/blk-cgroup.c
++++ b/block/blk-cgroup.c
+@@ -87,32 +87,14 @@ static void blkg_free_workfn(struct work_struct *work)
+ {
+ 	struct blkcg_gq *blkg = container_of(work, struct blkcg_gq,
+ 					     free_work);
+-	struct request_queue *q = blkg->q;
+ 	int i;
+ 
+-	/*
+-	 * pd_free_fn() can also be called from blkcg_deactivate_policy(),
+-	 * in order to make sure pd_free_fn() is called in order, the deletion
+-	 * of the list blkg->q_node is delayed to here from blkg_destroy(), and
+-	 * blkcg_mutex is used to synchronize blkg_free_workfn() and
+-	 * blkcg_deactivate_policy().
+-	 */
+-	if (q)
+-		mutex_lock(&q->blkcg_mutex);
+-
+ 	for (i = 0; i < BLKCG_MAX_POLS; i++)
+ 		if (blkg->pd[i])
+ 			blkcg_policy[i]->pd_free_fn(blkg->pd[i]);
+ 
+-	if (blkg->parent)
+-		blkg_put(blkg->parent);
+-
+-	if (q) {
+-		list_del_init(&blkg->q_node);
+-		mutex_unlock(&q->blkcg_mutex);
+-		blk_put_queue(q);
+-	}
+-
++	if (blkg->q)
++		blk_put_queue(blkg->q);
+ 	free_percpu(blkg->iostat_cpu);
+ 	percpu_ref_exit(&blkg->refcnt);
+ 	kfree(blkg);
+@@ -145,6 +127,8 @@ static void __blkg_release(struct rcu_head *rcu)
+ 
+ 	/* release the blkcg and parent blkg refs this blkg has been holding */
+ 	css_put(&blkg->blkcg->css);
++	if (blkg->parent)
++		blkg_put(blkg->parent);
+ 	blkg_free(blkg);
+ }
+ 
+@@ -441,14 +425,9 @@ static void blkg_destroy(struct blkcg_gq *blkg)
+ 	lockdep_assert_held(&blkg->q->queue_lock);
+ 	lockdep_assert_held(&blkcg->lock);
+ 
+-	/*
+-	 * blkg stays on the queue list until blkg_free_workfn(), see details in
+-	 * blkg_free_workfn(), hence this function can be called from
+-	 * blkcg_destroy_blkgs() first and again from blkg_destroy_all() before
+-	 * blkg_free_workfn().
+-	 */
+-	if (hlist_unhashed(&blkg->blkcg_node))
+-		return;
++	/* Something wrong if we are trying to remove same group twice */
++	WARN_ON_ONCE(list_empty(&blkg->q_node));
++	WARN_ON_ONCE(hlist_unhashed(&blkg->blkcg_node));
+ 
+ 	for (i = 0; i < BLKCG_MAX_POLS; i++) {
+ 		struct blkcg_policy *pol = blkcg_policy[i];
+@@ -460,6 +439,7 @@ static void blkg_destroy(struct blkcg_gq *blkg)
+ 	blkg->online = false;
+ 
+ 	radix_tree_delete(&blkcg->blkg_tree, blkg->q->id);
++	list_del_init(&blkg->q_node);
+ 	hlist_del_init_rcu(&blkg->blkcg_node);
+ 
+ 	/*
+@@ -1246,7 +1226,6 @@ int blkcg_init_disk(struct gendisk *disk)
+ 	int ret;
+ 
+ 	INIT_LIST_HEAD(&q->blkg_list);
+-	mutex_init(&q->blkcg_mutex);
+ 
+ 	new_blkg = blkg_alloc(&blkcg_root, disk, GFP_KERNEL);
+ 	if (!new_blkg)
+@@ -1484,7 +1463,6 @@ void blkcg_deactivate_policy(struct request_queue *q,
+ 	if (queue_is_mq(q))
+ 		blk_mq_freeze_queue(q);
+ 
+-	mutex_lock(&q->blkcg_mutex);
+ 	spin_lock_irq(&q->queue_lock);
+ 
+ 	__clear_bit(pol->plid, q->blkcg_pols);
+@@ -1503,7 +1481,6 @@ void blkcg_deactivate_policy(struct request_queue *q,
+ 	}
+ 
+ 	spin_unlock_irq(&q->queue_lock);
+-	mutex_unlock(&q->blkcg_mutex);
+ 
+ 	if (queue_is_mq(q))
+ 		blk_mq_unfreeze_queue(q);
+diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+index 1680b6e..891f8cb 100644
+--- a/include/linux/blkdev.h
++++ b/include/linux/blkdev.h
+@@ -487,7 +487,6 @@ struct request_queue {
+ 	DECLARE_BITMAP		(blkcg_pols, BLKCG_MAX_POLS);
+ 	struct blkcg_gq		*root_blkg;
+ 	struct list_head	blkg_list;
+-	struct mutex		blkcg_mutex;
+ #endif
+ 
+ 	struct queue_limits	limits;
+-- 
+2.39.2
+

@@ -1,133 +1,155 @@
 # Maintainer: David Runge <dvzrv@archlinux.org>
-# Maintainer: Ronald van Haren <ronald.archlinux.org>
+# Contributor: Ronald van Haren <ronald.archlinux.org>
 # Contributor: David Runge <dvzrv@archlinux.org>
 # Contributor: damir <damir@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - removed -malign-double from CFLAGS
-#  - removed --enable-sse from single precision
+#  - removed --enable-sse, --enable-avx from single precision
 #  - removed --enable-sse2, --enable-avx from double precision
-#  - removed quad precision variant
+#  - removed quad precision variant from _build_types array
 
 pkgname=fftw
 pkgver=3.3.10
-pkgrel=1
+pkgrel=4
 pkgdesc="A library for computing the discrete Fourier transform (DFT)"
-arch=('x86_64')
-license=('GPL2')
+arch=(x86_64)
 url="http://www.fftw.org/"
-depends=('bash' 'gcc-libs' 'glibc' 'openmpi')
-makedepends=('gcc-fortran')
-provides=('libfftw3q_threads.so' 'libfftw3q_omp.so' 'libfftw3q.so'
-'libfftw3l_threads.so' 'libfftw3l_omp.so' 'libfftw3l_mpi.so' 'libfftw3l.so'
-'libfftw3f_threads.so' 'libfftw3f_omp.so' 'libfftw3f_mpi.so' 'libfftw3f.so'
-'libfftw3_threads.so' 'libfftw3_omp.so' 'libfftw3_mpi.so' 'libfftw3.so')
-source=("http://www.fftw.org/${pkgname}-${pkgver}.tar.gz")
+license=(GPL2)
+depends=(
+  bash
+  gcc-libs
+  glibc
+  openmpi
+)
+makedepends=(
+  cmake
+  gcc-fortran
+)
+provides=(
+  libfftw3q_threads.so
+  libfftw3q_omp.so
+  libfftw3q.so
+  libfftw3l_threads.so
+  libfftw3l_omp.so
+  libfftw3l_mpi.so
+  libfftw3l.so
+  libfftw3f_threads.so
+  libfftw3f_omp.so
+  libfftw3f_mpi.so
+  libfftw3f.so
+  libfftw3_threads.so
+  libfftw3_omp.so
+  libfftw3_mpi.so
+  libfftw3.so
+)
+source=(http://www.fftw.org/$pkgname-$pkgver.tar.gz)
 sha512sums=('2d34b5ccac7b08740dbdacc6ebe451d8a34cf9d9bfec85a5e776e87adf94abfd803c222412d8e10fbaa4ed46f504aa87180396af1b108666cde4314a55610b40')
 b2sums=('3663872bd95a01d2c79af185f53918e1d1a9c91c620082402772c07f25b9b77d4920a78dc686fac6b51aa961b8d62b7e2cef3f3031e096bed40ced80b59b29d5')
+_build_types=(single double long-double)
 
 prepare() {
-  cp -av "${pkgname}-${pkgver}" "${pkgname}-${pkgver}-double"
-  cp -av "${pkgname}-${pkgver}" "${pkgname}-${pkgver}-long-double"
-  cp -av "${pkgname}-${pkgver}" "${pkgname}-${pkgver}-quad"
+  local _i
+
+  # fix wrong soname in FFTW3LibraryDepends.cmake
+  sed -e 's/3.6.9/3.6.10/' -i $pkgname-$pkgver/CMakeLists.txt
+
+  mv -v $pkgname-$pkgver $pkgname-$pkgver-single
+  for _i in {1..3}; do
+    cp -av $pkgname-$pkgver-single $pkgname-$pkgver-"${_build_types[$_i]}"
+  done
 }
 
 build() {
+  local _name
+  local _configure=(
+    ./configure
+    --prefix=/usr
+    --enable-shared
+    --enable-threads
+    --enable-mpi
+    --enable-openmp
+  )
+  local _configure_single=(
+    --enable-single
+  )
+  local _configure_double=(
+  )
+  local _configure_long_double=(
+    --enable-long-double
+  )
+  local _configure_quad=(
+    --disable-mpi
+    --enable-quad-precision
+  )
+  local _cmake_options=(
+    -B build
+    -S $pkgname-$pkgver-$_build_types
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_BUILD_TYPE=None
+    -D ENABLE_OPENMP=ON
+    -D ENABLE_THREADS=ON
+    -D ENABLE_FLOAT=ON
+    -D ENABLE_LONG_DOUBLE=ON
+    -D ENABLE_QUAD_PRECISION=ON
+    -D ENABLE_SSE=ON
+    -D ENABLE_SSE2=ON
+    -D ENABLE_AVX=ON
+    -D ENABLE_AVX2=ON
+  )
+
+  # create missing FFTW3LibraryDepends.cmake
+  # https://bugs.archlinux.org/task/67604
+  cmake "${_cmake_options[@]}"
+  # fix broken IMPORTED_LOCATION: https://github.com/FFTW/fftw3/issues/130#issuecomment-1030280157
+  sed -e 's|\(IMPORTED_LOCATION_NONE\).*|\1 "/usr/lib/libfftw3.so.3"|' -i build/FFTW3LibraryDepends.cmake
+
   export F77='gfortran'
   # use upstream default CFLAGS while keeping our -march/-mtune
   CFLAGS+=" -O3 -fomit-frame-pointer -fstrict-aliasing -ffast-math"
-  # default configure call
-  _default_configure="./configure --prefix=/usr --enable-shared --enable-threads --enable-mpi --enable-openmp"
 
-  # configure single precision
-  (
-    cd "${pkgname}-${pkgver}"
-    ${_default_configure} --enable-single
-    # NOTE: fix overlinking
-    sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  )
+  for _name in "${_build_types[@]}"; do
+    (
+      cd $pkgname-$pkgver-$_name
+      case $_name in
+        single)
+        "${_configure[@]}" "${_configure_single[@]}"
+        ;;
+        double)
+        "${_configure[@]}" "${_configure_double[@]}"
+        ;;
+        long-double)
+        "${_configure[@]}" "${_configure_long_double[@]}"
+        ;;
+        quad)
+        "${_configure[@]}" "${_configure_quad[@]}"
+        ;;
+      esac
+      # fix overlinking because of libtool
+      sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+    )
+  done
 
-  # configure double precision
-  (
-    cd "${pkgname}-${pkgver}-double"
-    ${_default_configure}
-    # NOTE: fix overlinking
-    sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  )
-
-  # configure long-double precission
-  (
-    cd "${pkgname}-${pkgver}-long-double"
-    ${_default_configure} --enable-long-double
-    # NOTE: fix overlinking
-    sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  )
-
-  make -C "${pkgname}-${pkgver}"
-  make -C "${pkgname}-${pkgver}-double"
-  make -C "${pkgname}-${pkgver}-long-double"
-
-# NOTE: cmake setup still missing MPI integration and needs patch for libquadmath
-#  _default_options=(
-#    -DCMAKE_INSTALL_PREFIX=/usr
-#    -DCMAKE_BUILD_TYPE='None'
-#    -DBUILD_SHARED_LIBS=ON
-#    -DENABLE_THREADS=ON
-#    -DENABLE_OPENMP=ON
-#    -Wno-dev
-#  )
-#
-#  cmake "${_default_options[@]}" \
-#        -DENABLE_SSE2=ON \
-#        -DENABLE_AVX=ON \
-#        -B "${pkgname}-${pkgver}/build" \
-#        -S "${pkgname}-${pkgver}"
-#  make VERBOSE=1 -C "${pkgname}-${pkgver}/build"
-#
-#  cmake "${_default_options[@]}" \
-#        -DENABLE_FLOAT=ON \
-#        -DENABLE_SSE=ON \
-#        -DENABLE_AVX=ON \
-#        -B "${pkgname}-${pkgver}/build-float" \
-#        -S "${pkgname}-${pkgver}"
-#  make VERBOSE=1 -C "${pkgname}-${pkgver}/build-float"
-#
-#  cmake "${_default_options[@]}" \
-#        -DENABLE_LONG_DOUBLE=ON \
-#        -B "${pkgname}-${pkgver}/build-long-double" \
-#        -S "${pkgname}-${pkgver}"
-#  make VERBOSE=1 -C "${pkgname}-${pkgver}/build-long-double"
-#
-#  cmake "${_default_options[@]}" \
-#        -DENABLE_QUAD_PRECISION=ON \
-#        -B "${pkgname}-${pkgver}/build-quad" \
-#        -S "${pkgname}-${pkgver}"
-#  make VERBOSE=1 -C "${pkgname}-${pkgver}/build-quad"
+  for _name in "${_build_types[@]}"; do
+    make -C $pkgname-$pkgver-$_name
+  done
 }
 
 check() {
-  make check -C "${pkgname}-${pkgver}"
-  make check -C "${pkgname}-${pkgver}-double"
-  make check -C "${pkgname}-${pkgver}-long-double"
-  make check -C "${pkgname}-${pkgver}-quad"
+  local _name
 
-#  cd "${pkgname}-${pkgver}"
-#  make VERBOSE=1 -C build test
-#  make VERBOSE=1 -C build-float test
-#  make VERBOSE=1 -C build-long-double test
-#  make VERBOSE=1 -C build-quad test
+  for _name in "${_build_types[@]}"; do
+    make check-local -C $pkgname-$pkgver-$_name/tests
+  done
 }
 
 package() {
-  make DESTDIR="${pkgdir}" install -C "${pkgname}-${pkgver}"
-  make DESTDIR="${pkgdir}" install -C "${pkgname}-${pkgver}-double"
-  make DESTDIR="${pkgdir}" install -C "${pkgname}-${pkgver}-long-double"
+  local _name
 
-  cd "${pkgname}-${pkgver}"
-#  make VERBOSE=1 DESTDIR="${pkgdir}" -C build install
-#  make VERBOSE=1 DESTDIR="${pkgdir}" -C build-float install
-#  make VERBOSE=1 DESTDIR="${pkgdir}" -C build-long-double install
-#  make VERBOSE=1 DESTDIR="${pkgdir}" -C build-quad install
-  install -vDm 644 {AUTHORS,ChangeLog,NEWS,README,TODO} \
-    -t "${pkgdir}/usr/share/doc/${pkgname}"
+  for _name in "${_build_types[@]}"; do
+    make DESTDIR="$pkgdir" install -C $pkgname-$pkgver-$_name
+  done
+  install -vDm 644 $pkgname-$pkgver-$_build_types/{AUTHORS,ChangeLog,NEWS,README,TODO} -t "$pkgdir/usr/share/doc/$pkgname"
+  # install missing FFTW3LibraryDepends.cmake
+  install -vDm 644 build/FFTW3LibraryDepends.cmake -t "$pkgdir/usr/lib/cmake/fftw3/"
 }

@@ -1,0 +1,72 @@
+--- a/modules/gui/qt/components/interface_widgets.cpp
++++ b/modules/gui/qt/components/interface_widgets.cpp
+@@ -108,6 +108,36 @@ void VideoWidget::sync( void )
+     if( QX11Info::isPlatformX11() )
+         XSync( QX11Info::display(), False );
+ #endif
++    refreshHandles();
++}
++
++/**
++ * The wayland surface may change if the window is hidden which
++ * seems to happen sometimes on resize
++ * In Qt it looks like this happens if the window is hidden
++ **/
++void VideoWidget::refreshHandles()
++{
++#ifdef QT5_HAS_WAYLAND
++    if (!p_window || p_window->type != VOUT_WINDOW_TYPE_WAYLAND)
++        return;
++
++    /* Ensure only the video widget is native (needed for Wayland) */
++    stable->setAttribute( Qt::WA_DontCreateNativeAncestors, true);
++
++    QWindow *window = stable->windowHandle();
++    assert(window != NULL);
++    window->create();
++
++    QPlatformNativeInterface *qni = qApp->platformNativeInterface();
++    assert(qni != NULL);
++
++    p_window->handle.wl = static_cast<wl_surface*>(
++        qni->nativeResourceForWindow(QByteArrayLiteral("surface"),
++                                     window));
++    p_window->display.wl = static_cast<wl_display*>(
++        qni->nativeResourceForIntegration(QByteArrayLiteral("wl_display")));
++#endif
+ }
+ 
+ /**
+@@ -165,21 +195,7 @@ bool VideoWidget::request( struct vout_w
+ #ifdef QT5_HAS_WAYLAND
+         case VOUT_WINDOW_TYPE_WAYLAND:
+         {
+-            /* Ensure only the video widget is native (needed for Wayland) */
+-            stable->setAttribute( Qt::WA_DontCreateNativeAncestors, true);
+-
+-            QWindow *window = stable->windowHandle();
+-            assert(window != NULL);
+-            window->create();
+-
+-            QPlatformNativeInterface *qni = qApp->platformNativeInterface();
+-            assert(qni != NULL);
+-
+-            p_wnd->handle.wl = static_cast<wl_surface*>(
+-                qni->nativeResourceForWindow(QByteArrayLiteral("surface"),
+-                                             window));
+-            p_wnd->display.wl = static_cast<wl_display*>(
+-                qni->nativeResourceForIntegration(QByteArrayLiteral("wl_display")));
++            refreshHandles();
+             break;
+         }
+ #endif
+--- a/modules/gui/qt/components/interface_widgets.hpp
++++ b/modules/gui/qt/components/interface_widgets.hpp
+@@ -88,6 +88,7 @@ private:
+     bool enable_mouse_events;
+ 
+     void reportSize();
++    void refreshHandles();
+ 
+ signals:
+     void sizeChanged( int, int );

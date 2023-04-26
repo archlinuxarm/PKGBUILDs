@@ -1,22 +1,28 @@
 # Maintainer: Maxime Gauduin <alucryd@archlinux.org>
+# Maintainer: T.J. Townsend <blakkheim@archlinux.org>
 # Contributor: Bartłomiej Piotrowski <nospam@bpiotrowski.pl>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - disable LTO: -DENABLE_LTO='FALSE'
-#  - cherry-pick upstream patch to fix ARM FTBFS
 
 pkgbase=vbam
 pkgname=(
   vbam-sdl
   vbam-wx
 )
-pkgver=2.1.4
-pkgrel=3
+_pkgname=visualboyadvance-m
+pkgver=2.1.5
+pkgrel=2
 pkgdesc='Nintendo GameBoy Advance emulator'
 arch=(x86_64)
 url=https://vba-m.com
 license=(GPL2)
 depends=(
+  glu
+  libavcodec.so
+  libavformat.so
+  libavutil.so
+  libswscale.so
   libgl
   libpng
   sdl2
@@ -25,50 +31,45 @@ depends=(
 )
 makedepends=(
   cmake
+  doctest
   ffmpeg
   git
   libglvnd
-  wxgtk3
+  ninja
+  wxwidgets-gtk3
   zip
 )
-source=(git+https://github.com/visualboyadvance-m/visualboyadvance-m.git#tag=8f4862de88de2f95866b7e501304f1e57a4e0abb?signed)
-sha256sums=(SKIP)
+_tag=a964f4a5c69ce30d124bd6dcf987bdedc82f3928 # git rev-parse v${pkgver}
+source=("git+https://github.com/${_pkgname}/${_pkgname}.git?signed#tag=${_tag}")
+b2sums=('SKIP')
 validpgpkeys=(A0C0E526E36FD2138C149D4D08AB596679D86240) # Rafael Kitover <rkitover@gmail.com>
 
-pkgver() {
-  cd visualboyadvance-m
-
-  git describe --tags | sed 's/^v//'
-}
-
 prepare() {
-  for p in sdl wx; do
-    if [[ -d build-$p ]]; then
-      rm -rf build-$p
-    fi
-    mkdir build-$p
-  done
-
-  cd visualboyadvance-m
-  git cherry-pick -n af0de1c4b308ef8d9a081ecf407805b75a99d877
+  cd ${_pkgname}
+  # Unbundle doctest (bundled one is not glibc 2.34 compatible)
+  sed -e 's|${CMAKE_SOURCE_DIR}/third_party|/usr|' -i src/wx/tests/CMakeLists.txt
+  # Fix build with openal 1.23
+  sed -e '/AL_NO_PROTOTYPES/d' -i src/wx/openal.h
 }
+
+#pkgver() {
+#  cd ${_pkgname}
+#  git describe --tags | sed 's/^v//; s/-/.r/; s/-g/./'
+#}
 
 build() {
-  cd build-sdl
-
-  cmake ../visualboyadvance-m \
-    -DCMAKE_BUILD_TYPE=Release \
+  cmake -S ${_pkgname} -B build-sdl -G Ninja \
+    -DCMAKE_BUILD_TYPE='' \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_SKIP_RPATH=TRUE \
     -DENABLE_SDL=TRUE \
     -DENABLE_WX=FALSE \
     -DENABLE_LINK=TRUE \
-    -DENABLE_LTO=FALSE
-  make
+    -DENABLE_LTO=FALSE \
+    -Wno-dev
+  cmake --build build-sdl
 
-  cd ../build-wx
-
-  cmake ../visualboyadvance-m \
+  cmake -S ${_pkgname} -B build-wx -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_SKIP_RPATH=TRUE \
@@ -77,32 +78,28 @@ build() {
     -DENABLE_FFMPEG=TRUE \
     -DENABLE_LINK=TRUE \
     -DENABLE_LTO=FALSE \
-    -DwxWidgets_CONFIG_EXECUTABLE=/usr/bin/wx-config-gtk3
-  make
+    -Wno-dev
+  cmake --build build-wx
 }
 
 package_vbam-sdl() {
   backup=(etc/vbam.cfg)
   conflicts=(vbam-wx)
 
-  make DESTDIR="${pkgdir}" -C build-sdl install
+  DESTDIR="${pkgdir}" cmake --install build-sdl
 }
 
 package_vbam-wx() {
   depends+=(
     glib2
     gtk3
-    libavcodec.so
-    libavformat.so
-    libavutil.so
-    libswscale.so
     openal
-    wxgtk3
+    wxwidgets-gtk3
     zip
   )
   conflicts=(vbam-sdl)
 
-  make DESTDIR="${pkgdir}" -C build-wx install
+  DESTDIR="${pkgdir}" cmake --install build-wx
 }
 
 # vim: ts=2 sw=2 et:
