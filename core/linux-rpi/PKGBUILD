@@ -16,7 +16,9 @@ url="http://www.kernel.org/"
 arch=(armv7h aarch64)
 license=(GPL2)
 makedepends=(
-  bc kmod inetutils
+  bc
+  kmod
+  inetutils
 )
 options=('!strip')
 source_armv7h=('config' 'config.txt')
@@ -48,6 +50,11 @@ elif [[ $CARCH == "aarch64" ]]; then
   _kernel=kernel8.img KARCH=arm64 _image=Image _config=config8 _bconfig=config8.txt
 fi
 
+_make() {
+  test -s version
+  make KERNELRELEASE="$(<version)" "$@"
+}
+
 prepare() {
   cd "${srcdir}/${_srcname}"
 
@@ -55,7 +62,6 @@ prepare() {
   patch -p1 -i ../0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
 
   echo "Setting version..."
-  scripts/setlocalversion --save-scmversion
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
@@ -77,40 +83,61 @@ prepare() {
     echo "verify that newconfig.$_config is fit for purpose then redefine $_config"
     exit
   else
+    make bcm2711_defconfig
+    make -s kernelrelease | sed 's/rpi-.*$/rpi-ARCH/' > version
+    make mrproper
     echo "Setting config..."
     cp ../"$_config" .config
-    make olddefconfig
-    make -s kernelrelease > version
+    _make olddefconfig
+    diff -u ../"$_config" .config || :
     echo "Prepared $pkgbase version $(<version)"
   fi
-
 }
 
 build() {
   cd "${srcdir}/${_srcname}"
 
-  make "$_image" modules dtbs
+  _make "$_image" modules dtbs
 }
 
 _package() {
   pkgdesc="RPi Foundation patched Linux kernel and modules"
-  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7' 'firmware-raspberrypi')
-  optdepends=('wireless-regdb: to set the correct wireless channels of your country')
-  provides=("linux=${pkgver}" 'WIREGUARD-MODULE')
-  conflicts=('linux' 'uboot-raspberrypi')
+  depends=(
+    coreutils
+    firmware-raspberrypi
+    kmod
+    linux-firmware
+    'mkinitcpio>=0.7'
+  )
+  optdepends=(
+    'wireless-regdb: to set the correct wireless channels of your country'
+  )
+  provides=(
+    linux="${pkgver}"
+    WIREGUARD-MODULE
+  )
+  conflicts=(
+    linux
+    uboot-raspberrypi
+  )
+  replaces=(
+    linux-raspberrypi-latest
+    linux-raspberrypi4
+  )
   install=${pkgname}.install
-  backup=('boot/config.txt' 'boot/cmdline.txt')
-  replaces=('linux-raspberrypi-latest' 'linux-raspberrypi4')
+  backup=(
+    boot/config.txt
+    boot/cmdline.txt
+  )
 
   cd "${srcdir}/${_srcname}"
-
-  local kernver="$(<version)"
-  local modulesdir="$pkgdir/usr/lib/modules/$kernver"
+  local modulesdir="$pkgdir/usr/lib/modules/$(<version)"
 
   # Used by mkinitcpio to name the kernel
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
+
   echo "Installing modules..."
-  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+  _make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
     DEPMOD=/doesnt/exist modules_install  # Suppress depmod
 
   # remove build and source links
@@ -220,7 +247,7 @@ _package-headers() {
   echo "Stripping build tools..."
   local file
   while read -rd '' file; do
-    case "$(file -bi "$file")" in
+    case "$(file -Sib "$file")" in
       application/x-sharedlib\;*)      # Libraries (.so)
         strip -v $STRIP_SHARED "$file" ;;
       application/x-archive\;*)        # Libraries (.a)
