@@ -1,0 +1,150 @@
+From: =?utf-8?b?THVib8WhIERvbGXFvmVs?= <lubos@dolezel.info>
+Date: Fri, 22 Jul 2016 09:33:05 +0200
+Subject: Allow non-JPEG scanning on the HP DeskJet 3520 All-in-One and
+ similar devices
+
+LP: #1245578
+---
+ scan/sane/bb_ledm.c | 47 +++++++++++++++++++++++++++++++++++++++++------
+ scan/sane/ledm.c    | 12 +++++++-----
+ 2 files changed, 48 insertions(+), 11 deletions(-)
+
+diff --git a/scan/sane/bb_ledm.c b/scan/sane/bb_ledm.c
+index 4b18af8..168a6ab 100644
+--- a/scan/sane/bb_ledm.c
++++ b/scan/sane/bb_ledm.c
+@@ -189,7 +189,7 @@ Keep-Alive: 20\r\nProxy-Connection: keep-alive\r\nCookie: AccessCounter=new\r\n0
+ <YStart>%d</YStart>\
+ <Height>%d</Height>\
+ <Format>%s</Format>\
+-<CompressionQFactor>15</CompressionQFactor>\
++<CompressionQFactor>0</CompressionQFactor>\
+ <ColorSpace>%s</ColorSpace>\
+ <BitDepth>%d</BitDepth>\
+ <InputSource>%s</InputSource>\
+@@ -234,6 +234,38 @@ Keep-Alive: 300\r\nProxy-Connection: keep-alive\r\nCookie: AccessCounter=new\r\n
+ # define JOBSTATE_COMPLETED "<j:JobState>Completed</j:JobState>"
+ # define PRESCANPAGE "<PreScanPage>"
+ 
++static int parse_status_elements(const char *payload, int size, struct wscn_create_scan_job_response *resp)
++{
++  char tag[512];
++  char value[128];
++  char *tail=(char *)payload;
++
++  while (1)
++  {
++    get_tag(tail, size-(tail-payload), tag, sizeof(tag), &tail);
++
++    if (!tag[0])
++      break;
++
++    if (strncmp(tag, "ImageWidth", 10) == 0)
++    {
++      get_element(tail, size-(tail-payload), value, sizeof(value), &tail);
++      resp->pixels_per_line = strtol(value, NULL, 10);
++    }
++    else if (strncmp(tag, "ImageHeight", 11) == 0)
++    {
++      get_element(tail, size-(tail-payload), value, sizeof(value), &tail);
++      resp->lines = strtol(value, NULL, 10);
++    }
++    else if (strncmp(tag, "BytesPerLine", 12) == 0)
++    {
++      get_element(tail, size-(tail-payload), value, sizeof(value), &tail);
++      resp->bytes_per_line = strtol(value, NULL, 10);
++    }
++  }
++  return 0;
++}
++
+ static int parse_scan_elements(const char *payload, int size, struct wscn_scan_elements *elements)
+ {
+   char tag[512];
+@@ -764,8 +796,7 @@ int bb_get_parameters(struct ledm_session *ps, SANE_Parameters *pp, int option)
+       if (ps->currentCompression == SF_RAW && ps->currentScanMode != CE_GRAY8)
+       {
+          /* Set scan parameters based on scan job response values */
+-        //pp->lines = pbb->job.lines;
+-        pp->lines = (int)(SANE_UNFIX(ps->effectiveBry - ps->effectiveTly)/MM_PER_INCH*ps->currentResolution);
++        pp->lines = pbb->job.lines;
+         pp->pixels_per_line = pbb->job.pixels_per_line;
+         pp->bytes_per_line = pbb->job.bytes_per_line;
+       }
+@@ -786,8 +817,8 @@ int bb_get_parameters(struct ledm_session *ps, SANE_Parameters *pp, int option)
+       break;
+     case SPO_BEST_GUESS:  /* called by xsane & sane_start */
+       /* Set scan parameters based on best guess. */
+-      pp->lines = (int)round(SANE_UNFIX(ps->effectiveBry - ps->effectiveTly)/MM_PER_INCH*ps->currentResolution);
+-      pp->pixels_per_line = (int)round(SANE_UNFIX(ps->effectiveBrx -ps->effectiveTlx)/MM_PER_INCH*ps->currentResolution);
++      pp->lines = (int)(SANE_UNFIX(ps->effectiveBry - ps->effectiveTly)/MM_PER_INCH*ps->currentResolution);
++      pp->pixels_per_line = ps->image_traits.iPixelsPerRow;
+       pp->bytes_per_line = BYTES_PER_LINE(pp->pixels_per_line, pp->depth * factor);
+       break;
+     default:
+@@ -896,7 +927,7 @@ SANE_Status bb_start_scan(struct ledm_session *ps)
+         (int) ((ps->currentBrx / 5548.7133) - (ps->currentTlx / 5548.7133)),//<Width>
+         (int) (ps->currentTly / 5548.7133),//<YStart>
+         (int) ((ps->currentBry / 5548.7133) - (ps->currentTly / 5548.7133)),//<Height>
+-        "Jpeg",//<Format>
++        (ps->currentCompression == SF_RAW) ? "Raw" : "Jpeg", //<Format>
+         (! strcmp(ce_element[ps->currentScanMode], "Color8")) ? "Color" : (! strcmp(ce_element[ps->currentScanMode], "Gray8")) ? "Gray" : "Gray",//<ColorSpace>
+         ((! strcmp(ce_element[ps->currentScanMode], "Color8")) || (! strcmp(ce_element[ps->currentScanMode], "Gray8"))) ? 8: 8,//<BitDepth>
+         ps->currentInputSource == IS_PLATEN ? is_element[1] : is_element[2],//<InputSource>
+@@ -994,6 +1025,7 @@ SANE_Status bb_start_scan(struct ledm_session *ps)
+         _DBG("bb_start_scan() read_http_payload FAILED len=%d buf=%s\n", len, buf);
+         break;
+      }
++
+       //For a new scan, buf must contain <PreScanPage>. 
+      if (NULL == strstr(buf,PRESCANPAGE)) 
+      {         //i.e Paper is not present in Scanner
+@@ -1012,6 +1044,9 @@ SANE_Status bb_start_scan(struct ledm_session *ps)
+         stat = SANE_STATUS_GOOD;
+         goto bugout;
+      }
++	 // Parse buf here
++     parse_status_elements(buf, len, &pbb->job);
++
+      usleep(500000);//0.5 sec delay
+   }//end while()
+ 
+diff --git a/scan/sane/ledm.c b/scan/sane/ledm.c
+index ac9d604..a56f534 100644
+--- a/scan/sane/ledm.c
++++ b/scan/sane/ledm.c
+@@ -170,11 +170,11 @@ static int set_scan_mode_side_effects(struct ledm_session *ps, enum COLOR_ENTRY
+       case CE_GRAY8:
+       case CE_COLOR8:
+       default:
+-//         ps->compressionList[j] = STR_COMPRESSION_NONE;
+-//         ps->compressionMap[j++] = SF_RAW;
++         ps->compressionList[j] = STR_COMPRESSION_NONE;
++         ps->compressionMap[j++] = SF_RAW;
+          ps->compressionList[j] = STR_COMPRESSION_JPEG;
+          ps->compressionMap[j++] = SF_JPEG;
+-         ps->currentCompression = SF_JPEG;
++         ps->currentCompression = SF_RAW;
+          ps->option[LEDM_OPTION_JPEG_QUALITY].cap |= SANE_CAP_SOFT_SELECT;   /* enable jpeg quality */
+          break;
+    }
+@@ -690,7 +690,7 @@ SANE_Status ledm_control_option(SANE_Handle handle, SANE_Int option, SANE_Action
+          }
+          else
+          {  /* Set default. */
+-            ps->currentCompression = SF_JPEG;
++            ps->currentCompression = SF_RAW;
+             stat = SANE_STATUS_GOOD;
+          }
+          break;
+@@ -995,7 +995,9 @@ SANE_Status ledm_start(SANE_Handle handle)
+     }
+   }
+   else
+-  ipGetImageTraits(ps->ip_handle, NULL, &ps->image_traits);  /* get valid image traits */
++  {
++    ipGetOutputTraits(ps->ip_handle, &ps->image_traits);  /* get valid image traits */
++  }
+ 
+   stat = SANE_STATUS_GOOD;
+ 
