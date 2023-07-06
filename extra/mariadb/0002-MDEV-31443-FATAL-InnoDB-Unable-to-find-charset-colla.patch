@@ -1,0 +1,113 @@
+From 313c5a1dfb744aaef10586526dda89d2b4a50651 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marko=20M=C3=A4kel=C3=A4?= <marko.makela@mariadb.com>
+Date: Wed, 5 Jul 2023 12:37:05 +0300
+Subject: [PATCH 1/1] MDEV-31443 [FATAL] InnoDB: Unable to find
+ charset-collation in ibuf_upgrade()
+
+dtype_new_read_for_order_and_null_size(): Correctly assign type->prtype.
+This caused the fatal error and crash.
+
+ibuf_merge(): Relax a too strict condition that would result in
+[ERROR] InnoDB: Unable to upgrade the change buffer
+when there exist buffered changes to redundant secondary indexes, such as
+PRIMARY KEY(x), INDEX(x).
+
+ibuf_upgrade(): Modify at most one user tablespace per mini-transaction,
+to be crash-safe.
+
+page_cur_insert_rec_zip(), page_cur_delete_rec(): Relax debug assertions
+for ibuf_upgrade().
+
+ibuf_log_rebuild_if_needed(): Invoke recv_sys.debug_free() only after
+srv_log_rebuild_if_needed() to avoid an assertion failure. This code
+is executed when the innodb_log_file_size is changed when upgrading
+from 10.x to 11.0.
+
+Tested by: Matthias Leich, Christian Hesse
+---
+ storage/innobase/ibuf/ibuf0ibuf.cc | 14 ++++++++++++--
+ storage/innobase/page/page0cur.cc  |  5 +++--
+ storage/innobase/srv/srv0start.cc  |  3 ++-
+ 3 files changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/storage/innobase/ibuf/ibuf0ibuf.cc b/storage/innobase/ibuf/ibuf0ibuf.cc
+index 5303b592c71..a13af290d8d 100644
+--- a/storage/innobase/ibuf/ibuf0ibuf.cc
++++ b/storage/innobase/ibuf/ibuf0ibuf.cc
+@@ -156,7 +156,7 @@ dtype_new_read_for_order_and_null_size(
+ 		<< 16;
+ 
+ 	if (dtype_is_string_type(type->mtype)) {
+-		type->prtype |= charset_coll << 16;
++		type->prtype |= charset_coll;
+ 
+ 		if (charset_coll == 0) {
+ 			/* This insert buffer record was inserted before
+@@ -709,7 +709,7 @@ static dberr_t ibuf_merge(fil_space_t *space, btr_cur_t *cur, mtr_t *mtr)
+     rec_t *rec= cur->page_cur.rec;
+     ulint n_fields= rec_get_n_fields_old(rec);
+ 
+-    if (n_fields <= IBUF_REC_FIELD_USER + 1 || rec[4])
++    if (n_fields < IBUF_REC_FIELD_USER + 1 || rec[4])
+       return DB_CORRUPTION;
+ 
+     n_fields-= IBUF_REC_FIELD_USER;
+@@ -910,7 +910,17 @@ ATTRIBUTE_COLD dberr_t ibuf_upgrade()
+         prev_space_id= space_id;
+         space= fil_space_t::get(space_id);
+         if (space)
++        {
++          /* Move to the next user tablespace. We buffer-fix the current
++          change buffer leaf page to prevent it from being evicted
++          before we have started a new mini-transaction. */
++          cur.page_cur.block->fix();
++          mtr.commit();
++          log_free_check();
++          mtr.start();
++          mtr.page_lock(cur.page_cur.block, RW_X_LATCH);
+           mtr.set_named_space(space);
++        }
+         spaces++;
+       }
+       pages++;
+diff --git a/storage/innobase/page/page0cur.cc b/storage/innobase/page/page0cur.cc
+index 8d3a44d630d..2562ae1d0e4 100644
+--- a/storage/innobase/page/page0cur.cc
++++ b/storage/innobase/page/page0cur.cc
+@@ -1791,7 +1791,8 @@ page_cur_insert_rec_zip(
+   ut_ad(rec_offs_comp(offsets));
+   ut_ad(fil_page_get_type(page) == FIL_PAGE_INDEX ||
+         fil_page_get_type(page) == FIL_PAGE_RTREE);
+-  ut_ad(mach_read_from_8(PAGE_HEADER + PAGE_INDEX_ID + page) == index->id);
++  ut_ad(mach_read_from_8(PAGE_HEADER + PAGE_INDEX_ID + page) == index->id ||
++        index->is_dummy);
+   ut_ad(!page_get_instant(page));
+   ut_ad(!page_cur_is_after_last(cursor));
+ #ifdef UNIV_ZIP_DEBUG
+@@ -2258,7 +2259,7 @@ page_cur_delete_rec(
+ 	      == index->table->not_redundant());
+ 	ut_ad(fil_page_index_page_check(block->page.frame));
+ 	ut_ad(mach_read_from_8(PAGE_HEADER + PAGE_INDEX_ID + block->page.frame)
+-	      == index->id);
++	      == index->id || index->is_dummy);
+ 	ut_ad(mtr->is_named_space(index->table->space));
+ 
+ 	/* The record must not be the supremum or infimum record. */
+diff --git a/storage/innobase/srv/srv0start.cc b/storage/innobase/srv/srv0start.cc
+index 33545f42d05..9e1efa3c85d 100644
+--- a/storage/innobase/srv/srv0start.cc
++++ b/storage/innobase/srv/srv0start.cc
+@@ -1165,8 +1165,9 @@ ATTRIBUTE_COLD static dberr_t ibuf_log_rebuild_if_needed()
+   if (recv_sys.is_corrupt_log() || recv_sys.is_corrupt_fs())
+     return DB_CORRUPTION;
+ 
++  dberr_t err= srv_log_rebuild_if_needed();
+   recv_sys.debug_free();
+-  return srv_log_rebuild_if_needed();
++  return err;
+ }
+ 
+ static tpool::task_group rollback_all_recovered_group(1);
+-- 
+2.41.0
+
