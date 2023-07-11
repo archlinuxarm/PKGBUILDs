@@ -14,7 +14,8 @@ highmem=1
 pkgbase=mesa
 pkgname=(
   'vulkan-mesa-layers'
-  'opencl-mesa'
+  'opencl-clover-mesa'
+  'opencl-rusticl-mesa'
   'vulkan-radeon'
   'vulkan-swrast'
   'vulkan-virtio'
@@ -25,7 +26,7 @@ pkgname=(
   'mesa'
 )
 pkgver=23.1.3
-pkgrel=1
+pkgrel=2
 pkgdesc="An open-source implementation of the OpenGL specification"
 url="https://www.mesa3d.org/"
 arch=('x86_64')
@@ -189,8 +190,8 @@ package_vulkan-mesa-layers() {
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
 
-package_opencl-mesa() {
-  pkgdesc="OpenCL support with clover and rusticl for mesa drivers"
+package_opencl-clover-mesa() {
+  pkgdesc="OpenCL support with clover for mesa drivers"
   depends=(
     'clang'
     'expat'
@@ -203,10 +204,35 @@ package_opencl-mesa() {
   )
   optdepends=('opencl-headers: headers necessary for OpenCL development')
   provides=('opencl-driver')
+  replaces=("mesa-opencl<=23.1.3-1")
+  conflicts=('opencl-mesa')
 
-  _install fakeinstall/etc/OpenCL
-  _install fakeinstall/$_libdir/lib*OpenCL*
+  _install fakeinstall/etc/OpenCL/vendors/mesa.icd
+  _install fakeinstall/$_libdir/libMesaOpenCL*
   _install fakeinstall/$_libdir/gallium-pipe
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+}
+
+package_opencl-rusticl-mesa() {
+  pkgdesc="OpenCL support with rusticl for mesa drivers"
+  depends=(
+    'clang'
+    'expat'
+    'libdrm'
+    'libelf'
+    'zstd'
+
+    'libclc'
+    'spirv-llvm-translator'
+  )
+  optdepends=('opencl-headers: headers necessary for OpenCL development')
+  provides=('opencl-driver')
+  replaces=("mesa-opencl<=23.1.3-1")
+  conflicts=('opencl-mesa')
+
+  _install fakeinstall/etc/OpenCL/vendors/rusticl.icd
+  _install fakeinstall/$_libdir/libRusticlOpenCL*
 
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
