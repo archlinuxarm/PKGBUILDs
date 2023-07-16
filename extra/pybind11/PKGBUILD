@@ -6,45 +6,51 @@
 #  - disable lto via -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
 
 pkgname=pybind11
-pkgver=2.10.4
-pkgrel=3
+pkgver=2.11.0
+pkgrel=1
 pkgdesc='A lightweight header-only library that exposes C++ types in Python and vice versa'
 arch=('any')
 url='https://pybind11.readthedocs.org/'
 license=('BSD')
 optdepends=('python-setuptools: for python bindings')
-makedepends=('cmake' 'boost' 'catch2' 'eigen' 'python-setuptools' 'python-pytest')
+makedepends=('cmake' 'boost' 'catch2' 'eigen' 'python-build' 'python-installer'
+             'python-setuptools' 'python-pytest' 'python-wheel')
              #'python-sphinx' 'python-sphinx_rtd_theme' 'python-breathe')
 checkdepends=('python-numpy' 'python-scipy')
-source=("https://github.com/pybind/pybind11/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha256sums=('832e2f309c57da9c1e6d4542dedd34b24e4192ecb4d62f6f4866a737454c9970')
+source=("https://github.com/pybind/pybind11/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz"
+        '010-pybind11-remove-unwanted-pip-build-deps.patch')
+sha256sums=('7af30a84c6810e721829c4646e31927af9d8861e085aa5dd37c3c8b8169fcda1'
+            '27f13a9b32ef344223d70f7340cc32d181ed1de0beb9ce8b6779271f7abd15c9')
+
+prepare() {
+    patch -d "${pkgname}-${pkgver}" -Np1 -i "${srcdir}/010-pybind11-remove-unwanted-pip-build-deps.patch"
+}
 
 build () {
     cd "${pkgname}-${pkgver}"
-    python setup.py build
+    python -m build --wheel --no-isolation
     
     # tests
     cmake \
-        -B "${srcdir}/build-cmake" \
-        -S "${srcdir}/${pkgname}-${pkgver}" \
         -G 'Unix Makefiles' \
+        -B "${srcdir}/build-tests" \
+        -S "${srcdir}/${pkgname}-${pkgver}" \
         -DCMAKE_BUILD_TYPE:STRING='None' \
         -DCMAKE_INSTALL_PREFIX:PATH='/usr' \
         -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF \
         -Wno-dev
-    make -C "${srcdir}/build-cmake" all mock_install
+    cmake --build "${srcdir}/build-tests"
     
     # manpage (needs python-sphinxcontrib-{moderncmakedomain,svg2pdfconverter})
     # make -C "${srcdir}/${pkgname}-${pkgver}/docs" man
 }
 
 check() {
-    make -C build-cmake check
+    make -C build-tests check
 }
 
 package() {
-    cd "${pkgname}-${pkgver}"
-    python setup.py install --root="$pkgdir" --skip-build --optimize='1'
+    python -m installer --destdir="$pkgdir" "${pkgname}-${pkgver}/dist"/*.whl
     
     # symlinks
     local _pyver
@@ -59,5 +65,5 @@ package() {
     # sed -i '/^\.TH/s/"1"/"7"/' "${pkgdir}/usr/share/man/man7/${pkgname}.7"
     
     # license
-    install -D -m644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
+    install -D -m644 "${pkgname}-${pkgver}/LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
