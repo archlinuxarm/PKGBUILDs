@@ -25,8 +25,8 @@ pkgname=(
   'mesa-vdpau'
   'mesa'
 )
-pkgver=23.1.5
-pkgrel=2
+pkgver=23.1.6
+pkgrel=1
 epoch=1
 pkgdesc="An open-source implementation of the OpenGL specification"
 url="https://www.mesa3d.org/"
@@ -83,10 +83,10 @@ source=(
   https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
   LICENSE
 )
-sha256sums=('3cf88576fdebf24fc4047067936131c90cb6541c27365996b79b661dec1fb153'
+sha256sums=('f4c7fd8e7b472a88da7d83e9a48f6f3bd17d4ea2cc4386f7231b796f3964157a'
             'SKIP'
             '7052ba73bb07ea78873a2431ee4e828f4e72bda7d176d07f770fa48373dec537')
-b2sums=('9919de93df171dd884ef39f52e480e62ef7f4cd55e43b507316af7de39b222ddec12914628d136d40a80f8398f517708a67a64b99858bba3c86686956b7c91bc'
+b2sums=('78b71ede0655e538a71d22ecbfb0bed7497c258a16ce5f7d9b627a4c9372f26292a50aec848a4923524e4862b00a6d5d3d2521b05033d9cf39d31f037bdb9254'
         'SKIP'
         '1ecf007b82260710a7bf5048f47dd5d600c168824c02c595af654632326536a6527fbe0738670ee7b921dd85a70425108e0f471ba85a8e1ca47d294ad74b4adb')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
