@@ -1,0 +1,53 @@
+From 5484657d2b1677b7e385ab6ef87ad64dcb9934e4 Mon Sep 17 00:00:00 2001
+From: Noel Grandin <noel.grandin@collabora.co.uk>
+Date: Thu, 10 Aug 2023 17:42:12 +0200
+Subject: [PATCH] tdf#156209 Font size increases when copying from cell in edit mode
+
+Regression from  0558926c2f9201a12b4c46efc36b8a4080af4d46
+"use more officecfg for SvtMiscOptions".
+
+However.... even reverting the above commit does not fix the problem.
+This is because there is an underlying latent bug, where depending on the order of initialisation of various and when they fire events, we can end up calling the alternative path in ScInputHandler::ImplCreateEditEngine which creates a pool via EditEngine::CreatePool(), which ends up having the "wrong" default map unit. And then that pool sticks around even after we have a document, and causes the reported bug.
+
+Solve it by simply not initialising the pool until we have an associated document, which is fine, since we don't actually need the pool until then.
+
+
+Change-Id: If012c82df225e59dca828556bfca84c1948b5887
+Reviewed-on: https://gerrit.libreoffice.org/c/core/+/155560
+Tested-by: Noel Grandin <noel.grandin@collabora.co.uk>
+Reviewed-by: Noel Grandin <noel.grandin@collabora.co.uk>
+---
+
+diff --git a/sc/source/ui/app/inputhdl.cxx b/sc/source/ui/app/inputhdl.cxx
+index 3351408..1267509 100644
+--- a/sc/source/ui/app/inputhdl.cxx
++++ b/sc/source/ui/app/inputhdl.cxx
+@@ -928,14 +928,10 @@
+     if ( mpEditEngine )
+         return;
+ 
+-    if ( pActiveViewSh )
+-    {
+-        ScDocument& rDoc = pActiveViewSh->GetViewData().GetDocShell()->GetDocument();
+-        mpEditEngine = std::make_unique<ScFieldEditEngine>(&rDoc, rDoc.GetEnginePool(), rDoc.GetEditPool());
+-    }
+-    else
+-        mpEditEngine = std::make_unique<ScFieldEditEngine>(nullptr, EditEngine::CreatePool().get(), nullptr, true);
+-
++    // we cannot create a properly initialised EditEngine until we have a document
++    assert( pActiveViewSh );
++    ScDocument& rDoc = pActiveViewSh->GetViewData().GetDocShell()->GetDocument();
++    mpEditEngine = std::make_unique<ScFieldEditEngine>(&rDoc, rDoc.GetEnginePool(), rDoc.GetEditPool());
+     mpEditEngine->SetWordDelimiters( ScEditUtil::ModifyDelimiters( mpEditEngine->GetWordDelimiters() ) );
+     UpdateRefDevice();      // also sets MapMode
+     mpEditEngine->SetPaperSize( Size( 1000000, 1000000 ) );
+@@ -4197,7 +4193,8 @@
+     else
+         pActiveViewSh = dynamic_cast<ScTabViewShell*>( SfxViewShell::Current() );
+ 
+-    ImplCreateEditEngine();
++    if (pActiveViewSh)
++        ImplCreateEditEngine();
+ 
+     if ( pState != pLastState.get() )
+     {
