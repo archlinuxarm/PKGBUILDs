@@ -5,7 +5,7 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - remove makedepends on seabios, revert not installing qemu seabios files
 # ALARM: Qu Wenruo <wqu@suse.com>
-#  - remove static build, make qemu-base/qemu-desktop meta packages to use their native system emulator as default dependency
+#  - make qemu-base/qemu-desktop meta packages to use their native system emulator as default dependency
 
 pkgbase=qemu
 pkgname=(
@@ -25,7 +25,7 @@ pkgname=(
   qemu-tests
   qemu-tools
   qemu-ui-{curses,dbus,egl-headless,gtk,opengl,sdl,spice-{app,core}}
-  qemu-user{,-binfmt}
+  qemu-user{,-static}{,-binfmt}
   qemu-vhost-user-gpu
   qemu-{base,desktop,emulators-full,full}
 )
@@ -280,6 +280,7 @@ prepare() {
 
   # create build dir
   mkdir -vp build
+  mkdir -vp build-static
 }
 
 build() {
@@ -298,6 +299,51 @@ build() {
     --enable-tpm
     --smbd=/usr/bin/smbd
     --with-coroutine=ucontext
+  )
+
+  local configure_static_options=(
+    "${common_configure_options[@]}"
+    --enable-attr
+    --enable-linux-user
+    --enable-tcg
+    --disable-bpf
+    --disable-bsd-user
+    --disable-capstone
+    --disable-docs
+    --disable-fdt
+    --disable-gcrypt
+    --disable-glusterfs
+    --disable-gnutls
+    --disable-gtk
+    --disable-install-blobs
+    --disable-kvm
+    --disable-libiscsi
+    --disable-libnfs
+    --disable-libssh
+    --disable-linux-io-uring
+    --disable-nettle
+    --disable-opengl
+    --disable-qom-cast-debug
+    --disable-sdl
+    --disable-system
+    --disable-tools
+    --disable-tpm
+    --disable-vde
+    --disable-vhost-crypto
+    --disable-vhost-kernel
+    --disable-vhost-net
+    --disable-vhost-user
+    --disable-vnc
+    --disable-werror
+    --disable-xen
+    --disable-zstd
+    --static
+  )
+
+  (
+    cd build-static
+    ../$pkgbase-$pkgver/configure "${configure_static_options[@]}"
+    ninja
   )
 
   (
@@ -323,6 +369,23 @@ package_qemu-common() {
     etc/sasl2/$pkgbase.conf
   )
   install=$pkgname.install
+
+  # install static binaries
+  meson install -C build-static --destdir "$pkgdir"
+  install -vdm 755 "$pkgdir/usr/lib/binfmt.d/"
+  $pkgbase-$pkgver/scripts/qemu-binfmt-conf.sh "${binfmt_conf_options[@]}"
+
+  # rename static binaries to prevent name conflicts
+  for _src in "$pkgdir/usr/bin/qemu-"*; do
+    mv -v "$_src" "$pkgdir/usr/bin/$(basename "$_src")-static"
+  done
+  # modify and rename binfmt.d configs to prevent name conflicts
+  for _conf in "$pkgdir/usr/lib/binfmt.d/"*; do
+    _exe_name="$(basename "${_conf/.conf/}")"
+    _new_exe_name="${_exe_name}-static"
+    _new_conf_name="${_conf/.conf/-static.conf}"
+    sed -e "s|usr/bin/${_exe_name}|usr/bin/${_new_exe_name}|" "$_conf" > "${_new_conf_name}"
+  done
 
   # install default binaries
   meson install -C build --destdir "$pkgdir"
@@ -512,6 +575,9 @@ package_qemu-common() {
     _pick qemu-ui-sdl usr/lib/qemu/ui-sdl.so
     _pick qemu-ui-spice-app usr/lib/qemu/ui-spice-app.so
     _pick qemu-ui-spice-core usr/lib/qemu/ui-spice-core.so
+
+    _pick qemu-user-static usr/bin/qemu-*-static
+    _pick qemu-user-static-binfmt usr/lib/binfmt.d/*-static.conf
 
     _pick qemu-user usr/bin/qemu-{aarch64{,_be},alpha,arm{,eb},cris,hexagon,hppa,i386,loongarch64,m68k,microblaze{,el},mips{,64,64el,el,n32,n32el},nios2,or1k,ppc{,64,64le},riscv{32,64},s390x,sh4{,eb},sparc{,32plus,64},x86_64,xtensa{,eb}}
     _pick qemu-user-binfmt usr/lib/binfmt.d/*.conf
@@ -852,7 +918,7 @@ package_qemu-system-tricore() {
 
 package_qemu-system-x86() {
   pkgdesc="QEMU system emulator for x86"
-  depends=("${_qemu_system_deps[@]}" edk2-ovmf qemu-system-x86-firmware=$pkgver-$pkgrel seabios systemd-libs libudev.so)
+  depends=("${_qemu_system_deps[@]}" qemu-system-x86-firmware=$pkgver-$pkgrel systemd-libs libudev.so)
   mv -v $pkgname/* "$pkgdir"
 }
 
@@ -986,6 +1052,21 @@ package_qemu-user() {
 package_qemu-user-binfmt() {
   pkgdesc="Binary format rules for QEMU user mode emulation"
   depends=(qemu-user=$pkgver-$pkgrel)
+  provides=(qemu-user-binfmt-provider)
+  conflicts=(qemu-user-binfmt-provider)
+  mv -v $pkgname/* "$pkgdir"
+}
+
+package_qemu-user-static() {
+  pkgdesc="QEMU static user mode emulation"
+  depends=(glibc)
+  optdepends=('qemu-user-static-binfmt: for binary format rules')
+  mv -v $pkgname/* "$pkgdir"
+}
+
+package_qemu-user-static-binfmt() {
+  pkgdesc="Binary format rules for QEMU static user mode emulation"
+  depends=(qemu-user-static=$pkgver-$pkgrel)
   provides=(qemu-user-binfmt-provider)
   conflicts=(qemu-user-binfmt-provider)
   mv -v $pkgname/* "$pkgdir"
