@@ -1,0 +1,107 @@
+# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
+# Contributor: John Sowiak <john@archlinux.org>
+# Contributor: tobias <tobias@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove makedepend, optdepend on cuda
+#  - remove depend on openimagedenoise, embree, openpgl
+#  - set -DWITH_CYCLES_EMBREE=OFF
+#  - remove makedepend on hip-runtime-amd
+#  - removed Intel OneAPI support
+
+buildarch=8
+
+# For legal reasons, we can't separately package the Optix headers so we'll
+# just build the package against them. I checked with NVIDIA and this way is
+# fine with them.
+
+pkgname=blender
+pkgver=3.6.4
+pkgrel=1
+epoch=17
+pkgdesc="A fully integrated 3D graphics creation suite"
+arch=('x86_64')
+license=('GPL')
+url="https://www.blender.org"
+depends=('libpng' 'libtiff' 'openexr' 'python' 'desktop-file-utils' 'python-requests' 'potrace'
+         'shared-mime-info' 'hicolor-icon-theme' 'xdg-utils' 'glew' 'openjpeg2' 'python-numpy'
+         'freetype2' 'openal' 'ffmpeg' 'fftw' 'boost-libs' 'opencollada' 'alembic' 'openxr'
+         'openimageio' 'libsndfile' 'jack' 'opencolorio'
+         'jemalloc' 'libspnav' 'ptex' 'opensubdiv' 'openvdb' 'sdl2' 'libharu'
+         'draco' 'libxkbcommon' 'libepoxy')
+makedepends=('cmake' 'boost' 'mesa' 'git' 'svn' 'llvm' 'ninja' 'wayland-protocols'
+             'libxkbcommon' 'libdecor')
+optdepends=('libdecor: wayland support')
+# We're using !buildflags here as otherwise we get stuff such as FS#77557
+# It'd be better to figure out exactly which of the flags is the culprit which I attempted but without any success.
+options=('!buildflags')
+source=("git+https://projects.blender.org/blender/blender.git#tag=v$pkgver"
+        https://developer.download.nvidia.com/redist/optix/v7.6/OptiX-7.6-Include.zip
+        force-draco1.patch
+        force-draco2.patch
+        blender-new-sycl.patch)
+sha512sums=('SKIP'
+            'dfe86de395dd298fb9feae73bff06a26742efa06a25bb5a4f78ffb1ba4c78f555d1af927efea98af281715cce01db219aa2adfd6bd323bf0d766c1c70ce03532'
+            'e239da4f3906f1b54265435181cf770bae3d269c8d915df9a73861e6ee71ec70bf2339426e7c81a91e5a567273b3b3742d7a99feefd3398d821b26e1ff3a56d0'
+            'c162646eba42ea7112cfb615466c2cbaddac8d254d4a9e91cf887c5bffef1325a983701163223a1fdee091310ac5574a400347aab7f52321825b5fa3d5a9036f'
+            'b1eb2379b673514da2599c5fc3be7fc597d4d3d23550ff392b364ae53f67e332bbed7612a0d06cbf9cd255ad6833bdb29f7e3fe668471d57e91407092419f4dd')
+
+prepare() {
+  cd "$pkgname"
+
+  make update
+
+  # fix draco
+  patch -p1 -i "$srcdir"/force-draco1.patch
+  patch -p1 -d scripts/addons -i "$srcdir"/force-draco2.patch
+  patch -p1 -i "$srcdir"/blender-new-sycl.patch
+}
+
+get_pyver() {
+  python -c 'import sys; print(str(sys.version_info[0]) + "." + str(sys.version_info[1]))'
+}
+
+build() {
+  cd "$pkgname"
+
+  local PYTHON_VER="$(get_pyver)"
+
+  # CUDA arch 90 is unsupported
+  echo 'set(CYCLES_CUDA_BINARIES_ARCH sm_52 sm_53 sm_60 sm_61 sm_62 sm_70 sm_72 sm_75 sm_80 sm_86 sm_87 sm_89 compute_89 CACHE STRING "CUDA architectures to build binaries for" FORCE)' > precache
+  echo 'mark_as_advanced(CYCLES_CUDA_BINARIES_ARCH)' >> precache
+
+  cmake \
+    -Bbuild \
+    -GNinja \
+    -Cbuild_files/cmake/config/blender_release.cmake \
+    -C precache \
+    -DLLVM_VERSION=16 \
+    -DPYTHON_VERSION=$PYTHON_VER \
+    -DOPTIX_ROOT_DIR="$srcdir" \
+    -DWITH_CYCLES_OSL=NO \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DWITH_INSTALL_PORTABLE=OFF \
+    -DWITH_PYTHON_INSTALL=OFF \
+    -DWITH_CYCLES_EMBREE=OFF
+  cmake --build build
+}
+
+package() {
+  cd "$pkgname"
+
+  DESTDIR="${pkgdir}" cmake --install build
+  install -Dm755 release/bin/blender-softwaregl "${pkgdir}/usr/bin/blender-softwaregl"
+  python -m compileall "${pkgdir}/usr/share/blender"
+  python -O -m compileall "${pkgdir}/usr/share/blender"
+
+  install -Dm644 release/freedesktop/org.blender.Blender.appdata.xml "${pkgdir}/usr/share/metainfo/org.blender.Blender.appdata.xml"
+
+  # Manually install additional scripts (See FS#69351)
+  cp -r scripts/addons_contrib/* "${pkgdir}"/usr/share/blender/3*/scripts/addons_contrib/
+
+  # Manually install draco bindings (See FS#73415)
+  mkdir -p "${pkgdir}/usr/lib/python$(get_pyver)"/
+  mv "${pkgdir}"/usr/share/blender/3*/python/lib/* "${pkgdir}"/usr/lib/
+  rm -r "${pkgdir}"/usr/share/blender/3*/python
+}

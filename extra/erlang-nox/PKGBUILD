@@ -1,0 +1,73 @@
+# Maintainer: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: Lukas Fleischer <lfleischer@archlinux.org>
+# Contributor: Vesa Kaihlavirta <vesa@archlinux.org>
+# Contributor: Sarah Hay <sarahhay@mb.sympatico.ca>
+# Contributor: Tom Burdick <thomas.burdick@wrightwoodtech.com>
+# Contributor: Ricardo Catalinas Jiménez <jimenezrick@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - configure with --disable-pgo to fix ARM FTBFS
+
+pkgname=erlang-nox
+pkgver=26.1
+pkgrel=1
+_docver=26.1
+pkgdesc='General-purpose concurrent functional programming language (headless version)'
+arch=(x86_64)
+url='https://erlang.org/'
+license=(Apache)
+depends=(ncurses openssl)
+makedepends=(fop git java-environment libxslt lksctp-tools unixodbc)
+conflicts=(erlang)
+optdepends=('erlang-unixodbc: database support'
+            'java-environment: for Java support'
+            'lksctp-tools: for SCTP support')
+options=(staticlibs)
+source=(epmd.conf
+        epmd.service
+        epmd.socket
+        "$url/download/otp_doc_man_$_docver.tar.gz"
+        "git+https://github.com/erlang/otp#commit=e962af35263618665c1df57df5135c0c703ad502") # tag: OTP-26.1
+b2sums=('1675ac9bf948ab19e8b63077d870ccf356fcdbce14de2777f00b3488aa1ce34a5e0a5cdc0428707f744dee5940b12653a44e0ded0554de95ebb31bce4676ff87'
+        '1f765318bcd322ce697a48c064ccdb1bd107b4a84e164a87f62678391cb82a9ab17a397d679cf266e037a5a2d91772b85f7a97f9cc5478c0f18118743b30045f'
+        'c37706f5f6e2d49100104fb442ebf15edd6ee0a1e8038d0364794cf34fd3f02a61b9ad2706228b3327b85b0cadcd11aac6087e7c98408eae2d307a09191b6553'
+        '2eed8963d425fe5ff3cd02eeacfd0eb86051225578613e374b71818a91e4f0b6953c4297a06ee59803d9421730c93871660ce66150a13d808f122a6f84f74f2a'
+        'SKIP')
+
+build() {
+  cd otp
+  #export CFLAGS+=' -ffat-lto-objects'
+  ./otp_build autoconf
+  ./configure \
+    --enable-threads \
+    --enable-shared-zlib \
+    --enable-ssl=dynamic-ssl-lib \
+    --prefix=/usr \
+    --with-odbc \
+    --disable-pgo
+  make DOC_TARGETS=chunks all
+  make DOC_TARGETS=chunks docs
+}
+
+package() {
+  make -C otp DESTDIR="$pkgdir" DOC_TARGETS=chunks install install-docs
+
+  # services and configuration
+  install -Dm644 epmd.service "$pkgdir/usr/lib/systemd/system/epmd.service"
+  install -Dm644 epmd.socket "$pkgdir/usr/lib/systemd/system/epmd.socket"
+  install -Dm644 epmd.conf "$pkgdir/etc/conf.d/epmd"
+
+  # readme and licenses
+  install -Dm644 otp/README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 otp/LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 otp/CONTRIBUTING.md "$pkgdir/usr/share/doc/$pkgname/CONTRIBUTING.md"
+  install -Dm644 otp/AUTHORS "$pkgdir/usr/share/doc/$pkgname/AUTHORS"
+
+  # man pages
+  cp -r -v man "$pkgdir/usr/lib/erlang/"
+
+  # remove files that are included in the erlang-unixodbc package
+  rm -rf "$pkgdir/usr/lib/erlang/"{lib/odbc*,man/man3/odbc.3}
+}
+
+# getver: raw.githubusercontent.com/erlang/otp/maint/OTP_VERSION

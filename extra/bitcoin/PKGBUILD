@@ -1,0 +1,141 @@
+# Maintainer: Christian Rebischke <Chris.Rebischke@archlinux.org>
+# Maintainer: kpcyrd <kpcyrd[at]archlinux[dot]org>
+# Contributor: Timothy Redaelli <timothy.redaelli@gmail.com>
+# Contributor: shahid <helllamer@gmail.com>
+# Contributor: James Harvey
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - build aarch64 with crc+crypto
+
+pkgbase=bitcoin
+pkgname=('bitcoin-daemon' 'bitcoin-qt' 'bitcoin-tx')
+pkgver=25.0
+pkgrel=3
+arch=('x86_64')
+url="https://bitcoin.org/en/wallets/desktop/linux/bitcoincore/"
+makedepends=('boost' 'libevent' 'qt5-base' 'qt5-tools' 'qrencode' 'miniupnpc' 'zeromq' 'db5.3')
+license=('MIT')
+source=("$pkgbase-$pkgver.tar.gz::https://bitcoincore.org/bin/bitcoin-core-$pkgver/bitcoin-$pkgver.tar.gz"
+        "$pkgbase-$pkgver.SHA256SUMS::https://bitcoincore.org/bin/bitcoin-core-$pkgver/SHA256SUMS"
+        "$pkgbase-$pkgver.SHA256SUMS.asc::https://bitcoincore.org/bin/bitcoin-core-$pkgver/SHA256SUMS.asc"
+        "bitcoin.sysusers"
+        "bitcoin.tmpfiles"
+        "bitcoin-qt.desktop"
+        "bitcoin-qt.appdata.xml")
+sha256sums=('5df67cf42ca3b9a0c38cdafec5bbb517da5b58d251f32c8d2a47511f9be1ebc2'
+            '74ae008c8c0a60c4b8a773b73d743a74d162ff2c53108be99015c82e33b8d0d4'
+            'SKIP'
+            '7a77112fb094b9b2e6dd873e24c9a6bacb1f1c453d811a024f271f4b78f2a704'
+            'ba83570b4671b18c230f23d8d93cd8faa73179a546655448c14d1644d9b49f35'
+            'a020897651c03690eae3411fe401100fd1a2ffaa799247165eb71124609b7959'
+            '71b125555451e9bc60b54a6658d886bad63bd18c58b5d6e3bd8977b82a70da7a')
+b2sums=('34f725e8c69ee3eb25d2a0c796f7688b3727603a4a34eb7ef4dd140c9b2995ecf28c60bfa45ad22614dcd445c9ddfdadd8dbb45dfbb9327c4b5dbe50c7ae9a11'
+        'a9842873e0aa2082a58bf90bae3caffd029028f48a7fae43e8829a3b27d06beffafa5bb697ee71db6644e4fd4d127e668cd3b32aa442d7c1b81a1a2bb890ec5e'
+        'SKIP'
+        '25166f5726b43c531b7ba5f58aaf1c0242d26b96d2057da156024a8f9fc53702ea9ef0c67290cf8d302b9fb473cb16435dc2fe4489ebc5d0eae516635fd81c0e'
+        '45d4703b78476cb1c5748f62863914e5397858c835e43cee2f4895608dbabf383993b840bb3ec2d4d2c64ca02152881ad4b495b28f94451f706687b83e99d2af'
+        'f14315183b5ac6b6a9f3e4ff269be37eeb6a4529bb4c9d0cd3e1d54e3ec8052f87ba1e6591080a0d1c78daf7af40cb2ecbd11d9702e217b9c1e50d5011a8e048'
+        '236a841446b905f4cf154184109451300b984694ace96bee3ec75872563313279f9c543daaceed2dd712bf56115deee538b862aa73f15dee5447d235299389c7')
+validpgpkeys=(71A3B16735405025D447E8F274810B012346C9A6
+              28E72909F1717FE9607754F8A7BEB2621678D37D
+              79D00BAC68B56D422F945A8F8E3A8F3247DBCBBF)
+changelog=Changelog
+
+prepare() {
+  sha256sum -c --ignore-missing "$pkgbase-$pkgver.SHA256SUMS"
+  cd "$pkgbase-$pkgver"
+  autoreconf -fi
+}
+
+build() {
+  cd $pkgbase-$pkgver
+  [[ $CARCH == "aarch64" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/-march=armv8-a/-march=armv8-a+crc+crypto/'` && CXXFLAGS="$CFLAGS"
+  #remove _FORTIFY_SOURCE from CXXFLAGS to prevent a duplicate definition warning as configure adds _FORTIFY_SOURCE itself
+  CXXFLAGS=${CXXFLAGS/-Wp,-D_FORTIFY_SOURCE=?/}
+  ./configure --prefix=/usr --with-gui=qt5 --with-incompatible-bdb BDB_LIBS="-ldb_cxx-5.3" BDB_CFLAGS="-I/usr/include/db5.3"
+  make
+}
+
+package_bitcoin-qt() {
+  pkgdesc="Bitcoin is a peer-to-peer network based digital currency - Qt"
+  depends=(libevent qt5-base miniupnpc libminiupnpc.so qrencode zeromq hicolor-icon-theme db5.3)
+
+  cd $pkgbase-$pkgver
+  install -Dm755 src/qt/bitcoin-qt "$pkgdir"/usr/bin/bitcoin-qt
+  install -Dm644 contrib/completions/fish/bitcoin-qt.fish \
+    -t "$pkgdir/usr/share/fish/vendor_completions.d/"
+  install -Dm644 doc/man/bitcoin-qt.1 \
+    "$pkgdir"/usr/share/man/man1/bitcoin-qt.1
+  install -Dm644 ../bitcoin-qt.desktop \
+    "$pkgdir"/usr/share/applications/bitcoin-qt.desktop
+  install -Dm644 ../bitcoin-qt.appdata.xml \
+    "$pkgdir"/usr/share/metainfo/bitcoin-qt.appdata.xml
+  install -Dm644 src/qt/res/src/bitcoin.svg \
+    "$pkgdir"/usr/share/icons/hicolor/scalable/apps/bitcoin-qt.svg
+
+  for i in 16 32 64 128 256; do
+    install -Dm644 share/pixmaps/bitcoin${i}.png \
+      "$pkgdir"/usr/share/icons/hicolor/${i}x${i}/apps/bitcoin-qt.png
+  done
+
+  install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+package_bitcoin-daemon() {
+  pkgdesc="Bitcoin is a peer-to-peer network based digital currency - daemon"
+  depends=(db5.3 libevent miniupnpc libminiupnpc.so sqlite zeromq)
+  backup=('etc/bitcoin/bitcoin.conf')
+  provides=('bitcoin-cli')
+  replaces=('bitcoin-cli')
+
+  cd $pkgbase-$pkgver
+  install -Dm755 -t "$pkgdir/usr/bin" \
+    src/bitcoind \
+    src/bitcoin-cli
+
+  install -Dm644 contrib/completions/bash/bitcoind.bash-completion \
+    "$pkgdir/usr/share/bash-completion/completions/bitcoind"
+  install -Dm644 contrib/completions/bash/bitcoin-cli.bash-completion \
+    "$pkgdir/usr/share/bash-completion/completions/bitcoin-cli"
+
+  install -Dm644 -t "$pkgdir/usr/share/fish/vendor_completions.d/" \
+    contrib/completions/fish/bitcoind.fish \
+    contrib/completions/fish/bitcoin-cli.fish
+
+  install -Dm644 -t "$pkgdir"/usr/share/man/man1/ \
+    doc/man/bitcoind.1 \
+    doc/man/bitcoin-cli.1
+
+  install -Dm644 contrib/init/bitcoind.service \
+    "$pkgdir/usr/lib/systemd/system/bitcoind.service"
+  install -Dm644 "$srcdir/bitcoin.sysusers" \
+    "$pkgdir/usr/lib/sysusers.d/bitcoin.conf"
+  install -Dm644 "$srcdir/bitcoin.tmpfiles" \
+    "$pkgdir/usr/lib/tmpfiles.d/bitcoin.conf"
+  install -Dm644 share/examples/bitcoin.conf \
+    "$pkgdir/etc/bitcoin/bitcoin.conf"
+
+  install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+package_bitcoin-tx() {
+  pkgdesc="Bitcoin is a peer-to-peer network based digital currency - commandline tools"
+  depends=(db5.3 sqlite)
+
+  cd $pkgbase-$pkgver
+  for tool in bitcoin-tx bitcoin-util bitcoin-wallet; do
+    install -Dm755 "src/$tool" -t "$pkgdir/usr/bin"
+    if [ -f "contrib/completions/bash/$tool.bash-completion" ]; then
+      install -Dm644 "contrib/completions/bash/$tool.bash-completion" \
+        "$pkgdir/usr/share/bash-completion/completions/$tool"
+    fi
+    install -Dm644 contrib/completions/fish/$tool.fish \
+      -t "$pkgdir/usr/share/fish/vendor_completions.d/"
+    install -Dm644 "doc/man/$tool.1" \
+      "$pkgdir/usr/share/man/man1/$tool.1"
+  done
+
+  install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+# vim:set ts=2 sw=2 et:

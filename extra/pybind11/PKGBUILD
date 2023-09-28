@@ -1,0 +1,69 @@
+# Maintainer : Daniel Bermond <dbermond@archlinux.org>
+# Maintainer : Santiago Torres-Arias <santiago@archlinux.org>
+# Contributor: Matthew Ellison <matt+aur@arroyonetworks.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - disable lto via -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
+
+pkgname=pybind11
+pkgver=2.11.1
+pkgrel=1
+pkgdesc='A lightweight header-only library that exposes C++ types in Python and vice versa'
+arch=('any')
+url='https://pybind11.readthedocs.org/'
+license=('BSD')
+optdepends=('python-setuptools: for python bindings')
+makedepends=('cmake' 'boost' 'catch2' 'eigen' 'python-build' 'python-installer'
+             'python-setuptools' 'python-pytest' 'python-wheel')
+             #'python-sphinx' 'python-sphinx_rtd_theme' 'python-breathe')
+checkdepends=('python-numpy' 'python-scipy')
+source=("https://github.com/pybind/pybind11/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz"
+        '010-pybind11-remove-unwanted-pip-build-deps.patch')
+sha256sums=('d475978da0cdc2d43b73f30910786759d593a9d8ee05b1b6846d1eb16c6d2e0c'
+            '27f13a9b32ef344223d70f7340cc32d181ed1de0beb9ce8b6779271f7abd15c9')
+
+prepare() {
+    patch -d "${pkgname}-${pkgver}" -Np1 -i "${srcdir}/010-pybind11-remove-unwanted-pip-build-deps.patch"
+}
+
+build () {
+    cd "${pkgname}-${pkgver}"
+    python -m build --wheel --no-isolation
+    
+    # tests
+    cmake \
+        -G 'Unix Makefiles' \
+        -B "${srcdir}/build-tests" \
+        -S "${srcdir}/${pkgname}-${pkgver}" \
+        -DCMAKE_BUILD_TYPE:STRING='None' \
+        -DCMAKE_INSTALL_PREFIX:PATH='/usr' \
+        -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF \
+        -Wno-dev
+    cmake --build "${srcdir}/build-tests"
+    
+    # manpage (needs python-sphinxcontrib-{moderncmakedomain,svg2pdfconverter})
+    # make -C "${srcdir}/${pkgname}-${pkgver}/docs" man
+}
+
+check() {
+    make -C build-tests check
+}
+
+package() {
+    python -m installer --destdir="$pkgdir" "${pkgname}-${pkgver}/dist"/*.whl
+    
+    # symlinks
+    local _pyver
+    _pyver="$(python -c 'import sys; print("%s.%s" %sys.version_info[0:2])')"
+    install -d -m755 "${pkgdir}/usr"/{include,lib/{cmake,pkgconfig}}
+    ln -s "../lib/python${_pyver}/site-packages/pybind11/include/pybind11" "${pkgdir}/usr/include/pybind11"
+    ln -s "../../lib/python${_pyver}/site-packages/pybind11/share/cmake/pybind11" "${pkgdir}/usr/lib/cmake/pybind11"
+    ln -s "../../lib/python${_pyver}/site-packages/pybind11/share/pkgconfig/pybind11.pc" "${pkgdir}/usr/lib/pkgconfig/pybind11.pc"
+    
+    # man page
+    # install -D -m644 "docs/.build/man/${pkgname}.1" "${pkgdir}/usr/share/man/man7/${pkgname}.7"
+    # sed -i '/^\.TH/s/"1"/"7"/' "${pkgdir}/usr/share/man/man7/${pkgname}.7"
+    
+    # license
+    install -D -m644 "${pkgname}-${pkgver}/LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}

@@ -1,0 +1,87 @@
+# Maintainer: Morten Linderud <foxboron@archlinux.org>
+# Contributor: Daniel Martí <mvdan@mvdan.cc>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Alexander F. Rødseth <xyproto@archlinux.org>
+# Contributor: Pierre Neidhardt <ambrevar@gmail.com>
+# Contributor: Vesa Kaihlavirta <vegai@iki.fi>
+# Contributor: Rémy Oudompheng <remy@archlinux.org>
+# Contributor: Andres Perera <andres87p gmail>
+# Contributor: Matthew Bauer <mjbauer95@gmail.com>
+# Contributor: Christian Himpel <chressie@gmail.com>
+# Contributor: Mike Rosset <mike.rosset@gmail.com>
+# Contributor: Daniel YC Lin <dlin.tw@gmail.com>
+# Contributor: John Luebs <jkluebs@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - added switches for our architectures
+
+pkgname=go
+epoch=2
+pkgver=1.21.1
+pkgrel=1
+pkgdesc='Core compiler tools for the Go programming language'
+arch=(x86_64)
+url='https://golang.org/'
+license=(BSD)
+makedepends=(git go)
+replaces=(go-pie)
+provides=(go-pie)
+options=(!strip staticlibs)
+source=(https://go.dev/dl/go${pkgver}.src.tar.gz{,.asc})
+validpgpkeys=('EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796')
+sha256sums=('bfa36bf75e9a1e9cbbdb9abcf9d1707e479bd3a07880a8ae3564caee5711cb99'
+            'SKIP')
+
+case "$CARCH" in
+  x86_64) export GOARCH=amd64 ;;
+  armv7h) export GOARCH=arm GOARM=7 ;;
+  aarch64) export GOARCH=arm64 ;;
+esac
+
+build() {
+  export GOROOT_FINAL=/usr/lib/go
+  export GOROOT_BOOTSTRAP=/usr/lib/go
+
+  cd "$pkgname/src"
+  ./make.bash -v
+}
+
+check() {
+  export GO_TEST_TIMEOUT_SCALE=3
+
+  cd $pkgname/src
+  ./run.bash --no-rebuild -v -v -v -k
+}
+
+package() {
+  cd "$pkgname"
+
+  install -d "$pkgdir/usr/bin" "$pkgdir/usr/lib/go" "$pkgdir/usr/share/doc/go" \
+    "$pkgdir/usr/lib/go/pkg/linux_amd64_"{dynlink,race}
+
+  cp -a bin pkg src lib misc api test "$pkgdir/usr/lib/go"
+  # We can't strip all binaries and libraries,
+  # as that also strips some testdata directories and breaks the tests.
+  # Just strip the packaged binaries as a compromise.
+  strip $STRIP_BINARIES "$pkgdir/usr/lib/go"{/bin/*,/pkg/tool/*/*}
+
+  cp -r doc/* "$pkgdir/usr/share/doc/go"
+
+  ln -sf /usr/lib/go/bin/go "$pkgdir/usr/bin/go"
+  ln -sf /usr/lib/go/bin/gofmt "$pkgdir/usr/bin/gofmt"
+  ln -sf /usr/share/doc/go "$pkgdir/usr/lib/go/doc"
+
+  install -Dm644 VERSION "$pkgdir/usr/lib/go/VERSION"
+
+  rm -rf "$pkgdir/usr/lib/go/pkg/bootstrap" "$pkgdir/usr/lib/go/pkg/tool/*/api"
+
+  # TODO: Figure out if really needed
+  rm -rf "$pkgdir"/usr/lib/go/pkg/obj/go-build
+
+  # https://github.com/golang/go/issues/57179
+  install -Dm644 go.env "$pkgdir/usr/lib/go/go.env"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+# vim: ts=2 sw=2 et

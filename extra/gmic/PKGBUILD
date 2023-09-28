@@ -1,0 +1,84 @@
+# Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
+# Contributor: farid <farid at archlinuc-br.org>
+# Contributor: Archie <Mymaud@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - set LTO=off for gmic-qt
+
+highmem=1
+
+pkgbase=gmic
+pkgname=(gmic gimp-plugin-gmic)
+pkgver=3.3.0
+pkgrel=1
+arch=(x86_64)
+url='https://gmic.eu/'
+license=(custom:CeCILL)
+makedepends=(cmake gimp qt5-base fftw openexr opencv eigen graphicsmagick qt5-tools)
+source=(https://gmic.eu/files/source/gmic_$pkgver.tar.gz
+        CMakeLists.txt FindCImg.cmake FindGMicStdlib.cmake FindGraphicsMagick.cmake)
+sha256sums=('9c00a2b4c33ff4879860eadb89f6c836062433a5debdaffbf41f98bfa83081f3'
+            '10664d810be3994c062c260fc6b92ba2d1cc2e76c9619e632ef0feb8f9e7b98f'
+            '5ad1b499cb0a9e3d9fff6a851346d6f356dfc592442183d6330726a29ee25384'
+            '83e4635a6fd101511381bc865255f4de88834da51911ce3eb45ddac2558cabcc'
+            '9240da9240a0c9c76ac4b503d53f4aec54af544cef3d9cc1f7ad7994d1cda0f9')
+
+prepare() {
+  mv CMakeLists.txt gmic-$pkgver
+  mkdir -p gmic-$pkgver/cmake
+  mv FindCImg.cmake FindGMicStdlib.cmake FindGraphicsMagick.cmake gmic-$pkgver/cmake
+}
+
+build() {
+  cmake -B build -S gmic-$pkgver \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DENABLE_DYNAMIC_LINKING=ON \
+    -DBUILD_LIB_STATIC=OFF \
+    -DENABLE_OPENCV=ON
+  cmake --build build
+# Temp install to link gmic-qt
+  DESTDIR="tmp-install" cmake --install build
+
+  export LDFLAGS="$LDFLAGS -L../build"
+  cmake -B build-qt -S gmic-$pkgver/gmic-qt \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DENABLE_DYNAMIC_LINKING=ON \
+    -DGMIC_PATH="$srcdir"/gmic-$pkgver/src \
+    -DCMAKE_PREFIX_PATH="$srcdir"/tmp-install/usr \
+    -DGMIC_QT_HOST=none \
+    -DENABLE_LTO=OFF
+  cmake --build build-qt
+
+  cmake -B build-gimp -S gmic-$pkgver/gmic-qt \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DENABLE_DYNAMIC_LINKING=ON \
+    -DGMIC_PATH="$srcdir"/gmic-$pkgver/src \
+    -DCMAKE_PREFIX_PATH="$srcdir"/tmp-install/usr \
+    -DGMIC_QT_HOST=gimp \
+    -DENABLE_LTO=OFF
+  cmake --build build-gimp
+}
+
+package_gmic() {
+  pkgdesc="GREYC's Magic Image Converter: image processing framework"
+  depends=(graphicsmagick opencv fftw)
+  optdepends=('qt5-base: for the Qt UI')
+  conflicts=(cimg)
+
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+  DESTDIR="$pkgdir" cmake --install build-qt
+
+  install -Dm644 gmic-$pkgver/resources/gmic_cluts.gmz -t "$pkgdir"/usr/share/gmic
+}
+
+package_gimp-plugin-gmic() {
+  pkgdesc="Gimp plugin for the G'MIC image processing framework"
+  depends=(gimp gmic qt5-base)
+
+  DESTDIR="$pkgdir" cmake --install build-gimp
+  install -Dm644 gmic-$pkgver/COPYING "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}

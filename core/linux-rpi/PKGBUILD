@@ -5,18 +5,20 @@
 # Contributer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgbase=linux-rpi
-_commit=a449e9f6e1429ee29bf42174e55ef8f24b1ff408
+_commit=fad58933544bb2a7b7db92847c25c79a83171fa6
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _regen=
-pkgver=6.1.24
-pkgrel=2
+pkgver=6.1.54
+pkgrel=1
 pkgdesc='Linux'
 url="http://www.kernel.org/"
 arch=(armv7h aarch64)
 license=(GPL2)
 makedepends=(
-  bc kmod inetutils
+  bc
+  kmod
+  inetutils
 )
 options=('!strip')
 source_armv7h=('config' 'config.txt')
@@ -29,16 +31,16 @@ source=("linux-$pkgver-${_commit:0:10}.tar.gz::https://github.com/raspberrypi/li
         90-linux.hook
         archarm.diffconfig
 )
-md5sums=('a503b2f770d2b62cd1ba9e168ac69930'
+md5sums=('42bcec0ed92931806cc4242d45df6f8b'
          '3bab7426d8c8818dda8353da3892a41f'
          'f66a7ea3feb708d398ef57e4da4815e9'
          '86d4a35722b5410e3b29fc92dae15d4b'
          '0a5f16bfec6ad982a2f6782724cca8ba'
          '441ec084c47cddc53e592fb0cbce4edf'
-         '1ba398db86c6889e23099572fea17088')
-md5sums_armv7h=('ede3d663465d083ed9a0382e62ff7d75'
-                '177bbdbe1baa46a04dcba86352cfa3fe')
-md5sums_aarch64=('6e5147f24ea65b1264f79f8e32a24623'
+         'c8f84694321e249492c80149833671d7')
+md5sums_armv7h=('5d2c77b812e3e6d2094537458aa1461b'
+                'a99311daa39248cfc9b6541a0a0a5f09')
+md5sums_aarch64=('e9d6af7b15b798c32e01381146936556'
                  '7e4403dea857e40005bf76beda9927ff')
 
 # setup vars
@@ -48,6 +50,11 @@ elif [[ $CARCH == "aarch64" ]]; then
   _kernel=kernel8.img KARCH=arm64 _image=Image _config=config8 _bconfig=config8.txt
 fi
 
+_make() {
+  test -s version
+  make KERNELRELEASE="$(<version)" "$@"
+}
+
 prepare() {
   cd "${srcdir}/${_srcname}"
 
@@ -55,7 +62,6 @@ prepare() {
   patch -p1 -i ../0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
 
   echo "Setting version..."
-  scripts/setlocalversion --save-scmversion
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
@@ -77,40 +83,61 @@ prepare() {
     echo "verify that newconfig.$_config is fit for purpose then redefine $_config"
     exit
   else
+    make bcm2711_defconfig
+    make -s kernelrelease | sed 's/rpi-.*$/rpi-ARCH/' > version
+    make mrproper
     echo "Setting config..."
     cp ../"$_config" .config
-    make olddefconfig
-    make -s kernelrelease > version
+    _make olddefconfig
+    diff -u ../"$_config" .config || :
     echo "Prepared $pkgbase version $(<version)"
   fi
-
 }
 
 build() {
   cd "${srcdir}/${_srcname}"
 
-  make "$_image" modules dtbs
+  _make "$_image" modules dtbs
 }
 
 _package() {
   pkgdesc="RPi Foundation patched Linux kernel and modules"
-  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7' 'firmware-raspberrypi')
-  optdepends=('wireless-regdb: to set the correct wireless channels of your country')
-  provides=("linux=${pkgver}" 'WIREGUARD-MODULE')
-  conflicts=('linux' 'uboot-raspberrypi')
+  depends=(
+    coreutils
+    firmware-raspberrypi
+    kmod
+    linux-firmware
+    'mkinitcpio>=0.7'
+  )
+  optdepends=(
+    'wireless-regdb: to set the correct wireless channels of your country'
+  )
+  provides=(
+    linux="${pkgver}"
+    WIREGUARD-MODULE
+  )
+  conflicts=(
+    linux
+    uboot-raspberrypi
+  )
+  replaces=(
+    linux-raspberrypi-latest
+    linux-raspberrypi4
+  )
   install=${pkgname}.install
-  backup=('boot/config.txt' 'boot/cmdline.txt')
-  replaces=('linux-raspberrypi-latest' 'linux-raspberrypi4')
+  backup=(
+    boot/config.txt
+    boot/cmdline.txt
+  )
 
   cd "${srcdir}/${_srcname}"
-
-  local kernver="$(<version)"
-  local modulesdir="$pkgdir/usr/lib/modules/$kernver"
+  local modulesdir="$pkgdir/usr/lib/modules/$(<version)"
 
   # Used by mkinitcpio to name the kernel
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
+
   echo "Installing modules..."
-  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+  _make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
     DEPMOD=/doesnt/exist modules_install  # Suppress depmod
 
   # remove build and source links
@@ -135,7 +162,7 @@ _package() {
   # sed expression for following substitutions
   local _subst="
     s|%PKGBASE%|${pkgbase}|g
-    s|%KERNVER%|${kernver}|g
+    s|%KERNVER%|$(<version)|g
   "
 
   # install mkinitcpio preset file
@@ -220,7 +247,7 @@ _package-headers() {
   echo "Stripping build tools..."
   local file
   while read -rd '' file; do
-    case "$(file -bi "$file")" in
+    case "$(file -Sib "$file")" in
       application/x-sharedlib\;*)      # Libraries (.so)
         strip -v $STRIP_SHARED "$file" ;;
       application/x-archive\;*)        # Libraries (.a)

@@ -1,0 +1,59 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Morten Linderud <foxboron@archlinux.org>
+
+# ALARM: Lorenz Steinert <lsteinert@uraziel.de>
+#  - remove makedepends pandoc
+#  - remove rclone.1 MANUAL.html and MANUAL.txt targets from make in build()
+
+pkgname=rclone
+pkgver=1.63.1
+pkgrel=1
+pkgdesc="Sync files to and from Google Drive, S3, Swift, Cloudfiles, Dropbox and Google Cloud Storage"
+arch=('x86_64')
+url="https://rclone.org/"
+license=('MIT')
+depends=('glibc')
+optdepends=('fuse3: for rclone mount')
+makedepends=('python' 'go' 'git' 'fuse3')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/rclone/rclone/archive/v$pkgver.tar.gz")
+sha512sums=('fff03146ae7de4b47b883576b67852f9ff0558137ecb966300bd357c706d4b71c20ad0f87d0028c90b570d9351024f4ae8ddcce13333df1cabd0e76e08b29063')
+
+prepare() {
+  cd "rclone-$pkgver"
+  sed -i "1s/python$/&2/" bin/make_manual.py bin/make_backend_docs.py
+}
+
+build() {
+  cd "rclone-$pkgver"
+  export GOFLAGS="-buildmode=pie -trimpath"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  PATH="/build/go/bin:$PATH" make TAG=v$pkgver rclone || true
+  PATH="/build/go/bin:$PATH" rclone genautocomplete bash rclone.bash_completion
+  PATH="/build/go/bin:$PATH" rclone genautocomplete zsh rclone.zsh_completion
+}
+
+check() {
+  cd "rclone-$pkgver"
+  PATH="/build/go/bin:$PATH" make TAG=v$pkgver test
+}
+
+package() {
+  cd "rclone-$pkgver"
+
+  install -Dm755 rclone "$pkgdir"/usr/bin/rclone
+
+  install -Dm644 rclone.bash_completion "$pkgdir"/usr/share/bash-completion/completions/rclone
+  install -Dm644 rclone.zsh_completion "$pkgdir"/usr/share/zsh/site-functions/_rclone
+
+  install -Dm644 COPYING "$pkgdir"/usr/share/licenses/$pkgname/COPYING
+
+  install -Dm644 rclone.1 "$pkgdir"/usr/share/man/man1/rclone.1
+  install -d "$pkgdir"/usr/share/doc/$pkgname
+  install -t "$pkgdir"/usr/share/doc/$pkgname -m644 MANUAL.html MANUAL.txt
+
+  # Mount helper symlinks
+  ln -s /usr/bin/rclone "${pkgdir}"/usr/bin/mount.rclone
+  ln -s /usr/bin/rclone "${pkgdir}"/usr/bin/rclonefs
+}

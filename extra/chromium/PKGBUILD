@@ -15,9 +15,10 @@
 highmem=1
 
 pkgname=chromium
-pkgver=112.0.5615.165
-pkgrel=1
+pkgver=117.0.5938.92
+pkgrel=2
 _launcher_ver=8
+_gcc_patchset=116-patchset-2
 _manual_clone=0
 pkgdesc="A web browser built for speed, simplicity, and security"
 arch=('x86_64')
@@ -36,20 +37,28 @@ optdepends=('pipewire: WebRTC desktop sharing under Wayland'
 options=('!lto') # Chromium adds its own flags for ThinLTO
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/chromium-$pkgver.tar.xz
         https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver/chromium-launcher-$_launcher_ver.tar.gz
-        sql-relax-constraints-on-VirtualCursor-layout.patch
-        disable-GlobalMediaControlsCastStartStop.patch
+        https://github.com/stha09/chromium-patches/releases/download/chromium-$_gcc_patchset/chromium-$_gcc_patchset.tar.xz
+        add-memory-for-std-unique_ptr-in-third_party-ip.patch
+        roll-src-third_party-libavif-src-b33d9ebfc.676aded35.patch
+        free-the-X11-pixmap-in-the-NativePixmapEGLX11Bind.patch
+        REVERT-disable-autoupgrading-debug-info.patch
+        material-color-utilities-cmath.patch
         use-oauth2-client-switches-as-default.patch
         0001-widevine-support-for-arm.patch
         0002-Run-blink-bindings-generation-single-threaded.patch
         0003-Fix-eu-strip-build-for-newer-GCC.patch)
-sha256sums=('168c62fea9f428f99fbf967f36a75ee5da160429e3a5b86bf02188c5fe7c79fd'
+sha256sums=('65ca491927902557cafc384c879b567c3728b06fc8ea0c46c45e2f0ce543342c'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
-            'e66be069d932fe18811e789c57b96249b7250257ff91a3d82d15e2a7283891b7'
-            '7f3b1b22d6a271431c1f9fc92b6eb49c6d80b8b3f868bdee07a6a1a16630a302'
+            '25ad7c1a5e0b7332f80ed15ccf07d7e871d8ffb4af64df7c8fef325a527859b0'
+            '7b9708f0dbfd697be7043d3cfe52da991185aa0ee29a3b8263506cd3ae4d41a9'
+            '30841fbe0785f8df584eeaa86584fe75f89da26e71df80cf536887557ddef0b6'
+            'ab1eb107ec1c915065dc59cf4832da27e17d60eb29038e2aec633daeb946cc6a'
+            '1b782b0f6d4f645e4e0daa8a4852d63f0c972aa0473319216ff04613a0592a69'
+            '55e6097d347be40cffebf3ce13ba84ea92d940f60865f1bd7c9af1ef2a2ef8e1'
             'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
-            '12cf566d11e2388fc2b1d629ac71aa2fd80d2dd133001d6612a1e325aea6bbb8'
-            'a832a0cafb5ca2c5aa6dbf55c05f3aae2680cbf5418e5816cab5498ed9e3ae30'
-            'c5377b9bb75b9de90893042825239545d8d871ee8699d81e9ec95fdff62b4bf1')
+            '2fd6bc8aa729a0c156a397fefc4b11408824e6291470b77c44c21b2f926182f7'
+            '7cc7bb03f74ef28c9bba4047df85fa72965a6b2e394be3455503c034896b0cf5'
+            '92d40f87244f96808976d601af4a141e864e6c3d719b34815c0fecdda1512f57')
 
 if (( _manual_clone )); then
   source[0]=fetch-chromium-release
@@ -59,7 +68,7 @@ fi
 # Possible replacements are listed in build/linux/unbundle/replace_gn_files.py
 # Keys are the names in the above script; values are the dependencies in Arch
 declare -gA _system_libs=(
-  [brotli]=brotli
+  #[brotli]=brotli
   [dav1d]=dav1d
   [ffmpeg]=ffmpeg
   [flac]=flac
@@ -68,8 +77,8 @@ declare -gA _system_libs=(
   [harfbuzz-ng]=harfbuzz
   [icu]=icu
   [jsoncpp]=jsoncpp
-  [libaom]=aom
-  #[libavif]=libavif # https://github.com/AOMediaCodec/libavif/commit/4d2776a3
+  #[libaom]=aom
+  [libavif]=libavif
   [libdrm]=
   [libjpeg]=libjpeg
   [libpng]=libpng
@@ -133,11 +142,20 @@ prepare() {
   patch -Np1 -i ../use-oauth2-client-switches-as-default.patch
 
   # Upstream fixes
-  patch -Np1 -i ../sql-relax-constraints-on-VirtualCursor-layout.patch
+  patch -Np1 -i ../add-memory-for-std-unique_ptr-in-third_party-ip.patch
+  patch -Np1 -i ../roll-src-third_party-libavif-src-b33d9ebfc.676aded35.patch
+  patch -Np1 -i ../free-the-X11-pixmap-in-the-NativePixmapEGLX11Bind.patch
 
-  # Disable kGlobalMediaControlsCastStartStop by default
-  # https://crbug.com/1314342
-  patch -Np1 -i ../disable-GlobalMediaControlsCastStartStop.patch
+  # Revert addition of compiler flag that needs newer clang
+  patch -Rp1 -i ../REVERT-disable-autoupgrading-debug-info.patch
+
+  # Build fixes
+  patch -Np0 -i ../material-color-utilities-cmath.patch
+
+  # Fixes for building with libstdc++ instead of libc++
+  patch -Np1 -i ../patches/chromium-114-maldoca-include.patch
+  patch -Np1 -i ../patches/chromium-114-ruy-include.patch
+  patch -Np1 -i ../patches/chromium-114-vk_mem_alloc-include.patch
 
   # Link to system tools required by the build
   mkdir -p third_party/node/linux/node-linux-x64/bin
@@ -195,13 +213,13 @@ build() {
     'rtc_use_pipewire=true'
     'link_pulseaudio=true'
     'use_custom_libcxx=false'
-    'use_gnome_keyring=false'
     'use_gold=false'
     'use_sysroot=false'
     'use_system_libffi=true'
     'enable_hangout_services_extension=true'
     'enable_widevine=true'
     'enable_nacl=false'
+    'enable_rust=false'
     "google_api_key=\"$_google_api_key\""
   )
 
@@ -289,6 +307,7 @@ package() {
 
     # SwiftShader ICD
     libvk_swiftshader.so
+    libvulkan.so.1
     vk_swiftshader_icd.json
   )
 

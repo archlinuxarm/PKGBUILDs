@@ -1,0 +1,66 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - disable lto via -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
+
+pkgbase=opencc
+pkgname=(opencc opencc-doc)
+pkgver=1.1.6
+pkgrel=2
+pkgdesc="Library for Open Chinese Convert"
+url="https://github.com/BYVoid/OpenCC"
+arch=('x86_64')
+license=('Apache')
+makedepends=('chrpath' 'cmake' 'darts' 'doxygen' 'marisa' 'pybind11' 'python-setuptools'
+             'python-wheel' 'rapidjson' 'tclap' 'gtest')
+source=("https://github.com/BYVoid/OpenCC/archive/ver.$pkgver/$pkgbase-$pkgver.tar.gz")
+sha512sums=('bfc40bdf1348e6a265b3304ab1e8acee2f4b6ac9c377ff3d8c996435a92dee98c3758503186b4fd424653faf44db339f8a90300e3290c59942ccf04b1bbb2a30')
+
+prepare() {
+  cd OpenCC-ver.$pkgver
+  rm -r deps
+}
+
+build() {
+  cd OpenCC-ver.$pkgver
+  cmake -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_DOCUMENTATION:BOOL=ON -DBUILD_PYTHON:BOOL=ON \
+        -DUSE_SYSTEM_MARISA:BOOL=ON -DUSE_SYSTEM_PYBIND11:BOOL=ON -DUSE_SYSTEM_RAPIDJSON:BOOL=ON \
+        -DUSE_SYSTEM_TCLAP:BOOL=ON -DUSE_SYSTEM_DARTS:BOOL=ON -DENABLE_GTEST:BOOL=ON \
+        -DUSE_SYSTEM_GTEST:BOOL=ON -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
+  make
+
+  cp opencc_clib.*.so python/opencc/clib/
+  python setup.py build
+}
+
+check() {
+  cd OpenCC-ver.$pkgver
+  make test
+}
+
+package_opencc() {
+  pkgdesc="Library for Open Chinese Convert"
+  depends=('marisa')
+
+  cd OpenCC-ver.$pkgver
+  make DESTDIR="$pkgdir" install
+  python setup.py install --root="$pkgdir" --optimize=1
+
+  # Hack to make opencc's python binding to use system opencc's configs
+  local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+  mkdir "$pkgdir"/usr/lib/"python$python_version"/site-packages/opencc/clib/share
+  ln -s ../../../../../../share/opencc "$pkgdir"/usr/lib/"python$python_version"/site-packages/opencc/clib/share/
+
+  # Remove insecure RPath
+  chrpath --delete "$pkgdir"/usr/lib/"python$python_version"/site-packages/opencc/clib/*.so
+
+  # Remove docs - install in split package
+  rm -r "$pkgdir/usr/share/opencc/doc"
+}
+
+package_opencc-doc() {
+  pkgdesc="Documentation for Library for Open Chinese Convert"
+
+  cd OpenCC-ver.$pkgver/doc
+  make DESTDIR="$pkgdir" install
+}

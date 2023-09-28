@@ -1,0 +1,54 @@
+# Maintainer:
+# Contributor: Kyle Keen <keenerd@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - build v7 without neon to fix FTBFS
+
+_name=volk
+pkgname=libvolk
+epoch=2
+pkgver=3.0.0
+_cpuver=0.6.0
+pkgrel=3
+pkgdesc="The Vector-Optimized Library of Kernels from Gnuradio"
+arch=('x86_64')
+url="https://www.libvolk.org/"
+license=('GPL3')
+depends=('gcc-libs' 'orc' 'python' 'python-six')
+makedepends=('cmake' 'python-mako')
+source=("volk-$pkgver.tgz::https://github.com/gnuradio/volk/archive/v$pkgver.tar.gz"
+        "cpufeatures-$_cpuver.tgz::https://github.com/google/cpu_features/archive/v$_cpuver.tar.gz")
+sha256sums=('617c25a5a240e41e50d695851925541b19e011d516c3e0c288a5aeefb3ceb7fd'
+            '95a1cf6f24948031df114798a97eea2a71143bd38a4d07d9a758dda3924c1932')
+validpgpkeys=('09E749D885FA881A7E84E823385323EE6402091D'
+              'D74F9F146E7F755783583158B343B2BA293E5174')
+
+prepare() {
+  cd $_name-$pkgver
+  rmdir cpu_features
+  ln -sf "$srcdir/cpu_features-$_cpuver" cpu_features
+}
+
+build() {
+  local cmake_options=(
+    -B build
+    -D PYTHON_EXECUTABLE=/usr/bin/python
+    -D CMAKE_C_FLAGS="$CFLAGS -ffat-lto-objects"
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -W no-dev
+    -S $_name-$pkgver
+  )
+
+  [[ $CARCH == "armv7h" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/neon/vfpv3/'` && CXXFLAGS="$CFLAGS"
+  export PYTHON_EXECUTABLE=/usr/bin/python
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
+}
+
+check() {
+  ctest --test-dir build --output-on-failure -E 'check_lgpl'
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}

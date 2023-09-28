@@ -1,0 +1,128 @@
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Lukas Fleischer <lfleischer@archlinux.org>
+# Contributor: Shinlun Hsieh <yngwiexx@yahoo.com.tw>
+# Contributor: Mateusz Herych <heniekk@gmail.com>
+# Contributor: Storyteller <spiralsorrow@hotmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove wine makedepend and optdepend
+#  - remove carla makedepend, set -DWANT_CARLA=OFF
+#  - remove -DWINE_INCLUDE_DIR and -DWINE_LIBRARY from cmake command
+#  - upstream rpmalloc fix for ARM
+
+pkgname=lmms
+pkgver=1.2.2
+pkgrel=16
+pkgdesc='The Linux MultiMedia Studio'
+arch=(x86_64)
+url="https://lmms.io"
+license=(GPL2)
+groups=(pro-audio)
+depends=(
+  gcc-libs
+  glibc
+  libx11
+  libxcb
+  qt5-base
+  qt5-x11extras
+  sdl12-compat
+  zlib
+)
+makedepends=(
+  alsa-lib
+  bash-completion
+  cmake
+  doxygen
+  extra-cmake-modules
+  fftw
+  fltk
+  fluidsynth
+  freetype2
+  jack
+  ladspa
+  lame
+  libgig
+  libogg
+  libpulse
+  libsamplerate
+  libsndfile
+  libvorbis
+  portaudio
+  qt5-tools
+  sndio
+  stk
+)
+optdepends=(
+  'pulseaudio: pulseaudio support'
+)
+options=(!lto)
+source=(
+  https://github.com/$pkgname/$pkgname/releases/download/v$pkgver/${pkgname}_$pkgver.tar.xz
+  $pkgname-1.2.2-wine.patch
+  lmms-carla-export.patch
+  $pkgname-1.2.2-kf5widgetsaddon.patch
+  https://github.com/rampantpixels/rpmalloc/commit/1c580b394e1a20e63d63c72cad421f7be4422089.patch
+)
+sha512sums=('df74d9e938f1c3807e9941b11db4ccfe9450e23b723c82774de15b7666ac39f1bfdd8519231e28849f994628190ecc92fa05d55bbc0b50a4421f2d183e729028'
+            '6dc97f6961a7eda8826ca28e2c3fb5cb69f73423d8809b2fba993120c7ebc3ff1f0dee91b2b7e304341bae89b72348ff86434c2637cfe58af8c6e6e28f43c692'
+            'be334dd7756086eca09d4e4c649fc6e5e49dd81982f28b51b085eda29e8f31e7bf8c98d417fca871f993d2956daa327107ab9eaac1a75195d0a54693d7f1069e'
+            'b44aabc76a0858fb22f009cdba48662c399ef0b1dce689c9ae26b8fbff77b5548a4f79487c362b6909a823afc129cf6c8ed2d7ff85807008ff863d5b68406192'
+            '95b8df46fbb1194d30ba9dd34e7b0325590c63a1a2f34730fa62c00fea1a75e728733ee3c287ed2b31150e66aa18e170fe4725a0e7cad2518039a19b12dc389c')
+b2sums=('8b561068194e9a4af8260675e784c25a92b6b2f731c29b677cbc16581306bbadcf27ea529adbcd735ff4adffedf3dd98ec7b2d89428a63ea600d022ecdae58e4'
+        '4b42d098c91871bcee9fbdc9486d1273be535f8c4ce837c0f7132cb2ed69739a60551e5c3f0c90059e83ae5d98d5887c5d00d597c785776eff854c42ede8a645'
+        '5a15297342b1a988d447231e1b6a75ad746c0f8d423be1499bc648aae9c73303d6cb00789ea0040b287952498a97605545145f30972a50a2c1ec8c3e5b445043'
+        'a5b49aed16a4620c43adccd1c3c8e6ef7e91a5acef547068d7039d34be74266839732336d503a6781ec003b71d5d2a2240806491db12e83b202fb4ca0740480b'
+        '350a8aa6610e30b5bd2b56a854bc7e8f872064c510cca84a641a8fb666e1a2620a95604c43ea6979ab651cad83524180bdbeae7e70219b109e6740f4f48e54e6')
+
+prepare() {
+  # prevent cmake from doing regular expressions breaking the build
+  patch -Np1 -d $pkgname -i ../$pkgname-1.2.2-wine.patch
+  # fix build with carla 2.4.3
+  patch -Np1 -d $pkgname -i ../$pkgname-carla-export.patch
+  # fix issues with kf5widgetsaddon: https://bugs.archlinux.org/task/76894
+  patch -Np1 -d $pkgname -i ../$pkgname-1.2.2-kf5widgetsaddon.patch
+  # upstream rpmalloc fix for ARM
+  patch -p1 -d $pkgname/src/3rdparty/rpmalloc/rpmalloc -i "${srcdir}/1c580b394e1a20e63d63c72cad421f7be4422089.patch"
+}
+
+build() {
+  local cmake_options=(
+    -B build
+    -DCMAKE_BUILD_TYPE=None
+    -DCMAKE_MODULE_PATH=/usr/share/ECM/find-modules
+    -DCMAKE_INSTALL_LIBDIR=lib
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_PREFIX_PATH=/usr/include/wine/windows
+    -DOpenGL_GL_PREFERENCE=GLVND
+    -DWANT_QT5=ON
+    -DWANT_SOUNDIO=OFF
+    -DWANT_CARLA=OFF
+    -S $pkgname
+    -W no-dev
+  )
+
+  # prevent mangling of static libs with LTO
+  CXXFLAGS+=' -ffat-lto-objects'
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
+}
+
+package() {
+  depends+=(
+    alsa-lib libasound.so
+    fftw libfftw3f.so
+    fltk libfltk.so
+    fluidsynth libfluidsynth.so
+    lame libmp3lame.so
+    libgig libgig.so
+    libogg libogg.so
+    libpulse libpulse.so
+    libsamplerate libsamplerate.so
+    libvorbis libvorbis.so libvorbisenc.so libvorbisfile.so
+    portaudio libportaudio.so
+    sndio libsndio.so
+    stk libstk-4.6.2.so
+  )
+
+  DESTDIR="$pkgdir" cmake --install build
+}

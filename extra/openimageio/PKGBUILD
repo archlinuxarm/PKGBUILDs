@@ -1,0 +1,60 @@
+# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
+# Contributor: SpepS <dreamspepser at yahoo dot it>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch out neon, FTBFS
+#  - disable lto via -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
+
+pkgname=openimageio
+pkgver=2.4.15.0
+pkgrel=1
+pkgdesc="A library for reading and writing images, including classes, utilities, and applications"
+arch=('x86_64')
+url="http://www.openimageio.org/"
+license=('custom')
+depends=('openexr' 'boost-libs' 'openjpeg2' 'glew' 'libtiff' 'opencolorio' 'libpng' 'libraw' 'libwebp'
+         'pugixml' 'pybind11' 'libheif' 'hdf5' 'freetype2')
+# TODO: Consider adding these deps: 'openvdb' 'ffmpeg' 'ptex' 'opencv'
+makedepends=('cmake' 'qt5-base' 'python' 'boost' 'mesa' 'fontconfig' 'libxrender' 'ninja' 'robin-map' 'fmt')
+optdepends=('qt5-base: iv image viewer'
+            'python: bindings support')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/OpenImageIO/oiio/archive/refs/tags/v$pkgver.tar.gz"
+        '0001-disable-neon.patch')
+sha512sums=('75b18d6f719797343c1b85a8441973f831b29bd4193c1c03ebb084f5e16389719c4df6c74352c06aa12975d321171e0da00dad2afb0e35ea50bcc8690c542d09'
+            '5cc9073dfdc735aab5b5e880b101b5c0e3469c3f290cda3b031f21b65fc28a5af567c09d005cb5008e4cdaeb84ec2c0ef33996471e85af295ff36e08c6638d9b')
+
+prepare() {
+  cd oiio-$pkgver
+  patch -p1 -i ../0001-disable-neon.patch
+}
+
+build() {
+  cd oiio-$pkgver
+
+  local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+  cmake \
+    -Bbuild \
+    -GNinja \
+    -DUSE_PYTHON=ON \
+    -DPYTHON_VERSION=$python_version \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DOIIO_BUILD_TESTS=ON \
+    -DOIIO_BUILD_TOOLS=ON \
+    -DBUILD_MISSING_FMT=OFF \
+    -DUSE_EXTERNAL_PUGIXML=ON \
+    -DSTOP_ON_WARNING=OFF \
+    -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
+  ninja -C build
+}
+
+package() {
+  cd oiio-$pkgver
+
+  DESTDIR="$pkgdir" ninja -C build install
+
+  # Remove vendored fonts
+  rm -r "$pkgdir"/usr/share/fonts
+
+  install -Dm644 LICENSE.md "$pkgdir/usr/share/licenses/$pkgname/LICENSE".md
+}

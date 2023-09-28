@@ -7,8 +7,11 @@
 #  - remove -march=armv8-a in AArch64 CFLAGS to not conflict with -march=armv8-a+crypto being added
 
 pkgbase=nss
-pkgname=(nss ca-certificates-mozilla)
-pkgver=3.89
+pkgname=(
+  nss
+  ca-certificates-mozilla
+)
+pkgver=3.93
 pkgrel=1
 pkgdesc="Network Security Services"
 url="https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS"
@@ -20,9 +23,10 @@ license=(
 depends=(
   'nspr>=4.35'
   'p11-kit>=0.23.19'
-  sh
   sqlite
   zlib
+
+  sh  # nss-config script
 )
 makedepends=(
   gyp
@@ -30,7 +34,7 @@ makedepends=(
   perl
   python
 )
-_revision=4e4ebb9ad0d4391035c76c26967682c148ff0fd7
+_revision=bfb3093c188a06bd08a5c054785950bb8a28a98a
 source=(
   "hg+https://hg.mozilla.org/projects/nss#revision=$_revision"
   bundle.sh
@@ -59,6 +63,17 @@ prepare() {
 }
 
 build() {
+  local buildsh_options=(
+    --disable-tests
+    --enable-libpkix
+    --opt
+    --system-nspr
+    --system-sqlite
+    -Ddisable_arm32_neon=1
+    -Ddisable_arm_hw_aes=1
+    -Ddisable_arm_hw_sha1=1
+    -Ddisable_arm_hw_sha2=1
+  )
   [[ $CARCH == "aarch64" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/-march=armv8-a//'` && CXXFLAGS="$CFLAGS"
 
   cd certs
@@ -68,27 +83,18 @@ build() {
   ./bundle.sh
 
   cd nss
-  ./build.sh \
-    --opt \
-    --system-sqlite \
-    --system-nspr \
-    --enable-libpkix \
-    --disable-tests \
-    -Ddisable_arm32_neon=1 \
-    -Ddisable_arm_hw_aes=1 \
-    -Ddisable_arm_hw_sha1=1 \
-    -Ddisable_arm_hw_sha2=1
+  ./build.sh "${buildsh_options[@]}"
 }
 
 package_nss() {
   local nsprver="$(pkg-config --modversion nspr)"
-  local libdir=/usr/lib
+  local libdir=/usr/lib includedir=/usr/include/nss
 
   sed nss/pkg/pkg-config/nss.pc.in \
-    -e "s,%libdir%,$libdir,g" \
     -e "s,%prefix%,/usr,g" \
-    -e "s,%exec_prefix%,/usr/bin,g" \
-    -e "s,%includedir%,/usr/include/nss,g" \
+    -e "s,%exec_prefix%,\${prefix},g" \
+    -e "s,%libdir%,$libdir,g" \
+    -e "s,%includedir%,$includedir,g" \
     -e "s,%NSPR_VERSION%,$nsprver,g" \
     -e "s,%NSS_VERSION%,$pkgver,g" |
     install -Dm644 /dev/stdin "$pkgdir$libdir/pkgconfig/nss.pc"
@@ -102,10 +108,10 @@ package_nss() {
     < <(awk '/#define.*NSS_V(MAJOR|MINOR|PATCH)/ {print $3}' nss/lib/nss/nss.h)
 
   sed nss/pkg/pkg-config/nss-config.in \
+    -e "s,@prefix@,/usr,g" \
+    -e "s,@exec_prefix@,/usr,g" \
     -e "s,@libdir@,$libdir,g" \
-    -e "s,@prefix@,/usr/bin,g" \
-    -e "s,@exec_prefix@,/usr/bin,g" \
-    -e "s,@includedir@,/usr/include/nss,g" \
+    -e "s,@includedir@,$includedir,g" \
     -e "s,@MOD_MAJOR_VERSION@,$vmajor,g" \
     -e "s,@MOD_MINOR_VERSION@,$vminor,g" \
     -e "s,@MOD_PATCH_VERSION@,$vpatch,g" |
@@ -114,7 +120,7 @@ package_nss() {
   install -Dt "$pkgdir/usr/bin" \
     dist/Release/bin/{*util,shlibsign,signtool,signver,ssltap}
 
-  install -Dt "$pkgdir/usr/include/nss" -m644 dist/public/nss/*.h
+  install -Dt "$pkgdir$includedir" -m644 dist/public/nss/*.h
 
   install -Dt "$pkgdir/usr/share/man/man1" -m644 \
     nss/doc/nroff/{*util,signtool,signver,ssltap}.1

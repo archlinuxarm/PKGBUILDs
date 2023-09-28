@@ -13,8 +13,8 @@
 #  - specify arm architecture to b2 for aarch64
 
 pkgname=('boost' 'boost-libs')
-pkgver=1.81.0
-pkgrel=3
+pkgver=1.83.0
+pkgrel=2
 _srcname=boost_${pkgver//./_}
 pkgdesc="Free peer-reviewed portable C++ source libraries"
 arch=('x86_64')
@@ -23,9 +23,11 @@ license=('custom')
 makedepends=('icu' 'python' 'python-numpy' 'bzip2' 'zlib' 'openmpi' 'zstd')
 source=(https://boostorg.jfrog.io/artifactory/main/release/$pkgver/source/$_srcname.tar.bz2
         boost-1.81.0-phoenix-multiple-definitions.patch
+        $pkgname-support-fn.contains-f-where-f-is-a-function.patch::https://github.com/boostorg/function/commit/7ca2310b15e3.patch
         $pkgname-ublas-c++20-iterator.patch::https://github.com/boostorg/ublas/commit/a31e5cffa85f.patch)
-sha256sums=('71feeed900fbccca04a3b4f2f84a7c217186f28a940ed8b7ed4725986baf99fa'
+sha256sums=('6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e'
             '3ebf428ef6be090a7b56a233330375539ac429333b83708e28fe5db049cfecdb'
+            '1b5998ee8fb389dd6df55a3684d29ffa37246bc007e8e6712bf2be6c7f745036'
             'aa38addb40d5f44b4a8472029b475e7e6aef1c460509eb7d8edf03491dc1b5ee')
 
 prepare() {
@@ -33,6 +35,11 @@ prepare() {
 
   # https://github.com/boostorg/phoenix/issues/111
   patch -Np1 -i ../boost-1.81.0-phoenix-multiple-definitions.patch
+
+  # https://github.com/boostorg/signals2/issues/68
+  # https://github.com/boostorg/function/issues/46
+  patch -Np2 -i <(sed 's#test/#asd/libs/function/test/#' \
+    ../$pkgname-support-fn.contains-f-where-f-is-a-function.patch)
 
   # https://github.com/boostorg/ublas/pull/97
   patch -Np2 -i ../$pkgname-ublas-c++20-iterator.patch
@@ -79,6 +86,9 @@ build() {
 }
 
 package_boost() {
+  local python_version=$(
+    python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+
   pkgdesc+=' (development headers)'
   depends=("boost-libs=$pkgver")
   optdepends=('python: for python bindings')
@@ -91,13 +101,16 @@ package_boost() {
 
   # https://github.com/boostorg/python/issues/203#issuecomment-391477685
   for _lib in python numpy; do
-    ln -srL "$pkgdir"/usr/lib/libboost_${_lib}3{10,}.so
+    ln -srL "$pkgdir"/usr/lib/libboost_${_lib}{${python_version/.},${python_version%.*}}.so
   done
 
   install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" $_srcname/LICENSE_1_0.txt
 }
 
 package_boost-libs() {
+  local python_version=$(
+    python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+
   pkgdesc+=' (runtime libraries)'
   depends=('bzip2' 'zlib' 'icu' 'zstd')
   optdepends=('openmpi: for mpi support')
@@ -108,10 +121,10 @@ package_boost-libs() {
     libboost_json.so libboost_locale.so libboost_log.so libboost_log_setup.so
     libboost_math_c99.so libboost_math_c99f.so libboost_math_c99l.so
     libboost_math_tr1.so libboost_math_tr1f.so libboost_math_tr1l.so
-    libboost_mpi{,_python310}.so libboost_nowide.so libboost_numpy310.so
-    libboost_prg_exec_monitor.so libboost_program_options.so
-    libboost_python310.so libboost_random.so
-    libboost_regex.so libboost_serialization.so
+    libboost_mpi{,_python${python_version/.}}.so libboost_nowide.so
+    libboost_numpy${python_version/.}.so libboost_prg_exec_monitor.so
+    libboost_program_options.so libboost_python${python_version/.}.so
+    libboost_random.so libboost_regex.so libboost_serialization.so
     libboost_stacktrace_addr2line.so libboost_stacktrace_basic.so
     libboost_stacktrace_noop.so libboost_system.so libboost_thread.so
     libboost_timer.so libboost_type_erasure.so libboost_unit_test_framework.so

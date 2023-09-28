@@ -1,0 +1,74 @@
+# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
+# Contributor: SanskritFritz (gmail)
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - disable LTO
+
+pkgname=netdata
+pkgver=1.42.4
+pkgrel=2
+pkgdesc="Real-time performance monitoring, in the greatest possible detail, over the web"
+url="https://github.com/netdata/netdata"
+arch=('x86_64')
+license=('GPL')
+backup=('etc/netdata/netdata.conf')
+depends=('libmnl' 'libnetfilter_acct' 'zlib' 'judy' 'libuv' 'json-c' 'libcap' 'lz4' 'openssl' 'which' 'snappy' 'protobuf'
+         'libwebsockets' 'mongo-c-driver' 'libyaml')
+makedepends=('cups')
+optdepends=('nodejs: for monitoring named and SNMP devices'
+            'lm_sensors: for monitoring hardware sensors'
+            'iproute2: for monitoring Linux QoS'
+            'python: for most of the external plugins'
+            'python-psycopg2: for monitoring PostgreSQL databases'
+            'python-mysqlclient: for monitoring MySQL/MariaDB databases'
+            'python-requests: for monitoring elasticsearch'
+            'hddtemp: for monitoring hhd temperature'
+            'fping: for for fping module'
+            'apcupsd: for monitoring APC UPS'
+            'cups: for CUPS plugin'
+            'iw: for monitoring Linux as access point')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/netdata/netdata/releases/download/v$pkgver/netdata-v$pkgver.tar.gz"
+        "$pkgname.sysusers"
+         protobuf-23.patch)
+sha512sums=('58bfb21658044b5c4ede4cb88e440b161f1548168b9012caeca18f5800ba17b742156dda97b4587ea705b3d31c6fe8f9fb32df76c482c1b62ed109066669ddcd'
+            'a910809a823ba58ca7bdaa72e8d68427b48f452c1fbb2343fa182ecb0a091a7640e73af24b8ba2fdd90e00aed8ef53b7fccd25cb8f04ca9b9fa6c8e52223ca66'
+            '5a759d6fe29f6ded679ebe61189a81639adf4397219cb0f1128a1490702ca4b1e250a70ed3bb548ca37c53992659f9c910e1ddc8b167bc6cf1f518630b960e05')
+
+prepare() {
+  cd $pkgname-v$pkgver
+  patch -p1 -i ../protobuf-23.patch # Fix build with protobuf 23
+  # protobuf 23 requires c++17
+  sed -e 's|\# AX_CXX_COMPILE_STDCXX(17, noext, optional)|AX_CXX_COMPILE_STDCXX(17, noext, optional)|' -i configure.ac
+}
+
+build() {
+  cd "$pkgname-v$pkgver"
+
+  autoreconf -i
+  ./configure \
+      --prefix="/usr" \
+      --sbindir="/usr/bin" \
+      --sysconfdir="/etc" \
+      --libexecdir="/usr/lib" \
+      --localstatedir="/var" \
+      --with-zlib --with-math --with-user=netdata --disable-lto
+  make
+}
+
+package() {
+  cd "$pkgname-v$pkgver"
+
+  make DESTDIR="$pkgdir" install
+
+  install -Dm644 system/netdata.conf "$pkgdir"/etc/netdata/netdata.conf
+  chown -R 0:134 "$pkgdir"/usr/share/netdata/web
+
+  install -Dm0644 "system/systemd/netdata.service.v235" "$pkgdir/usr/lib/systemd/system/netdata.service"
+  install -Dm0644 "system/logrotate/netdata" "$pkgdir/etc/logrotate.d/netdata"
+  install -Dm0644 "${srcdir}/${pkgname}.sysusers" "${pkgdir}/usr/lib/sysusers.d/${pkgname}.conf"
+
+  # https://github.com/netdata/netdata/tree/master/collectors/apps.plugin#permissions
+  setcap cap_dac_read_search,cap_sys_ptrace+ep "${pkgdir}"/usr/lib/netdata/plugins.d/apps.plugin
+  setcap cap_dac_read_search,cap_sys_ptrace+ep "${pkgdir}"/usr/lib/netdata/plugins.d/debugfs.plugin
+  setcap cap_dac_read_search,cap_sys_ptrace+ep "${pkgdir}"/usr/lib/netdata/plugins.d/perf.plugin
+}

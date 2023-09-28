@@ -1,0 +1,89 @@
+# Maintainer: Bruno Pagani <archange@archlinux.org>
+# Maintainer: Robin Candau <antiz@archlinux.org>
+# Maintainer: Maxime Gauduin <alucryd@archlinux.org>
+# Contributor: Frederik Schwan <frederik dot schwan at linux dot com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - reduce go garbage collection memory usage with GOGC=50
+#  - set nodejs max memory
+#  - set go temp dir to /build
+#  - don't check repo signature until author puts his keys on keyservers
+
+pkgname=gitea
+pkgver=1.20.4
+pkgrel=1
+pkgdesc="Painless self-hosted Git service, community managed."
+arch=(x86_64)
+url="https://gitea.io"
+license=(MIT)
+depends=(git)
+makedepends=(go nodejs npm)
+optdepends=(
+  'mariadb: MariaDB support'
+  'memcached: MemCached support'
+  'openssh: GIT over SSH support'
+  'pam: Authentication via PAM support'
+  'postgresql: PostgreSQL support'
+  'redis: Redis support'
+  'sqlite: SQLite support'
+)
+checkdepends=(openssh)
+options=(!lto)
+backup=('etc/gitea/app.ini')
+_tag=defc69dffe8fb458f9f1dd15caee226941fe93a0 # git rev-parse v${pkgver}
+source=(git+https://github.com/go-gitea/gitea.git#tag=${_tag}
+        gitea.tmpfiles
+        gitea.service
+        gitea.sysusers)
+sha256sums=('SKIP'
+            '1521fd7edc3830c695698ffe9835709f1408040b5ec989f07410972c894fa8ba'
+            'b16d02a9f32a17cc14dfa46a980bad795a4ed744627e6342248f60236dc2be43'
+            '7e7b798b8ce035c1fb55993ece41c5efb6cad5922708866804fa50ada0cf9fa5')
+validpgpkeys=(
+  B56E3C7437A49E136862F5DE9D8A57ADAA232E95  # Matti Ranta <matti@mdranta.net>, retrieved from https://github.com/techknowlogick.gpg
+  D8F9672D77C0BB60A024C23EDFDE60A0093EB926  # Lauris Bukšis-Haberkorns <lauris@nix.lv>, retrieved from https://github.com/lafriks.gpg
+  BA66F67FD73F7058D712D308C3B7C91B632F738A  # Lunny Xiao <xiaolunwen@gmail.com>, retrieved from https://github.com/lunny.gpg
+  8722B61D72341082553B201CB8BE6D610E61C862  # '6543' <6543@obermui.de>, retrieved from https://github.com/6543.gpg
+  D2CF76DA95F201E9901532AB3CDE74631F13A748  # Andrew Thornton <art27@cantab.net>, retrieved from https://github.com/zeripath.gpg
+  82A110A44DF1A28D50C093BFB853ADA5DA7BBF7A  # jolheiser <john@jolheiser.com>, retrieved from https://github.com/jolheiser.gpg
+  FE7C3EAEB8CD8290390B12AD3DECE05F6D9A647C  # delvh <dev.lh@web.de>, retrieved from https://github.com/delvh.gpg
+)
+
+pkgver() {
+  cd ${pkgname}
+  git describe --tags | sed 's/^v//'
+}
+
+prepare() {
+  cd ${pkgname}
+  make deps
+}
+
+build() {
+  cd ${pkgname}
+  export GOGC=50
+  export NODE_OPTIONS="--max_old_space_size=1536"
+  export GOTMPDIR="/build"
+  export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+  export CGO_LDFLAGS="${LDFLAGS}"
+  export EXTRA_GOFLAGS="-buildmode=pie -mod=readonly -modcacherw"
+  export LDFLAGS="-linkmode=external -compressdwarf=false -X 'code.gitea.io/gitea/modules/setting.AppWorkPath=/var/lib/gitea/' -X 'code.gitea.io/gitea/modules/setting.CustomConf=/etc/gitea/app.ini'"
+  export TAGS="bindata sqlite sqlite_unlock_notify pam"
+  make -j1
+}
+
+check() {
+  cd ${pkgname}
+  make test
+}
+
+package() {
+  install -Dm755 ${pkgname}/${pkgname} -t "${pkgdir}"/usr/bin/
+  install -Dm644 ${pkgname}/LICENSE -t "${pkgdir}"/usr/share/licenses/${pkgname}/
+  install -Dm644 ${pkgname}.service -t "${pkgdir}"/usr/lib/systemd/system/
+  install -Dm644 ${pkgname}.tmpfiles "${pkgdir}"/usr/lib/tmpfiles.d/${pkgname}.conf
+  install -Dm644 ${pkgname}.sysusers "${pkgdir}"/usr/lib/sysusers.d/${pkgname}.conf
+  install -Dm644 ${pkgname}/custom/conf/app.example.ini "${pkgdir}"/etc/gitea/app.ini
+}

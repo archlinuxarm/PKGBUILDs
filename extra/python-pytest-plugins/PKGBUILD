@@ -1,0 +1,79 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - drop makedepend on pypandoc
+
+pkgbase=python-pytest-plugins
+pkgname=('python-pytest-fixture-config' 'python-pytest-shutil' 'python-pytest-virtualenv')
+pkgver=1.7.0
+pkgrel=9
+arch=('any')
+license=('BSD')
+url='https://github.com/manahl/pytest-plugins'
+makedepends=('python-pytest' 'python-setuptools-git' 'python-execnet' 'python-path.py'
+             'python-mock' 'python-virtualenv' 'python-termcolor')
+source=("$pkgbase-$pkgver.tar.gz::https://github.com/manahl/pytest-plugins/archive/v$pkgver.tar.gz")
+sha512sums=('6ce64f554359ae8b4e8b1cdab9908226501bad1d6bcdec9d7968133bbf0b3530842883cf3ea7ef14e09372fd1454d685d4b1bf4e8d95498b69a8b0f20177e2be')
+
+prepare() {
+  # New pypandoc?
+  sed -i "s/'rst')/'rst', format='markdown')/" pytest-plugins-$pkgver/common_setup.py
+  sed -i "s/pypandoc.convert/pypandoc.convert_text/g" pytest-plugins-$pkgver/common_setup.py
+
+  # Our /bin is a symlink
+  sed -i "s|'/bin'|'/usr/bin'|" pytest-plugins-$pkgver/pytest-shutil/tests/integration/test_cmdline_integration.py
+
+  # Pytest 4
+  sed -i 's/< *4.0/<5/' pytest-plugins-$pkgver/pytest-*/setup.py
+
+  (cd pytest-plugins-$pkgver; make copyfiles)
+
+  sed -i '/contextlib2/d' pytest-plugins-$pkgver/pytest-shutil/setup.py
+}
+
+build() {
+  for _pkg in pytest-fixture-config pytest-shutil pytest-virtualenv; do
+    cd "$srcdir"/pytest-plugins-$pkgver/$_pkg
+    python setup.py build
+  done
+}
+
+check() {
+  # Hack entry points by installing it
+
+  local python_version=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+  for _pkg in pytest-fixture-config pytest-shutil pytest-virtualenv; do
+    cd "$srcdir"/pytest-plugins-$pkgver/$_pkg
+    python setup.py install --root="$srcdir"/tmp_install --optimize=1
+    PYTHONPATH="$srcdir"/tmp_install/usr/lib/python${python_version}/site-packages py.test -k 'not test_pretty_formatter'
+  done
+}
+
+package_python-pytest-fixture-config() {
+  pkgdesc='Fixture configuration utils for py.test'
+  depends=('python-pytest')
+
+  cd pytest-plugins-$pkgver/pytest-fixture-config
+  python setup.py install --root="$pkgdir" --optimize=1
+  install -D -m644 ../LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+package_python-pytest-shutil() {
+  pkgdesc='A goodie-bag of unix shell and environment tools for py.test'
+  depends=('python-pytest' 'python-execnet' 'python-path.py' 'python-mock' 'python-termcolor')
+
+  cd pytest-plugins-$pkgver/pytest-shutil
+  python setup.py install --root="$pkgdir" --optimize=1
+  install -D -m644 ../LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+package_python-pytest-virtualenv() {
+  pkgdesc='Virtualenv fixture for py.test'
+  depends=('python-pytest-fixture-config' 'python-pytest-shutil' 'python-virtualenv')
+
+  cd pytest-plugins-$pkgver/pytest-virtualenv
+  python setup.py install --root="$pkgdir" --optimize=1
+  install -D -m644 ../LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+# vim:set ts=2 sw=2 et:
