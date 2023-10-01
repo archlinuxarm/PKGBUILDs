@@ -104,6 +104,10 @@ prepare() {
   # its GPU cache; otherwise it can cause pages to render incorrectly.
   # https://bugs.launchpad.net/ubuntu/+source/chromium-browser/+bug/2020604
   echo "$pkgver-arch$epoch.$pkgrel" >VERSION
+
+  if [[ $CARCH == "armv7h" ]]; then
+    sed -i "/c_cpp_args += '-mtls-dialect=gnu2'/d" meson.build
+  fi
 }
 
 build() {
