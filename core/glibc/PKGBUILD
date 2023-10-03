@@ -14,10 +14,11 @@
 
 noautobuild=1
 
-pkgname=glibc
+pkgbase=glibc
+pkgname=(glibc glibc-locales)
 pkgver=2.38
-_commit=f6445dc94da185b3d1ee283f0ca0a34c4e1986cc
-pkgrel=5
+_commit=750a45a783906a19591fb8ff6b7841470f1f5701
+pkgrel=6
 arch=(x86_64)
 url='https://www.gnu.org/software/libc'
 license=(GPL LGPL)
@@ -71,40 +72,45 @@ build() {
   [[ $CARCH == "armv7h" ]] && _configure_flags+=(--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf)
   [[ $CARCH == "aarch64" ]] && _configure_flags+=(--host=aarch64-unknown-linux-gnu --build=aarch64-unknown-linux-gnu --enable-memory-tagging)
 
-  echo "slibdir=/usr/lib" >> configparms
-  echo "rtlddir=/usr/lib" >> configparms
-  echo "sbindir=/usr/bin" >> configparms
-  echo "rootsbindir=/usr/bin" >> configparms
+  (
+    cd glibc-build
 
-  # Credits @allanmcrae
-  # https://github.com/allanmcrae/toolchain/blob/f18604d70c5933c31b51a320978711e4e6791cf1/glibc/PKGBUILD
-  # remove fortify for building libraries
-  # CFLAGS=${CFLAGS/-Wp,-D_FORTIFY_SOURCE=2/}
+    echo "slibdir=/usr/lib" >> configparms
+    echo "rtlddir=/usr/lib" >> configparms
+    echo "sbindir=/usr/bin" >> configparms
+    echo "rootsbindir=/usr/bin" >> configparms
 
-  "${srcdir}"/glibc/configure \
-      --libdir=/usr/lib \
-      --libexecdir=/usr/lib \
-      "${_configure_flags[@]}"
+    # Credits @allanmcrae
+    # https://github.com/allanmcrae/toolchain/blob/f18604d70c5933c31b51a320978711e4e6791cf1/glibc/PKGBUILD
+    # remove fortify for building libraries
+    # CFLAGS=${CFLAGS/-Wp,-D_FORTIFY_SOURCE=2/}
 
-  make -O
+    "${srcdir}"/glibc/configure \
+        --libdir=/usr/lib \
+        --libexecdir=/usr/lib \
+        "${_configure_flags[@]}"
 
-  # build info pages manually for reproducibility
-  make info
+    make -O
 
-  # pregenerate C.UTF-8 locale until it is built into glibc
-  # (https://sourceware.org/glibc/wiki/Proposals/C.UTF-8, FS#74864)-
-  elf/ld.so --library-path "$PWD" locale/localedef -c -f ../glibc/localedata/charmaps/UTF-8 -i ../glibc/localedata/locales/C ../C.UTF-8/
+    # build info pages manually for reproducibility
+    make info
+  )
+
+  # pregenerate locales here instead of in package
+  # functions because localedef does not like fakeroot
+  make -C "${srcdir}"/glibc/localedata objdir="${srcdir}"/glibc-build \
+    DESTDIR="${srcdir}"/locales install-locale-files
 }
 
-# Credits for skip_test() and check() @allanmcrae
+# Credits for _skip_test() and check() @allanmcrae
 # https://github.com/allanmcrae/toolchain/blob/f18604d70c5933c31b51a320978711e4e6791cf1/glibc/PKGBUILD
-skip_test() {
+_skip_test() {
   test=${1}
   file=${2}
   sed -i "/\b${test} /d" "${srcdir}"/glibc/${file}
 }
 
-check() {
+check() (
   cd glibc-build
 
   # adjust/remove buildflags that cause false-positive testsuite failures
@@ -117,18 +123,18 @@ check() {
   # The following tests fail due to restrictions in the Arch build system
   # The correct fix is to add the following to the systemd-nspawn call:
   # --system-call-filter="@clock @memlock @pkey"
-  skip_test test-errno-linux        sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-mlock2              sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-ntp_gettime         sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-ntp_gettimex        sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-pkey                sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-process_mrelease    sysdeps/unix/sysv/linux/Makefile
-  skip_test tst-adjtime             time/Makefile
+  _skip_test test-errno-linux        sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-mlock2              sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-ntp_gettime         sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-ntp_gettimex        sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-pkey                sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-process_mrelease    sysdeps/unix/sysv/linux/Makefile
+  _skip_test tst-adjtime             time/Makefile
 
   make -O check
-}
+)
 
-package() {
+package_glibc() {
   pkgdesc='GNU C Library'
   depends=('linux-api-headers>=4.10' tzdata filesystem)
   optdepends=('gd: for memusagestat'
@@ -137,7 +143,7 @@ package() {
   backup=(etc/gai.conf
           etc/locale.gen)
 
-  make -C glibc-build install_root="${pkgdir}" install
+  make -C glibc-build DESTDIR="${pkgdir}" install
   rm -f "${pkgdir}"/etc/ld.so.cache
 
   # Shipped in tzdata
@@ -154,19 +160,33 @@ package() {
   # Create /etc/locale.gen
   install -m644 "${srcdir}"/locale.gen.txt "${pkgdir}"/etc/locale.gen
   sed -e '1,3d' -e 's|/| |g' -e 's|\\| |g' -e 's|^|#|g' \
-    "${srcdir}"/glibc/localedata/SUPPORTED >> "${pkgdir}"/etc/locale.gen
+    localedata/SUPPORTED >> "${pkgdir}"/etc/locale.gen
 
   # Add SUPPORTED file to pkg
   sed -e '1,3d' -e 's|/| |g' -e 's| \\||g' \
-    "${srcdir}"/glibc/localedata/SUPPORTED > "${pkgdir}"/usr/share/i18n/SUPPORTED
+    localedata/SUPPORTED > "${pkgdir}"/usr/share/i18n/SUPPORTED
 
   # install C.UTF-8 so that it is always available
+  # should be built into glibc eventually
+  # https://sourceware.org/glibc/wiki/Proposals/C.UTF-8
+  # https://bugs.archlinux.org/task/74864
   install -dm755 "${pkgdir}"/usr/lib/locale
-  cp -r "${srcdir}"/C.UTF-8 -t "${pkgdir}"/usr/lib/locale
+  cp -r "${srcdir}"/locales/usr/lib/locale/C.utf8 -t "${pkgdir}"/usr/lib/locale
   sed -i '/#C\.UTF-8 /d' "${pkgdir}"/etc/locale.gen
 
   # Provide tracing probes to libstdc++ for exceptions, possibly for other
   # libraries too. Useful for gdb's catch command.
   install -Dm644 "${srcdir}"/sdt.h "${pkgdir}"/usr/include/sys/sdt.h
   install -Dm644 "${srcdir}"/sdt-config.h "${pkgdir}"/usr/include/sys/sdt-config.h
+}
+
+package_glibc-locales() {
+  pkgdesc='Pregenerated locales for GNU C Library'
+  depends=("glibc=$pkgver")
+
+  cp -r locales/* -t "${pkgdir}"
+  rm -r "${pkgdir}"/usr/lib/locale/C.utf8
+
+  # deduplicate locale data
+  hardlink -c "${pkgdir}"/usr/lib/locale
 }
