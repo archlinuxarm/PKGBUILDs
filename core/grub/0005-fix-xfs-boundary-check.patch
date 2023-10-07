@@ -1,0 +1,214 @@
+[PATCH v3] Fix XFS directory extent parsing
+From: 	Jon DeVree
+Subject: 	[PATCH v3] Fix XFS directory extent parsing
+Date: 	Wed, 27 Sep 2023 20:43:55 -0400
+
+The XFS directory entry parsing code has never been completely correct
+for extent based directories. The parser correctly handles the case
+where the directory is contained in a single extent, but then mistakenly
+assumes the data blocks for the multiple extent case are each identical
+to the single extent case. The difference in the format of the data
+blocks between the two cases is tiny enough that its gone unnoticed for
+a very long time.
+
+A recent change introduced some additional bounds checking into the XFS
+parser. Like GRUB's existing parser, it is correct for the single extent
+case but incorrect for the multiple extent case. When parsing a
+directory with multiple extents, this new bounds checking is sometimes
+(but not always) tripped and triggers an "invalid XFS diretory entry"
+error. This probably would have continued to go unnoticed but the
+/boot/grub/<arch> directory is large enough that it often has multiple
+extents.
+
+The difference between the two cases is that when there are multiple
+extents, the data blocks do not contain a trailer nor do they contain
+any leaf information. That information is stored in a separate set of
+extents dedicated to just the leaf information. These extents come after
+the directory entry extents and are not included in the inode size. So
+the existing parser already ignores the leaf extents.
+
+The only reason to read the trailer/leaf information at all is so that
+the parser can avoid misinterpreting that data as directory entries. So
+this updates the parser as follows:
+
+For the single extent case the parser doesn't change much:
+1. Read the size of the leaf information from the trailer
+2. Set the end pointer for the parser to the start of the leaf
+   information. (The previous bounds checking set the end pointer to the
+   start of the trailer, so this is actually a small improvement.)
+3. Set the entries variable to the expected number of directory entries.
+
+For the multiple extent case:
+1. Set the end pointer to the end of the block.
+2. Do not set up the entries variable. Figuring out how many entries are
+   in each individual block is complex and does not seem worth it when
+   it appears to be safe to just iterate over the entire block.
+
+Notes:
+* When there is only one extent there will only ever be one block. If
+  more than one block is required then XFS will always switch to holding
+  leaf information in a separate extent.
+* B-tree based directories seems to be parsed properly by the same code
+  that handles multiple extents. This is unlikely to ever occur within
+  /boot though because its only used when there are an extremely large
+  number of directory entries.
+
+Fixes: ef7850c75 (fs/xfs: Fix issues found while fuzzing the XFS filesystem)
+Fixes: b2499b29c (Adds support for the XFS filesystem.)
+Fixes: https://savannah.gnu.org/bugs/?64376
+
+Signed-off-by: Jon DeVree <nuxi@vault24.org>
+---
+
+Notes:
+    Changes from v2:
+    * Fix bounds check on filename
+    
+    Changes from v1:
+    * Address review feedback
+
+ grub-core/fs/xfs.c | 51 +++++++++++++++++++++++++++++++++-------------
+ 1 file changed, 37 insertions(+), 14 deletions(-)
+
+diff --git a/grub-core/fs/xfs.c b/grub-core/fs/xfs.c
+index b91cd32b4..acdfb1a7b 100644
+--- a/grub-core/fs/xfs.c
++++ b/grub-core/fs/xfs.c
+@@ -223,6 +223,12 @@ struct grub_xfs_inode
+ /* Size of struct grub_xfs_inode v2, up to unused4 member included. */
+ #define XFS_V2_INODE_SIZE      (XFS_V3_INODE_SIZE - 76)
+ 
++struct grub_xfs_dir_leaf_entry
++{
++  grub_uint32_t hashval;
++  grub_uint32_t address;
++} GRUB_PACKED;
++
+ struct grub_xfs_dirblock_tail
+ {
+   grub_uint32_t leaf_count;
+@@ -877,9 +883,8 @@ grub_xfs_iterate_dir (grub_fshelp_node_t dir,
+	  {
+	    struct grub_xfs_dir2_entry *direntry =
+					grub_xfs_first_de(dir->data, dirblock);
+-	    int entries;
+-	    struct grub_xfs_dirblock_tail *tail =
+-					grub_xfs_dir_tail(dir->data, dirblock);
++           int entries = -1;
++           char *end = dirblock + dirblk_size;
+
+ 	    numread = grub_xfs_read_file (dir, 0, 0,
+ 					  blk << dirblk_log2,
+@@ -890,14 +895,27 @@ grub_xfs_iterate_dir (grub_fshelp_node_t dir,
+ 	        return 0;
+ 	      }
+
+-	    entries = (grub_be_to_cpu32 (tail->leaf_count)
+-		       - grub_be_to_cpu32 (tail->leaf_stale));
++           /* leaf and tail information are only in the data block if the number
++            * of extents is 1 */
++           if (dir->inode.nextents == grub_cpu_to_be32_compile_time (1))
++             {
++               struct grub_xfs_dirblock_tail *tail =
++                                              grub_xfs_dir_tail(dir->data, dirblock);
++               end = (char *)tail;
+ 
+-	    if (!entries)
+-	      continue;
++               /* subtract the space used by leaf nodes */
++               end -= grub_be_to_cpu32 (tail->leaf_count) *
++                      sizeof (struct grub_xfs_dir_leaf_entry);
++
++               entries = (grub_be_to_cpu32 (tail->leaf_count)
++                          - grub_be_to_cpu32 (tail->leaf_stale));
++
++               if (!entries)
++                 continue;
++             }
+
+ 	    /* Iterate over all entries within this block.  */
+-	    while ((char *)direntry < (char *)tail)
++           while ((char *)direntry < (char *)end)
+ 	      {
+ 		grub_uint8_t *freetag;
+ 		char *filename;
+@@ -917,7 +935,7 @@ grub_xfs_iterate_dir (grub_fshelp_node_t dir,
+ 		  }
+ 
+ 		filename = (char *)(direntry + 1);
+-		if (filename + direntry->len - 1 > (char *) tail)
++               if (filename + direntry->len + 1 > (char *) end)
+ 		  return grub_error (GRUB_ERR_BAD_FS, "invalid XFS directory entry");
+ 
+		/* The byte after the filename is for the filetype, padding, or
+@@ -931,11 +949,16 @@ grub_xfs_iterate_dir (grub_fshelp_node_t dir,
+ 		    return 1;
+ 		  }
+
+-		/* Check if last direntry in this block is
+-		   reached.  */
+-		entries--;
+-		if (!entries)
+-		  break;
++               /* the expected number of directory entries is only tracked for the
++                * single extent case */
++               if (dir->inode.nextents == grub_cpu_to_be32_compile_time (1))
++                 {
++                   /* Check if last direntry in this block is
++                      reached.  */
++                   entries--;
++                   if (!entries)
++                     break;
++                 }
+
+ 		/* Select the next directory entry.  */
+ 		direntry = grub_xfs_next_de(dir->data, direntry);
+-- 
+2.40.1
+
+[PATCH 1/1] fs/xfs: Incorrect short form directory data boundary check
+From: 	Lidong Chen
+Subject: 	[PATCH 1/1] fs/xfs: Incorrect short form directory data boundary check
+Date: 	Thu, 28 Sep 2023 22:33:44 +0000
+
+After parsing of the current entry, the entry pointer is advanced
+to the next entry at the end of the 'for' loop. In case where the
+last entry is at the end of the data boundary, the advanced entry
+pointer can point off the data boundary. The subsequent boundary
+check for the advanced entry pointer can cause a failure.
+
+The fix is to include the boundary check into the 'for' loop
+condition.
+
+Signed-off-by: Lidong Chen <lidong.chen@oracle.com>
+---
+ grub-core/fs/xfs.c | 7 ++-----
+ 1 file changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/grub-core/fs/xfs.c b/grub-core/fs/xfs.c
+index b91cd32b4..ebf962793 100644
+--- a/grub-core/fs/xfs.c
++++ b/grub-core/fs/xfs.c
+@@ -816,7 +816,8 @@ grub_xfs_iterate_dir (grub_fshelp_node_t dir,
+ 	if (iterate_dir_call_hook (parent, "..", &ctx))
+ 	  return 1;
+ 
+-	for (i = 0; i < head->count; i++)
++	for (i = 0; i < head->count &&
++	    (grub_uint8_t *) de < ((grub_uint8_t *) dir + grub_xfs_fshelp_size (dir->data)); i++)
+ 	  {
+ 	    grub_uint64_t ino;
+ 	    grub_uint8_t *inopos = grub_xfs_inline_de_inopos(dir->data, de);
+@@ -852,10 +852,6 @@ grub_xfs_iterate_dir (grub_fshelp_node_t dir,
+ 	    de->name[de->len] = c;
+ 
+ 	    de = grub_xfs_inline_next_de(dir->data, head, de);
+-
+-	    if ((grub_uint8_t *) de >= (grub_uint8_t *) dir + grub_xfs_fshelp_size (dir->data))
+-	      return grub_error (GRUB_ERR_BAD_FS, "invalid XFS directory entry");
+-
+ 	  }
+ 	  break;
+ 	}
+-- 
+2.30.2
