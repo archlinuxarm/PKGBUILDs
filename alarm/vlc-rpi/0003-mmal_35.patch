@@ -117,6 +117,461 @@
  include hw/vaapi/Makefile.am
  include hw/vdpau/Makefile.am
  include keystore/Makefile.am
+--- a/modules/audio_filter/converter/tospdif.c
++++ b/modules/audio_filter/converter/tospdif.c
+@@ -484,6 +484,7 @@ static int write_buffer_dtshd( filter_t
+                               p_in_buf->i_buffer ) != VLC_SUCCESS )
+         return SPDIF_ERROR;
+     unsigned i_period = p_filter->fmt_out.audio.i_rate
++                      * (p_filter->fmt_out.audio.i_bytes_per_frame / p_filter->fmt_out.audio.i_frame_length) / 4
+                       * core.i_frame_length / core.i_rate;
+ 
+     int i_subtype = dtshd_get_subtype( i_period );
+--- a/modules/audio_output/alsa.c
++++ b/modules/audio_output/alsa.c
+@@ -39,6 +39,8 @@
+ #include <alsa/asoundlib.h>
+ #include <alsa/version.h>
+ 
++#define TRACE_ALL 0
++
+ /** Private data for an ALSA PCM playback stream */
+ struct aout_sys_t
+ {
+@@ -51,11 +53,19 @@ struct aout_sys_t
+     bool soft_mute;
+     float soft_gain;
+     char *device;
++    unsigned int pause_bytes;
++
++    vlc_fourcc_t * passthrough_types;
+ };
+ 
+ #include "audio_output/volume.h"
+ 
+-#define A52_FRAME_NB 1536
++enum {
++    PASSTHROUGH_UNSET = -1,
++    PASSTHROUGH_NONE = 0,
++    PASSTHROUGH_SPDIF,
++    PASSTHROUGH_HDMI,
++};
+ 
+ static int Open (vlc_object_t *);
+ static void Close (vlc_object_t *);
+@@ -77,6 +87,22 @@ static const char *const channels_text[]
+     N_("Surround 5.0"), N_("Surround 5.1"), N_("Surround 7.1"),
+ };
+ 
++#define PASSTHROUGH_NAME "alsa-passthrough"
++#define PASSTHROUGH_TEXT N_("Audio passthrough mode")
++#define PASSTHROUGH_LONGTEXT N_("Audio passthrough mode. Defaults to 0 (none)")
++static const int passthrough_modes[] = {
++    PASSTHROUGH_UNSET, PASSTHROUGH_NONE, PASSTHROUGH_SPDIF, PASSTHROUGH_HDMI,
++};
++static const char *const passthrough_modes_text[] = {
++    N_("unset"), N_("none"), N_("S/PDIF"), N_("HDMI"),
++};
++
++#define PASSTHROUGH_TYPES_NAME "alsa-passthrough-types"
++#define PASSTHROUGH_TYPES_TEXT "List of codecs to accept for passthrough"
++#define PASSTHROUGH_TYPES_LONGTEXT "List of codecs to accept for passthrough, comma separated. Default is to try everything."\
++    "If this option is given then " PASSTHROUGH_NAME " defaults to HDMI"
++
++
+ vlc_module_begin ()
+     set_shortname( "ALSA" )
+     set_description( N_("ALSA audio output") )
+@@ -88,12 +114,85 @@ vlc_module_begin ()
+     add_integer ("alsa-audio-channels", AOUT_CHANS_FRONT,
+                  AUDIO_CHAN_TEXT, AUDIO_CHAN_LONGTEXT, false)
+         change_integer_list (channels, channels_text)
++    add_integer (PASSTHROUGH_NAME, PASSTHROUGH_UNSET, PASSTHROUGH_TEXT,
++                 PASSTHROUGH_LONGTEXT, false)
++        change_integer_list (passthrough_modes, passthrough_modes_text)
++    add_string(PASSTHROUGH_TYPES_NAME, NULL, PASSTHROUGH_TYPES_TEXT,
++               PASSTHROUGH_TYPES_LONGTEXT, false)
+     add_sw_gain ()
+     set_capability( "audio output", 150 )
+     set_callbacks( Open, Close )
+ vlc_module_end ()
+ 
+ 
++static vlc_fourcc_t * parse_passthrough(audio_output_t * const aout, const char * const str)
++{
++    const char * p = str;
++    size_t n = 2;
++    vlc_fourcc_t * rv = NULL;
++    vlc_fourcc_t * f;
++
++    if (str == NULL)
++        return NULL;
++
++    while (*p != '\0')
++        if (*p++ == ',')
++            ++n;
++
++    rv = malloc(sizeof(vlc_fourcc_t) * n);
++    if (rv == NULL)
++        return NULL;
++    f = rv;
++
++    if (strcasecmp(str, "none") == 0)
++        goto done;
++
++    for (p = str; *p != 0;)
++    {
++        unsigned int i;
++        const char *c = strchrnul(p, ',');
++        vlc_fourcc_t fcc = 0;
++
++        static const struct {
++            const char * str;
++            vlc_fourcc_t val;
++        } codecs[] = {
++            {.str = "truehd", .val = VLC_CODEC_TRUEHD },
++            {.str = "mlp",    .val = VLC_CODEC_MLP },
++            {.str = "dts",    .val = VLC_CODEC_DTS },
++            {.str = "dtshd",  .val = VLC_CODEC_DTS },
++            {.str = "ac3",    .val = VLC_CODEC_A52 },
++            {.str = "ac-3",   .val = VLC_CODEC_A52 },
++            {.str = "eac3",   .val = VLC_CODEC_EAC3 },
++            {.str = "eac-3",  .val = VLC_CODEC_EAC3 },
++            {.str = "all",    .val = VLC_CODEC_UNKNOWN },
++        };
++
++        for (i = 0; i != ARRAY_SIZE(codecs); ++i)
++        {
++            if (strncasecmp(p, codecs[i].str, c - p) == 0)
++            {
++                fcc = codecs[i].val;
++                break;
++            }
++        }
++
++        if (fcc != 0)
++            *f++ = fcc;
++        else
++            msg_Warn(aout, "Unknown codec type '%.*s'", (int)(c - p), p);
++
++        if (*c == 0)
++            break;
++
++        p = c + 1;
++    }
++
++done:
++    *f = 0;
++    return rv;
++}
++
+ /** Helper for ALSA -> VLC debugging output */
+ static void Dump (vlc_object_t *obj, const char *msg,
+                   int (*cb)(void *, snd_output_t *), void *p)
+@@ -285,11 +384,20 @@ static int Start (audio_output_t *aout,
+ {
+     aout_sys_t *sys = aout->sys;
+     snd_pcm_format_t pcm_format; /* ALSA sample format */
+-    bool spdif = false;
++    unsigned channels;
++    int passthrough = PASSTHROUGH_NONE;
++    snd_pcm_uframes_t periodSizeMax;
++    snd_pcm_uframes_t periodSize;
++    snd_pcm_uframes_t bufferSize;
++    unsigned int req_rate = fmt->i_rate;
++    vlc_fourcc_t req_format = fmt->i_format;
++
++    msg_Dbg(aout, "Start: Format: %.4s, Chans: %d, Rate:%d", (char*)&fmt->i_format, aout_FormatNbChannels(fmt), fmt->i_rate);
+ 
+-    if (aout_FormatNbChannels(fmt) == 0)
++    if (aout_FormatNbChannels(fmt) == 0 && AOUT_FMT_LINEAR(fmt))
+         return VLC_EGENERIC;
+ 
++    sys->pause_bytes = 0;
+     switch (fmt->i_format)
+     {
+         case VLC_CODEC_FL64:
+@@ -308,36 +416,88 @@ static int Start (audio_output_t *aout,
+             pcm_format = SND_PCM_FORMAT_U8;
+             break;
+         default:
+-            if (AOUT_FMT_SPDIF(fmt))
+-                spdif = var_InheritBool (aout, "spdif");
+-            if (spdif)
++            if (AOUT_FMT_SPDIF(fmt) || AOUT_FMT_HDMI(fmt))
+             {
+-                fmt->i_format = VLC_CODEC_SPDIFL;
++                if (sys->passthrough_types != NULL)
++                {
++                    // VLC_CODEC_UNKNOWN used as explicit "all"
++                    const vlc_fourcc_t *p;
++                    for (p = sys->passthrough_types; *p != 0 || *p == VLC_CODEC_UNKNOWN; ++p)
++                        if (*p == fmt->i_format)
++                            break;
++                    if (*p == 0)
++                    {
++                        msg_Dbg(aout, "Codec %.4s not in passthrough-types", (const char *)&fmt->i_format);
++                        return VLC_EGENERIC;
++                    }
++                }
++
++                passthrough = var_InheritInteger(aout, PASSTHROUGH_NAME);
++                // Explicit passthrough will override spdif
++                if (passthrough == PASSTHROUGH_UNSET)
++                    passthrough =
++                        var_InheritBool(aout, "spdif") ? PASSTHROUGH_SPDIF :
++                        sys->passthrough_types != NULL ? PASSTHROUGH_HDMI : PASSTHROUGH_NONE;
++                msg_Dbg(aout, "Passthrough %d for format %4.4s", passthrough, (const char *)&fmt->i_format);
++            }
++
++            if (passthrough != PASSTHROUGH_NONE)
++            {
++                req_format = VLC_CODEC_SPDIFL;
+                 pcm_format = SND_PCM_FORMAT_S16;
++                sys->pause_bytes = 3 * 4;
++                channels    = 2;
++
++                switch (fmt->i_format) {
++                    case VLC_CODEC_MLP:
++                    case VLC_CODEC_TRUEHD:
++                        sys->pause_bytes = 4 * 4;
++                        req_rate   = fmt->i_rate * 4;
++                        channels   = 8;
++                        break;
++
++                    case VLC_CODEC_DTS:
++                    {
++                        if (passthrough == PASSTHROUGH_SPDIF)
++                            break;
++                        req_rate   = 192000;
++                        channels   = 8;
++                        break;
++                    }
++
++                    case VLC_CODEC_EAC3:
++                        sys->pause_bytes = 4 * 4;
++                        req_rate   = fmt->i_rate * 4;
++                        break;
++
++                    default:
++                        break;
++                }
+             }
+             else
+             if (HAVE_FPU)
+             {
+-                fmt->i_format = VLC_CODEC_FL32;
++                req_format = VLC_CODEC_FL32;
+                 pcm_format = SND_PCM_FORMAT_FLOAT;
+             }
+             else
+             {
+-                fmt->i_format = VLC_CODEC_S16N;
++                req_format = VLC_CODEC_S16N;
+                 pcm_format = SND_PCM_FORMAT_S16;
+             }
++            break;
+     }
+ 
+     const char *device = sys->device;
+ 
+     /* Choose the IEC device for S/PDIF output */
+     char sep = '\0';
+-    if (spdif)
++    if (passthrough != PASSTHROUGH_NONE)
+     {
+         const char *opt = NULL;
+ 
+         if (!strcmp (device, "default"))
+-            device = "iec958"; /* TODO: hdmi */
++            device = (passthrough == PASSTHROUGH_HDMI) ? "hdmi" : "iec958";
+ 
+         if (!strncmp (device, "iec958", 6))
+             opt = device + 6;
+@@ -364,8 +524,12 @@ static int Start (audio_output_t *aout,
+             FS( 44100) /* def. */ FS( 48000) FS( 32000)
+             FS( 22050)            FS( 24000)
+             FS( 88200) FS(768000) FS( 96000)
+-            FS(176400)            FS(192000)
++            FS(176400)
+ #undef FS
++            case 192000:
++                aes3 = (passthrough == PASSTHROUGH_HDMI && channels == 8) ?
++                    IEC958_AES3_CON_FS_768000 : IEC958_AES3_CON_FS_192000;
++                break;
+             default:
+                 aes3 = IEC958_AES3_CON_FS_NOTID;
+                 break;
+@@ -430,21 +594,27 @@ static int Start (audio_output_t *aout,
+     if (snd_pcm_hw_params_test_format (pcm, hw, pcm_format) == 0)
+         ;
+     else
+-    if (snd_pcm_hw_params_test_format (pcm, hw, SND_PCM_FORMAT_FLOAT) == 0)
++    if (passthrough != PASSTHROUGH_NONE)
+     {
+-        fmt->i_format = VLC_CODEC_FL32;
++        msg_Warn(aout, "Failed to set required passthrough format");
++        goto error;
++    }
++    else
++    if (snd_pcm_hw_params_test_format(pcm, hw, SND_PCM_FORMAT_FLOAT) == 0)
++    {
++        req_format = VLC_CODEC_FL32;
+         pcm_format = SND_PCM_FORMAT_FLOAT;
+     }
+     else
+     if (snd_pcm_hw_params_test_format (pcm, hw, SND_PCM_FORMAT_S32) == 0)
+     {
+-        fmt->i_format = VLC_CODEC_S32N;
++        req_format = VLC_CODEC_S32N;
+         pcm_format = SND_PCM_FORMAT_S32;
+     }
+     else
+     if (snd_pcm_hw_params_test_format (pcm, hw, SND_PCM_FORMAT_S16) == 0)
+     {
+-        fmt->i_format = VLC_CODEC_S16N;
++        req_format = VLC_CODEC_S16N;
+         pcm_format = SND_PCM_FORMAT_S16;
+     }
+     else
+@@ -459,10 +629,10 @@ static int Start (audio_output_t *aout,
+         msg_Err (aout, "cannot set sample format: %s", snd_strerror (val));
+         goto error;
+     }
++    sys->format = req_format;
+ 
+     /* Set channels count */
+-    unsigned channels;
+-    if (!spdif)
++    if (passthrough == PASSTHROUGH_NONE)
+     {
+         uint16_t map = var_InheritInteger (aout, "alsa-audio-channels");
+ 
+@@ -474,7 +644,6 @@ static int Start (audio_output_t *aout,
+     else
+     {
+         sys->chans_to_reorder = 0;
+-        channels = 2;
+     }
+ 
+     /* By default, ALSA plug will pad missing channels with zeroes, which is
+@@ -490,14 +659,26 @@ static int Start (audio_output_t *aout,
+     }
+ 
+     /* Set sample rate */
+-    val = snd_pcm_hw_params_set_rate_near (pcm, hw, &fmt->i_rate, NULL);
++    sys->rate = req_rate;
++    val = snd_pcm_hw_params_set_rate_near (pcm, hw, &sys->rate, NULL);
+     if (val)
+     {
+         msg_Err (aout, "cannot set sample rate: %s", snd_strerror (val));
+         goto error;
+     }
+-    sys->rate = fmt->i_rate;
++    if (passthrough != PASSTHROUGH_NONE && sys->rate != req_rate)
++    {
++        msg_Warn(aout, "Passthrough requires rate %d, got %d", req_rate, sys->rate);
++        goto error;
++    }
++
++    bufferSize    = req_rate / 10;  // 100ms - bigger than this & truehd goes unhappy?
++    periodSize    = bufferSize / 4;
++    periodSizeMax = bufferSize / 3;
++    snd_pcm_hw_params_set_period_size_max(pcm, hw, &periodSizeMax, NULL);
+ 
++    snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &bufferSize);
++    snd_pcm_hw_params_set_period_size_near(pcm, hw, &periodSize, NULL);
+ #if 1 /* work-around for period-long latency outputs (e.g. PulseAudio): */
+     param = AOUT_MIN_PREPARE_TIME;
+     val = snd_pcm_hw_params_set_period_time_near (pcm, hw, &param, NULL);
+@@ -579,13 +760,12 @@ static int Start (audio_output_t *aout,
+     }
+ 
+     /* Setup audio_output_t */
+-    if (spdif)
+-    {
+-        fmt->i_bytes_per_frame = AOUT_SPDIF_SIZE;
+-        fmt->i_frame_length = A52_FRAME_NB;
+-    }
++    fmt->i_frame_length = 1;
++    fmt->i_bytes_per_frame = snd_pcm_frames_to_bytes(pcm, fmt->i_frame_length);
++    fmt->i_channels = channels;
++    fmt->i_rate = sys->rate;
++    fmt->i_format = sys->format;
+     fmt->channel_type = AUDIO_CHANNEL_TYPE_BITMAP;
+-    sys->format = fmt->i_format;
+ 
+     aout->time_get = TimeGet;
+     aout->play = Play;
+@@ -616,7 +796,7 @@ static int TimeGet (audio_output_t *aout
+         msg_Err (aout, "cannot estimate delay: %s", snd_strerror (val));
+         return -1;
+     }
+-    *delay = frames * CLOCK_FREQ / sys->rate;
++    *delay = (uint_fast64_t)frames * CLOCK_FREQ / sys->rate;
+     return 0;
+ }
+ 
+@@ -627,6 +807,29 @@ static void Play (audio_output_t *aout,
+ {
+     aout_sys_t *sys = aout->sys;
+ 
++#if TRACE_ALL
++    static mtime_t last_pts = 0;
++    msg_Dbg(aout, "<<< %s: PTS: %"PRId64" samples: %u, bytes: %zu, delta: %"PRId64, __func__,
++            block->i_pts, block->i_nb_samples, block->i_buffer,
++            block->i_pts - last_pts);
++    last_pts = block->i_pts;
++#endif
++
++    // S/pdif packets always start with sync so if no sync then this must
++    // be a padding buffer
++    if (sys->pause_bytes != 0 && block->p_buffer[0] == 0)
++    {
++        static const uint8_t pause_le[16] = {0x72, 0xf8, 0x1f, 0x4e, 3, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0};
++        static const uint8_t pause_be[16] = {0xf8, 0x72, 0x4e, 0x1f, 0, 3, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0};
++        const uint8_t *const pause = sys->format == VLC_CODEC_SPDIFB ? pause_be : pause_le;
++        size_t n = block->i_buffer / sys->pause_bytes;
++        size_t i;
++
++        msg_Dbg(aout, "Silence detected");
++        for (i = 0; i != n; ++i)
++            memcpy(block->p_buffer + i * sys->pause_bytes, pause, sys->pause_bytes);
++    }
++
+     if (sys->chans_to_reorder != 0)
+         aout_ChannelReorder(block->p_buffer, block->i_buffer,
+                            sys->chans_to_reorder, sys->chans_table, sys->format);
+@@ -792,7 +995,7 @@ static int DeviceSelect (audio_output_t
+ static int Open(vlc_object_t *obj)
+ {
+     audio_output_t *aout = (audio_output_t *)obj;
+-    aout_sys_t *sys = malloc (sizeof (*sys));
++    aout_sys_t *sys = calloc (1, sizeof (*sys));
+ 
+     if (unlikely(sys == NULL))
+         return VLC_ENOMEM;
+@@ -822,6 +1025,12 @@ static int Open(vlc_object_t *obj)
+         free (ids);
+     }
+ 
++    {
++        const char *types = var_InheritString(aout, PASSTHROUGH_TYPES_NAME);
++        sys->passthrough_types = parse_passthrough(aout, types);
++        free((void *)types);
++    }
++
+     return VLC_SUCCESS;
+ error:
+     free (sys);
+@@ -833,6 +1042,7 @@ static void Close(vlc_object_t *obj)
+     audio_output_t *aout = (audio_output_t *)obj;
+     aout_sys_t *sys = aout->sys;
+ 
++    free (sys->passthrough_types);
+     free (sys->device);
+     free (sys);
+ }
 --- a/modules/codec/Makefile.am
 +++ b/modules/codec/Makefile.am
 @@ -373,6 +373,7 @@ libavcodec_plugin_la_SOURCES = \
@@ -390,7 +845,17 @@
  struct decoder_sys_t
  {
      AVCodecContext *p_context;
-@@ -88,6 +99,7 @@ struct decoder_sys_t
+@@ -59,6 +70,9 @@ struct decoder_sys_t
+     /* Video decoder specific part */
+     date_t  pts;
+ 
++    mtime_t dts0;
++    bool dts0_used;
++
+     /* Closed captions for decoders */
+     cc_data_t cc;
+ 
+@@ -88,6 +102,7 @@ struct decoder_sys_t
      /* VA API */
      vlc_va_t *p_va;
      enum PixelFormat pix_fmt;
@@ -398,7 +863,7 @@
      int profile;
      int level;
  
-@@ -356,6 +368,13 @@ static int lavc_CopyPicture(decoder_t *d
+@@ -356,6 +371,13 @@ static int lavc_CopyPicture(decoder_t *d
  {
      decoder_sys_t *sys = dec->p_sys;
  
@@ -412,7 +877,7 @@
      vlc_fourcc_t fourcc = FindVlcChroma(frame->format);
      if (!fourcc)
      {
-@@ -417,6 +436,7 @@ static int OpenVideoCodec( decoder_t *p_
+@@ -417,6 +439,7 @@ static int OpenVideoCodec( decoder_t *p_
  
      ctx->bits_per_coded_sample = p_dec->fmt_in.video.i_bits_per_pixel;
      p_sys->pix_fmt = AV_PIX_FMT_NONE;
@@ -420,7 +885,7 @@
      p_sys->profile = -1;
      p_sys->level = -1;
      cc_Init( &p_sys->cc );
-@@ -458,17 +478,37 @@ static int OpenVideoCodec( decoder_t *p_
+@@ -458,17 +481,37 @@ static int OpenVideoCodec( decoder_t *p_
      return 0;
  }
  
@@ -460,7 +925,16 @@
      if( p_context == NULL )
          return VLC_EGENERIC;
  
-@@ -649,6 +689,27 @@ int InitVideoDec( vlc_object_t *obj )
+@@ -603,6 +646,8 @@ int InitVideoDec( vlc_object_t *obj )
+     /* ***** misc init ***** */
+     date_Init(&p_sys->pts, 1, 30001);
+     date_Set(&p_sys->pts, VLC_TS_INVALID);
++    p_sys->dts0 = VLC_TS_INVALID;
++    p_sys->dts0_used = false;
+     p_sys->b_first_frame = true;
+     p_sys->i_late_frames = 0;
+     p_sys->b_from_preroll = false;
+@@ -649,6 +694,27 @@ int InitVideoDec( vlc_object_t *obj )
      return VLC_SUCCESS;
  }
  
@@ -488,7 +962,54 @@
  /*****************************************************************************
   * Flush:
   *****************************************************************************/
-@@ -1183,9 +1244,10 @@ static picture_t *DecodeBlock( decoder_t
+@@ -658,6 +724,8 @@ static void Flush( decoder_t *p_dec )
+     AVCodecContext *p_context = p_sys->p_context;
+ 
+     date_Set(&p_sys->pts, VLC_TS_INVALID); /* To make sure we recover properly */
++    p_sys->dts0 = VLC_TS_INVALID;
++    p_sys->dts0_used = false;
+     p_sys->i_late_frames = 0;
+     p_sys->b_draining = false;
+     cc_Flush( &p_sys->cc );
+@@ -685,6 +753,8 @@ static bool check_block_validity( decode
+     if( block->i_flags & (BLOCK_FLAG_DISCONTINUITY|BLOCK_FLAG_CORRUPTED) )
+     {
+         date_Set( &p_sys->pts, VLC_TS_INVALID ); /* To make sure we recover properly */
++        p_sys->dts0 = VLC_TS_INVALID;
++        p_sys->dts0_used = false;
+         cc_Flush( &p_sys->cc );
+ 
+         p_sys->i_late_frames = 0;
+@@ -1025,6 +1095,10 @@ static picture_t *DecodeBlock( decoder_t
+             }
+             if( b_has_data )
+             {
++                /* Remember 1st DTS in case we need to invent a timebase */
++                if (p_sys->dts0 <= VLC_TS_INVALID)
++                    p_sys->dts0 = p_block->i_dts;
++
+                 pkt->data = p_block->p_buffer;
+                 pkt->size = p_block->i_buffer;
+                 pkt->pts = p_block->i_pts > VLC_TS_INVALID ? p_block->i_pts : AV_NOPTS_VALUE;
+@@ -1131,6 +1205,17 @@ static picture_t *DecodeBlock( decoder_t
+         if( i_pts == AV_NOPTS_VALUE )
+             i_pts = date_Get( &p_sys->pts );
+ 
++        /* VLC doesn't like having no pts - but a simple timestamp at the
++         * start of time is all that is needed to get it going - pick the
++         * first dts we saw as being in the right general area */
++        if (i_pts > VLC_TS_INVALID)
++            p_sys->dts0_used = true;
++        else if (p_sys->dts0 > VLC_TS_INVALID && !p_sys->dts0_used)
++        {
++            i_pts = p_sys->dts0;
++            p_sys->dts0_used = true;
++        }
++
+         /* Interpolate the next PTS */
+         if( i_pts > VLC_TS_INVALID )
+             date_Set( &p_sys->pts, i_pts );
+@@ -1183,9 +1268,10 @@ static picture_t *DecodeBlock( decoder_t
          {   /* When direct rendering is not used, get_format() and get_buffer()
               * might not be called. The output video format must be set here
               * then picture buffer can be allocated. */
@@ -501,7 +1022,7 @@
                  p_pic = decoder_NewPicture(p_dec);
  
              if( !p_pic )
-@@ -1538,7 +1600,7 @@ static enum PixelFormat ffmpeg_GetFormat
+@@ -1538,7 +1624,7 @@ static enum PixelFormat ffmpeg_GetFormat
      video_format_t fmt;
  
      /* Enumerate available formats */
@@ -510,7 +1031,7 @@
      bool can_hwaccel = false;
  
      for (size_t i = 0; pi_fmt[i] != AV_PIX_FMT_NONE; i++)
-@@ -1561,7 +1623,7 @@ static enum PixelFormat ffmpeg_GetFormat
+@@ -1561,7 +1647,7 @@ static enum PixelFormat ffmpeg_GetFormat
       * existing output format, and if present, hardware acceleration back-end.
       * This avoids resetting the pipeline downstream. This also avoids
       * needlessly probing for hardware acceleration support. */
@@ -519,7 +1040,7 @@
       {
           msg_Dbg(p_dec, "get format failed");
           goto no_reuse;
-@@ -1583,7 +1645,7 @@ static enum PixelFormat ffmpeg_GetFormat
+@@ -1583,7 +1669,7 @@ static enum PixelFormat ffmpeg_GetFormat
       for (size_t i = 0; pi_fmt[i] != AV_PIX_FMT_NONE; i++)
          if (pi_fmt[i] == p_sys->pix_fmt)
          {
@@ -528,7 +1049,7 @@
              {
                  msg_Dbg(p_dec, "reusing decoder output format %d", pi_fmt[i]);
                  return p_sys->pix_fmt;
-@@ -1602,7 +1664,7 @@ no_reuse:
+@@ -1602,7 +1688,7 @@ no_reuse:
      p_sys->level = p_context->level;
  
      if (!can_hwaccel)
@@ -537,7 +1058,7 @@
  
  #if (LIBAVCODEC_VERSION_MICRO >= 100) \
    && (LIBAVCODEC_VERSION_INT < AV_VERSION_INT(57, 83, 101))
-@@ -1610,7 +1672,7 @@ no_reuse:
+@@ -1610,7 +1696,7 @@ no_reuse:
      {
          msg_Warn(p_dec, "thread type %d: disabling hardware acceleration",
                   p_context->active_thread_type);
@@ -546,7 +1067,7 @@
      }
  #endif
  
-@@ -1618,6 +1680,8 @@ no_reuse:
+@@ -1618,6 +1704,8 @@ no_reuse:
  
      static const enum PixelFormat hwfmts[] =
      {
@@ -555,7 +1076,7 @@
  #ifdef _WIN32
  #if LIBAVUTIL_VERSION_CHECK(54, 13, 1, 24, 100)
          AV_PIX_FMT_D3D11VA_VLD,
-@@ -1628,12 +1692,14 @@ no_reuse:
+@@ -1628,12 +1716,14 @@ no_reuse:
  #if (LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(52, 4, 0))
          AV_PIX_FMT_VDPAU,
  #endif
@@ -570,7 +1091,7 @@
          for( size_t j = 0; hwfmt == AV_PIX_FMT_NONE && pi_fmt[j] != AV_PIX_FMT_NONE; j++ )
              if( hwfmts[i] == pi_fmt[j] )
                  hwfmt = hwfmts[i];
-@@ -1641,6 +1707,14 @@ no_reuse:
+@@ -1641,6 +1731,14 @@ no_reuse:
          if( hwfmt == AV_PIX_FMT_NONE )
              continue;
  
@@ -585,7 +1106,7 @@
          p_dec->fmt_out.video.i_chroma = vlc_va_GetChroma(hwfmt, swfmt);
          if (p_dec->fmt_out.video.i_chroma == 0)
              continue; /* Unknown brand of hardware acceleration */
-@@ -1673,12 +1747,14 @@ no_reuse:
+@@ -1673,12 +1771,14 @@ no_reuse:
  
          p_sys->p_va = va;
          p_sys->pix_fmt = hwfmt;
@@ -611,6 +1132,15 @@
 +#include <QScreen>
  
  #include "qt.hpp"
+ 
+@@ -284,7 +285,7 @@ vlc_module_begin ()
+     add_string( "qt-slider-colours", "153;210;153;20;210;20;255;199;15;245;39;29",
+                 SLIDERCOL_TEXT, SLIDERCOL_LONGTEXT, false )
+ 
+-    add_bool( "qt-privacy-ask", true, PRIVACY_TEXT, PRIVACY_TEXT,
++    add_bool( "qt-privacy-ask", false, PRIVACY_TEXT, PRIVACY_TEXT,
+               false )
+         change_private ()
  
 @@ -529,6 +530,22 @@ static void *ThreadPlatform( void *obj,
      QApplication::setAttribute( Qt::AA_UseHighDpiPixmaps );
@@ -15034,7 +15564,7 @@
 +
 --- /dev/null
 +++ b/modules/hw/mmal/xsplitter.c
-@@ -0,0 +1,649 @@
+@@ -0,0 +1,662 @@
 +#ifdef HAVE_CONFIG_H
 +#include "config.h"
 +#endif
@@ -15048,6 +15578,11 @@
 +#include <vlc_modules.h>
 +
 +#define TRACE_ALL 0
++
++// If set will reduce requested size on X
++// A good idea if we have h/w scaler before X
++// as it limits the work needed by GL but a disaster if we don't
++#define LIMIT_X_PELS 0
 +
 +#define VOUT_DISPLAY_CHANGE_MMAL_BASE 1024
 +#define VOUT_DISPLAY_CHANGE_MMAL_HIDE (VOUT_DISPLAY_CHANGE_MMAL_BASE + 0)
@@ -15111,6 +15646,7 @@
 +}
 +#endif
 +
++#if LIMIT_X_PELS
 +static const uint16_t sqrt_tab[64] = {
 +    [ 0]=58617, [ 1]=53510, [ 2]=49541, [ 3]=46341,
 +    [ 4]=43691, [ 5]=41449, [ 6]=39520, [ 7]=37837,
@@ -15130,11 +15666,17 @@
 +    [60]=16257, [61]=16134, [62]=16013, [63]=15895
 +};
 +#define SQRT_MAX (sizeof(sqrt_tab)/sizeof(sqrt_tab[0]) - 1)
++#endif
 +
 +static bool cpy_fmt_limit_size(const display_desc_t * const dd,
 +                           video_format_t * const dst,
 +                           const video_format_t * const src)
 +{
++#if !LIMIT_X_PELS
++    VLC_UNUSED(dd);
++    *dst = *src;
++    return false;
++#else
 +    const unsigned int src_pel = src->i_visible_width * src->i_visible_height;
 +
 +    *dst = *src;
@@ -15163,6 +15705,7 @@
 +    dst->i_height         = height;
 +    dst->i_visible_height = height;
 +    return true;
++#endif
 +}
 +
 +static void unload_display_module(vout_display_t * const x_vout)
@@ -15261,7 +15804,7 @@
 +
 +    if ((x_vout->module = module_need(x_vout, cap, module_name, true)) == NULL)
 +    {
-+        msg_Err(vd, "Failed to open Xsplitter:%s module", module_name);
++        msg_Dbg(vd, "Failed to open Xsplitter:%s module", module_name);
 +        goto fail;
 +    }
 +
@@ -15617,7 +16160,7 @@
 +    sys->cur_desc = wanted_display(vd, sys);
 +    if (sys->cur_desc == NULL) {
 +        char dbuf0[5], dbuf1[5];
-+        msg_Info(vd, "No valid output found for vout (%s/%s)", str_fourcc(dbuf0, vd->fmt.i_chroma), str_fourcc(dbuf1, vd->source.i_chroma));
++        msg_Warn(vd, "No valid output found for vout (%s/%s)", str_fourcc(dbuf0, vd->fmt.i_chroma), str_fourcc(dbuf1, vd->source.i_chroma));
 +        goto fail;
 +    }
 +
@@ -15717,9 +16260,9 @@
  libwl_shm_plugin_la_SOURCES = video_output/wayland/shm.c
 --- /dev/null
 +++ b/modules/video_output/drmu/drm_vout.c
-@@ -0,0 +1,1033 @@
+@@ -0,0 +1,1040 @@
 +/*****************************************************************************
-+ * mmal.c: MMAL-based vout plugin for Raspberry Pi
++ * drm_vout.c: DRM based output device
 + *****************************************************************************
 + * Copyright © 2014 jusst technologies GmbH
 + *
@@ -15855,7 +16398,7 @@
 +    int i;
 +
 +    if (drm_fmt == 0) {
-+        msg_Warn(vd, "Failed drm format copy_pic: %#x", src->format.i_chroma);
++        msg_Warn(vd, "Failed vlc->drm format for copy_pic: %s", drmu_log_fourcc(src->format.i_chroma));
 +        return NULL;
 +    }
 +
@@ -16350,6 +16893,52 @@
 +    return sys->vlc_pic_pool;
 +}
 +
++// Copy format from *fmtp into vd->fmt and make any necessary adjustments to
++// ensure display (tweak chroma)
++static void
++set_format(vout_display_t * const vd, vout_display_sys_t * const sys, const video_format_t *const fmtp)
++{
++#if HAS_DRMPRIME
++    uint32_t drm_fmt;
++    uint64_t drm_mod;
++
++    // We think we can deal with the source format so set requested
++    // input format to source
++    vd->fmt = *fmtp;
++
++    if ((drm_fmt = drmu_format_vlc_to_drm_prime(fmtp->i_chroma, &drm_mod)) != 0 &&
++        drmu_plane_format_check(sys->dp, drm_fmt, drm_mod)) {
++        // Hurrah!
++    }
++    else
++#endif
++#if HAS_ZC_CMA
++    if (fmtp->i_chroma == VLC_CODEC_MMAL_OPAQUE) {
++        // Can't deal directly with opaque - but we can always convert it to ZC I420
++        vd->fmt.i_chroma = VLC_CODEC_MMAL_ZC_I420;
++    }
++    else
++#endif
++    if ((drm_fmt = drmu_format_vlc_to_drm(fmtp)) != 0 &&
++        drmu_plane_format_check(sys->dp, drm_fmt, 0)) {
++        // It is a format where simple byte copying works
++    }
++    else {
++        const vlc_fourcc_t *fallback = vlc_fourcc_IsYUV(fmtp->i_chroma) ?
++            vlc_fourcc_GetYUVFallback(fmtp->i_chroma) :
++            vlc_fourcc_GetRGBFallback(fmtp->i_chroma);
++
++        for (; *fallback; ++fallback) {
++            if (drmu_plane_format_check(sys->dp, drmu_format_vlc_chroma_to_drm(*fallback), 0))
++                break;
++        }
++
++        // no conversion - ask for something we know we can deal with
++        vd->fmt.i_chroma = *fallback ? *fallback : VLC_CODEC_I420;
++    }
++}
++
++
 +static int vd_drm_control(vout_display_t *vd, int query, va_list args)
 +{
 +    vout_display_sys_t * const sys = vd->sys;
@@ -16376,8 +16965,7 @@
 +        case VOUT_DISPLAY_RESET_PICTURES:
 +            msg_Warn(vd, "Reset Pictures");
 +            kill_pool(sys);
-+            vd->fmt = vd->source; // Take (nearly) whatever source wants to give us
-+//            vd->fmt.i_chroma = req_chroma(vd);  // Adjust chroma to something we can actaully deal with
++            set_format(vd, sys, &vd->source);
 +            ret = VLC_SUCCESS;
 +            break;
 +
@@ -16658,46 +17246,8 @@
 +        }
 +    }
 +
-+    {
-+#if HAS_DRMPRIME
-+        uint32_t drm_fmt;
-+        uint64_t drm_mod;
++    set_format(vd, sys, fmtp);
 +
-+        // We think we can deal with the source format so set requested
-+        // input format to source
-+        vd->fmt = *fmtp;
-+
-+        if ((drm_fmt = drmu_format_vlc_to_drm_prime(fmtp->i_chroma, &drm_mod)) != 0 &&
-+            drmu_plane_format_check(sys->dp, drm_fmt, drm_mod)) {
-+            // Hurrah!
-+        }
-+        else
-+#endif
-+#if HAS_ZC_CMA
-+        if (fmtp->i_chroma == VLC_CODEC_MMAL_OPAQUE) {
-+            // Can't deal directly with opaque - but we can always convert it to ZC I420
-+            vd->fmt.i_chroma = VLC_CODEC_MMAL_ZC_I420;
-+        }
-+        else
-+#endif
-+        if ((drm_fmt = drmu_format_vlc_to_drm(fmtp)) != 0 &&
-+            drmu_plane_format_check(sys->dp, drm_fmt, 0)) {
-+            // It is a format where simple byte copying works
-+        }
-+        else {
-+            const vlc_fourcc_t *fallback = vlc_fourcc_IsYUV(fmtp->i_chroma) ?
-+                vlc_fourcc_GetYUVFallback(fmtp->i_chroma) :
-+                vlc_fourcc_GetRGBFallback(fmtp->i_chroma);
-+
-+            for (; *fallback; ++fallback) {
-+                if (drmu_plane_format_check(sys->dp, drmu_format_vlc_chroma_to_drm(*fallback), 0))
-+                    break;
-+            }
-+
-+            // no conversion - ask for something we know we can deal with
-+            vd->fmt.i_chroma = *fallback ? *fallback : VLC_CODEC_I420;
-+        }
-+    }
 +//    vout_display_SetSizeAndSar(vd, drmu_crtc_width(sys->dc), drmu_crtc_height(sys->dc),
 +//                               drmu_ufrac_vlc_to_rational(drmu_crtc_sar(sys->dc)));
 +
@@ -24647,6 +25197,48 @@
      set_callbacks (OpenGLES2, Close)
      add_shortcut ("egl")
  
+--- a/src/audio_output/dec.c
++++ b/src/audio_output/dec.c
+@@ -217,20 +217,27 @@ static void aout_DecSilence (audio_outpu
+ {
+     aout_owner_t *owner = aout_owner (aout);
+     const audio_sample_format_t *fmt = &owner->mixer_format;
+-    size_t frames = (fmt->i_rate * length) / CLOCK_FREQ;
++    size_t frame_count = (fmt->i_rate * length) / CLOCK_FREQ;
+ 
+-    block_t *block = block_Alloc (frames * fmt->i_bytes_per_frame
+-                                  / fmt->i_frame_length);
+-    if (unlikely(block == NULL))
+-        return; /* uho! */
++    msg_Dbg (aout, "inserting %zu zero frames", frame_count);
++    while (frame_count != 0)
++    {
++        // Block into something that has a multiple of 3 in case this is spdif
++        // and we are going to substitute with pause blocks with a rep count of 3
++        const size_t frames = frame_count > 3072 ? 3072 : frame_count;
++        block_t *block = block_Alloc((size_t)((uint_fast64_t)frames * fmt->i_bytes_per_frame
++                                      / fmt->i_frame_length));
++        if (unlikely(block == NULL))
++            return; /* uho! */
+ 
+-    msg_Dbg (aout, "inserting %zu zeroes", frames);
+-    memset (block->p_buffer, 0, block->i_buffer);
+-    block->i_nb_samples = frames;
+-    block->i_pts = pts;
+-    block->i_dts = pts;
+-    block->i_length = length;
+-    aout_OutputPlay (aout, block);
++        memset (block->p_buffer, 0, block->i_buffer);
++        block->i_nb_samples = frames;
++        block->i_pts = pts;
++        block->i_dts = pts;
++        block->i_length = length;
++        aout_OutputPlay (aout, block);
++        frame_count -= frames;
++    }
+ }
+ 
+ static void aout_DecSynchronize (audio_output_t *aout, mtime_t dec_pts,
 --- a/src/input/decoder.c
 +++ b/src/input/decoder.c
 @@ -2000,6 +2000,7 @@ void input_DecoderDelete( decoder_t *p_d
@@ -24759,46 +25351,3 @@
  
      assert( p_dst->context == NULL );
  
---- a/src/video_output/display.c
-+++ b/src/video_output/display.c
-@@ -226,9 +226,9 @@ void vout_display_PlacePicture(vout_disp
-     const unsigned width  = source->i_visible_width;
-     const unsigned height = source->i_visible_height;
-     /* Compute the height if we use the width to fill up display_width */
--    const int64_t scaled_height = (int64_t)height * display_width  * cfg->display.sar.num * source->i_sar_den / (width  * source->i_sar_num * cfg->display.sar.den);
-+    const int64_t scaled_height = ((int64_t)height * display_width  * cfg->display.sar.num * source->i_sar_den + (width  * source->i_sar_num * cfg->display.sar.den)/2) / (width  * source->i_sar_num * cfg->display.sar.den);
-     /* And the same but switching width/height */
--    const int64_t scaled_width  = (int64_t)width  * display_height * cfg->display.sar.den * source->i_sar_num / (height * source->i_sar_den * cfg->display.sar.num);
-+    const int64_t scaled_width  = ((int64_t)width  * display_height * cfg->display.sar.den * source->i_sar_num + (height * source->i_sar_den * cfg->display.sar.num)/2) / (height * source->i_sar_den * cfg->display.sar.num);
- 
-     if (source->projection_mode == PROJECTION_MODE_RECTANGULAR) {
-         /* We keep the solution that avoid filling outside the display */
---- a/src/video_output/video_output.c
-+++ b/src/video_output/video_output.c
-@@ -964,6 +964,17 @@ static picture_t *ConvertRGB32AndBlend(v
-     return NULL;
- }
- 
-+
-+static inline bool is_zc_chroma(const vlc_fourcc_t i_chroma)
-+{
-+    return i_chroma == VLC_CODEC_MMAL_OPAQUE ||
-+        i_chroma == VLC_CODEC_MMAL_ZC_I420 ||
-+        i_chroma == VLC_CODEC_MMAL_ZC_RGB32 ||
-+        i_chroma == VLC_CODEC_MMAL_ZC_SAND10 ||
-+        i_chroma == VLC_CODEC_MMAL_ZC_SAND30 ||
-+        i_chroma == VLC_CODEC_MMAL_ZC_SAND8;
-+}
-+
- static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
- {
-     vout_thread_sys_t *sys = vout->p;
-@@ -1098,7 +1109,7 @@ static int ThreadDisplayRenderPicture(vo
-     }
- 
-     assert(vout_IsDisplayFiltered(vd) == !sys->display.use_dr);
--    if (sys->display.use_dr && !is_direct) {
-+    if (sys->display.use_dr && !is_direct && !is_zc_chroma(todisplay->format.i_chroma)) {
-         picture_t *direct = NULL;
-         if (likely(vout->p->display_pool != NULL))
-             direct = picture_pool_Get(vout->p->display_pool);
