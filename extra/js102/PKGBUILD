@@ -2,6 +2,7 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - configure with --disable-lto, --disable-rust-simd
+#  - remove PGO build
 
 pkgname=js102
 pkgver=102.15.0
@@ -84,42 +85,7 @@ build() {
   export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
   export MACH_USE_SYSTEM_PYTHON=1
 
-  # Do 3-tier PGO
-  echo "Building instrumented JS..."
-  cat >.mozconfig ../mozconfig - <<END
-ac_add_options --enable-profile-generate=cross
-END
-  ./mach build
-
-  echo "Profiling instrumented JS..."
-  (
-    local js="$PWD/obj/dist/bin/js"
-    export LLVM_PROFILE_FILE="$PWD/js-%p-%m.profraw"
-
-    cd js/src/octane
-    "$js" run.js
-
-    cd ../../../third_party/webkit/PerformanceTests/ARES-6
-    "$js" cli.js
-
-    cd ../SunSpider/sunspider-0.9.1
-    "$js" sunspider-standalone-driver.js
-  )
-
-  llvm-profdata merge -o merged.profdata *.profraw
-
-  stat -c "Profile data found (%s bytes)" merged.profdata
-  test -s merged.profdata
-
-  echo "Removing instrumented JS..."
-  ./mach clobber
-
-  echo "Building optimized JS..."
-  cat >.mozconfig ../mozconfig - <<END
-#ac_add_options --enable-lto=cross
-ac_add_options --enable-profile-use=cross
-ac_add_options --with-pgo-profile-path=${PWD@Q}/merged.profdata
-END
+  cat >.mozconfig ../mozconfig
   ./mach build
 }
 
