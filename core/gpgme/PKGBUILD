@@ -3,30 +3,42 @@
 # Contributor: Sarah Hay <sarah@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - comment touch on x86 python file
 #  - add -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 to v7 CPPFLAGS
 
 pkgbase=gpgme
-pkgname=(gpgme qgpgme python-gpgme)
-pkgver=1.18.0
+pkgname=(gpgme qgpgme-qt5 qgpgme-qt6 python-gpgme)
+pkgver=1.23.1
 pkgrel=1
-_python_ver=3.10
 pkgdesc='A C wrapper library for GnuPG'
 arch=('x86_64')
 url='https://www.gnupg.org/related_software/gpgme/'
 license=('LGPL')
-makedepends=('libgpg-error' 'gnupg' 'qt5-base' 'python' 'swig')
-options=('debug')
-validpgpkeys=('6DAA6E64A76D2840571B4902528897B826403ADA') # Werner Koch (dist signing 2020)
-source=("https://www.gnupg.org/ftp/gcrypt/${pkgbase}/${pkgbase}-${pkgver}.tar.bz2"{,.sig}
-        python310.patch)
-sha256sums=('361d4eae47ce925dba0ea569af40e7b52c645c4ae2e65e5621bf1b6cdd8b0e9e'
-            'SKIP'
-            '5de2f6bcb6b30642d0cbc3fbd86803c9460d732f44a526f44cedee8bb78d291a')
+makedepends=(
+  'gnupg'
+  'libgpg-error'
+  'python'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+  'qt5-base'
+  'qt6-base'
+  'swig'
+)
+validpgpkeys=('6DAA6E64A76D2840571B4902528897B826403ADA'  # Werner Koch (dist signing 2020)
+              'AC8E115BF73E2D8D47FA9908E98E9B2D19C6C8BD') # Niibe Yutaka (GnuPG Release Key)
+source=("https://www.gnupg.org/ftp/gcrypt/${pkgbase}/${pkgbase}-${pkgver}.tar.bz2"{,.sig})
+sha256sums=('a0c316f7ab7d3bfb01a8753c3370dc906e5b61436021f3b54ff1483b513769bd'
+            'SKIP')
 
 prepare() {
-  cd ${pkgbase}-${pkgver}
-  patch -Np1 -i ../python310.patch
+  cd ${pkgbase}-${pkgver}/
+
+  sed -i 's/-unknown//' autogen.sh
+  autoreconf -fi
+
+  # Building qt5 and qt6 bindings in the same source tree is not supported
+  cp -r ${srcdir}/${pkgbase}-${pkgver}{,-qt6}
 }
 
 build() {
@@ -40,12 +52,21 @@ build() {
     --disable-gpgsm-test
   make
 
-  # ensure reproducibility of .pyc files
-  touch -d @$SOURCE_DATE_EPOCH lang/python/version.py
-  #touch -d @$SOURCE_DATE_EPOCH lang/python/python${_python_ver}-gpg/lib.linux-x86_64-${_python_ver}/gpg/gpgme.py
+  (
+    # use a PEP517 workflow to get a reproducible Python package
+    # NOTE: top_builddir is required so that the build takes place against local gpgme, not system gpgme
+    cd lang/python/
+    top_builddir="$srcdir/$pkgbase-$pkgver" python -m build --wheel --no-isolation
+  )
 
-  # .pyc files will be created if check() is used - generate them here
-
+  cd ../${pkgbase}-${pkgver}-qt6
+  ./configure \
+    --prefix=/usr \
+    --disable-fd-passing \
+    --disable-static \
+    --disable-gpgsm-test \
+    --enable-languages=cpp,qt6
+  make
 }
 
 check() {
@@ -55,9 +76,6 @@ check() {
   sed -i 's#"t-keylist-secret",##' tests/json/t-json.c
 
   make check
-
-  # ensure reproducibilty whether test-suite is run or not
-  find . -name *.pyc -exec rm {} +
 }
 
 package_gpgme() {
@@ -71,18 +89,30 @@ package_gpgme() {
   make DESTDIR="${pkgdir}" install
 
   # split qgpgme
-  rm -r "${pkgdir}"/usr/include/{qgpgme,QGpgME}/
   rm -r "${pkgdir}"/usr/lib/{cmake/QGpgme/,libqgpgme.*}
   rm -r "${pkgdir}"/usr/lib/python*
 }
 
-package_qgpgme() {
-  pkgdesc="Qt bindings for GPGme"
+package_qgpgme-qt5() {
+  pkgdesc="Qt5 bindings for GPGme"
   depends=('gpgme' 'qt5-base')
+  provides=('qgpgme')
+  replaces=('qgpgme')
 
   cd ${pkgbase}-${pkgver}/lang/qt
 
   make DESTDIR="${pkgdir}" install
+  rm -r "${pkgdir}"/usr/include
+}
+
+package_qgpgme-qt6() {
+  pkgdesc="Qt6 bindings for GPGme"
+  depends=('gpgme' 'qt6-base')
+
+  cd ${pkgbase}-${pkgver}-qt6/lang/qt
+
+  make DESTDIR="${pkgdir}" install
+  rm -r "${pkgdir}"/usr/include
 }
 
 package_python-gpgme() {
@@ -90,5 +120,5 @@ package_python-gpgme() {
   depends=('gpgme' 'python')
 
   cd ${pkgbase}-${pkgver}/lang/python
-  make DESTDIR="${pkgdir}" install
+  python -m installer --destdir="$pkgdir" dist/*.whl
 }

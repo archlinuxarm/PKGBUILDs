@@ -1,0 +1,77 @@
+# Maintainer: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributors:
+#   Andrei Antoukh - niwi@niwi.be - https://www.niwi.be
+#   henning mueller <henning@orgizm.net>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - build v7 with -DUATOMIC_NO_LINK_ERROR due to liburcu
+
+pkgname=glusterfs
+epoch=1
+pkgver=11.0
+_major=${pkgver%%.*}
+pkgrel=1
+pkgdesc='a cluster file-system capable of scaling to several peta-bytes.'
+arch=(x86_64)
+url='https://www.gluster.org/'
+license=(GPL2 LGPL3)
+install=glusterfs.install
+backup=('etc/glusterfs/glusterd.vol'
+        'etc/glusterfs/eventsconfig.json'
+        'etc/glusterfs/gluster-rsyslog-5.8.conf'
+        'etc/glusterfs/gluster-rsyslog-7.2.conf'
+        'etc/glusterfs/glusterd.vol'
+        'etc/glusterfs/glusterfs-georep-logrotate'
+        'etc/glusterfs/glusterfs-logrotate')
+depends=(fuse python libxml2 libaio liburcu attr rpcbind liburing gperftools)
+makedepends=(rpcsvc-proto)
+optdepends=('glib2: qemu-block'
+	    'python-prettytable: gluster-georep-sshkey')
+source=(https://download.gluster.org/pub/gluster/glusterfs/${_major}/$pkgver/glusterfs-$pkgver.tar.gz
+        glusterfs.sysusers)
+sha256sums=('0ae8f4a90408813e45d4349e813f78b60e919e1009d29fd174c462f456142696'
+            'a470d07aedb2674adfb295b4775e490b48816b87974946da4dcf62aa0d72108a')
+
+prepare() {
+  cd "$srcdir"/$pkgname-$pkgver
+  autoreconf -fi
+}
+
+build() {
+  cd "$srcdir"/$pkgname-$pkgver
+  [[ $CARCH == "armv7h" ]] && CFLAGS+=" -DUATOMIC_NO_LINK_ERROR"
+  ./configure \
+    --prefix=/usr \
+    --sbindir=/usr/bin \
+    --with-mountutildir=/usr/bin \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --mandir=/usr/share/man \
+    --libexecdir=/usr/lib/$pkgname \
+    --with-systemddir=/usr/lib/systemd/system \
+    --with-tmpfilesdir=/usr/lib/tmpfiles.d \
+    --enable-gnfs \
+    LEXLIB=
+  make
+}
+
+package() {
+  cd "$srcdir"/$pkgname-$pkgver
+
+  make -j1 DESTDIR="$pkgdir" install
+
+  # https://bugzilla.redhat.com/show_bug.cgi?id=1598900
+  install -Dm644 "$srcdir"/glusterfs.sysusers \
+    "$pkgdir"/usr/lib/sysusers.d/glusterfs.conf
+
+  install -D -m 644 \
+    "$srcdir"/$pkgname-$pkgver/{README.md,INSTALL,COPYING*} \
+    "$pkgdir"/usr/share/doc/glusterfs/
+
+  cp -rf \
+    "$srcdir"/$pkgname-$pkgver/doc/* \
+    "$pkgdir"/usr/share/doc/glusterfs/
+  rm -rf "$pkgdir"/var/run
+}
+
+# vim:set ts=2 sw=2 et:

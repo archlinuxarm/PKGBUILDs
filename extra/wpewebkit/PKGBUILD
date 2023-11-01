@@ -4,29 +4,36 @@
 #  - build v7 with vfpv3, neon is broken
 
 pkgbase=wpewebkit
-pkgname=(wpewebkit wpewebkit-docs)
-pkgver=2.38.2
+pkgname=(
+  wpewebkit
+  wpewebkit-docs
+)
+pkgver=2.42.1
 pkgrel=1
 pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
 arch=(x86_64)
 license=(custom)
 depends=(
-  at-spi2-atk
+  at-spi2-core
   atk
   bubblewrap
   cairo
   fontconfig
   freetype2
   glib2
+  gst-plugins-bad-libs
   gst-plugins-base-libs
   gstreamer
   harfbuzz
   harfbuzz-icu
   icu
+  libavif
+  libdrm
   libepoxy
   libgcrypt
   libjpeg
+  libjxl
   libpng
   libseccomp
   libsoup3
@@ -37,6 +44,7 @@ depends=(
   libxkbcommon
   libxml2
   libxslt
+  mesa
   openjpeg2
   sqlite
   wayland
@@ -46,29 +54,59 @@ depends=(
   zlib
 )
 makedepends=(
+  clang
   cmake
   gi-docgen
   gobject-introspection
   gperf
   gst-plugins-bad
+  lld
   ninja
   python
   ruby
   systemd
+  unifdef
   wayland-protocols
 )
-options=(debug)
-source=($url/releases/wpewebkit-$pkgver.tar.xz{,.asc})
-sha256sums=('5ce5ac6d5cb6c13469f52d2ece34b302524ff59caf05ecf0f7c62e12c48df422'
+source=(
+  $url/releases/wpewebkit-$pkgver.tar.xz{,.asc}
+)
+sha256sums=('18a2cf547a503420f4cb8f523a2f4c24b4dc2773abbe74c7d585e6d23cb27bac'
             'SKIP')
-validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
-              '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
+b2sums=('12e8d0fb662e36c68f4e029d948de0b4bed4d9087d622d0b940726f3bb958572699cbe3d943408e9526d254a0b355b474281a432a38a7a19efbced4031dc7e6e'
+        'SKIP')
+validpgpkeys=(
+  'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
+  '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
+)
 
 prepare() {
   cd wpewebkit-$pkgver
 }
 
 build() {
+  local cmake_options=(
+    -DPORT=WPE
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_INSTALL_LIBDIR=lib
+    -DCMAKE_INSTALL_LIBEXECDIR=lib
+    -DCMAKE_SKIP_RPATH=ON
+    -DUSE_AVIF=ON
+    -DENABLE_WPE_1_1_API=ON
+    -DENABLE_DOCUMENTATION=ON
+    -DENABLE_MINIBROWSER=ON
+  )
+
+  # GCC with LTO fails to link jsc
+  #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_size_validate':
+  #     <artificial>:(.text+0x49f0f): undefined reference to `ipint_extern_table_size'
+  #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_fill_validate':
+  #     <artificial>:(.text+0x4a019): undefined reference to `ipint_extern_table_fill'
+  #     collect2: error: ld returned 1 exit status
+  #export CC=clang CXX=clang++
+  #LDFLAGS+=" -fuse-ld=lld"
+
   # Produce minimal debug info: 4.3 GB of debug data makes the
   # build too slow and is too much to package for debuginfod
   CFLAGS+=' -g1'
@@ -76,26 +114,24 @@ build() {
 
   [[ $CARCH == "armv7h" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/neon/vfpv3/'` && CXXFLAGS="$CFLAGS"
 
-  cmake -S wpewebkit-$pkgver -B build -G Ninja \
-    -DPORT=WPE \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_LIBDIR=lib \
-    -DCMAKE_INSTALL_LIBEXECDIR=lib \
-    -DCMAKE_SKIP_RPATH=ON \
-    -DUSE_SOUP2=OFF \
-    -DENABLE_DOCUMENTATION=ON \
-    -DENABLE_MINIBROWSER=ON
+  cmake -S wpewebkit-$pkgver -B build -G Ninja "${cmake_options[@]}"
   cmake --build build
 }
 
 package_wpewebkit() {
-  depends+=(libwpe-1.0.so libWPEBackend-fdo-1.0.so)
-  provides+=(libWPEWebKit-1.1.so)
-  optdepends=('geoclue: Geolocation support'
-              'gst-plugins-good: media decoding'
-              'gst-plugins-bad: media decoding'
-              'gst-libav: nonfree media decoding')
+  depends+=(
+    libWPEBackend-fdo-1.0.so
+    libwpe-1.0.so
+  )
+  provides+=(
+    libWPEWebKit-1.1.so
+  )
+  optdepends=(
+    'geoclue: Geolocation support'
+    'gst-libav: nonfree media decoding'
+    'gst-plugins-bad: media decoding'
+    'gst-plugins-good: media decoding'
+  )
 
   DESTDIR="$pkgdir" cmake --install build
 

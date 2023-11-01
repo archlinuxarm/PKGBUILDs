@@ -1,21 +1,24 @@
-# Maintainer: graysky <graysky@archlinux.us>
+# Maintainer: graysky <therealgraysky AT proton DOT me>
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
 # Maintainer: Oleg Rakhmanov <oleg@archlinuxarm.org>
 # Maintainer: Dave Higham <pepedog@archlinuxarm.org>
 # Contributer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgbase=linux-rpi
-_commit=3e2b55bf16ebcdc0cc4585e57463d32635161611
+_commit=cb013b6602de32c647ed08faf899596664a18635
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
-pkgver=5.15.79
-pkgrel=2
+_regen=
+pkgver=6.1.58
+pkgrel=3
 pkgdesc='Linux'
 url="http://www.kernel.org/"
 arch=(armv7h aarch64)
 license=(GPL2)
 makedepends=(
-  bc kmod inetutils
+  bc
+  kmod
+  inetutils
 )
 options=('!strip')
 source_armv7h=('config' 'config.txt')
@@ -26,16 +29,18 @@ source=("linux-$pkgver-${_commit:0:10}.tar.gz::https://github.com/raspberrypi/li
         linux.preset
         60-linux.hook
         90-linux.hook
+        archarm.diffconfig
 )
-md5sums=('0c1fee1b58b8c40c8b85615f7d66a365'
+md5sums=('a76694d83b01d99f65e0ae7abc4850ce'
          '3bab7426d8c8818dda8353da3892a41f'
          'f66a7ea3feb708d398ef57e4da4815e9'
          '86d4a35722b5410e3b29fc92dae15d4b'
          '0a5f16bfec6ad982a2f6782724cca8ba'
-         '441ec084c47cddc53e592fb0cbce4edf')
-md5sums_armv7h=('09d431a67f7dfaa46a365513463fe8c8'
-                'aedda0148db2692971671e6aa90ad9ff')
-md5sums_aarch64=('f69bdefd12483afb039c07008cab90a8'
+         '441ec084c47cddc53e592fb0cbce4edf'
+         'c8f84694321e249492c80149833671d7')
+md5sums_armv7h=('5fae2b13371d538d2ce2d6bc73b164b1'
+                'a99311daa39248cfc9b6541a0a0a5f09')
+md5sums_aarch64=('007df2714c051b4028450cba9b71b108'
                  '7e4403dea857e40005bf76beda9927ff')
 
 # setup vars
@@ -45,51 +50,94 @@ elif [[ $CARCH == "aarch64" ]]; then
   _kernel=kernel8.img KARCH=arm64 _image=Image _config=config8 _bconfig=config8.txt
 fi
 
+_make() {
+  test -s version
+  make KERNELRELEASE="$(<version)" "$@"
+}
+
 prepare() {
   cd "${srcdir}/${_srcname}"
 
   # consistent behavior of lscpu on arm/arm64
-  patch -Np1 -i ../0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
+  patch -p1 -i ../0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
 
   echo "Setting version..."
-  scripts/setlocalversion --save-scmversion
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
-  echo "Setting config..."
-  cp ../"$_config" .config
-  make olddefconfig
-
-  make -s kernelrelease > version
-  echo "Prepared $pkgbase version $(<version)"
+  if [[ $_regen -eq 1 ]]; then
+    # useful on two point releases to keep shit straight
+    echo "Applying custom shit to bcm2711_defconfig"
+    make bcm2711_defconfig
+    cat ../archarm.diffconfig >> .config
+    make oldconfig
+    if [[ $CARCH == "armv7h" ]]; then
+      # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16373
+      scripts/config --enable CONFIG_BCM2835_THERMAL
+      # workaround OOM killer issue
+      # https://github.com/raspberrypi/linux/issues/5395
+      # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16377
+      scripts/config --disable CONFIG_LRU_GEN_ENABLED
+    fi
+    sed '/^CONFIG_LOCALVERSION=/s,.*$,CONFIG_LOCALVERSION="-ARCH",' .config >$startdir/newconfig.$_config
+    echo "verify that newconfig.$_config is fit for purpose then redefine $_config"
+    exit
+  else
+    make bcm2711_defconfig
+    make -s kernelrelease | sed 's/rpi-.*$/rpi-ARCH/' > version
+    make mrproper
+    echo "Setting config..."
+    cp ../"$_config" .config
+    _make olddefconfig
+    diff -u ../"$_config" .config || :
+    echo "Prepared $pkgbase version $(<version)"
+  fi
 }
 
 build() {
   cd "${srcdir}/${_srcname}"
 
-  make "$_image" modules dtbs
+  _make "$_image" modules dtbs
 }
 
 _package() {
   pkgdesc="RPi Foundation patched Linux kernel and modules"
-  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7' 'firmware-raspberrypi')
-  optdepends=('wireless-regdb: to set the correct wireless channels of your country')
-  provides=("linux=${pkgver}" 'WIREGUARD-MODULE')
-  conflicts=('linux' 'uboot-raspberrypi')
+  depends=(
+    coreutils
+    firmware-raspberrypi
+    kmod
+    linux-firmware
+    'mkinitcpio>=0.7'
+  )
+  optdepends=(
+    'wireless-regdb: to set the correct wireless channels of your country'
+  )
+  provides=(
+    linux="${pkgver}"
+    WIREGUARD-MODULE
+  )
+  conflicts=(
+    linux
+    uboot-raspberrypi
+  )
+  replaces=(
+    linux-raspberrypi-latest
+    linux-raspberrypi4
+  )
   install=${pkgname}.install
-  backup=('boot/config.txt' 'boot/cmdline.txt')
-  replaces=('linux-raspberrypi-latest' 'linux-raspberrypi4')
+  backup=(
+    boot/config.txt
+    boot/cmdline.txt
+  )
 
   cd "${srcdir}/${_srcname}"
-
-  local kernver="$(<version)"
-  local modulesdir="$pkgdir/usr/lib/modules/$kernver"
+  local modulesdir="$pkgdir/usr/lib/modules/$(<version)"
 
   # Used by mkinitcpio to name the kernel
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
 
   echo "Installing modules..."
-  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+  _make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
     DEPMOD=/doesnt/exist modules_install  # Suppress depmod
 
   # remove build and source links
@@ -114,7 +162,7 @@ _package() {
   # sed expression for following substitutions
   local _subst="
     s|%PKGBASE%|${pkgbase}|g
-    s|%KERNVER%|${kernver}|g
+    s|%KERNVER%|$(<version)|g
   "
 
   # install mkinitcpio preset file
@@ -181,6 +229,12 @@ _package-headers() {
     rm -r "$_arch"
   done
 
+  echo "Symlinking common aliases..."
+  # https://archlinuxarm.org/forum/viewtopic.php?f=60&t=16354
+  ln -sr arm "$builddir/arch/armv7h"
+  ln -sr arm "$builddir/arch/armv7l"
+  ln -sr arm64 "$builddir/arch/aarch64"
+
   echo "Removing documentation..."
   rm -r "$builddir/Documentation"
 
@@ -193,7 +247,7 @@ _package-headers() {
   echo "Stripping build tools..."
   local file
   while read -rd '' file; do
-    case "$(file -bi "$file")" in
+    case "$(file -Sib "$file")" in
       application/x-sharedlib\;*)      # Libraries (.so)
         strip -v $STRIP_SHARED "$file" ;;
       application/x-archive\;*)        # Libraries (.a)

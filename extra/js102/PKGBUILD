@@ -2,23 +2,45 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - configure with --disable-lto, --disable-rust-simd
+#  - remove PGO build
 
-pkgname=js102 
-pkgver=102.4.0
+pkgname=js102
+pkgver=102.15.0
 pkgrel=1
 pkgdesc="JavaScript interpreter and libraries - Version 102"
-arch=(x86_64)
 url="https://spidermonkey.dev/"
+arch=(x86_64)
 license=(MPL)
-depends=(gcc-libs readline zlib sh)
-makedepends=(zip autoconf2.13 python-setuptools python-psutil rust llvm clang lld)
-checkdepends=(mercurial git)
-options=(!lto debug)
+depends=(
+  gcc-libs
+  readline
+  sh
+  zlib
+)
+makedepends=(
+  autoconf2.13
+  clang
+  lld
+  llvm
+  python-psutil
+  python-setuptools
+  rust
+  zip
+)
+checkdepends=(
+  git
+  mercurial
+)
+options=(!lto)
 _relver=${pkgver}esr
-source=(https://archive.mozilla.org/pub/firefox/releases/$_relver/source/firefox-$_relver.source.tar.xz{,.asc})
-sha256sums=('e79f0ddd4914dfbff61c5eea7ff28ad2dd12ecfbf3d63a41dab57d50171d904e'
-            'SKIP')
-validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
+source=(
+  https://archive.mozilla.org/pub/firefox/releases/$_relver/source/firefox-$_relver.source.tar.xz{,.asc}
+)
+b2sums=('b70727fa91d0d270673374bebb4745b87f6194191c1c9415547d772811a4a85f79a97e8985877eb5c9beef43fe15bef574172da35935e7024a947919ec11d883'
+        'SKIP')
+validpgpkeys=(
+  14F26682D0916CDD81E37B6D61B7B526D98F0353  # Mozilla Software Releases <release@mozilla.com>
+)
 
 # Make sure the duplication between bin and lib is found
 COMPRESSZST+=(--long)
@@ -40,9 +62,9 @@ ac_add_options --disable-lto
 ac_add_options --enable-linker=lld
 ac_add_options --disable-bootstrap
 ac_add_options --disable-debug
-ac_add_options --disable-debug-symbols
 ac_add_options --disable-jemalloc
 ac_add_options --disable-strip
+ac_add_options --disable-unified-build
 
 # System libraries
 ac_add_options --with-system-zlib
@@ -54,6 +76,8 @@ ac_add_options --enable-shared-js
 ac_add_options --enable-tests
 ac_add_options --with-intl-api
 END
+
+  sed -i 's/!HasAlignmentFault()/true/' js/src/jit/shared/AtomicOperations-shared-jit.cpp
 }
 
 build() {
@@ -63,42 +87,7 @@ build() {
   export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
   export MACH_USE_SYSTEM_PYTHON=1
 
-  # Do 3-tier PGO
-  echo "Building instrumented JS..."
-  cat >.mozconfig ../mozconfig - <<END
-ac_add_options --enable-profile-generate=cross
-END
-  ./mach build
-
-  echo "Profiling instrumented JS..."
-  (
-    local js="$PWD/obj/dist/bin/js"
-    export LLVM_PROFILE_FILE="$PWD/js-%p-%m.profraw"
-
-    cd js/src/octane
-    "$js" run.js
-
-    cd ../../../third_party/webkit/PerformanceTests/ARES-6
-    "$js" cli.js
-
-    cd ../SunSpider/sunspider-0.9.1
-    "$js" sunspider-standalone-driver.js
-  )
-
-  llvm-profdata merge -o merged.profdata *.profraw
-
-  stat -c "Profile data found (%s bytes)" merged.profdata
-  test -s merged.profdata
-
-  echo "Removing instrumented JS..."
-  ./mach clobber
-
-  echo "Building optimized JS..."
-  cat >.mozconfig ../mozconfig - <<END
-#ac_add_options --enable-lto=cross
-ac_add_options --enable-profile-use=cross
-ac_add_options --with-pgo-profile-path=${PWD@Q}/merged.profdata
-END
+  cat >.mozconfig ../mozconfig
   ./mach build
 }
 
@@ -128,4 +117,4 @@ package() {
   find "$pkgdir"/usr/{lib/pkgconfig,include} -type f -exec chmod -c a-x {} +
 }
 
-# vim:set sw=2 et:
+# vim:set sw=2 sts=-1 et:

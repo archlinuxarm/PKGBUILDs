@@ -9,6 +9,7 @@
 #  - don't build docs, removed docs package; takes a day to build
 #  - replace --with-num-cores with --with-jobs
 #  - remove --enable-jvm-feature-zgc from configure, not supported on ARM
+#  - set --with-native-debug-symbols=none, OOM
 
 # TODO add test, see about packaging jtreg and using it here
 # TODO see about building with OpenJDK10
@@ -22,19 +23,20 @@
 
 pkgbase=java-openjdk
 pkgname=('jre-openjdk-headless' 'jre-openjdk' 'jdk-openjdk' 'openjdk-src')
-_majorver=19
+# on a majorver change, don't forget to update the misc files that come along this PKGBUILD
+_majorver=21
 _minorver=0
-_securityver=1
-_updatever=10
-pkgver=${_majorver}.${_minorver}.${_securityver}.u${_updatever}
-#pkgver=${_majorver}.u${_updatever}
+_securityver=0
+_updatever=35
+# pkgver=${_majorver}.${_minorver}.${_securityver}.u${_updatever}
+pkgver=${_majorver}.u${_updatever}
 pkgrel=3
-_git_tag=jdk-${_majorver}.${_minorver}.${_securityver}+${_updatever}
-#_git_tag=jdk-${_majorver}+${_updatever}
+# _git_tag=jdk-${_majorver}.${_minorver}.${_securityver}+${_updatever}
+_git_tag=jdk-${_majorver}+${_updatever}
 arch=('x86_64')
 url='https://openjdk.java.net/'
 license=('custom')
-makedepends=('java-environment>=11' 'cpio' 'unzip' 'zip' 'libelf' 'libcups' 'libx11'
+makedepends=('java-environment>=17' 'cpio' 'unzip' 'zip' 'libelf' 'libcups' 'libx11'
              'libxrender' 'libxtst' 'libxt' 'libxext' 'libxrandr' 'alsa-lib'
              'graphviz' 'freetype2' 'libjpeg-turbo' 'giflib' 'libpng' 'lcms2'
              'libnet' 'bash' 'harfbuzz' 'gcc-libs' 'glibc')
@@ -43,10 +45,10 @@ source=(https://github.com/openjdk/jdk${_majorver}u/archive/${_git_tag}.tar.gz
         freedesktop-java.desktop
         freedesktop-jconsole.desktop
         freedesktop-jshell.desktop)
-sha256sums=('cdc7e6d857ed87c8fe653609dc5a63f1f698b3aaf1eb7dc9d733832dab599514'
-            '37656108f25ca6943cc89ef09677bd53be0f6aee369f9acb3151803ed2b233f5'
-            '766f83adcd3c7ae70808f3894a1b741681b4e3edc0ff9ee2b229f59bc3fd0a9d'
-            'd4846c8de3dc9056feeb6d0c1d5fc48b639d2e4ae9b94944cb2b1376cb431be6')
+sha256sums=('b798ebc2e899a98edf2be99e786bb0fbad144e2270925dffe624fbe052f07ade'
+            '72111743ab6ab36854b0c85a504172983715d0798fce10bc4e35689b7d15fd93'
+            '8ecdf5c1605bafa58b3f7da615e6d8d3d943e3a2d3831930d6efa7815aacce07'
+            '50fc0d677489b73d549df2f08d759d5f057f200adbbab83ea5e87456152ee03e')
 
 case "${CARCH}" in
   x86_64) _JARCH='x86_64';;
@@ -63,10 +65,17 @@ else
   _imgdir=${_jdkdir}/build/linux-${_JARCH}-server-release/images
 fi
 
-_nonheadless=(lib/libawt_xawt.{so,debuginfo}
-              lib/libjawt.{so,debuginfo}
-              lib/libjsound.{so,debuginfo}
-              lib/libsplashscreen.{so,debuginfo})
+_nonheadless=(lib/libawt_xawt.so
+              lib/libjawt.so
+              lib/libjsound.so
+              lib/libsplashscreen.so)
+
+_nonjre=(lib/ct.sym
+          lib/libattach.so
+          lib/libsaproc.so
+          lib/lible.so
+          lib/src.zip)
+
 
 build() {
   cd ${_jdkdir}
@@ -130,6 +139,7 @@ build() {
     --with-lcms=system \
     --with-zlib=system \
     --with-harfbuzz=system \
+    --with-native-debug-symbols=none \
     --enable-unlimited-crypto \
     --disable-warnings-as-errors \
     --with-jvm-variants=$_variants \
@@ -173,10 +183,17 @@ package_jre-openjdk-headless() {
 
   cd ${_imgdir}/jre
 
-  install -dm 755 "${pkgdir}${_jvmdir}"
+  install -dm 755 "${pkgdir}${_jvmdir}"/bin
 
-  cp -a bin lib \
-    "${pkgdir}${_jvmdir}"
+  for i in $(ls bin/); do
+    cp ../jdk/bin/$i "${pkgdir}${_jvmdir}/bin/"
+  done
+
+  cp -a ../jdk/lib "${pkgdir}${_jvmdir}"
+
+  for f in "${_nonjre[@]}"; do
+    rm "${pkgdir}${_jvmdir}/${f}"
+  done
 
   for f in "${_nonheadless[@]}"; do
     rm "${pkgdir}${_jvmdir}/${f}"

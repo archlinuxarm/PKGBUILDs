@@ -11,19 +11,24 @@
 noautobuild=1
 
 pkgname=binutils
-pkgver=2.39
-_commit=9e855cffa1fda44629e7f9b76dfa3e5a51a440e9
+pkgver=2.41
+_commit=31b78cc991781265d9404bd55151691bedd6d556
 pkgrel=3
 pkgdesc='A set of programs to assemble and manipulate binary and object files'
 arch=(x86_64)
 url='https://www.gnu.org/software/binutils/'
 license=('GPL3' 'GPL' 'FDL1.3' 'custom:FSFAP')
-groups=(base-devel)
-depends=(glibc zlib libelf jansson)
+depends=(glibc jansson libelf zlib zstd)
 makedepends=(git)
 checkdepends=(dejagnu debuginfod bc)
 optdepends=('debuginfod: for debuginfod server/client functionality')
-options=(staticlibs !distcc !ccache debug)
+provides=(
+  libctf.so
+  libgprofng.so
+  libsframe.so
+)
+backup=('etc/gprofng.rc')
+options=(staticlibs !distcc !ccache)
 source=(git+https://sourceware.org/git/binutils-gdb.git#commit=${_commit}
         gold-warn-unsupported.patch)
 sha256sums=('SKIP'
@@ -31,7 +36,7 @@ sha256sums=('SKIP'
 validpgpkeys=(3A24BC1E8FB409FA9F14371813FCEF89DD9E3C4F)
 
 prepare() {
-  [[ ! -d binutils-gdb ]] && ln -s binutils-$pkgver binutils-gdb
+  [[ ! -d binutils-gdb ]] && ln -s binutils-${pkgver} binutils-gdb
   mkdir -p binutils-build
 
   cd binutils-gdb
@@ -53,16 +58,19 @@ build() {
   [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf"
   [[ $CARCH == "aarch64" ]] && CONFIGFLAG="--host=aarch64-unknown-linux-gnu --build=aarch64-unknown-linux-gnu"
 
-  "$srcdir/binutils-gdb/configure" \
+  "${srcdir}"/binutils-gdb/configure \
     --prefix=/usr \
+    --sysconfdir="${pkgdir}"/etc \
     --with-lib-path=/usr/lib:/usr/local/lib \
     --with-bugurl=https://github.com/archlinuxarm/PKGBUILDs/issues \
+    --enable-colored-disassembly \
     --enable-default-execstack=no \
     --enable-deterministic-archives \
     --enable-gold \
     --enable-install-libiberty \
     --enable-jansson \
     --enable-ld=default \
+    --enable-new-dtags \
     --enable-plugins \
     --enable-relro \
     --enable-shared \
@@ -102,18 +110,27 @@ check() {
 
 package() {
   cd binutils-build
-  make prefix="$pkgdir/usr" tooldir="$pkgdir/usr" install
+  make prefix="${pkgdir}"/usr tooldir="${pkgdir}"/usr install
 
   # install PIC version of libiberty
-  install -m644 libiberty/pic/libiberty.a "$pkgdir/usr/lib"
+  install -m644 libiberty/pic/libiberty.a "${pkgdir}"/usr/lib
 
   # Remove unwanted files
-  rm -f "$pkgdir"/usr/share/man/man1/{dlltool,windres,windmc}*
+  rm -f "${pkgdir}"/usr/share/man/man1/{dlltool,windres,windmc}*
 
   # No shared linking to these files outside binutils
-  rm -f "$pkgdir"/usr/lib/lib{bfd,opcodes}.so
-  echo 'INPUT( /usr/lib/libbfd.a -liberty -lz -ldl )' > "$pkgdir/usr/lib/libbfd.so"
-  echo 'INPUT( /usr/lib/libopcodes.a -lbfd )' > "$pkgdir/usr/lib/libopcodes.so"
+  rm -f "${pkgdir}"/usr/lib/lib{bfd,opcodes}.so
+  tee "${pkgdir}"/usr/lib/libbfd.so << EOS
+/* GNU ld script */
+
+INPUT( /usr/lib/libbfd.a -lsframe -liberty -lz -lzstd -ldl )
+EOS
+
+  tee "${pkgdir}"/usr/lib/libopcodes.so << EOS
+/* GNU ld script */
+
+INPUT( /usr/lib/libopcodes.a -lbfd )
+EOS
 
   # install FSF All Permissive License
   install -Dm644 -t "${pkgdir}"/usr/share/licenses/${pkgname}/ FSFAP

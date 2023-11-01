@@ -1,0 +1,112 @@
+# Maintainer: Bruno Pagani <archange@archlinux.org>
+# Maintainer: Filipe Laíns (FFY00) <lains@archlinux.org>
+# Maintainer: Frederik Schwan <freswa at archlinux dot org>
+# Contributor: Mirco Tischler <mt-ml at gmx dot de>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove depends on libsmbios, efivar, fwupd-efi, tmp2-tss
+#  - remove makedepends on valgrind, gnu-efi-libs
+#  - meson with -Dplugin_uefi_capsule=disabled -Dplugin_uefi_pk=disabled -Dplugin_redfish=disabled -Dplugin_nvme=disabled (efivar, gnu-efi-libs dependency)
+#  - meson with -Dplugin_msr=disabled
+#  - meson with -Dplugin_intel_spi=false
+#  - remove makedepend on pandoc, meson with -Dman=false
+
+pkgname=fwupd
+pkgver=1.9.6
+pkgrel=1
+pkgdesc="Simple daemon to allow session software to update firmware"
+arch=(x86_64)
+url="https://github.com/fwupd/fwupd"
+license=(LGPL)
+depends=(
+  bluez
+  flashrom
+  gcab
+  gnutls
+  hicolor-icon-theme
+  libarchive.so
+  libcbor.so
+  libcurl.so
+  libgudev-1.0.so
+  libgusb
+  libjcat
+  libjson-glib-1.0.so
+  libmm-glib.so
+  libpassim.so
+  libprotobuf-c.so
+  libqmi-glib.so
+  libxmlb
+  polkit
+  python
+  shared-mime-info
+)
+optdepends=(
+  'udisks2: UEFI firmware upgrade support'
+)
+makedepends=(
+  bash-completion
+  gi-docgen
+  gobject-introspection
+  meson
+  noto-fonts
+  noto-fonts-cjk
+  python-cairo
+  python-gobject
+  python-pillow
+  vala
+)
+checkdepends=(umockdev)
+provides=(libfwupd.so)
+backup=(
+  'etc/fwupd/fwupd.conf'
+  'etc/fwupd/remotes.d/dell-esrt.conf'
+  'etc/fwupd/remotes.d/fwupd-tests.conf'
+  'etc/fwupd/remotes.d/lvfs-testing.conf'
+  'etc/fwupd/remotes.d/lvfs.conf'
+  'etc/fwupd/remotes.d/vendor-directory.conf'
+  'etc/fwupd/remotes.d/vendor.conf'
+)
+source=(
+  "https://github.com/fwupd/fwupd/releases/download/${pkgver}/${pkgname}-${pkgver}.tar.xz"{,.asc}
+  fwupd.sysusers
+)
+sha512sums=('c65d795268e0e36fd2572ce3d4f2fb811412c16d583fa5463bee017a70b5d0f8b1b92460efa977a7d70bb5e3f6b5b02756e795e5f8ab7e7ac7874dc1ab5a0bfb'
+            'SKIP'
+            '637203080b55eda74a659f58c853a9a723a2dad5da70915b2b0e036c6145a649468ebec700cc83975d9cb5378b9dced8b3a3b26bdbcc75ddc774837355e75deb')
+b2sums=('8b54efef5947dc4766a24b8501100f7e24707944b5c9aae3c3fcd88dfce230667507af8816203b0ececa0510485661f5f599c1cdc2285df72683ede4b7a6d15c'
+        'SKIP'
+        'e65ca7da22a20a40882cfc1fe4479643f9a38c90a4f2c3e71e6e5e3de1d6db212a0f17d600097619fe3cdb0a9b860422f8b0b9a9d45441518e51a7eb12a918bb')
+validpgpkeys=(163EB50119225DB3DF8F49EA17ACBA8DFA970E17) # Richard Hughes <richard@hughsie.com>
+
+build() {
+  arch-meson ${pkgname}-${pkgver} build \
+    -D b_lto=false \
+    -D docs=enabled \
+    -D plugin_amdgpu=disabled \
+    -D launchd=disabled \
+    -D plugin_intel_spi=false \
+    -D supported_build=enabled \
+    -D efi_binary=false \
+    -D systemd_unit_user=fwupd \
+    -Dplugin_uefi_capsule=disabled -Dplugin_uefi_pk=disabled -Dplugin_redfish=disabled -Dplugin_nvme=disabled -Dplugin_msr=disabled -Dman=false
+  meson compile -C build
+}
+
+check() {
+  meson test -C build
+}
+
+package() {
+  DESTDIR="${pkgdir}" meson install -C build
+  # Add fwupd user https://bugs.archlinux.org/task/79653
+  install -D -m644 fwupd.sysusers "${pkgdir}"/usr/lib/sysusers.d/fwupd.conf
+  # Fixup mode to match polkit
+  install -d -o root -g 102 -m 750 "${pkgdir}"/usr/share/polkit-1/rules.d
+  # Remove the tests
+  rm -r "${pkgdir}"/usr/share/installed-tests/
+  mv "${pkgdir}"/usr/bin/{,fwupd-}dbxtool
+  #mv "${pkgdir}"/usr/share/man/man1/{,fwupd-}dbxtool.1
+  # Remove msr module-load config as it is built-in
+  #rm "${pkgdir}"/usr/lib/modules-load.d/fwupd-msr.conf
+  #rmdir "${pkgdir}"/usr/lib/modules-load.d
+}

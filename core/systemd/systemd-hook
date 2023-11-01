@@ -17,7 +17,7 @@ systemd_live() {
 
 udevd_live() {
   is_chrooted
-  if [ ! -d /run/udev ]; then
+  if [ ! -S /run/udev/control ]; then
     echo >&2 "  Skipped: Device manager is not running."
     exit 0
   fi
@@ -26,21 +26,53 @@ udevd_live() {
 op="$1"; shift
 
 case "$op" in
-  catalog)  /usr/bin/journalctl --update-catalog ;;
-  hwdb)     /usr/bin/systemd-hwdb --usr update ;;
-  update)   touch -c /usr ;;
-  sysusers) /usr/bin/systemd-sysusers ;;
-  tmpfiles) /usr/bin/systemd-tmpfiles --create ;;
+  catalog)
+    /usr/bin/journalctl --update-catalog
+    ;;
+  hwdb)
+    /usr/bin/systemd-hwdb --usr update
+    ;;
+  update)
+    touch -c /usr
+    ;;
+  sysusers)
+    /usr/bin/systemd-sysusers
+    ;;
+  tmpfiles)
+    /usr/bin/systemd-tmpfiles --create
+    ;;
 
-  daemon-reload) systemd_live; /usr/bin/systemctl daemon-reload ;;
-  udev-reload)   udevd_live;   /usr/bin/udevadm control --reload ;;
-  binfmt)        systemd_live; /usr/lib/systemd/systemd-binfmt ;;
-  sysctl)        systemd_live; /usr/lib/systemd/systemd-sysctl ;;
+  daemon-reload)
+    systemd_live
+    /usr/bin/systemctl daemon-reload
+    ;;
+  udev-reload)
+    udevd_live
+    /usr/bin/udevadm control --reload
+    if [ ! -e /etc/systemd/do-not-udevadm-trigger-on-update ]; then
+      /usr/bin/udevadm trigger -c change
+      /usr/bin/udevadm settle
+    fi
+    ;;
+  binfmt)
+    systemd_live
+    /usr/lib/systemd/systemd-binfmt
+    ;;
+  sysctl)
+    systemd_live
+    /usr/lib/systemd/systemd-sysctl
+    ;;
 
   # For use by other packages
-  reload)        systemd_live; /usr/bin/systemctl try-reload-or-restart "$@" ;;
+  reload)
+    systemd_live
+    /usr/bin/systemctl try-reload-or-restart "$@"
+    ;;
 
-  *) echo >&2 "  Invalid operation '$op'"; exit 1 ;;
+  *)
+    echo >&2 "  Invalid operation '$op'"
+    exit 1
+    ;;
 esac
 
 exit 0
