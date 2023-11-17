@@ -1,0 +1,204 @@
+From 5875d32ce071e591461e404bdd8aae849ccdcab1 Mon Sep 17 00:00:00 2001
+From: Matthias Gerstner <matthias.gerstner@suse.de>
+Date: Fri, 8 Sep 2023 10:17:04 +0200
+Subject: [PATCH] hppsfilter: booklet printing: change insecure fixed /tmp file
+ paths
+
+Using the fixed /tmp file paths in booklet printing /tmp/booklet.ps,
+/tmp/temp.ps and /tmp/NUP.ps is a local security issue and also prevents
+potential parallel operation of hplip.
+
+Use proper `mkstemp()` for these files. Functions like `PS_Booklet()`
+and `cupsFileOpen()` don't use the open file descriptor but open the
+path by name again. This is safe, since the files have already been
+safely created and have safe modes. I wanted to avoid changing a whole
+series of function signatures for this.
+
+The purpose of the `chmod()` in `open_tempbookletfile()` is unclear, the
+data should only be processed by our own process. Making the file world
+readable is an information leak, though. Thus drop this line.
+---
+ prnt/hpps/hppsfilter.c | 124 ++++++++++++++++++++++++++++++++---------
+ 1 file changed, 98 insertions(+), 26 deletions(-)
+
+diff --git a/prnt/hpps/hppsfilter.c b/prnt/hpps/hppsfilter.c
+index d6721b1..711b8d8 100644
+--- a/prnt/hpps/hppsfilter.c
++++ b/prnt/hpps/hppsfilter.c
+@@ -43,7 +43,9 @@ static FILE *g_fp_outdbgps = NULL;
+ static FILE *ptempbooklet_file = NULL;
+ static char temp_filename[FILE_NAME_SIZE] = {0};
+ static char booklet_filename[FILE_NAME_SIZE] = {0};
++static int booklet_fd = -1;
+ static char Nup_filename[FILE_NAME_SIZE] = {0};
++static int Nup_fd = -1;
+ extern void PS_Booklet(char *tempfile, char *bookletfile, char *nupfile,int order, int nup, char* pagesize, int bookletMaker);
+ static const char *GetOptionValue(const char *iOptionValue);
+ 
+@@ -99,16 +101,78 @@ static int hpwrite (void *pBuffer, size_t size)
+     return ndata_written;
+ }
+ 
+-static void open_tempbookletfile(char *mode)
++static int open_tempbookletfile(char *mode)
+ {
+-    ptempbooklet_file= fopen(temp_filename, mode);
++    snprintf(temp_filename, FILE_NAME_SIZE, "/tmp/hppsfilter-temp.XXXXXX");
++    int fd = mkstemp(temp_filename);
++    if (fd < 0) {
++        temp_filename[0] = '\0';
++        fprintf(stderr, "ERROR: Unable to open temp file %s\n", temp_filename);
++        return 1;
++    }
++
++    ptempbooklet_file = fdopen(fd, mode);
+     if(ptempbooklet_file == NULL)
+     {
+-            fprintf(stderr, "ERROR: Unable to open temp file %s\n", temp_filename);
+-            return 1;
++        close(fd);
++        fprintf(stderr, "ERROR: Unable to open temp file %s\n", temp_filename);
++        return 1;
+     }  
+-    chmod(temp_filename, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
++    return 0;
++}
++
++static void clean_tempfiles()
++{
++    if (booklet_fd != -1)
++    {
++        close(booklet_fd);
++        booklet_fd = -1;
++    }
++
++    if (Nup_fd != -1)
++    {
++        close(Nup_fd);
++        Nup_fd = -1;
++    }
++
++    if (ptempbooklet_file != NULL)
++    {
++        fclose(ptempbooklet_file);
++        ptempbooklet_file = NULL;
++    }
++
++    if( booklet_filename[0] != '\0' )
++    {
++        if ((unlink(booklet_filename)) == -1)
++        {
++            fprintf(stderr, "ERROR: Unable to remove temporary files in /tmp dir \"%s\" ",booklet_filename);
++            return 1;
++        }
++
++        booklet_filename[0] = '\0';
++    }
++
++    if( temp_filename[0] != '\0' )
++    {
++        if ((unlink(temp_filename)) == -1)
++        {
++            fprintf(stderr, "ERROR: Unable to remove temporary files in /tmp dir \"%s\"  ",temp_filename);
++            return 1;
++        }
++
++        temp_filename[0] = '\0';
++    }
+ 
++    if( Nup_filename[0] != '\0' )
++    {
++        if ((unlink(Nup_filename)) == -1)
++        {
++            fprintf(stderr, "ERROR: Unable to remove temporary files in /tmp dir \"%s\" ",Nup_filename);
++            return 1;
++        }
++
++        Nup_filename[0] = '\0';
++    }
+ }
+ 
+ static int Dump_tempbookletfile (void *pBuffer, size_t size)
+@@ -921,6 +985,8 @@ int main (int argc, char **argv)
+    char buffer[MAX_BUFFER]     = {0};
+    int LfpSecurePin = 0;
+ 
++   atexit(clean_tempfiles);
++
+     get_LogLevel();
+     setbuf (stderr, NULL);
+ 
+@@ -1024,13 +1090,32 @@ int main (int argc, char **argv)
+     if(booklet_enabled)
+     {
+         /* 1. dump  the contents of the input file into temp file */
+-        sprintf(booklet_filename, "/tmp/%s.ps","booklet");
+-        sprintf(temp_filename, "/tmp/%s.ps","temp");
+-        sprintf(Nup_filename, "/tmp/%s.ps","NUP");
+-        open_tempbookletfile("w");
+-	while( (numBytes = cupsFileGetLine(fp_input, line, sizeof(line))) > 0)
++        snprintf(booklet_filename, FILE_NAME_SIZE, "/tmp/hppsfilter-booklet.XXXXXX");
++        booklet_fd = mkstemp(booklet_filename);
++        if( booklet_fd < 0 )
++        {
++            booklet_filename[0] = '\0';
++            fprintf(stderr, "ERROR: Unable to create booklet temporary file \"%s\"", booklet_filename);
++            return 1;
++        }
++
++        snprintf(Nup_filename, FILE_NAME_SIZE, "/tmp/hppsfilter-nup.XXXXXX");
++        Nup_fd = mkstemp(Nup_filename);
++        if( Nup_fd < 0 )
++        {
++            Nup_filename[0] = '\0';
++            clean_tempfiles();
++            fprintf(stderr, "ERROR: Unable to create nup temporary file \"%s\"", Nup_filename);
++            return 1;
++        }
++
++        if( open_tempbookletfile("w") != 0 )
++        {
++            clean_tempfiles();
++            return 1;
++        }
++        while( (numBytes = cupsFileGetLine(fp_input, line, sizeof(line))) > 0)
+             Dump_tempbookletfile (line, numBytes);
+-        fclose(ptempbooklet_file);
+ 
+         /* 2. Perform the booklet operation on the PS file */
+         PS_Booklet(temp_filename,booklet_filename,Nup_filename,order,nup,subString,bookletMaker);
+@@ -1040,6 +1125,7 @@ int main (int argc, char **argv)
+         if ((fp_bookletinput = cupsFileOpen(Nup_filename, "r")) == NULL)
+         {
+             fprintf(stderr, "ERROR: Unable to open Nup_filename print file \"%s\"", Nup_filename);
++            clean_tempfiles();
+             return 1;
+         }
+         while ( (numBytes = cupsFileGetLine(fp_bookletinput, line, sizeof(line))) > 0)
+@@ -1047,21 +1133,7 @@ int main (int argc, char **argv)
+         cupsFileClose (fp_bookletinput);
+ 
+         /* 4. Unlink function to remove the temp temporary files created */
+-        if( (unlink(booklet_filename)) == -1)
+-        {
+-            fprintf(stderr, "ERROR: Unable to remove temporary files in /tmp dir \"%s\" ",booklet_filename);
+-            return 1;
+-        }
+-        if( (unlink(temp_filename)) == -1)
+-        {
+-            fprintf(stderr, "ERROR: Unable to remove temporary files in /tmp dir \"%s\"  ",temp_filename);
+-            return 1;
+-        }
+-        if( (unlink(Nup_filename)) == -1)
+-        {
+-            fprintf(stderr, "ERROR: Unable to remove temporary files in /tmp dir \"%s\" ",Nup_filename);
+-            return 1;
+-        }
++        clean_tempfiles();
+         booklet_enabled = 0;
+         bookletMaker=0;
+     }
+-- 
+2.41.0
+
+
