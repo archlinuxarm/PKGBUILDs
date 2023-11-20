@@ -18,7 +18,7 @@ buildarch=8
 
 pkgname=blender
 pkgver=4.0.1
-pkgrel=1
+pkgrel=2
 epoch=17
 pkgdesc="A fully integrated 3D graphics creation suite"
 arch=('x86_64')
@@ -27,9 +27,9 @@ url="https://www.blender.org"
 depends=('libpng' 'libtiff' 'openexr' 'python' 'desktop-file-utils' 'python-requests' 'potrace'
          'shared-mime-info' 'hicolor-icon-theme' 'xdg-utils' 'glew' 'openjpeg2' 'python-numpy'
          'freetype2' 'openal' 'ffmpeg' 'fftw' 'boost-libs' 'opencollada' 'alembic' 'openxr'
-         'openimageio' 'libsndfile' 'jack' 'opencolorio'
+         'openimageio' 'libsndfile' 'jack' 'opencolorio' 'materialx'
          'jemalloc' 'libspnav' 'ptex' 'opensubdiv' 'openvdb' 'sdl2' 'libharu'
-         'draco' 'libxkbcommon' 'libepoxy')
+         'draco' 'libxkbcommon' 'libepoxy' 'usd' 'openshadinglanguage')
 makedepends=('cmake' 'boost' 'mesa' 'git' 'svn' 'llvm' 'ninja' 'wayland-protocols'
              'libxkbcommon' 'libdecor')
 optdepends=('libdecor: wayland support')
@@ -37,12 +37,12 @@ optdepends=('libdecor: wayland support')
 # It'd be better to figure out exactly which of the flags is the culprit which I attempted but without any success.
 options=('!buildflags')
 source=("git+https://projects.blender.org/blender/blender.git#tag=v$pkgver"
-        https://developer.download.nvidia.com/redist/optix/v7.6/OptiX-7.6-Include.zip
+        https://developer.download.nvidia.com/redist/optix/v7.7/OptiX-7.7-Include.zip
         https://projects.blender.org/blender/blender/pulls/115127.patch
         force-draco1.patch
         force-draco2.patch)
 sha512sums=('SKIP'
-            'dfe86de395dd298fb9feae73bff06a26742efa06a25bb5a4f78ffb1ba4c78f555d1af927efea98af281715cce01db219aa2adfd6bd323bf0d766c1c70ce03532'
+            '55caea5beccdc0adebdba8a825f3cfee083015311de5602cfcf215139ccbf9fed62f10ee1dcdf7e31a3557aabbc1fa872eeed67bc46f59fb4e5abd18331c0aca'
             'ae4aa976f00184ccef735b58734ba13bebafa5ebb64b86d784528c60a4d910065246beca00b0fcf97aed4ce14eeefb29f7be53d76d65df9e122f11a8c1da6818'
             'e239da4f3906f1b54265435181cf770bae3d269c8d915df9a73861e6ee71ec70bf2339426e7c81a91e5a567273b3b3742d7a99feefd3398d821b26e1ff3a56d0'
             'c162646eba42ea7112cfb615466c2cbaddac8d254d4a9e91cf887c5bffef1325a983701163223a1fdee091310ac5574a400347aab7f52321825b5fa3d5a9036f')
@@ -60,6 +60,10 @@ prepare() {
   # https://devtalk.blender.org/t/regression-cmake-install-error-for-man-page/32129
   # https://projects.blender.org/blender/blender/pulls/115127
   patch -Np1 -i "$srcdir"/115127.patch
+
+  # Revert https://projects.blender.org/blender/blender/commit/4b891b4af which causes all
+  # CMake custom commands to be run in serial instead of in parallel.
+  sed -i "s/USES_TERMINAL//g" intern/cycles/kernel/CMakeLists.txt
 }
 
 get_pyver() {
@@ -75,7 +79,6 @@ build() {
   echo 'set(CYCLES_CUDA_BINARIES_ARCH sm_52 sm_53 sm_60 sm_61 sm_62 sm_70 sm_72 sm_75 sm_80 sm_86 sm_87 sm_89 compute_89 CACHE STRING "CUDA architectures to build binaries for" FORCE)' > precache
   echo 'mark_as_advanced(CYCLES_CUDA_BINARIES_ARCH)' >> precache
 
-  # Disable OSL until it's built with LLVM 16
   # Disable manpage for the time being
   cmake \
     -Bbuild \
@@ -85,12 +88,13 @@ build() {
     -DLLVM_VERSION=16 \
     -DPYTHON_VERSION=$PYTHON_VER \
     -DOPTIX_ROOT_DIR="$srcdir" \
-    -DWITH_CYCLES_OSL=NO \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=Release \
     -DWITH_INSTALL_PORTABLE=OFF \
     -DWITH_PYTHON_INSTALL=OFF \
     -DWITH_DOC_MANPAGE=OFF \
+    -DUSD_ROOT_DIR=/usr \
+    -DSYCL_OFFLINE_COMPILER_PARALLEL_JOBS=8 \
     -DWITH_CYCLES_EMBREE=OFF
   cmake --build build
 }
