@@ -1,4 +1,5 @@
 # Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
+# Contributor: Hurricane Pootis <hurricanepootis@protonmail.com>
 # Contributor: John Sowiak <john@archlinux.org>
 # Contributor: tobias <tobias@archlinux.org>
 
@@ -16,8 +17,8 @@ buildarch=8
 # fine with them.
 
 pkgname=blender
-pkgver=3.6.5
-pkgrel=2
+pkgver=4.0.1
+pkgrel=1
 epoch=17
 pkgdesc="A fully integrated 3D graphics creation suite"
 arch=('x86_64')
@@ -37,14 +38,14 @@ optdepends=('libdecor: wayland support')
 options=('!buildflags')
 source=("git+https://projects.blender.org/blender/blender.git#tag=v$pkgver"
         https://developer.download.nvidia.com/redist/optix/v7.6/OptiX-7.6-Include.zip
+        https://projects.blender.org/blender/blender/pulls/115127.patch
         force-draco1.patch
-        force-draco2.patch
-        blender-new-sycl.patch)
+        force-draco2.patch)
 sha512sums=('SKIP'
             'dfe86de395dd298fb9feae73bff06a26742efa06a25bb5a4f78ffb1ba4c78f555d1af927efea98af281715cce01db219aa2adfd6bd323bf0d766c1c70ce03532'
+            'ae4aa976f00184ccef735b58734ba13bebafa5ebb64b86d784528c60a4d910065246beca00b0fcf97aed4ce14eeefb29f7be53d76d65df9e122f11a8c1da6818'
             'e239da4f3906f1b54265435181cf770bae3d269c8d915df9a73861e6ee71ec70bf2339426e7c81a91e5a567273b3b3742d7a99feefd3398d821b26e1ff3a56d0'
-            'c162646eba42ea7112cfb615466c2cbaddac8d254d4a9e91cf887c5bffef1325a983701163223a1fdee091310ac5574a400347aab7f52321825b5fa3d5a9036f'
-            'b1eb2379b673514da2599c5fc3be7fc597d4d3d23550ff392b364ae53f67e332bbed7612a0d06cbf9cd255ad6833bdb29f7e3fe668471d57e91407092419f4dd')
+            'c162646eba42ea7112cfb615466c2cbaddac8d254d4a9e91cf887c5bffef1325a983701163223a1fdee091310ac5574a400347aab7f52321825b5fa3d5a9036f')
 
 prepare() {
   cd "$pkgname"
@@ -54,7 +55,11 @@ prepare() {
   # fix draco
   patch -p1 -i "$srcdir"/force-draco1.patch
   patch -p1 -d scripts/addons -i "$srcdir"/force-draco2.patch
-  patch -p1 -i "$srcdir"/blender-new-sycl.patch
+
+  # To fix manpage installation
+  # https://devtalk.blender.org/t/regression-cmake-install-error-for-man-page/32129
+  # https://projects.blender.org/blender/blender/pulls/115127
+  patch -Np1 -i "$srcdir"/115127.patch
 }
 
 get_pyver() {
@@ -70,6 +75,8 @@ build() {
   echo 'set(CYCLES_CUDA_BINARIES_ARCH sm_52 sm_53 sm_60 sm_61 sm_62 sm_70 sm_72 sm_75 sm_80 sm_86 sm_87 sm_89 compute_89 CACHE STRING "CUDA architectures to build binaries for" FORCE)' > precache
   echo 'mark_as_advanced(CYCLES_CUDA_BINARIES_ARCH)' >> precache
 
+  # Disable OSL until it's built with LLVM 16
+  # Disable manpage for the time being
   cmake \
     -Bbuild \
     -GNinja \
@@ -83,6 +90,7 @@ build() {
     -DCMAKE_BUILD_TYPE=Release \
     -DWITH_INSTALL_PORTABLE=OFF \
     -DWITH_PYTHON_INSTALL=OFF \
+    -DWITH_DOC_MANPAGE=OFF \
     -DWITH_CYCLES_EMBREE=OFF
   cmake --build build
 }
@@ -95,13 +103,13 @@ package() {
   python -m compileall "${pkgdir}/usr/share/blender"
   python -O -m compileall "${pkgdir}/usr/share/blender"
 
-  install -Dm644 release/freedesktop/org.blender.Blender.appdata.xml "${pkgdir}/usr/share/metainfo/org.blender.Blender.appdata.xml"
+  install -Dm644 release/freedesktop/org.blender.Blender.metainfo.xml "${pkgdir}/usr/share/metainfo/org.blender.Blender.metainfo.xml"
 
   # Manually install additional scripts (See FS#69351)
-  cp -r scripts/addons_contrib/* "${pkgdir}"/usr/share/blender/3*/scripts/addons_contrib/
+  cp -r scripts/addons_contrib/* "${pkgdir}"/usr/share/blender/4*/scripts/addons_contrib/
 
   # Manually install draco bindings (See FS#73415)
   mkdir -p "${pkgdir}/usr/lib/python$(get_pyver)"/
-  mv "${pkgdir}"/usr/share/blender/3*/python/lib/* "${pkgdir}"/usr/lib/
-  rm -r "${pkgdir}"/usr/share/blender/3*/python
+  mv "${pkgdir}"/usr/share/blender/4*/python/lib/* "${pkgdir}"/usr/lib/
+  rm -r "${pkgdir}"/usr/share/blender/4*/python
 }
