@@ -1,8 +1,12 @@
 disable_cma() {
   if [[ -f /boot/config.txt && $(grep '^cma' /boot/config.txt) != '' ]]; then
-    echo ">>> You appear to have dynamic memory (CMA) enabled, which is currently broken"
-    echo ">>>   in newer kernels and will cause many issues if left enabled."
-    echo ">>> Disabling that for you now."
+    cat <<END
+
+>>> You appear to have dynamic memory (CMA) enabled, which is currently broken
+    in newer kernels and will cause many issues if left enabled. Disabling that
+    for you now.
+
+END
     sed -i 's/^cma_/#cma_/g' /boot/config.txt
   fi
 }
@@ -16,35 +20,37 @@ correct_fstab() {
   fi
 }
 
-post_install () {
-  disable_cma
+advertise_rpi5() {
+  if [[ -f /sys/firmware/devicetree/base/model ]]; then
+    if grep -a -q 5 /sys/firmware/devicetree/base/model; then
+      cat <<END
 
-  # coming from linux-aarch64 also needs a padded zero in the path to /boot
-  correct_fstab
+>>> For optimal performance on RPi5, consider installing the
+    linux-rpi-16k kernel package instead of linux-rpi.
+
+END
+    fi
+  fi
+}
+
+post_install () {
+  post_upgrade
 }
 
 post_upgrade() {
-  if grep "^[^#]*[[:space:]]/boot" etc/fstab 2>&1 >/dev/null; then
-    if ! grep "[[:space:]]/boot" etc/mtab 2>&1 >/dev/null; then
-      echo "WARNING: /boot appears to be a separate partition but is not mounted."
-      echo "         You probably just broke your system. Congratulations."
-    fi
-  fi
-
+  advertise_rpi5
+  correct_fstab
   disable_cma
 
-  if [ "$(vercmp $2 3.18.3)" -lt 0 ]; then
-    echo "________________________________________________________________________________"
-    echo ""
-    echo "WARNING: This kernel provides updated config.txt and cmdline.txt files."
-    echo "         Check for pacnew files in /boot and merge or replace the existing files"
-    echo "         with the new versions."
-    echo "________________________________________________________________________________"
-    echo ""
-  fi
+  if grep "^[^#]*[[:space:]]/boot" etc/fstab 2>&1 >/dev/null; then
+    if ! grep "[[:space:]]/boot" etc/mtab 2>&1 >/dev/null; then
+      cat <<END
 
-  if [ "$(vercmp $2 5.10.0)" -lt 0 ]; then
-    correct_fstab
+>>> WARNING: /boot appears to be a separate partition but is not mounted.
+    You probably just broke your system. Congratulations.
+
+END
+    fi
   fi
 }
 
