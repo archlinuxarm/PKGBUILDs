@@ -32,13 +32,13 @@ index aac7479..5f1a51a 100644
 --- a/converter/other/gemtopnm.c
 +++ b/converter/other/gemtopnm.c
 @@ -106,6 +106,7 @@ main(argc, argv)
- 
- 	pnm_writepnminit( stdout, cols, rows, MAXVAL, type, 0 );
+     else
+         type = PPM_TYPE;
  
 +    overflow_add(cols, padright);
-     { 
-         /* allocate input row data structure */
-         int plane;
+     pnm_writepnminit( stdout, cols, rows, MAXVAL, type, 0 );
+ 
+     {
 diff --git a/converter/other/jpegtopnm.c b/converter/other/jpegtopnm.c
 index ab3b18e..c324b86 100644
 --- a/converter/other/jpegtopnm.c
@@ -318,21 +318,21 @@ index 2f8a42b..1c8d236 100644
 --- a/converter/pbm/pbmtoppa/pbm.c
 +++ b/converter/pbm/pbmtoppa/pbm.c
 @@ -106,6 +106,7 @@ int pbm_readline(pbm_stat* pbm,unsigned char* data)
-     return 0;
+                 break;
+             case P4: {
+                 int tmp, tmp2;
++                overflow_add(pbmStatP->width, 7);
+                 tmp = (pbmStatP->width+7)/8;
+                 tmp2 = fread(data,1,tmp,pbmStatP->fptr);
+                 if (tmp2 == tmp) {
+@@ -185,6 +186,7 @@ void pbm_unreadline (pbm_stat *pbm, void *data)
  
-   case P4:
-+    overflow_add(pbm->width, 7);
-     tmp=(pbm->width+7)/8;
-     tmp2=fread(data,1,tmp,pbm->fptr);
-     if(tmp2 == tmp)
-@@ -130,6 +131,7 @@ void pbm_unreadline (pbm_stat *pbm, void *data)
-     return;
- 
-   pbm->unread = 1;
-+  overflow_add(pbm->width, 7);
-   pbm->revdata = malloc ((pbm->width+7)/8);
-   memcpy (pbm->revdata, data, (pbm->width+7)/8);
-   pbm->current_line--;
+     if (!pbmStatP->unread) {
+         pbmStatP->unread = 1;
++        overflow_add(pbmStatP->width, 7);
+         pbmStatP->revdata = malloc ((pbmStatP->width+7)/8);
+         memcpy(pbmStatP->revdata, data, (pbmStatP->width+7)/8);
+         --pbmStatP->current_line;
 diff --git a/converter/pbm/pbmtoppa/pbmtoppa.c b/converter/pbm/pbmtoppa/pbmtoppa.c
 index f43c08a..98e0284 100644
 --- a/converter/pbm/pbmtoppa/pbmtoppa.c
@@ -491,7 +491,7 @@ index 662be0b..2a86efc 100644
 @@ -1355,6 +1373,9 @@ dcol_to_ppm(FILE *         const ifP,
      if( redmaxval != maxval || greenmaxval != maxval || bluemaxval != maxval )
          pm_message("scaling colors to %d bits", pm_maxvaltobits(maxval));
-     
+ 
 +    overflow_add(redmaxval, 1);
 +    overflow_add(greenmaxval, 1);
 +    overflow_add(bluemaxval, 1);
@@ -500,14 +500,14 @@ index 662be0b..2a86efc 100644
      MALLOCARRAY_NOFAIL(bluetable,  bluemaxval  +1);
 @@ -1784,7 +1805,9 @@ PCHG_ConvertSmall(PCHG, cmap, mask, datasize)
              ChangeCount32 = *data++;
-             datasize -= 2;
+             remDataSize -= 2;
  
 +            overflow_add(ChangeCount16, ChangeCount32);
              changes = ChangeCount16 + ChangeCount32;
 +            overflow_add(changes, 1);
-             for( i = 0; i < changes; i++ ) {
-                 if( totalchanges >= PCHG->TotalChanges ) goto fail;
-                 if( datasize < 2 ) goto fail;
+             for (i = 0; i < changes; ++i) {
+                 if (totalchanges >= pchgP->TotalChanges) goto fail;
+                 if (remDataSize < 2) goto fail;
 @@ -2049,6 +2072,9 @@ read_pchg(FILE *     const ifP,
              cmap->mp_change[i] = NULL;
          if( PCHG.StartLine < 0 ) {
@@ -579,51 +579,37 @@ diff --git a/converter/ppm/pjtoppm.c b/converter/ppm/pjtoppm.c
 index 7b694fb..62ce77e 100644
 --- a/converter/ppm/pjtoppm.c
 +++ b/converter/ppm/pjtoppm.c
-@@ -127,20 +127,22 @@ main(argc, argv)
+@@ -127,11 +127,15 @@ main(argc, argv)
                  case 'V':   /* send plane */
                  case 'W':   /* send last plane */
-                     if (rows == -1 || r >= rows || image == NULL) {
--                        if (rows == -1 || r >= rows)
-+                        if (rows == -1 || r >= rows) {
-+                            overflow_add(rows, 100);
-                             rows += 100;
+                     if (row >= rowsX || image == NULL) {
+-                        if (row >= rowsX)
++                        if (row >= rowsX) {
++                            overflow_add(rowsX, 100);
+                             rowsX += 100;
 +                        }
 +
                          if (image == NULL) {
--                            MALLOCARRAY(image, rows * planes);
--                            MALLOCARRAY(imlen, rows * planes);
+-                            MALLOCARRAY(image, uintProduct(rowsX, planes));
+-                            MALLOCARRAY(imlen, uintProduct(rowsX, planes));
 +                            image = (unsigned char **)
-+                                malloc3(rows , planes , sizeof(unsigned char *));
-+                            imlen = (int *) malloc3(rows , planes,  sizeof(int));
-                         }
-                         else {
--                            image = (unsigned char **) 
--                                realloc(image, 
--                                        rows * planes * 
--                                        sizeof(unsigned char *));
--                            imlen = (int *) 
--                                realloc(imlen, rows * planes * sizeof(int));
--                        }
-+                            overflow2(rows,planes);
-+                            image = (unsigned char **)
-+                                realloc2(image, rows * planes,
-+                                    sizeof(unsigned char *));
-+                            imlen = (int *) realloc2(imlen, rows * planes, sizeof(int));                        }
-                     }
-                     if (image == NULL || imlen == NULL)
-                         pm_error("out of memory");
++                                malloc3(rowsX , planes , sizeof(unsigned char *));
++                            imlen = (int *) malloc3(rowsX , planes,  sizeof(int));
+                         } else {
+                             REALLOCARRAY(image, uintProduct(rowsX, planes));
+                             REALLOCARRAY(imlen, uintProduct(rowsX, planes));
 @@ -212,8 +214,10 @@ main(argc, argv)
-                 for (i = 0, c = 0; c < imlen[p + r * planes]; c += 2)
-                     for (cmd = image[p + r * planes][c],
-                              val = image[p + r * planes][c+1]; 
--                         cmd >= 0 && i < newcols; cmd--, i++) 
+                      col += 2)
+                     for (cmd = image[plane + row * planes][col],
+                              val = image[plane + row * planes][col+1];
+-                         cmd >= 0 && i < newcols; cmd--, i++)
 +                         cmd >= 0 && i < newcols; cmd--, i++) {
                          buf[i] = val;
 +                        overflow_add(i, 1);
 +                    }
-                 cols = cols > i ? cols : i;
-                 free(image[p + r * planes]);
-                 /* 
+                 cols = MAX(cols, i);
+                 free(image[plane + row * planes]);
+                 /*
 @@ -224,6 +228,7 @@ main(argc, argv)
                  image[p + r * planes] = (unsigned char *) realloc(buf, i);
              }
@@ -831,9 +817,9 @@ index 6ba4cb4..fc6a498 100644
 --- a/converter/ppm/sldtoppm.c
 +++ b/converter/ppm/sldtoppm.c
 @@ -464,6 +464,8 @@ slider(slvecfn   slvec,
-     
+ 
      /* Allocate image buffer and clear it to black. */
-     
+ 
 +    overflow_add(ixdots, 1);
 +    overflow_add(iydots, 1);
      pixels = ppm_allocarray(pixcols = ixdots + 1, pixrows = iydots + 1);
@@ -869,13 +855,13 @@ index f49c8d9..580e5e0 100644
 --- a/editor/pbmreduce.c
 +++ b/editor/pbmreduce.c
 @@ -94,6 +94,7 @@ main( argc, argv )
-     if (halftone == QT_FS) {
-         unsigned int col;
-         /* Initialize Floyd-Steinberg. */
+ 
+     unsigned int col;
+ 
 +        overflow_add(newcols, 2);
-         MALLOCARRAY(thiserr, newcols + 2);
-         MALLOCARRAY(nexterr, newcols + 2);
-         if (thiserr == NULL || nexterr == NULL)
+     MALLOCARRAY(fsP->thiserr, newcols + 2);
+     MALLOCARRAY(fsP->nexterr, newcols + 2);
+ 
 diff --git a/editor/pnmgamma.c b/editor/pnmgamma.c
 index b357b0d..ec612d3 100644
 --- a/editor/pnmgamma.c
@@ -939,12 +925,12 @@ index b2448cb..b924120 100644
      MALLOCARRAY(fserrP->thiserr, pamP->depth);
 @@ -465,6 +466,7 @@ floydInitRow(struct pam * const pamP, struct fserr * const fserrP) {
  
-     int col;
-     
+     unsigned int col;
+ 
 +    overflow_add(pamP->width, 2);
      for (col = 0; col < pamP->width + 2; ++col) {
          unsigned int plane;
-         for (plane = 0; plane < pamP->depth; ++plane) 
+         for (plane = 0; plane < pamP->depth; ++plane)
 diff --git a/editor/pnmscalefixed.c b/editor/pnmscalefixed.c
 index 884ca31..747cd8f 100644
 --- a/editor/pnmscalefixed.c
@@ -1004,42 +990,6 @@ index 6cb8d3a..6f4bde9 100644
      MALLOCARRAY(hist, inpam.maxval + 1);
      if (hist == NULL)
          pm_error("Unable to allocate memory for histogram.");
-diff --git a/generator/pbmtext.c b/generator/pbmtext.c
-index 9f4366d..445d718 100644
---- a/generator/pbmtext.c
-+++ b/generator/pbmtext.c
-@@ -96,12 +96,14 @@ parseCommandLine(int argc, const char ** argv,
-         
-         for (i = 1; i < argc; ++i) {
-             if (i > 1) {
-+                overflow_add(totaltextsize, 1);
-                 totaltextsize += 1;
-                 text = realloc(text, totaltextsize);
-                 if (text == NULL)
-                     pm_error("out of memory allocating space for input text");
-                 strcat(text, " ");
--            } 
-+            }
-+            overflow_add(totaltextsize, strlen(argv[i]));
-             totaltextsize += strlen(argv[i]);
-             text = realloc(text, totaltextsize);
-             if (text == NULL)
-@@ -712,6 +714,7 @@ getText(const char          cmdline_text[],
-                 pm_error("A line of input text is longer than %u characters."
-                          "Cannot process.", (unsigned)sizeof(buf)-1);
-             if (lineCount >= maxlines) {
-+                overflow2(maxlines, 2);
-                 maxlines *= 2;
-                 REALLOCARRAY(text_array, maxlines);
-                 if (text_array == NULL)
-@@ -832,6 +835,7 @@ main(int argc, const char *argv[]) {
-             hmargin = fontP->maxwidth;
-         } else {
-             vmargin = fontP->maxheight;
-+            overflow2(2, fontP->maxwidth);
-             hmargin = 2 * fontP->maxwidth;
-         }
-     }
 diff --git a/lib/libpam.c b/lib/libpam.c
 index cc6368e..4e10572 100644
 --- a/lib/libpam.c
@@ -1049,13 +999,13 @@ index cc6368e..4e10572 100644
      tuple * tuplerow;
  
 -    tuplerow = malloc(pamP->width * (sizeof(tuple *) + bytesPerTuple));
--                      
+-
 +    overflow_add(sizeof(tuple *), bytesPerTuple);
 +    tuplerow = malloc2(pamP->width, (sizeof(tuple *) + bytesPerTuple));
 +
      if (tuplerow != NULL) {
          /* Now we initialize the pointers to the individual tuples
-            to make this a regulation C two dimensional array.  
+            to make this a regulation C two dimensional array.
 diff --git a/lib/libpammap.c b/lib/libpammap.c
 index 55e1d3f..04b1ba3 100644
 --- a/lib/libpammap.c
@@ -1143,7 +1093,7 @@ index e9f1405..da54391 100644
 +void __overflow2(int, int);
 +void overflow3(int, int, int);
 +void overflow_add(int, int);
-+
++void *realloc2(void*, int, int);
  
  #endif
 diff --git a/other/pnmcolormap.c b/other/pnmcolormap.c
