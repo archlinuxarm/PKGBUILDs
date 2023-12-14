@@ -16,7 +16,7 @@ pkgname=('systemd'
 _tag='0966fe6734417ce07d5eb82a245fdec3789714da' # git rev-parse v${_tag_name}
 _tag_name=255
 pkgver="${_tag_name/-/}"
-pkgrel=1
+pkgrel=2
 arch=('x86_64')
 url='https://www.github.com/systemd/systemd'
 makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
@@ -62,7 +62,7 @@ sha512sums=('SKIP'
             'SKIP'
             '3ccf783c28f7a1c857120abac4002ca91ae1f92205dcd5a84aff515d57e706a3f9240d75a0a67cff5085716885e06e62597baa86897f298662ec36a940cf410e'
             '4a6cd0cf6764863985dc5ad774d7c93b574645a05b3295f989342951d43c71696d069641592e37eeadb6d6f0531576de96b6392224452f15cd9f056fae038f8e'
-            '442e79012d654e72cde03c8b4b90c7b6e9c9e7803551fdeae79bda945f7aff92f1046f5edc64f75d23614f66b3ef044cc47c862379b3e0695ecff412fec90401'
+            'ada692514d758fa11e2be6b4c5e1dc2d9d47548f24ada35afdce1dcac918e72ae2251c892773e6cf41fa431c3613a1608668e999eb86a565870fecb55c47b4ba'
             'a8c7e4a2cc9c9987e3c957a1fc3afe8281f2281fffd2e890913dcf00cf704024fb80d86cb75f9314b99b0e03bac275b22de93307bfc226d8be9435497e95b7e6'
             '61032d29241b74a0f28446f8cf1be0e8ec46d0847a61dadb2a4f096e8686d5f57fe5c72bcf386003f6520bc4b5856c32d63bf3efe7eb0bc0deefc9f68159e648'
             'c416e2121df83067376bcaacb58c05b01990f4614ad9de657d74b6da3efa441af251d13bf21e3f0f71ddcb4c9ea658b81da3d915667dc5c309c87ec32a1cb5a5'
@@ -74,6 +74,8 @@ sha512sums=('SKIP'
             '2b50b25e8680878f7974fa9d519df7e141ca11c4bfe84a92a5d01bb193f034b1726ea05b3c0030bad1fbda8dbb78bf1dc7b73859053581b55ba813c39b27d9dc'
             'a436d3f5126c6c0d6b58c6865e7bd38dbfbfb7babe017eeecb5e9d162c21902cbf4e0a68cf3ac2f99815106f9fa003b075bd2b4eb5d16333fa913df6e2f3e32a'
             '190112e38d5a5c0ca91b89cd58f95595262a551530a16546e1d84700fc9644aa2ca677953ffff655261e8a7bff6e6af4e431424df5f13c00bc90b77c421bc32d'
+  # network/networkd-address: don't set up firewall rules here
+  '58c6e75f263a1562f5550221af1ec1a9b6046143'
             'a1661ab946c6cd7d3c6251a2a9fd68afe231db58ce33c92c42594aedb5629be8f299ba08a34713327b373a3badd1554a150343d8d3e5dfb102999c281bd49154'
             '9426829605bbb9e65002437e02ed54e35c20fdf94706770a3dc1049da634147906d6b98bf7f5e7516c84068396a12c6feaf72f92b51bdf19715e0f64620319de'
             'da7a97d5d3701c70dd5388b0440da39006ee4991ce174777931fea2aa8c90846a622b2b911f02ae4d5fffb92680d9a7e211c308f0f99c04896278e2ee0d9a4dc'
@@ -81,6 +83,10 @@ sha512sums=('SKIP'
             '825b9dd0167c072ba62cabe0677e7cd20f2b4b850328022540f122689d8b25315005fa98ce867cf6e7460b2b26df16b88bb3b5c9ebf721746dce4e2271af7b97')
 
 _backports=(
+  # network/networkd-address: don't set up firewall rules here
+  '58c6e75f263a1562f5550221af1ec1a9b6046143'
+  # core: do not make private /dev/ read-only too soon
+  'b0cb93591096b23f1cb3b81825824e11609c1833'
 )
 
 _reverts=(
@@ -241,13 +247,14 @@ package_systemd() {
   mv "$pkgdir"/usr/share/man/man3 systemd-libs/man3
 
   # ukify shipped in separate package
-  # we do *NOT* move the kernel-install files there, as other ways of
-  # creating uki exist!
-  install -d -m0755 systemd-ukify/{bin,systemd,man1}
-  mv "$pkgdir"/usr/bin/ukify systemd-ukify/bin/
   if [[ $CARCH != "armv7h" ]]; then
+    install -d -m0755 systemd-ukify/{bin,systemd,man1,install.d}
+    mv "$pkgdir"/usr/bin/ukify systemd-ukify/bin/
     mv "$pkgdir"/usr/lib/systemd/ukify systemd-ukify/systemd/
     mv "$pkgdir"/usr/share/man/man1/ukify.1 systemd-ukify/man1/
+    # we move the ukify hook itself, but keep 90-uki-copy.install in place,
+    # because there are other ways to generate UKIs w/o ukify, e.g. w/ mkinitcpio
+    mv "$pkgdir"/usr/lib/kernel/install.d/60-ukify.install systemd-ukify/install.d
   fi
 
   # manpages shipped with systemd-sysvcompat
@@ -312,7 +319,7 @@ package_systemd-resolvconf() {
   license=('LGPL2.1')
   depends=('systemd')
   provides=('openresolv' 'resolvconf')
-  conflicts=('openresolv')
+  conflicts=('resolvconf')
 
   install -d -m0755 "$pkgdir"/usr/bin
   ln -s resolvectl "$pkgdir"/usr/bin/resolvconf
@@ -349,6 +356,7 @@ package_systemd-ukify() {
   mv systemd-ukify/bin "$pkgdir"/usr/bin
   mv systemd-ukify/systemd "$pkgdir"/usr/lib/systemd
   mv systemd-ukify/man1 "$pkgdir"/usr/share/man/man1
+  mv systemd-ukify/install.d "$pkgdir"/usr/lib/kernel/install.d
 }
 
 # vim:ft=sh syn=sh et sw=2:
