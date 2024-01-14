@@ -10,7 +10,7 @@ _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _regen=
 pkgver=6.6.11
-pkgrel=1
+pkgrel=2
 pkgdesc='Linux'
 url="https://github.com/raspberrypi/linux"
 arch=(armv7h aarch64)
@@ -28,8 +28,6 @@ source=("linux-$pkgver-${_commit:0:10}.tar.gz::https://github.com/raspberrypi/li
         config.txt
         0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
         linux.preset
-        60-linux.hook
-        90-linux.hook
         archarm.diffconfig
 )
 md5sums=('4fccdacbd5f97ff0e0b85c29efffecd9'
@@ -37,11 +35,9 @@ md5sums=('4fccdacbd5f97ff0e0b85c29efffecd9'
          '16c484af9f72b9275afcf83a6b8eab36'
          'f66a7ea3feb708d398ef57e4da4815e9'
          '86d4a35722b5410e3b29fc92dae15d4b'
-         '0a5f16bfec6ad982a2f6782724cca8ba'
-         '441ec084c47cddc53e592fb0cbce4edf'
          'c8f84694321e249492c80149833671d7')
-md5sums_armv7h=('249f5f5e7f7985c0a13f6b1669b13c12')
-md5sums_aarch64=('7141b36bf441654769cdbd0038a986de')
+md5sums_armv7h=('d0f6f5760648f67d334ee8985bc37553')
+md5sums_aarch64=('814310e1fdf35c32129255cf14cf13df')
 
 # setup vars
 if [[ $CARCH == "armv7h" ]]; then
@@ -76,17 +72,17 @@ prepare() {
       # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16377
       scripts/config --enable CONFIG_LRU_GEN_ENABLED
     fi
-    sed '/^CONFIG_LOCALVERSION=/s,.*$,CONFIG_LOCALVERSION="-ARCH",' .config >$startdir/newconfig.$_config
+    # bcm2711_defconfig inserts either -v7l or -v8 for CONFIG_LOCALVERSION= so set this to null
+    sed '/^CONFIG_LOCALVERSION=/s,.*$,CONFIG_LOCALVERSION="",' .config >$startdir/newconfig.$_config
     echo "verify that newconfig.$_config is fit for purpose then redefine $_config"
     exit
   else
-    make bcm2711_defconfig
-    make -s kernelrelease | sed 's/rpi-.*$/rpi-ARCH/' > version
-    make mrproper
     echo "Setting config..."
     cp ../"$_config" .config
     make olddefconfig
     diff -u ../"$_config" .config || :
+
+    make -s kernelrelease > version
     echo "Prepared $pkgbase version $(<version)"
   fi
 }
@@ -163,11 +159,9 @@ _package() {
   sed "${_subst}" ../linux.preset |
     install -Dm644 /dev/stdin "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
 
-  # install pacman hooks
-  sed "${_subst}" ../60-linux.hook |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/60-${pkgbase}.hook"
-  sed "${_subst}" ../90-linux.hook |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
+  # rather than use another hook (90-linux.hook) rely on kmod's 90-mkinitcpio-install.hook
+  # which avoids a double run of mkinitcpio that can occur
+  touch "${pkgdir}/usr/lib/modules/$(<version)/vmlinuz"
 }
 
 _package-headers() {
