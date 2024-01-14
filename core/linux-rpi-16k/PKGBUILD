@@ -12,7 +12,7 @@ _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _regen=
 pkgver=6.6.11
-pkgrel=1
+pkgrel=2
 pkgdesc='Linux'
 url="https://github.com/raspberrypi/linux"
 arch=(aarch64)
@@ -29,18 +29,14 @@ source=("linux-$pkgver-${_commit:0:10}.tar.gz::https://github.com/raspberrypi/li
         config8
         0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
         linux.preset
-        60-linux.hook
-        90-linux.hook
         archarm.diffconfig
 )
 md5sums=('4fccdacbd5f97ff0e0b85c29efffecd9'
          '3bab7426d8c8818dda8353da3892a41f'
          '16c484af9f72b9275afcf83a6b8eab36'
-         '4be68cd89d9c3451d4aad6efd59bf65b'
+         '193b2b50f8abcedd8ce14cc5b58b6631'
          'f66a7ea3feb708d398ef57e4da4815e9'
          '86d4a35722b5410e3b29fc92dae15d4b'
-         '0a5f16bfec6ad982a2f6782724cca8ba'
-         '441ec084c47cddc53e592fb0cbce4edf'
          'c8f84694321e249492c80149833671d7')
 
 # setup vars
@@ -62,17 +58,17 @@ prepare() {
     make bcm2712_defconfig
     cat ../archarm.diffconfig >> .config
     make oldconfig
+    # bcm2712_defconfig inserts their own value for CONFIG_LOCALVERSION= so set this to null
     sed '/^CONFIG_LOCALVERSION=/s,.*$,CONFIG_LOCALVERSION="-ARCH",' .config >$startdir/newconfig.$_config
     echo "verify that newconfig.$_config is fit for purpose then redefine $_config"
     exit
   else
-    make bcm2712_defconfig
-    make -s kernelrelease | sed 's/rpi-16k.*$/rpi-16k-ARCH/' > version
-    make mrproper
     echo "Setting config..."
     cp ../"$_config" .config
     make olddefconfig
     diff -u ../"$_config" .config || :
+
+    make -s kernelrelease > version
     echo "Prepared $pkgbase version $(<version)"
   fi
 }
@@ -157,11 +153,9 @@ _package() {
   sed "${_subst}" ../linux.preset |
     install -Dm644 /dev/stdin "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
 
-  # install pacman hooks
-  sed "${_subst}" ../60-linux.hook |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/60-${pkgbase}.hook"
-  sed "${_subst}" ../90-linux.hook |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
+  # rather than use another hook (90-linux.hook) rely on kmod's 90-mkinitcpio-install.hook
+  # which avoids a double run of mkinitcpio that can occur
+  touch "${pkgdir}/usr/lib/modules/$(<version)/vmlinuz"
 }
 
 _package-headers() {
