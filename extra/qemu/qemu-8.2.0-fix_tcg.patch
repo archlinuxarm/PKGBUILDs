@@ -1,0 +1,43 @@
+With PCREL, we have a page-relative view of EIP, and an
+approximation of PC = EIP+CSBASE that is good enough to
+detect page crossings.  If we try to recompute PC after
+masking EIP, we will mess up that approximation and write
+a corrupt value to EIP.
+
+We already handled masking properly for PCREL, so the
+fix in b5e0d5d2 was only needed for the !PCREL path.
+
+Cc: qemu-stable@nongnu.org
+Fixes: b5e0d5d22fbf ("target/i386: Fix 32-bit wrapping of pc/eip computation")
+Reported-by: Michael Tokarev <mjt@tls.msk.ru>
+Signed-off-by: Richard Henderson <richard.henderson@linaro.org>
+---
+ target/i386/tcg/translate.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/target/i386/tcg/translate.c b/target/i386/tcg/translate.c
+index 037bc47e7c..e68375b19d 100644
+--- a/target/i386/tcg/translate.c
++++ b/target/i386/tcg/translate.c
+@@ -2845,10 +2845,6 @@ static void gen_jmp_rel(DisasContext *s, MemOp ot, int diff, int tb_num)
+         }
+     }
+     new_eip &= mask;
+-    new_pc = new_eip + s->cs_base;
+-    if (!CODE64(s)) {
+-        new_pc = (uint32_t)new_pc;
+-    }
+ 
+     gen_update_cc_op(s);
+     set_cc_op(s, CC_OP_DYNAMIC);
+@@ -2864,6 +2860,8 @@ static void gen_jmp_rel(DisasContext *s, MemOp ot, int diff, int tb_num)
+             tcg_gen_andi_tl(cpu_eip, cpu_eip, mask);
+             use_goto_tb = false;
+         }
++    } else if (!CODE64(s)) {
++        new_pc = (uint32_t)(new_eip + s->cs_base);
+     }
+ 
+     if (use_goto_tb && translator_use_goto_tb(&s->base, new_pc)) {
+-- 
+2.34.1
