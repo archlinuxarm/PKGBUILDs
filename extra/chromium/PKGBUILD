@@ -15,10 +15,11 @@
 highmem=1
 
 pkgname=chromium
-pkgver=120.0.6099.224
+pkgver=121.0.6167.71
 pkgrel=1
 _launcher_ver=8
 _manual_clone=0
+_system_clang=1
 pkgdesc="A web browser built for speed, simplicity, and security"
 arch=('x86_64')
 url="https://www.chromium.org/Home"
@@ -38,17 +39,15 @@ options=('!lto') # Chromium adds its own flags for ThinLTO
 source=(https://commondatastorage.googleapis.com/chromium-browser-official/chromium-$pkgver.tar.xz
         https://github.com/foutrelis/chromium-launcher/archive/v$_launcher_ver/chromium-launcher-$_launcher_ver.tar.gz
         https://gitlab.com/Matt.Jolly/chromium-patches/-/archive/${pkgver%%.*}/chromium-patches-${pkgver%%.*}.tar.bz2
-        libxml2-2.12.patch
         icu-74.patch
         drop-flags-unsupported-by-clang16.patch
         use-oauth2-client-switches-as-default.patch
         0001-widevine-support-for-arm.patch
         0002-Run-blink-bindings-generation-single-threaded.patch
         0003-Fix-eu-strip-build-for-newer-GCC.patch)
-sha256sums=('850a85c8d8a01041a07dfaaea8289fa5f8294b4e375e6b77997b61434e0a2f1a'
+sha256sums=('fbf49711de4c3c4991ad2f844aa357f2cbaa119c8a091f13bff84b31fa5007c5'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
-            'ffee1082fbe3d0c9e79dacb8405d5a0e1aa94d6745089a30b093f647354894d2'
-            '1808df5ba4d1e2f9efa07ac6b510bec866fa6d60e44505d82aea3f6072105a71'
+            'e9113c1ed2900b84b488e608774ce25212d3c60094abdae005d8a943df9b505e'
             'ff9ebd86b0010e1c604d47303ab209b1d76c3e888c423166779cefbc22de297f'
             '8d1cdf3ddd8ff98f302c90c13953f39cd804b3479b13b69b8ef138ac57c83556'
             'e393174d7695d0bafed69e868c5fbfecf07aa6969f3b64596d0bae8b067e1711'
@@ -86,7 +85,7 @@ declare -gA _system_libs=(
   #[re2]=re2          # needs libstdc++
   #[snappy]=snappy    # needs libstdc++
   #[woff2]=woff2      # needs libstdc++
-  [zlib]=minizip
+  #[zlib]=minizip
 )
 _unwanted_bundled_libs=(
   $(printf "%s\n" ${!_system_libs[@]} | sed 's/^libjpeg$/&_turbo/')
@@ -138,25 +137,29 @@ prepare() {
   patch -Np1 -i ../use-oauth2-client-switches-as-default.patch
 
   # Upstream fixes
-  patch -Np1 -i ../libxml2-2.12.patch
 
   # Fix build with ICU 74
   patch -Np1 -i ../icu-74.patch
 
   # Drop compiler flags that need newer clang
-  patch -Np1 -i ../drop-flags-unsupported-by-clang16.patch
+  #patch -Np1 -i ../drop-flags-unsupported-by-clang16.patch
 
   # Fixes for building with libstdc++ instead of libc++
   #patch -Np1 -i ../chromium-patches-*/chromium-114-ruy-include.patch
   #patch -Np1 -i ../chromium-patches-*/chromium-117-material-color-include.patch
-  patch -Np1 -i ../chromium-patches-*/chromium-119-at-spi-variable-consumption.patch
-  patch -Np1 -i ../chromium-patches-*/chromium-119-clang16.patch
-  #patch -Np1 -i ../chromium-patches-*/chromium-120-std-nullptr_t.patch
+  #patch -Np1 -i ../chromium-patches-*/chromium-119-clang16.patch
 
   # Link to system tools required by the build
   mkdir -p third_party/node/linux/node-linux-x64/bin
   ln -s /usr/bin/node third_party/node/linux/node-linux-x64/bin/
   ln -s /usr/bin/java third_party/jdk/current/bin/
+
+  # Use prebuilt rust as system rust cannot be used due to the error:
+  #   error: the option `Z` is only accepted on the nightly compiler
+  #./tools/rust/update_rust.py
+
+  # To link to rust libraries we need to compile with prebuilt clang
+  #./tools/clang/scripts/update.py
 
   # Remove bundled libraries for which we will use the system copies; this
   # *should* do what the remove_bundled_libraries.py script does, with the
@@ -185,22 +188,27 @@ build() {
   ./build.sh
   popd
 
-  export CC=clang
-  export CXX=clang++
-  export AR=ar
-  export NM=nm
+  if (( _system_clang )); then
+    export CC=clang
+    export CXX=clang++
+    export AR=ar
+    export NM=nm
+  else
+    local _clang_path="$PWD/third_party/llvm-build/Release+Asserts/bin"
+    export CC=$_clang_path/clang
+    export CXX=$_clang_path/clang++
+    export AR=$_clang_path/llvm-ar
+    export NM=$_clang_path/llvm-nm
+  fi
 
   local _flags=(
     'custom_toolchain="//build/toolchain/linux/unbundle:default"'
     'host_toolchain="//build/toolchain/linux/unbundle:default"'
-    'clang_base_path="/usr"'
-    'clang_use_chrome_plugins=false'
     'clang_use_default_sample_profile=false'
     'use_allocator="none"'
     'is_official_build=true' # implies is_cfi=true on x86_64
     'symbol_level=0' # sufficient for backtraces on x86(_64)
     'is_cfi=false'
-    'chrome_pgo_phase=0'
     'treat_warnings_as_errors=false'
     'disable_fieldtrial_testing_config=true'
     'blink_enable_generated_code_formatting=false'
@@ -221,6 +229,18 @@ build() {
 
   if [[ -n ${_system_libs[icu]+set} ]]; then
     _flags+=('icu_use_data_file=false')
+  fi
+
+  if (( _system_clang )); then
+     local _clang_version=$(
+       clang --version | grep -m1 version | sed 's/.* \([0-9]\+\).*/\1/')
+
+    _flags+=(
+      'clang_base_path="/usr"'
+      'clang_use_chrome_plugins=false'
+      "clang_version=\"$_clang_version\""
+      'chrome_pgo_phase=0' # needs newer clang to read the bundled PGO profile
+    )
   fi
 
   if [[ $CARCH == "armv7h" ]]; then
