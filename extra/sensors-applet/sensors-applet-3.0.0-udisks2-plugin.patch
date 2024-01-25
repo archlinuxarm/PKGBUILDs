@@ -1,0 +1,1494 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: info-cppsp <info@cppsp.de>
+Date: Wed, 13 Sep 2017 13:13:30 +0200
+Subject: [PATCH 1/4] added udisks2 plugin
+
+(cherry picked from commit a7e24a66b69f02106db00e5392b68c39f5d4eb59)
+
+Conflicts:
+	plugins/udisks2/Makefile.am
+---
+ autogenclean.sh                  |  17 +
+ configure.ac                     |  24 ++
+ plugins/Makefile.am              |   5 +
+ plugins/udisks2/Makefile.am      |  24 ++
+ plugins/udisks2/udisks2-plugin.c | 550 +++++++++++++++++++++++++++++++
+ plugins/udisks2/udisks2-plugin.h |  24 ++
+ 6 files changed, 644 insertions(+)
+ create mode 100644 autogenclean.sh
+ create mode 100644 plugins/udisks2/Makefile.am
+ create mode 100644 plugins/udisks2/udisks2-plugin.c
+ create mode 100644 plugins/udisks2/udisks2-plugin.h
+
+diff --git a/autogenclean.sh b/autogenclean.sh
+new file mode 100644
+index 0000000..d6a31c8
+--- /dev/null
++++ b/autogenclean.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash -e
++#
++# deletes compile files, so that I can upload the whole folder to github
++# use make clean first
++
++find . -name "Makefile"  -exec rm {} \;
++find . -name "Makefile.in"  -exec rm {} \;
++find . -name "autom4te.cache"  -exec rm -r {} \;
++find . -name ".deps"  -exec rm -r {} \;
++find . -name "m4"  -exec rm -r {} \;
++find . -name "*.gmo"  -exec rm {} \;
++find . -name "POTFILES"  -exec rm {} \;
++find . -name "Makefile.in.in"  -exec rm {} \;
++find . -name "stamp-it"  -exec rm {} \;
++rm ./sensors-applet/config.h*;
++rm ./sensors-applet/stamp-h1;
++rm ./aclocal.m4 ./compile ./config.* ./configure ./depcomp ./install-sh ./libtool ./ltmain.sh ./missing ./omf.make ./xmldocs.make ./INSTALL;
+diff --git a/configure.ac b/configure.ac
+index 5d689f6..239c60b 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -100,6 +100,29 @@ fi
+ 
+ AM_CONDITIONAL(UDISKS, test -n "$DBUSGLIB_CFLAGS" -a -n "$LIBATASMART_CFLAGS")
+ 
++# enable support for udisks2 (via dbus) by default if its available
++AC_ARG_ENABLE(udisks2,
++	      AS_HELP_STRING([--disable-udisks2],
++			     [Disable support for udisks2 sensor readings via DBUS.]),
++			     enable_udisks2=$enableval, enable_udisks2="yes")
++
++if test "x$enable_udisks2" = "xno" ; then
++	echo "Disabling udisks2 support"
++#else
++#	PKG_CHECK_MODULES(DBUSGLIB, dbus-glib-1 >= $LIBDBUSGLIB_REQUIRED,
++#		          HAVE_DBUSGLIB="yes", HAVE_DBUSGLIB="no")
++#	AC_SUBST(DBUSGLIB_CFLAGS)
++#	AC_SUBST(DBUSGLIB_LIBS)
++
++#	PKG_CHECK_MODULES(LIBATASMART, libatasmart >= $LIBATASMART_REQUIRED,
++#			  HAVE_LIBATASMART="yes", HAVE_LIBATASMART="no")
++#	AC_SUBST(LIBATASMART_CFLAGS)
++#	AC_SUBST(LIBATASMART_LIBS)
++fi
++
++# use same test as above, bc AM_CONDITIONAL may not be in if/else
++AM_CONDITIONAL(UDISKS2, test "x$enable_udisks2" = "xyes")
++
+ # support for libnotify
+ LIBNOTIFY_CFLAGS=
+ LIBNOTIFY_LIBS=
+@@ -268,6 +291,7 @@ AC_CONFIG_FILES([
+ 	plugins/Makefile
+ 	plugins/acpi/Makefile
+ 	plugins/udisks/Makefile
++	plugins/udisks2/Makefile
+ 	plugins/eee/Makefile
+ 	plugins/hddtemp/Makefile
+ 	plugins/i2c-proc/Makefile
+diff --git a/plugins/Makefile.am b/plugins/Makefile.am
+index 74161f5..d787000 100644
+--- a/plugins/Makefile.am
++++ b/plugins/Makefile.am
+@@ -1,6 +1,7 @@
+ DIST_SUBDIRS = \
+ 	acpi \
+ 	udisks \
++	udisks2 \
+ 	eee \
+ 	hddtemp \
+         i2c-proc \
+@@ -32,6 +33,10 @@ if UDISKS
+ SUBDIRS	     += udisks
+ endif
+ 
++if UDISKS2
++SUBDIRS	     += udisks2
++endif
++
+ if LIBSENSORS
+ SUBDIRS      += libsensors
+ else
+diff --git a/plugins/udisks2/Makefile.am b/plugins/udisks2/Makefile.am
+new file mode 100644
+index 0000000..90af1fe
+--- /dev/null
++++ b/plugins/udisks2/Makefile.am
+@@ -0,0 +1,24 @@
++# UDisks plugin
++plugindir = $(libdir)/sensors-applet/plugins
++
++libudisks2_la_CPPFLAGS = -DGNOMELOCALEDIR=\""$(datadir)/locale/"\" \
++	-DG_LOG_DOMAIN=\""Sensors Applet"\" \
++	-DPIXMAPS_DIR=\""$(datadir)/pixmaps/$(PACKAGE)/"\" \
++	-DDATADIR=\""$(datadir)"\" \
++	-DLIBDIR=\""$(libdir)"\" \
++        -DSYSCONFDIR=\""$(sysconfdir)"\" \
++        -DPREFIX=\""$(prefix)"\" \
++	-I$(top_srcdir) \
++	$(GLIB_CFLAGS)
++
++
++
++plugin_LTLIBRARIES = libudisks2.la
++
++libudisks2_la_SOURCES = \
++	udisks2-plugin.h	\
++	udisks2-plugin.c
++
++libudisks2_la_LDFLAGS = $(PLUGIN_LIBTOOL_FLAGS) $(GLIB_LIBS)
++
++libudisks2_la_LIBADD = $(top_builddir)/lib/libsensors-applet-plugin.la
+diff --git a/plugins/udisks2/udisks2-plugin.c b/plugins/udisks2/udisks2-plugin.c
+new file mode 100644
+index 0000000..3bc6eef
+--- /dev/null
++++ b/plugins/udisks2/udisks2-plugin.c
+@@ -0,0 +1,550 @@
++/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*-
++ * vim: sts=0 sw=8 ts=8 tw=78 noexpandtab
++ *
++ * Copyright (C) 2009 Pramod Dematagoda <pmd.lotr.gandalf@gmail.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
++ */
++
++/*
++Udisks2 plugin for the mate-sensors-applet
++
++written by info@cppsp.de using the structure and code of the previous version
++from above author
++
++fd1 - from doc1 - dbus-glib documentation
++https://dbus.freedesktop.org/doc/dbus-glib/
++fd2 - from doc2 - GDBUS documentation
++https://developer.gnome.org/gio/stable/index.html
++
++I couldn't figure out debug, so I used syslog
++syslog(LOG_ERR, "hellodd");
++-> /var/log/syslog
++*/
++
++
++
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif /* HAVE_CONFIG_H */
++
++#include <stdio.h>
++#include <gio/gio.h>
++#include "udisks2-plugin.h"
++
++
++// remove // from next line for syslog debug
++//#define UD2PD              1
++
++#ifdef UD2PD
++#include <syslog.h>
++#endif
++
++
++#define UDISKS2_BUS_NAME              "org.freedesktop.UDisks2"
++#define UDISKS2_INTERFACE_NAME        "org.freedesktop.DBus.ObjectManager"
++#define UDISKS2_DEVICE_INTERFACE_NAME "org.freedesktop.UDisks2.Drive"
++#define UDISKS2_DEVICE_INTERFACE2_NAME "org.freedesktop.UDisks2.Drive.Ata"
++
++#define UDISKS2_PROPERTIES_INTERFACE  "org.freedesktop.DBus.Properties"
++#define UDISKS2_OBJECT_PATH           "/org/freedesktop/UDisks2"
++
++
++/*
++ * Info about a single sensor
++ */
++typedef struct _DevInfo{
++	gchar *path;
++	gchar *id;
++	gdouble temp;
++	GDBusProxy *sensor_proxy;       // dbus object
++	GError *error;
++} DevInfo;
++
++
++const gchar *plugin_name = "udisks2";
++
++// a container for the devices found to have smart enabled
++GHashTable *devices = NULL;
++
++/* This is a global variable for convenience */
++GDBusConnection *connection;
++
++
++static void update_device(DevInfo *info)
++{
++	GError *error = NULL;
++	GVariant *tempgvar;
++	gdouble temp;
++
++	// check valid input parameter
++	g_return_if_fail(info != NULL);
++
++	// check connection too
++	g_return_if_fail(connection != NULL);
++
++	g_clear_error(&info->error);
++
++// for the udisks plugin a new sensor_proxy was created here, which seems stupid, as one is already stored in the DevInfo struct
++// I only create one direct connect proxy here in this function
++
++	// check for sensor_proxy, which should exist at this point, make one if necessary and save it into DevInfo
++	// this is used to get the temp value the direct way
++	if(NULL == info->sensor_proxy)
++	{
++		info->sensor_proxy = g_dbus_proxy_new_sync(connection, G_DBUS_PROXY_FLAGS_NONE, NULL,
++						  UDISKS2_BUS_NAME,
++						  info->path,
++						  UDISKS2_PROPERTIES_INTERFACE,
++						  NULL, NULL
++						);
++
++	}
++
++// "DriveAtaSmartTimeCollected" in ud2 is "drive ata SmartUpdated"
++// fd: The point in time (seconds since the Unix Epoch) that the SMART status was updated or 0 if never updated.
++// should we bother getting this time??
++
++/*
++	if (!g_dbus_proxy_call_sync(sensor_proxy, "Get", NULL,
++			       G_TYPE_STRING, UDISKS2_BUS_NAME,
++			       G_TYPE_STRING, "DriveAtaSmartTimeCollected", G_TYPE_INVALID,
++			       G_TYPE_VALUE, &smart_time,
++			       G_TYPE_INVALID) ||
++	    !g_value_get_uint64(&smart_time))
++	{
++		g_object_unref(sensor_proxy);
++		return;
++	}
++*/
++
++
++// reading "DriveAtaSmartBlob" doesn't make it refresh
++// it seems to me that smart updates occur automatically every 10 minutes
++// mate-sensor-applet has a default refresh of 2 seconds...
++// it is possible to force a smart update with udisks2: SmartUpdate (IN  a{sv} options);
++
++// fd: A blob containing the ATA SMART data. This blob can be used with libatasmart to get more information. This property is only valid if DriveAtaSmartTimeCollected is greater than zero.
++// this smartblob was needed, bc there was no other way to get the smart temperature from udisks
++/*
++
++	if (!g_dbus_proxy_call_sync(sensor_proxy, "Get", &info->error,
++			      G_TYPE_STRING, UDISKS2_BUS_NAME,
++			      G_TYPE_STRING, "DriveAtaSmartBlob", G_TYPE_INVALID,
++			      G_TYPE_VALUE, &smart_blob_val,
++			      G_TYPE_INVALID))
++	{
++		g_debug("Error getting DriveAtaSmartBlob %s",
++			info->error ? info->error->message : "NULL");
++		g_object_unref(sensor_proxy);
++		return;
++	}
++	smart_blob = g_value_get_boxed(&smart_blob_val);
++
++	sk_disk_open(NULL, &sk_disk);
++	sk_disk_set_blob(sk_disk, smart_blob->data, smart_blob->len);
++	if (sk_disk_smart_get_temperature(sk_disk, &temperature) < 0)
++	{
++		g_debug("Error getting temperature from AtaSmartBlob");
++		g_free(sk_disk);
++		g_array_free(smart_blob, TRUE);
++		g_object_unref(sensor_proxy);
++		return;
++	}
++*/
++
++	// directly asking the device's DBus object for the temp
++	tempgvar = g_dbus_proxy_call_sync(info->sensor_proxy, "Get",
++				g_variant_new ("(ss)",
++					UDISKS2_DEVICE_INTERFACE2_NAME,
++					"SmartTemperature"),				// parameters
++				G_DBUS_CALL_FLAGS_NONE,		// flags
++				-1,				// timeout
++				NULL,				// cancellable
++				&error);
++
++	if (NULL == tempgvar)
++	{
++
++#ifdef UD2PD
++syslog(LOG_ERR, "Failed to get drive temperature");
++#endif
++		g_debug("Failed to get drive temperature: %s",
++			   error->message);
++		g_error_free(error);
++		// throw away proxy, maybe next time it will be better
++		g_object_unref(info->sensor_proxy);
++		return;
++	}
++	else
++	{
++
++#ifdef UD2PD
++syslog(LOG_ERR, "tempgvar value: %s", g_variant_print(g_variant_get_variant(g_variant_get_child_value(tempgvar, 0)), TRUE));
++#endif
++
++		// tempgvar comes back as sg along the lines of array(gvariant(tempasdouble))
++		// hence unpacking
++		temp = g_variant_get_double(g_variant_get_variant(g_variant_get_child_value(tempgvar, 0)));
++		// temp in K
++		info->temp = temp - 273.15;
++		g_variant_unref(tempgvar);
++
++#ifdef UD2PD
++syslog(LOG_ERR, "Refresh udisks2 device temp: '%f'\n", info->temp);
++#endif
++
++	}
++
++
++}
++
++
++
++/* This is the handler for the Changed() signal emitted by UDisks. */
++/*
++static void udisks2_changed_signal_cb(GDBusProxy *sensor_proxy) {
++	const gchar *path;
++	DevInfo *info;
++
++	// fd2: Gets the object path sensor_proxy is for.
++	path = g_dbus_proxy_get_object_path(sensor_proxy);
++	g_debug("%s changed()", path);
++	info = g_hash_table_lookup(devices, path);
++
++//	update_device(info);
++}
++*/
++
++
++// in this function we would like to get a list of device (hdd/ssd) paths
++// then with each path we get the temperature
++// it is possible with udisks2 to get all the above information in one g_dbus_proxy_call_sync(), so that is how I did it
++// a better version would be to use GDBusObjectManager Server + Client ??
++static void udisks2_plugin_get_sensors(GList **sensors) {
++
++#ifdef UD2PD
++syslog(LOG_ERR, "fstart");
++#endif
++
++	GDBusProxy *proxy;
++	GError *error = NULL;
++
++	DevInfo *info;
++
++	/* This connection will be used for everything, including the obtaining
++	 * of sensor data
++	 */
++	// fd1: Returns a connection to the given bus. The connection is a global variable shared with other callers of this function.
++	// fd2: Synchronously connects to the message bus specified by bus_type . Note that the returned object may shared with other callers, e.g. if two separate parts of a process calls this function with the same bus_type , they will share the same object.
++	connection = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
++	if (connection == NULL)
++	{
++
++#ifdef UD2PD
++syslog(LOG_ERR, "dbus conn fail");
++#endif
++
++		g_debug("Failed to open connection to DBUS: %s",
++			error->message);
++		g_error_free(error);
++		return;
++	}
++
++#ifdef UD2PD
++syslog(LOG_ERR, "dbus conn success");
++#endif
++
++	/* This was the proxy which is only used once during the enumeration of
++	 * the device object paths
++	 */
++	// I use it to get all info of all devices at once
++	// fd1: Creates a new proxy for a remote interface exported by a connection on a message bus.
++	// fd2: Creates a proxy for accessing interface_name on the remote object at object_path owned by name at connection and synchronously loads D-Bus properties unless the G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES flag is used.
++	proxy = g_dbus_proxy_new_sync(connection, G_DBUS_PROXY_FLAGS_NONE, NULL,
++					  UDISKS2_BUS_NAME,
++					  UDISKS2_OBJECT_PATH,
++					  UDISKS2_INTERFACE_NAME,
++					  NULL, NULL
++					);
++
++#ifdef UD2PD
++syslog(LOG_ERR, "dbus conn proxy success");
++#endif
++
++	/* The object paths of the disks are enumerated and placed in an array
++	 * of object paths
++	 */
++	// fd1: Function for synchronously invoking a method and receiving reply values.
++	// fd2: Synchronously invokes the method_name method on proxy.
++	// called "EnumerateDevices" method on UDisks object through dbus
++	// which returned an array of objectpaths
++	// "GetManagedObjects" returns dict of (objectpath, (dict of (string [ie. if. name], dict of(string [ie. property name], variant [ie. prop. value]))))
++
++	// g_dbus_proxy_call_sync() returns NULL on error, GVariant * otherwise
++	GVariant *managed_objects;
++
++
++	managed_objects = g_dbus_proxy_call_sync(proxy, "GetManagedObjects",
++				NULL,				// parameters
++				G_DBUS_CALL_FLAGS_NONE,		// flags
++				-1,				// timeout
++				NULL,				// cancellable
++				&error);
++
++	if (NULL == managed_objects)
++	{
++
++#ifdef UD2PD
++syslog(LOG_ERR, "Failed to enumerate disk devices");
++#endif
++
++		g_debug("Failed to enumerate disk devices: %s",
++			   error->message);
++		g_error_free(error);
++		g_object_unref(proxy);
++		g_object_unref(connection);
++		connection = NULL;
++		return;
++	}
++
++	// the result dictionary is enclosed in an array, unpack
++	managed_objects = g_variant_get_child_value(managed_objects, 0);
++
++#ifdef UD2PD
++//syslog(LOG_ERR, "managed_objects type: %s", g_variant_print(managed_objects, TRUE));
++syslog(LOG_ERR, "success to enumerate disk devices");
++#endif
++
++	// iterator for the result dictionary
++
++	// iterator code is based on the g_variant_iter_next() documentation
++	// iter is freed if the GVariant is, when using g_variant_iter_init()
++	GVariantIter iter;
++	gchar *key;	     // object path (like '/org/freedesktop/UDisks2/drives/Samsung_SSD_840_EVO_250GB_*insert drive serial nr.*')
++	GVariant *value;
++
++#ifdef UD2PD
++// log collection size
++syslog(LOG_ERR, "iter init count: %d", (int) g_variant_iter_init(&iter, managed_objects));
++#else
++	g_variant_iter_init(&iter, managed_objects);
++#endif
++
++	// "{sv}"  is a GVariant format string
++	// {} dictionary of, s string, v GVariant
++	// changed to "{oa{sa{sv}}}" on error message 'the GVariant format string '{sv}' has a type of '{sv}' but the given value has a type of 'a{oa{sa{sv}}}''
++	// a is array, o is object path
++	// NOO!! the right format string is "{o@*}", which means get an object path into the 1st variable (key)
++	// and get 'everything else' (as a GVariant) into the 2nd variable (value)
++	// needs the & before the key and value params!
++	while (g_variant_iter_next(&iter, "{o@*}", &key, &value))
++	{
++
++#ifdef UD2PD
++syslog(LOG_ERR, "in iter while loop");
++syslog(LOG_ERR, "key value: %s", key);
++//syslog(LOG_ERR, "value type: %s", g_variant_print(value, TRUE));
++#endif
++
++		// level 2
++		// create a dictionary of value
++		// the two interface names that we are searching for are known and defined
++		// can't use GVariantDict, it only supports '{sv}' but the given value has a type of '{sa{sv}}'
++		// using general lookup
++
++		GVariant *propdict;		// drive data
++		GVariant *propdict2;	// drive smart data
++
++		// make two dictionaries that contain the properties of the drive interfaces
++		propdict = g_variant_lookup_value(value, UDISKS2_DEVICE_INTERFACE_NAME, G_VARIANT_TYPE_DICTIONARY);
++		propdict2 = g_variant_lookup_value(value, UDISKS2_DEVICE_INTERFACE2_NAME, G_VARIANT_TYPE_DICTIONARY);
++
++
++		// do we have the right ifname keys?
++		if((NULL != propdict) && (NULL != propdict2))
++		{
++
++#ifdef UD2PD
++syslog(LOG_ERR, "propdict type: %s", g_variant_print(propdict, TRUE));
++syslog(LOG_ERR, "propdict2 type: %s", g_variant_print(propdict2, TRUE));
++#endif
++
++			// get data
++			gchar *id;
++			gchar *model;
++
++			gboolean smartenabled;
++			gdouble temp;
++
++			// NULL, bc we don't care about the length of the string
++			// typecast bc g_variant_get_string() returns const char*
++			id = (gchar *) g_variant_get_string(g_variant_lookup_value(propdict, "Id", G_VARIANT_TYPE_STRING), NULL);
++			model = (gchar *) g_variant_get_string(g_variant_lookup_value(propdict, "Model", G_VARIANT_TYPE_STRING), NULL);
++
++			smartenabled = g_variant_get_boolean(g_variant_lookup_value(propdict2, "SmartEnabled", G_VARIANT_TYPE_BOOLEAN));
++			temp = g_variant_get_double(g_variant_lookup_value(propdict2, "SmartTemperature", G_VARIANT_TYPE_DOUBLE));
++
++#ifdef UD2PD
++syslog(LOG_ERR, "Found udisks2 device id: '%s'\n", id);
++syslog(LOG_ERR, "Found udisks2 device model: '%s'\n", model);
++syslog(LOG_ERR, "Found udisks2 device smartenabled: '%d'\n", smartenabled);
++syslog(LOG_ERR, "Found udisks2 device temp: '%f'\n", temp);
++#endif
++
++
++			// only go on if smart is enabled
++			// save data
++			if(smartenabled)
++			{
++
++				info = g_malloc0(sizeof(DevInfo));
++				if (devices == NULL)
++				{
++					devices = g_hash_table_new(g_str_hash,
++								   g_str_equal);
++				}
++
++				info->id =  g_strdup(id);
++				info->path =  g_strdup(key);
++
++				// temp in K
++				// this could be left at 0.0, 2 seconds later it will be refreshed anyway
++				info->temp = (gdouble)temp - 273.15;
++				g_hash_table_insert(devices, info->id, info);
++
++				// Write the sensor data
++				sensors_applet_plugin_add_sensor(sensors,
++								 id,
++								 "Disk Temperature",
++								 model,
++								 TEMP_SENSOR,
++								 FALSE,
++								 HDD_ICON,
++								 DEFAULT_GRAPH_COLOR);
++
++				g_debug("Added %s", id);
++
++#ifdef UD2PD
++syslog(LOG_ERR, "Added %s", id);
++#endif
++
++			}
++			else
++			{
++
++#ifdef UD2PD
++syslog(LOG_ERR, "No temp data for device: %s\n", key);
++#endif
++
++				g_debug ("No temp data for device: %s\n", key);
++			}
++
++#ifdef UD2PD
++syslog(LOG_ERR, "b4 free1");
++#endif
++
++			g_free(id);
++			g_free(model);
++
++		}
++
++#ifdef UD2PD
++syslog(LOG_ERR, "b4 free2");
++#endif
++
++		// free propdict, propdict2
++		// g_variant_dict_unref() may not work a few times, gives error
++		// this one seems to do fine
++		if(NULL != propdict) {g_variant_unref(propdict);}
++		if(NULL != propdict2) {g_variant_unref(propdict2);}
++
++#ifdef UD2PD
++syslog(LOG_ERR, "b4 free3");
++#endif
++
++		g_free(key);
++		g_variant_unref(value);
++
++	}       // end of while loop
++
++
++	g_variant_unref(managed_objects);
++	g_object_unref(proxy);
++	if (devices == NULL)
++	{
++		g_object_unref(connection);
++		connection = NULL;
++	}
++}
++
++
++// this is the function called every refresh cycle
++static gdouble udisks2_plugin_get_sensor_value(const gchar *path,
++					      const gchar *id,
++					      SensorType type,
++					      GError **error) {
++	DevInfo *info;
++
++	// get device stuct from data store
++	info = (DevInfo *)g_hash_table_lookup(devices, path);
++	if (info == NULL)
++	{
++		g_set_error(error, SENSORS_APPLET_PLUGIN_ERROR, 0,
++			    "Error finding disk with path %s", path);
++		return 0.0;
++	}
++
++	if (info->error)
++	{
++		*error = info->error;
++		info->error = NULL;
++		return 0.0;
++	}
++
++	// refresh device temp
++	/* update value since Changed() signal doesn't fire manually enough so
++	 * poll instead */
++	update_device(info);
++	return info->temp;
++}
++
++
++// API functions
++const gchar *sensors_applet_plugin_name(void)
++{
++	return plugin_name;
++}
++
++static GList *udisks2_plugin_init(void) {
++	GList *sensors = NULL;
++
++	udisks2_plugin_get_sensors(&sensors);
++
++	return sensors;
++}
++
++GList *sensors_applet_plugin_init(void)
++{
++	return udisks2_plugin_init();
++}
++
++gdouble sensors_applet_plugin_get_sensor_value(const gchar *path,
++					       const gchar *id,
++					       SensorType type,
++					       GError **error) {
++	return udisks2_plugin_get_sensor_value(path, id, type, error);
++}
+diff --git a/plugins/udisks2/udisks2-plugin.h b/plugins/udisks2/udisks2-plugin.h
+new file mode 100644
+index 0000000..026ee8c
+--- /dev/null
++++ b/plugins/udisks2/udisks2-plugin.h
+@@ -0,0 +1,24 @@
++/*
++ * Copyright (C) 2009 Pramod Dematagoda <pmd.lotr.gandalf@gmail.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
++ */
++
++#ifndef UDISKS2_PLUGIN_H
++#define UDISKS2_PLUGIN_H
++
++#include <sensors-applet/sensors-applet-plugin.h>
++
++#endif /* UDISKS2_PLUGIN_H */
+-- 
+2.40.1
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: info-cppsp <info@cppsp.de>
+Date: Tue, 19 Sep 2017 08:25:04 +0200
+Subject: [PATCH 2/4] fixed memory leaks in update_device()
+
+(cherry picked from commit b46d8ac24d38b4b1a099fcc237f06ec5d3becfda)
+---
+ plugins/udisks2/udisks2-plugin.c | 91 ++++++++++++++++++++++----------
+ 1 file changed, 63 insertions(+), 28 deletions(-)
+
+diff --git a/plugins/udisks2/udisks2-plugin.c b/plugins/udisks2/udisks2-plugin.c
+index 3bc6eef..2fe401e 100644
+--- a/plugins/udisks2/udisks2-plugin.c
++++ b/plugins/udisks2/udisks2-plugin.c
+@@ -81,13 +81,14 @@ const gchar *plugin_name = "udisks2";
+ GHashTable *devices = NULL;
+ 
+ /* This is a global variable for convenience */
+-GDBusConnection *connection;
++GDBusConnection *connection = NULL;
+ 
+ 
+ static void update_device(DevInfo *info)
+ {
+ 	GError *error = NULL;
+-	GVariant *tempgvar;
++	GVariant *tempgvar = NULL;
++	GVariant *tempgvar2 = NULL;
+ 	gdouble temp;
+ 
+ 	// check valid input parameter
+@@ -109,9 +110,21 @@ static void update_device(DevInfo *info)
+ 						  UDISKS2_BUS_NAME,
+ 						  info->path,
+ 						  UDISKS2_PROPERTIES_INTERFACE,
+-						  NULL, NULL
++						  NULL, &error
+ 						);
+ 
++		// check, just to be sure
++		if (NULL == info->sensor_proxy)
++		{
++
++#ifdef UD2PD
++syslog(LOG_ERR, "Failed to get drive temperature 1");
++#endif
++			g_debug("Failed to get drive temperature 1: %s",
++				   error->message);
++			g_clear_error(&error);
++			return;
++		}
+ 	}
+ 
+ // "DriveAtaSmartTimeCollected" in ud2 is "drive ata SmartUpdated"
+@@ -180,28 +193,37 @@ static void update_device(DevInfo *info)
+ 	{
+ 
+ #ifdef UD2PD
+-syslog(LOG_ERR, "Failed to get drive temperature");
++syslog(LOG_ERR, "Failed to get drive temperature 2");
+ #endif
+-		g_debug("Failed to get drive temperature: %s",
++		g_debug("Failed to get drive temperature 2: %s",
+ 			   error->message);
+-		g_error_free(error);
++		g_clear_error(&error);
+ 		// throw away proxy, maybe next time it will be better
+-		g_object_unref(info->sensor_proxy);
++		g_clear_object(&info->sensor_proxy);
+ 		return;
+ 	}
+ 	else
+ 	{
+ 
+ #ifdef UD2PD
+-syslog(LOG_ERR, "tempgvar value: %s", g_variant_print(g_variant_get_variant(g_variant_get_child_value(tempgvar, 0)), TRUE));
++syslog(LOG_ERR, "tempgvar value: %s", g_variant_print(tempgvar, TRUE));
++// leaks memory!
++//syslog(LOG_ERR, "tempgvar value: %s", g_variant_print(g_variant_get_variant(g_variant_get_child_value(tempgvar, 0)), TRUE));
+ #endif
+ 
+ 		// tempgvar comes back as sg along the lines of array(gvariant(tempasdouble))
+ 		// hence unpacking
+-		temp = g_variant_get_double(g_variant_get_variant(g_variant_get_child_value(tempgvar, 0)));
++		// need to free up every param / return value, so can't do it like:
++		//temp = g_variant_get_double(g_variant_get_variant(g_variant_get_child_value(tempgvar, 0)));
++		tempgvar2 = g_variant_get_child_value(tempgvar, 0);
++		g_variant_unref(tempgvar);
++		tempgvar = g_variant_get_variant(tempgvar2);
++		g_variant_unref(tempgvar2);
++		temp = g_variant_get_double(tempgvar);
++		g_variant_unref(tempgvar);
++
+ 		// temp in K
+ 		info->temp = temp - 273.15;
+-		g_variant_unref(tempgvar);
+ 
+ #ifdef UD2PD
+ syslog(LOG_ERR, "Refresh udisks2 device temp: '%f'\n", info->temp);
+@@ -240,7 +262,7 @@ static void udisks2_plugin_get_sensors(GList **sensors) {
+ syslog(LOG_ERR, "fstart");
+ #endif
+ 
+-	GDBusProxy *proxy;
++	GDBusProxy *proxy = NULL;
+ 	GError *error = NULL;
+ 
+ 	DevInfo *info;
+@@ -251,7 +273,7 @@ syslog(LOG_ERR, "fstart");
+ 	// fd1: Returns a connection to the given bus. The connection is a global variable shared with other callers of this function.
+ 	// fd2: Synchronously connects to the message bus specified by bus_type . Note that the returned object may shared with other callers, e.g. if two separate parts of a process calls this function with the same bus_type , they will share the same object.
+ 	connection = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
+-	if (connection == NULL)
++	if (NULL == connection)
+ 	{
+ 
+ #ifdef UD2PD
+@@ -260,7 +282,7 @@ syslog(LOG_ERR, "dbus conn fail");
+ 
+ 		g_debug("Failed to open connection to DBUS: %s",
+ 			error->message);
+-		g_error_free(error);
++		g_clear_error(&error);
+ 		return;
+ 	}
+ 
+@@ -278,9 +300,22 @@ syslog(LOG_ERR, "dbus conn success");
+ 					  UDISKS2_BUS_NAME,
+ 					  UDISKS2_OBJECT_PATH,
+ 					  UDISKS2_INTERFACE_NAME,
+-					  NULL, NULL
++					  NULL, &error
+ 					);
+ 
++	if (NULL == proxy)
++	{
++
++#ifdef UD2PD
++syslog(LOG_ERR, "dbus conn proxy fail");
++#endif
++		g_debug("dbus conn proxy fail: %s",
++			   error->message);
++		g_clear_error(&error);
++		g_clear_object(&connection);
++		return;
++	}
++
+ #ifdef UD2PD
+ syslog(LOG_ERR, "dbus conn proxy success");
+ #endif
+@@ -295,17 +330,18 @@ syslog(LOG_ERR, "dbus conn proxy success");
+ 	// "GetManagedObjects" returns dict of (objectpath, (dict of (string [ie. if. name], dict of(string [ie. property name], variant [ie. prop. value]))))
+ 
+ 	// g_dbus_proxy_call_sync() returns NULL on error, GVariant * otherwise
+-	GVariant *managed_objects;
++	// need second param to prevent memory leak
++	GVariant *managed_objects, *managed_objects2;
+ 
+ 
+-	managed_objects = g_dbus_proxy_call_sync(proxy, "GetManagedObjects",
++	managed_objects2 = g_dbus_proxy_call_sync(proxy, "GetManagedObjects",
+ 				NULL,				// parameters
+ 				G_DBUS_CALL_FLAGS_NONE,		// flags
+ 				-1,				// timeout
+ 				NULL,				// cancellable
+ 				&error);
+ 
+-	if (NULL == managed_objects)
++	if (NULL == managed_objects2)
+ 	{
+ 
+ #ifdef UD2PD
+@@ -314,15 +350,15 @@ syslog(LOG_ERR, "Failed to enumerate disk devices");
+ 
+ 		g_debug("Failed to enumerate disk devices: %s",
+ 			   error->message);
+-		g_error_free(error);
+-		g_object_unref(proxy);
+-		g_object_unref(connection);
+-		connection = NULL;
++		g_clear_error(&error);
++		g_clear_object(&proxy);
++		g_clear_object(&connection);
+ 		return;
+ 	}
+ 
+ 	// the result dictionary is enclosed in an array, unpack
+-	managed_objects = g_variant_get_child_value(managed_objects, 0);
++	managed_objects = g_variant_get_child_value(managed_objects2, 0);
++	g_variant_unref(managed_objects2);
+ 
+ #ifdef UD2PD
+ //syslog(LOG_ERR, "managed_objects type: %s", g_variant_print(managed_objects, TRUE));
+@@ -412,7 +448,7 @@ syslog(LOG_ERR, "Found udisks2 device temp: '%f'\n", temp);
+ 			{
+ 
+ 				info = g_malloc0(sizeof(DevInfo));
+-				if (devices == NULL)
++				if (NULL == devices)
+ 				{
+ 					devices = g_hash_table_new(g_str_hash,
+ 								   g_str_equal);
+@@ -483,11 +519,10 @@ syslog(LOG_ERR, "b4 free3");
+ 
+ 
+ 	g_variant_unref(managed_objects);
+-	g_object_unref(proxy);
+-	if (devices == NULL)
++	g_clear_object(&proxy);
++	if (NULL == devices)
+ 	{
+-		g_object_unref(connection);
+-		connection = NULL;
++		g_clear_object(&connection);
+ 	}
+ }
+ 
+@@ -501,7 +536,7 @@ static gdouble udisks2_plugin_get_sensor_value(const gchar *path,
+ 
+ 	// get device stuct from data store
+ 	info = (DevInfo *)g_hash_table_lookup(devices, path);
+-	if (info == NULL)
++	if (NULL == info)
+ 	{
+ 		g_set_error(error, SENSORS_APPLET_PLUGIN_ERROR, 0,
+ 			    "Error finding disk with path %s", path);
+-- 
+2.40.1
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: info-cppsp <info@cppsp.de>
+Date: Sat, 27 Jan 2018 12:12:32 +0100
+Subject: [PATCH 3/4] Remove deprecated udisks plugin
+
+udisks and dbus-glib have been deprecated for at least 5 years.
+Linux Mint 17.3 and therefore Ubuntu 14.04 LTS ship with udisks2 as default.
+I've also made a new plugin for udisks2.
+Let's just get rid of this, shall we?
+
+(cherry picked from commit 86b3ec83e0b236b0a1a25bcb12444a6a7ce61a25)
+
+ Conflicts:
+	configure.ac
+	plugins/udisks/Makefile.am
+	plugins/udisks/udisks-plugin.c
+	plugins/udisks/udisks-plugin.h
+---
+ configure.ac                   |  30 ---
+ plugins/Makefile.am            |   5 -
+ plugins/udisks/Makefile.am     |  25 ---
+ plugins/udisks/udisks-plugin.c | 328 ---------------------------------
+ plugins/udisks/udisks-plugin.h |  24 ---
+ 5 files changed, 412 deletions(-)
+ delete mode 100644 plugins/udisks/Makefile.am
+ delete mode 100644 plugins/udisks/udisks-plugin.c
+ delete mode 100644 plugins/udisks/udisks-plugin.h
+
+diff --git a/configure.ac b/configure.ac
+index 239c60b..7704412 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -56,8 +56,6 @@ GTK_REQUIRED=3.4.0
+ LIBPANEL_REQUIRED=3.0.0
+ LIBNOTIFY_REQUIRED=0.3.0
+ LIBCAIRO_REQUIRED=1.0.4
+-LIBDBUSGLIB_REQUIRED=0.80
+-LIBATASMART_REQUIRED=0.16
+ 
+ PKG_CHECK_MODULES(GLIB, glib-2.0 >= $GLIB_REQUIRED)
+ AC_SUBST(GLIB_CFLAGS)
+@@ -78,33 +76,6 @@ PKG_CHECK_MODULES(CAIRO, cairo >= $LIBCAIRO_REQUIRED)
+ AC_SUBST(CAIRO_CFLAGS)
+ AC_SUBST(CAIRO_LIBS)
+ 
+-# enable support for udisks (via dbus) by default if its available
+-AC_ARG_ENABLE(udisks,
+-	      AS_HELP_STRING([--disable-udisks],
+-			     [Disable support for udisks sensor readings via DBUS.]),
+-			     enable_udisks=$enableval, enable_udisks="yes")
+-
+-if test "x$enable_udisks" = "xno" ; then
+-	echo "Disabling udisks support"
+-else
+-	PKG_CHECK_MODULES(DBUSGLIB, dbus-glib-1 >= $LIBDBUSGLIB_REQUIRED,
+-		          HAVE_DBUSGLIB="yes", HAVE_DBUSGLIB="no")
+-	AC_SUBST(DBUSGLIB_CFLAGS)
+-	AC_SUBST(DBUSGLIB_LIBS)
+-
+-	PKG_CHECK_MODULES(LIBATASMART, libatasmart >= $LIBATASMART_REQUIRED,
+-			  HAVE_LIBATASMART="yes", HAVE_LIBATASMART="no")
+-	AC_SUBST(LIBATASMART_CFLAGS)
+-	AC_SUBST(LIBATASMART_LIBS)
+-fi
+-
+-AM_CONDITIONAL(UDISKS, test -n "$DBUSGLIB_CFLAGS" -a -n "$LIBATASMART_CFLAGS")
+-
+-# enable support for udisks2 (via dbus) by default if its available
+-AC_ARG_ENABLE(udisks2,
+-	      AS_HELP_STRING([--disable-udisks2],
+-			     [Disable support for udisks2 sensor readings via DBUS.]),
+-			     enable_udisks2=$enableval, enable_udisks2="yes")
+ 
+ if test "x$enable_udisks2" = "xno" ; then
+ 	echo "Disabling udisks2 support"
+@@ -290,7 +261,6 @@ AC_CONFIG_FILES([
+ 	lib/Makefile
+ 	plugins/Makefile
+ 	plugins/acpi/Makefile
+-	plugins/udisks/Makefile
+ 	plugins/udisks2/Makefile
+ 	plugins/eee/Makefile
+ 	plugins/hddtemp/Makefile
+diff --git a/plugins/Makefile.am b/plugins/Makefile.am
+index d787000..c4a4044 100644
+--- a/plugins/Makefile.am
++++ b/plugins/Makefile.am
+@@ -1,6 +1,5 @@
+ DIST_SUBDIRS = \
+ 	acpi \
+-	udisks \
+ 	udisks2 \
+ 	eee \
+ 	hddtemp \
+@@ -29,10 +28,6 @@ SUBDIRS = \
+ 	smu-sys \
+ 	sonypi
+ 
+-if UDISKS
+-SUBDIRS	     += udisks
+-endif
+-
+ if UDISKS2
+ SUBDIRS	     += udisks2
+ endif
+diff --git a/plugins/udisks/Makefile.am b/plugins/udisks/Makefile.am
+deleted file mode 100644
+index 8772824..0000000
+--- a/plugins/udisks/Makefile.am
++++ /dev/null
+@@ -1,25 +0,0 @@
+-# UDisks plugin
+-plugindir = $(libdir)/sensors-applet/plugins
+-
+-libudisks_la_CPPFLAGS = -DGNOMELOCALEDIR=\""$(datadir)/locale/"\" \
+-	-DG_LOG_DOMAIN=\""Sensors Applet"\" \
+-	-DPIXMAPS_DIR=\""$(datadir)/pixmaps/$(PACKAGE)/"\" \
+-	-DDATADIR=\""$(datadir)"\" \
+-	-DLIBDIR=\""$(libdir)"\" \
+-        -DSYSCONFDIR=\""$(sysconfdir)"\" \
+-        -DPREFIX=\""$(prefix)"\" \
+-	-I$(top_srcdir) \
+-	$(DBUSGLIB_CFLAGS)
+-	$(LIBATASMART_CFLAGS)
+-
+-
+-
+-plugin_LTLIBRARIES = libudisks.la
+-
+-libudisks_la_SOURCES = \
+-	udisks-plugin.h	\
+-	udisks-plugin.c
+-
+-libudisks_la_LDFLAGS = $(PLUGIN_LIBTOOL_FLAGS) $(DBUSGLIB_LIBS)	$(LIBATASMART_LIBS)
+-
+-libudisks_la_LIBADD = $(top_builddir)/lib/libsensors-applet-plugin.la
+diff --git a/plugins/udisks/udisks-plugin.c b/plugins/udisks/udisks-plugin.c
+deleted file mode 100644
+index f7915da..0000000
+--- a/plugins/udisks/udisks-plugin.c
++++ /dev/null
+@@ -1,328 +0,0 @@
+-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*-
+- *
+- * Copyright (C) 2009 Pramod Dematagoda <pmd.lotr.gandalf@gmail.com>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License along
+- * with this program; if not, write to the Free Software Foundation, Inc.,
+- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+- */
+-
+-#ifdef HAVE_CONFIG_H
+-#include "config.h"
+-#endif /* HAVE_CONFIG_H */
+-
+-#include <stdio.h>
+-#include <atasmart.h>
+-#include <glib.h>
+-#include <dbus/dbus-glib.h>
+-#include "udisks-plugin.h"
+-
+-#define UDISKS_BUS_NAME              "org.freedesktop.UDisks"
+-#define UDISKS_DEVICE_INTERFACE_NAME "org.freedesktop.UDisks.Device"
+-#define UDISKS_INTERFACE_NAME        "org.freedesktop.UDisks"
+-#define UDISKS_PROPERTIES_INTERFACE  "org.freedesktop.DBus.Properties"
+-#define UDISKS_OBJECT_PATH           "/org/freedesktop/UDisks"
+-
+-
+-/*
+- * Info about a single sensor
+- */
+-typedef struct _DevInfo{
+-	gchar *path;
+-	gdouble temp;
+-	DBusGProxy *sensor_proxy;
+-	GError *error;
+-} DevInfo;
+-
+-const gchar *plugin_name = "udisks";
+-
+-GHashTable *devices = NULL;
+-
+-/* This is a global variable for convenience */
+-DBusGConnection *connection;
+-
+-static void update_device(DevInfo *info)
+-{
+-	DBusGProxy *sensor_proxy;
+-	GValue smart_time = { 0, };
+-	SkDisk *sk_disk;
+-	GValue smart_blob_val = { 0, };
+-	GArray *smart_blob;
+-	guint64 temperature;
+-
+-	g_return_if_fail(info != NULL);
+-
+-	g_clear_error(&info->error);
+-
+-	sensor_proxy = dbus_g_proxy_new_for_name(connection,
+-						 UDISKS_BUS_NAME,
+-						 info->path,
+-						 UDISKS_PROPERTIES_INTERFACE);
+-
+-	if (!dbus_g_proxy_call(sensor_proxy, "Get", NULL,
+-			       G_TYPE_STRING, UDISKS_BUS_NAME,
+-			       G_TYPE_STRING, "DriveAtaSmartTimeCollected", G_TYPE_INVALID,
+-			       G_TYPE_VALUE, &smart_time,
+-			       G_TYPE_INVALID) ||
+-	    !g_value_get_uint64(&smart_time))
+-	{
+-		g_object_unref(sensor_proxy);
+-		return;
+-	}
+-
+-	if (!dbus_g_proxy_call(sensor_proxy, "Get", &info->error,
+-			      G_TYPE_STRING, UDISKS_BUS_NAME,
+-			      G_TYPE_STRING, "DriveAtaSmartBlob", G_TYPE_INVALID,
+-			      G_TYPE_VALUE, &smart_blob_val,
+-			      G_TYPE_INVALID))
+-	{
+-		g_debug("Error getting DriveAtaSmartBlob %s",
+-			info->error ? info->error->message : "NULL");
+-		g_object_unref(sensor_proxy);
+-		return;
+-	}
+-	smart_blob = g_value_get_boxed(&smart_blob_val);
+-
+-	sk_disk_open(NULL, &sk_disk);
+-	sk_disk_set_blob(sk_disk, smart_blob->data, smart_blob->len);
+-	if (sk_disk_smart_get_temperature(sk_disk, &temperature) < 0)
+-	{
+-		g_debug("Error getting temperature from AtaSmartBlob");
+-		g_free(sk_disk);
+-		g_array_free(smart_blob, TRUE);
+-		g_object_unref(sensor_proxy);
+-		return;
+-	}
+-
+-	/* Temperature is in mK, so convert it to K first */
+-	temperature /= 1000;
+-	info->temp = (gdouble)temperature - 273.15;
+-
+-	g_free(sk_disk);
+-	g_array_free(smart_blob, TRUE);
+-	g_object_unref(sensor_proxy);
+-}
+-
+-/* This is the handler for the Changed() signal emitted by UDisks. */
+-static void udisks_changed_signal_cb(DBusGProxy *sensor_proxy) {
+-	const gchar *path;
+-	DevInfo *info;
+-
+-	path = dbus_g_proxy_get_path(sensor_proxy);
+-	g_debug("%s changed()", path);
+-	info = g_hash_table_lookup(devices, path);
+-
+-	update_device(info);
+-}
+-
+-static void udisks_plugin_get_sensors(GList **sensors) {
+-	DBusGProxy *proxy, *sensor_proxy;
+-	GError *error = NULL;
+-	GPtrArray *paths;
+-	guint i;
+-	DevInfo *info;
+-
+-	g_type_init();
+-
+-	/* This connection will be used for everything, including the obtaining
+-	 * of sensor data
+-	 */
+-	connection = dbus_g_bus_get(DBUS_BUS_SYSTEM, &error);
+-	if (connection == NULL)
+-	{
+-		g_debug("Failed to open connection to DBUS: %s",
+-							error->message);
+-		g_error_free(error);
+-		return;
+-	}
+-
+-	/* This is the proxy which is only used once during the enumeration of
+-	 * the device object paths
+-	 */
+-	proxy = dbus_g_proxy_new_for_name(connection,
+-					  UDISKS_BUS_NAME,
+-					  UDISKS_OBJECT_PATH,
+-					  UDISKS_INTERFACE_NAME);
+-
+-	/* The object paths of the disks are enumerated and placed in an array
+-	 * of object paths
+-	 */
+-	if (!dbus_g_proxy_call(proxy, "EnumerateDevices", &error,
+-			       G_TYPE_INVALID,
+-			       dbus_g_type_get_collection("GPtrArray",
+-							  DBUS_TYPE_G_OBJECT_PATH),
+-			       &paths,
+-			       G_TYPE_INVALID))
+-	{
+-		g_debug("Failed to enumerate disk devices: %s",
+-			   error->message);
+-		g_error_free(error);
+-		g_object_unref(proxy);
+-		dbus_g_connection_unref(connection);
+-		connection = NULL;
+-		return;
+-	}
+-
+-	for (i = 0; i < paths->len; i++) {
+-		/* This proxy is used to get the required data in order to build
+-		 * up the list of sensors
+-		 */
+-		GValue model = {0, }, id = {0, }, smart_available = {0, };
+-		gchar *path = (gchar *)g_ptr_array_index(paths, i);
+-
+-		sensor_proxy = dbus_g_proxy_new_for_name(connection,
+-							 UDISKS_BUS_NAME,
+-							 path,
+-							 UDISKS_PROPERTIES_INTERFACE);
+-
+-		if (dbus_g_proxy_call(sensor_proxy, "Get", &error,
+-				      G_TYPE_STRING,
+-				      UDISKS_BUS_NAME,
+-				      G_TYPE_STRING,
+-				      "DriveAtaSmartIsAvailable",
+-				      G_TYPE_INVALID,
+-				      G_TYPE_VALUE, &smart_available, G_TYPE_INVALID)) {
+-			gchar *id_str, *model_str;
+-			if (!g_value_get_boolean(&smart_available)) {
+-				g_debug("Drive at path '%s' does not support Smart monitoring... ignoring",
+-					path);
+-				g_object_unref(sensor_proxy);
+-				g_free (path);
+-				continue;
+-			}
+-
+-			dbus_g_proxy_call(sensor_proxy, "Get", NULL,
+-					  G_TYPE_STRING, UDISKS_BUS_NAME,
+-					  G_TYPE_STRING, "DriveModel",
+-					  G_TYPE_INVALID,
+-					  G_TYPE_VALUE, &model,
+-					  G_TYPE_INVALID);
+-
+-			dbus_g_proxy_call(sensor_proxy, "Get", NULL,
+-					  G_TYPE_STRING, UDISKS_BUS_NAME,
+-					  G_TYPE_STRING, "DeviceFile",
+-					  G_TYPE_INVALID,
+-					  G_TYPE_VALUE, &id,
+-					  G_TYPE_INVALID);
+-
+-			g_object_unref(sensor_proxy);
+-
+-			sensor_proxy = dbus_g_proxy_new_for_name(connection,
+-								 UDISKS_BUS_NAME,
+-								 path,
+-								 UDISKS_DEVICE_INTERFACE_NAME);
+-
+-			/* Use the Changed() signal emitted from UDisks to
+-			 * get the temperature immediately if it changes rather
+-			 * than waiting to poll
+-			 */
+-			dbus_g_proxy_add_signal(sensor_proxy, "Changed",
+-						G_TYPE_INVALID);
+-
+-			dbus_g_proxy_connect_signal(sensor_proxy, "Changed",
+-						    G_CALLBACK(udisks_changed_signal_cb),
+-						    path, NULL);
+-
+-			info = g_malloc0(sizeof(DevInfo));
+-			if (devices == NULL)
+-			{
+-				devices = g_hash_table_new(g_str_hash,
+-							   g_str_equal);
+-			}
+-			info->path = g_strdup(path);
+-			info->sensor_proxy = sensor_proxy;
+-			info->temp = 0.0;
+-			g_hash_table_insert(devices, info->path, info);
+-
+-			/* Write the sensor data */
+-			id_str = g_value_dup_string(&id);
+-			model_str = g_value_dup_string(&model);
+-			sensors_applet_plugin_add_sensor(sensors,
+-							 path,
+-							 id_str,
+-							 model_str,
+-							 TEMP_SENSOR,
+-							 FALSE,
+-							 HDD_ICON,
+-							 DEFAULT_GRAPH_COLOR);
+-			g_free(id_str);
+-			g_free(model_str);
+-		} else {
+-			g_debug ("Cannot obtain data for device: %s\n"
+-				    "Error: %s\n",
+-				    path,
+-				    error->message);
+-			g_error_free (error);
+-			error = NULL;
+-			g_object_unref(sensor_proxy);
+-		}
+-		g_free(path);
+-	}
+-	g_ptr_array_free(paths, TRUE);
+-	g_object_unref(proxy);
+-	if (devices == NULL)
+-	{
+-		dbus_g_connection_unref(connection);
+-		connection = NULL;
+-	}
+-}
+-
+-static gdouble udisks_plugin_get_sensor_value(const gchar *path,
+-					      const gchar *id,
+-					      SensorType type,
+-					      GError **error) {
+-	DevInfo *info;
+-
+-	info = (DevInfo *)g_hash_table_lookup(devices, path);
+-	if (info == NULL)
+-	{
+-		g_set_error(error, SENSORS_APPLET_PLUGIN_ERROR, 0,
+-			    "Error finding disk with path %s", path);
+-		return 0.0;
+-	}
+-	if (info->error)
+-	{
+-		*error = info->error;
+-		info->error = NULL;
+-		return 0.0;
+-	}
+-	/* update value since Changed() signal doesn't fire manually enough so
+-	 * poll instead */
+-	update_device(info);
+-	return info->temp;
+-}
+-
+-static GList *udisks_plugin_init(void) {
+-	GList *sensors = NULL;
+-
+-	udisks_plugin_get_sensors(&sensors);
+-
+-	return sensors;
+-}
+-
+-const gchar *sensors_applet_plugin_name(void)
+-{
+-	return plugin_name;
+-}
+-
+-GList *sensors_applet_plugin_init(void)
+-{
+-	return udisks_plugin_init();
+-}
+-
+-gdouble sensors_applet_plugin_get_sensor_value(const gchar *path,
+-					       const gchar *id,
+-					       SensorType type,
+-					       GError **error) {
+-	return udisks_plugin_get_sensor_value(path, id, type, error);
+-}
+diff --git a/plugins/udisks/udisks-plugin.h b/plugins/udisks/udisks-plugin.h
+deleted file mode 100644
+index 58892eb..0000000
+--- a/plugins/udisks/udisks-plugin.h
++++ /dev/null
+@@ -1,24 +0,0 @@
+-/*
+- * Copyright (C) 2009 Pramod Dematagoda <pmd.lotr.gandalf@gmail.com>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License along
+- * with this program; if not, write to the Free Software Foundation, Inc.,
+- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+- */
+-
+-#ifndef UDISKS_PLUGIN_H
+-#define UDISKS_PLUGIN_H
+-
+-#include <sensors-applet/sensors-applet-plugin.h>
+-
+-#endif /* UDISKS_PLUGIN_H */
+-- 
+2.40.1
+
+
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: raveit65 <mate@raveit.de>
+Date: Sun, 28 Jan 2018 10:05:23 +0100
+Subject: [PATCH 4/4] build: enable udisk2 plugin again
+
+(cherry picked from commit bcd9924b5e561b2af08ec91e5ecbb9ecaf26c13c)
+---
+ configure.ac | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/configure.ac b/configure.ac
+index 7704412..df8dab0 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -77,6 +77,12 @@ AC_SUBST(CAIRO_CFLAGS)
+ AC_SUBST(CAIRO_LIBS)
+ 
+ 
++# enable support for udisks2 (via dbus) by default if its available
++AC_ARG_ENABLE(udisks2,
++	      AS_HELP_STRING([--disable-udisks2],
++			     [Disable support for udisks2 sensor readings via DBUS.]),
++			     enable_udisks2=$enableval, enable_udisks2="yes")
++
+ if test "x$enable_udisks2" = "xno" ; then
+ 	echo "Disabling udisks2 support"
+ #else
+-- 
+2.40.1
+
