@@ -1,0 +1,204 @@
+From 372d09fd9a8d76847c81092ebff71c80fd6c145d Mon Sep 17 00:00:00 2001
+From: Mark Wielaard <mark@klomp.org>
+Date: Sat, 18 Nov 2023 21:17:02 +0100
+Subject: [PATCH 1/1] Add fchmodat2 syscall on linux
+
+fchmodat2 is a new syscall on linux 6.6. It is a variant of fchmodat
+that takes an extra flags argument.
+
+https://bugs.kde.org/show_bug.cgi?id=477198
+---
+ NEWS                                         |  1 +
+ coregrind/m_syswrap/priv_syswrap-linux.h     |  3 +++
+ coregrind/m_syswrap/syswrap-amd64-linux.c    |  2 ++
+ coregrind/m_syswrap/syswrap-arm-linux.c      |  2 ++
+ coregrind/m_syswrap/syswrap-arm64-linux.c    |  2 ++
+ coregrind/m_syswrap/syswrap-linux.c          | 11 +++++++++++
+ coregrind/m_syswrap/syswrap-mips32-linux.c   |  2 ++
+ coregrind/m_syswrap/syswrap-mips64-linux.c   |  1 +
+ coregrind/m_syswrap/syswrap-nanomips-linux.c |  1 +
+ coregrind/m_syswrap/syswrap-ppc32-linux.c    |  2 ++
+ coregrind/m_syswrap/syswrap-ppc64-linux.c    |  2 ++
+ coregrind/m_syswrap/syswrap-s390x-linux.c    |  2 ++
+ coregrind/m_syswrap/syswrap-x86-linux.c      |  2 ++
+ include/vki/vki-scnums-shared-linux.h        |  2 ++
+ 14 files changed, 35 insertions(+)
+
+diff --git a/coregrind/m_syswrap/priv_syswrap-linux.h b/coregrind/m_syswrap/priv_syswrap-linux.h
+index f13726bc0d..d50cdcc981 100644
+--- a/coregrind/m_syswrap/priv_syswrap-linux.h
++++ b/coregrind/m_syswrap/priv_syswrap-linux.h
+@@ -334,6 +334,9 @@ DECL_TEMPLATE(linux, sys_memfd_secret);
+ // Linux-specific (since Linux 5.6)
+ DECL_TEMPLATE(linux, sys_pidfd_getfd);
+ 
++// Since Linux 6.6
++DECL_TEMPLATE(linux, sys_fchmodat2);
++
+ /* ---------------------------------------------------------------------
+    Wrappers for sockets and ipc-ery.  These are split into standalone
+    procedures because x86-linux hides them inside multiplexors
+diff --git a/coregrind/m_syswrap/syswrap-amd64-linux.c b/coregrind/m_syswrap/syswrap-amd64-linux.c
+index 8de4371e20..d93d937211 100644
+--- a/coregrind/m_syswrap/syswrap-amd64-linux.c
++++ b/coregrind/m_syswrap/syswrap-amd64-linux.c
+@@ -886,6 +886,8 @@ static SyscallTableEntry syscall_table[] = {
+    LINXY(__NR_epoll_pwait2,      sys_epoll_pwait2),      // 441
+ 
+    LINXY(__NR_memfd_secret,      sys_memfd_secret),      // 447
++
++   LINX_(__NR_fchmodat2,         sys_fchmodat2),         // 452
+ };
+ 
+ SyscallTableEntry* ML_(get_linux_syscall_entry) ( UInt sysno )
+diff --git a/coregrind/m_syswrap/syswrap-arm-linux.c b/coregrind/m_syswrap/syswrap-arm-linux.c
+index 5a16ca124e..21fc066d6d 100644
+--- a/coregrind/m_syswrap/syswrap-arm-linux.c
++++ b/coregrind/m_syswrap/syswrap-arm-linux.c
+@@ -1060,6 +1060,8 @@ static SyscallTableEntry syscall_main_table[] = {
+    LINX_(__NR_faccessat2,    sys_faccessat2),           // 439
+ 
+    LINXY(__NR_epoll_pwait2,      sys_epoll_pwait2),      // 441
++
++   LINX_(__NR_fchmodat2,         sys_fchmodat2),         // 452
+ };
+ 
+ 
+diff --git a/coregrind/m_syswrap/syswrap-arm64-linux.c b/coregrind/m_syswrap/syswrap-arm64-linux.c
+index f80890bd0c..5a24dcaf39 100644
+--- a/coregrind/m_syswrap/syswrap-arm64-linux.c
++++ b/coregrind/m_syswrap/syswrap-arm64-linux.c
+@@ -841,6 +841,8 @@ static SyscallTableEntry syscall_main_table[] = {
+    LINXY(__NR_epoll_pwait2,      sys_epoll_pwait2),      // 441
+ 
+    LINXY(__NR_memfd_secret,      sys_memfd_secret),      // 447
++
++   LINX_(__NR_fchmodat2,         sys_fchmodat2),         // 452
+ };
+ 
+ 
+diff --git a/coregrind/m_syswrap/syswrap-linux.c b/coregrind/m_syswrap/syswrap-linux.c
+index 0cc6221976..01bbba0a6d 100644
+--- a/coregrind/m_syswrap/syswrap-linux.c
++++ b/coregrind/m_syswrap/syswrap-linux.c
+@@ -6077,6 +6077,17 @@ PRE(sys_fchmodat)
+    PRE_MEM_RASCIIZ( "fchmodat(path)", ARG2 );
+ }
+ 
++PRE(sys_fchmodat2)
++{
++   PRINT("sys_fchmodat2 ( %ld, %#" FMT_REGWORD "x(%s), %" FMT_REGWORD "u, %"
++	  FMT_REGWORD "u )",
++         SARG1, ARG2, (HChar*)(Addr)ARG2, ARG3, ARG4);
++   PRE_REG_READ4(long, "fchmodat2",
++                 int, dfd, const char *, path, vki_mode_t, mode,
++                 unsigned int, flags);
++   PRE_MEM_RASCIIZ( "fchmodat2(pathname)", ARG2 );
++}
++
+ PRE(sys_faccessat)
+ {
+    PRINT("sys_faccessat ( %ld, %#" FMT_REGWORD "x(%s), %ld )",
+diff --git a/coregrind/m_syswrap/syswrap-mips32-linux.c b/coregrind/m_syswrap/syswrap-mips32-linux.c
+index e90809602c..ba0a453879 100644
+--- a/coregrind/m_syswrap/syswrap-mips32-linux.c
++++ b/coregrind/m_syswrap/syswrap-mips32-linux.c
+@@ -1145,6 +1145,8 @@ static SyscallTableEntry syscall_main_table[] = {
+    LINX_ (__NR_faccessat2,             sys_faccessat2),              // 439
+ 
+    LINXY(__NR_epoll_pwait2,      sys_epoll_pwait2),      // 441
++
++   LINX_(__NR_fchmodat2,               sys_fchmodat2),               // 452
+ };
+ 
+ SyscallTableEntry* ML_(get_linux_syscall_entry) (UInt sysno)
+diff --git a/coregrind/m_syswrap/syswrap-mips64-linux.c b/coregrind/m_syswrap/syswrap-mips64-linux.c
+index 1452e6b74f..ead350719d 100644
+--- a/coregrind/m_syswrap/syswrap-mips64-linux.c
++++ b/coregrind/m_syswrap/syswrap-mips64-linux.c
+@@ -823,6 +823,7 @@ static SyscallTableEntry syscall_main_table[] = {
+    LINXY (__NR_pidfd_getfd, sys_pidfd_getfd),
+    LINX_ (__NR_faccessat2, sys_faccessat2),
+    LINXY(__NR_epoll_pwait2, sys_epoll_pwait2),
++   LINX_ (__NR_fchmodat2, sys_fchmodat2),
+ };
+ 
+ SyscallTableEntry * ML_(get_linux_syscall_entry) ( UInt sysno )
+diff --git a/coregrind/m_syswrap/syswrap-nanomips-linux.c b/coregrind/m_syswrap/syswrap-nanomips-linux.c
+index fad05702d2..b7eaa24ebc 100644
+--- a/coregrind/m_syswrap/syswrap-nanomips-linux.c
++++ b/coregrind/m_syswrap/syswrap-nanomips-linux.c
+@@ -831,6 +831,7 @@ static SyscallTableEntry syscall_main_table[] = {
+    LINXY(__NR_pidfd_getfd,             sys_pidfd_getfd),
+    LINX_ (__NR_faccessat2,             sys_faccessat2),
+    LINXY (__NR_epoll_pwait2,           sys_epoll_pwait2),
++   LINX_ (__NR_fchmodat2,              sys_fchmodat2),
+ };
+ 
+ SyscallTableEntry* ML_(get_linux_syscall_entry) (UInt sysno)
+diff --git a/coregrind/m_syswrap/syswrap-ppc32-linux.c b/coregrind/m_syswrap/syswrap-ppc32-linux.c
+index 53722fbf7f..7cb0221314 100644
+--- a/coregrind/m_syswrap/syswrap-ppc32-linux.c
++++ b/coregrind/m_syswrap/syswrap-ppc32-linux.c
+@@ -1067,6 +1067,8 @@ static SyscallTableEntry syscall_table[] = {
+    LINX_(__NR_faccessat2,        sys_faccessat2),       // 439
+ 
+    LINXY (__NR_epoll_pwait2,     sys_epoll_pwait2),      // 441
++
++   LINX_ (__NR_fchmodat2,        sys_fchmodat2),         // 452
+ };
+ 
+ SyscallTableEntry* ML_(get_linux_syscall_entry) ( UInt sysno )
+diff --git a/coregrind/m_syswrap/syswrap-ppc64-linux.c b/coregrind/m_syswrap/syswrap-ppc64-linux.c
+index 6a99673251..bd7fbb2c5a 100644
+--- a/coregrind/m_syswrap/syswrap-ppc64-linux.c
++++ b/coregrind/m_syswrap/syswrap-ppc64-linux.c
+@@ -1033,6 +1033,8 @@ static SyscallTableEntry syscall_table[] = {
+    LINX_(__NR_faccessat2,        sys_faccessat2),       // 439
+ 
+    LINXY (__NR_epoll_pwait2,     sys_epoll_pwait2),      // 441
++
++   LINX_ (__NR_fchmodat2,        sys_fchmodat2),         // 452
+ };
+ 
+ SyscallTableEntry* ML_(get_linux_syscall_entry) ( UInt sysno )
+diff --git a/coregrind/m_syswrap/syswrap-s390x-linux.c b/coregrind/m_syswrap/syswrap-s390x-linux.c
+index 3238eef3ff..4f03f218eb 100644
+--- a/coregrind/m_syswrap/syswrap-s390x-linux.c
++++ b/coregrind/m_syswrap/syswrap-s390x-linux.c
+@@ -876,6 +876,8 @@ static SyscallTableEntry syscall_table[] = {
+    LINXY(__NR_epoll_pwait2, sys_epoll_pwait2),                        // 441
+ 
+    LINXY(__NR_memfd_secret, sys_memfd_secret),                        // 447
++
++   LINX_ (__NR_fchmodat2, sys_fchmodat2),                             // 452
+ };
+ 
+ SyscallTableEntry* ML_(get_linux_syscall_entry) ( UInt sysno )
+diff --git a/coregrind/m_syswrap/syswrap-x86-linux.c b/coregrind/m_syswrap/syswrap-x86-linux.c
+index c7eff0585c..f57b5395ca 100644
+--- a/coregrind/m_syswrap/syswrap-x86-linux.c
++++ b/coregrind/m_syswrap/syswrap-x86-linux.c
+@@ -1657,6 +1657,8 @@ static SyscallTableEntry syscall_table[] = {
+    LINXY(__NR_epoll_pwait2,      sys_epoll_pwait2),     // 441
+ 
+    LINXY(__NR_memfd_secret,      sys_memfd_secret),      // 447
++
++   LINX_(__NR_fchmodat2,         sys_fchmodat2),         // 452
+ };
+ 
+ SyscallTableEntry* ML_(get_linux_syscall_entry) ( UInt sysno )
+diff --git a/include/vki/vki-scnums-shared-linux.h b/include/vki/vki-scnums-shared-linux.h
+index 1bd4066703..068a2cd12b 100644
+--- a/include/vki/vki-scnums-shared-linux.h
++++ b/include/vki/vki-scnums-shared-linux.h
+@@ -50,4 +50,6 @@
+ 
+ #define __NR_memfd_secret		447
+ 
++#define __NR_fchmodat2		452
++
+ #endif
+-- 
+2.39.3
+
