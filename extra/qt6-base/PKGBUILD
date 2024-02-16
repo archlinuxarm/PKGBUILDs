@@ -6,8 +6,9 @@
 #  - disable ibase for now, FTBFS
 #  - removed -DFEATURE_no_direct_extern_access=ON
 
-pkgname=qt6-base
-_qtver=6.6.1
+pkgbase=qt6-base
+pkgname=(qt6-base qt6-xcb-private-headers)
+_qtver=6.6.2
 pkgver=${_qtver/-/}
 pkgrel=3
 arch=(x86_64)
@@ -81,17 +82,20 @@ optdepends=('freetds: MS SQL driver'
             'qt6-wayland: to run Qt6 applications in a Wayland session'
             'unixodbc: ODBC driver')
 groups=(qt6)
-_pkgfn=${pkgname/6-/}-everywhere-src-$_qtver
+_pkgfn=${pkgbase/6-/}-everywhere-src-$_qtver
 source=(https://download.qt.io/official_releases/qt/${pkgver%.*}/$_qtver/submodules/$_pkgfn.tar.xz
         qt6-base-cflags.patch
-        qt6-base-nostrip.patch)
-sha256sums=('450c5b4677b2fe40ed07954d7f0f40690068e80a94c9df86c2c905ccd59d02f7'
+        qt6-base-nostrip.patch
+        qt-6.6.2-revert-ABI-break.patch::https://code.qt.io/cgit/qt/qtbase.git/patch/?id=fb92bb07)
+sha256sums=('b89b426b9852a17d3e96230ab0871346574d635c7914480a2a27f98ff942677b'
             '5411edbe215c24b30448fac69bd0ba7c882f545e8cf05027b2b6e2227abc5e78'
-            '4b93f6a79039e676a56f9d6990a324a64a36f143916065973ded89adc621e094')
+            '4b93f6a79039e676a56f9d6990a324a64a36f143916065973ded89adc621e094'
+            'ff0de01b5afafab6d36f0a18ac1ab3ade2107ca75f03123da024a07d7eba2d97')
 
 prepare() {
   patch -d $_pkgfn -p1 < qt6-base-cflags.patch # Use system CFLAGS
   patch -d $_pkgfn -p1 < qt6-base-nostrip.patch # Don't strip binaries with qmake
+  patch -d $_pkgfn -Rp1 < qt-6.6.2-revert-ABI-break.patch # Revert ABI break in 6.6.2
 }
 
 build() {
@@ -117,7 +121,8 @@ build() {
   cmake --build build
 }
 
-package() {
+package_qt6-base() {
+  pkgdesc='A cross-platform application and UI framework'
   depends+=(qt6-translations)
   DESTDIR="$pkgdir" cmake --install build
 
@@ -129,4 +134,18 @@ package() {
   while read _line; do
     ln -s $_line
   done < "$srcdir"/build/user_facing_tool_links.txt
+}
+
+package_qt6-xcb-private-headers() {
+  pkgdesc='Private headers for Qt6 Xcb'
+
+  depends=("qt6-base=$pkgver")
+  optdepends=()
+  groups=()
+
+  cd $_pkgfn
+  install -d -m755 "$pkgdir"/usr/include/qt6xcb-private/{gl_integrations,nativepainting}
+  cp -r src/plugins/platforms/xcb/*.h "$pkgdir"/usr/include/qt6xcb-private/
+  cp -r src/plugins/platforms/xcb/gl_integrations/*.h "$pkgdir"/usr/include/qt6xcb-private/gl_integrations/
+  cp -r src/plugins/platforms/xcb/nativepainting/*.h "$pkgdir"/usr/include/qt6xcb-private/nativepainting/
 }
