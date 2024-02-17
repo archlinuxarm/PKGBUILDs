@@ -25,7 +25,7 @@ pkgname=(
   'mesa-vdpau'
   'mesa'
 )
-pkgver=23.3.5
+pkgver=24.0.1
 pkgrel=1
 epoch=1
 pkgdesc="An open-source implementation of the OpenGL specification"
@@ -84,10 +84,10 @@ source=(
   https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
   LICENSE
 )
-sha256sums=('69ccb1278641ff5bad71ca0f866188aeb1a92aadc4dbb9d35f50aebec5b8b50f'
+sha256sums=('f387192b08c471c545590dd12230a2a343244804b5fe866fec6aea02eab57613'
             'SKIP'
             '7052ba73bb07ea78873a2431ee4e828f4e72bda7d176d07f770fa48373dec537')
-b2sums=('69c7434ae9c503c14b5bf9abad9a3a26a1dd402461b098dcdb01b9da7a7e8652f897fd9681c809aa70d3ace77c448289d22400deca3854844a355eb0ac095583'
+b2sums=('05eb98f2fec0d15e63e8da2ca2e563d0b6fb7e29d639e66fc69074b7550939160e6f29121b80f2c64083625f2b13aa728221443b1f5adf2dd0fd92056ed9dc40'
         'SKIP'
         '1ecf007b82260710a7bf5048f47dd5d600c168824c02c595af654632326536a6527fbe0738670ee7b921dd85a70425108e0f471ba85a8e1ca47d294ad74b4adb')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
@@ -146,7 +146,7 @@ build() {
     -D rust_std=2021
     -D shared-glapi=enabled
     -D valgrind=enabled
-    -D video-codecs=vc1dec,h264dec,h264enc,h265dec,h265enc
+    -D video-codecs=all
     -D vulkan-drivers=amd,swrast,broadcom,panfrost,virtio
     -D vulkan-layers=device-select,overlay
   )
