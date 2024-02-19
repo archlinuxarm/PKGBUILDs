@@ -9,50 +9,43 @@
 #  - removed --enable-sse2, --enable-avx from double precision
 #  - removed quad precision variant from _build_types array
 
-pkgname=fftw
+pkgbase=fftw
+pkgname=(fftw fftw-openmpi)
 pkgver=3.3.10
-pkgrel=5
+pkgrel=6
 pkgdesc="A library for computing the discrete Fourier transform (DFT)"
 arch=(x86_64)
 url="http://www.fftw.org/"
-license=(GPL2)
-depends=(
+license=(GPL-2.0-or-later)
+makedepends=(
   bash
+  cmake
+  gcc-fortran
   gcc-libs
   glibc
   openmpi
-)
-makedepends=(
-  cmake
-  gcc-fortran
-)
-provides=(
-  libfftw3q_threads.so
-  libfftw3q_omp.so
-  libfftw3q.so
-  libfftw3l_threads.so
-  libfftw3l_omp.so
-  libfftw3l_mpi.so
-  libfftw3l.so
-  libfftw3f_threads.so
-  libfftw3f_omp.so
-  libfftw3f_mpi.so
-  libfftw3f.so
-  libfftw3_threads.so
-  libfftw3_omp.so
-  libfftw3_mpi.so
-  libfftw3.so
 )
 source=(http://www.fftw.org/$pkgname-$pkgver.tar.gz)
 sha512sums=('2d34b5ccac7b08740dbdacc6ebe451d8a34cf9d9bfec85a5e776e87adf94abfd803c222412d8e10fbaa4ed46f504aa87180396af1b108666cde4314a55610b40')
 b2sums=('3663872bd95a01d2c79af185f53918e1d1a9c91c620082402772c07f25b9b77d4920a78dc686fac6b51aa961b8d62b7e2cef3f3031e096bed40ced80b59b29d5')
 _build_types=(single double long-double)
+_soname=3.6.10
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
 
 prepare() {
   local _i
 
   # fix wrong soname in FFTW3LibraryDepends.cmake
-  sed -e 's/3.6.9/3.6.10/' -i $pkgname-$pkgver/CMakeLists.txt
+  sed -e "s/3.6.9/$_soname/" -i $pkgname-$pkgver/CMakeLists.txt
 
   mv -v $pkgname-$pkgver $pkgname-$pkgver-single
   for _i in {1..3}; do
@@ -69,6 +62,7 @@ build() {
     --enable-threads
     --enable-mpi
     --enable-openmp
+    MPILIBS="$(mpicc --showme:link)"
   )
   local _configure_single=(
     --enable-single
@@ -91,11 +85,11 @@ build() {
     -D ENABLE_THREADS=ON
     -D ENABLE_FLOAT=ON
     -D ENABLE_LONG_DOUBLE=ON
-    -D ENABLE_QUAD_PRECISION=ON
-    -D ENABLE_SSE=ON
-    -D ENABLE_SSE2=ON
-    -D ENABLE_AVX=ON
-    -D ENABLE_AVX2=ON
+    -D ENABLE_QUAD_PRECISION=OFF
+    -D ENABLE_SSE=OFF
+    -D ENABLE_SSE2=OFF
+    -D ENABLE_AVX=OFF
+    -D ENABLE_AVX2=OFF
   )
 
   # create missing FFTW3LibraryDepends.cmake
@@ -139,17 +133,62 @@ check() {
   local _name
 
   for _name in "${_build_types[@]}"; do
-    make check-local -C $pkgname-$pkgver-$_name/tests
+    make smallcheck -C $pkgname-$pkgver-$_name/tests
   done
 }
 
-package() {
+package_fftw() {
+  depends=(
+    bash
+    gcc-libs
+    glibc
+  )
+  optdepends=('fftw-openmpi: for OpenMPI integration')
+  provides=(
+    libfftw3q_threads.so
+    libfftw3q_omp.so
+    libfftw3q.so
+    libfftw3l_threads.so
+    libfftw3l_omp.so
+    libfftw3l.so
+    libfftw3f_threads.so
+    libfftw3f_omp.so
+    libfftw3f.so
+    libfftw3_threads.so
+    libfftw3_omp.so
+    libfftw3.so
+  )
+
   local _name
 
   for _name in "${_build_types[@]}"; do
     make DESTDIR="$pkgdir" install -C $pkgname-$pkgver-$_name
   done
+  (
+    cd "$pkgdir"
+    _pick $pkgbase-openmpi usr/include/fftw3-mpi.h
+    _pick $pkgbase-openmpi usr/include/fftw3{,l}-mpi.f03
+    _pick $pkgbase-openmpi usr/lib/libfftw3{,f,l}_mpi.{a,so}
+    _pick $pkgbase-openmpi usr/lib/libfftw3{,f,l}_mpi.so.${_soname%%.*}
+    _pick $pkgbase-openmpi usr/lib/libfftw3{,f,l}_mpi.so.$_soname
+  )
   install -vDm 644 $pkgname-$pkgver-$_build_types/{AUTHORS,ChangeLog,NEWS,README,TODO} -t "$pkgdir/usr/share/doc/$pkgname"
   # install missing FFTW3LibraryDepends.cmake
   install -vDm 644 build/FFTW3LibraryDepends.cmake -t "$pkgdir/usr/lib/cmake/fftw3/"
+}
+
+package_fftw-openmpi() {
+  pkgdesc+=" - OpenMPI libraries"
+  depends=(
+    fftw
+    glibc
+    openmpi
+  )
+  provides=(
+    libfftw3l_mpi.so
+    libfftw3f_mpi.so
+    libfftw3_mpi.so
+  )
+
+  mv -v $pkgname/* "$pkgdir"
 }
