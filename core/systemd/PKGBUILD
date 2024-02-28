@@ -13,11 +13,19 @@ pkgname=('systemd'
          'systemd-resolvconf'
          'systemd-sysvcompat'
          'systemd-ukify')
-_tag='8cf1da1e9172ba04d90a483a63118873343ea656' # git rev-parse v${_tag_name}
-_tag_name=255.3
-pkgver="${_tag_name/-/}"
+_tag='4003dd6754e3446691402d3cc389fbfd4faccc90' # git rev-parse v${_tag_name}
+_tag_name=255.4
+# Upstream versioning is incompatible with pacman's version comparisons so we
+# replace tildes with the empty string to make sure pacman's version comparing
+# does the right thing for rc versions:
+# ➜ vercmp 255~rc1 255
+# 1
+# ➜ vercmp 255rc1 255
+# -1
+pkgver="${_tag_name/~/}"
 pkgrel=1
 arch=('x86_64')
+license=('LGPL-2.1-or-later')
 url='https://www.github.com/systemd/systemd'
 makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
              'intltool' 'iptables' 'kmod' 'libcap' 'libidn2' 'libgcrypt'
@@ -26,9 +34,8 @@ makedepends=('acl' 'cryptsetup' 'docbook-xsl' 'gperf' 'lz4' 'xz' 'pam' 'libelf'
              'meson' 'libseccomp' 'pcre2' 'audit' 'kexec-tools' 'libxkbcommon'
              'bash-completion' 'p11-kit' 'systemd' 'libfido2' 'tpm2-tss' 'rsync'
              'bpf' 'libbpf' 'clang' 'llvm' 'curl' 'gnutls' 'python-pyelftools'
-             'libpwquality' 'qrencode')
-checkdepends=('python-pefile')
-options=('strip' '!distcc')
+             'libpwquality' 'qrencode' 'python-pefile')
+options=('!distcc')
 validpgpkeys=('63CDA1E5D3FC22B998D20DD6327F26951A015CC4'  # Lennart Poettering <lennart@poettering.net>
               'A9EA9081724FFAE0484C35A1A81CEA22BC8C7E2E'  # Luca Boccassi <luca.boccassi@gmail.com>
               '9A774DB5DB996C154EBBFBFDA0099A18E29326E1'  # Yu Watanabe <watanabe.yu+github@gmail.com>
@@ -62,7 +69,7 @@ sha512sums=('SKIP'
             'SKIP'
             '3ccf783c28f7a1c857120abac4002ca91ae1f92205dcd5a84aff515d57e706a3f9240d75a0a67cff5085716885e06e62597baa86897f298662ec36a940cf410e'
             '4a6cd0cf6764863985dc5ad774d7c93b574645a05b3295f989342951d43c71696d069641592e37eeadb6d6f0531576de96b6392224452f15cd9f056fae038f8e'
-            'ada692514d758fa11e2be6b4c5e1dc2d9d47548f24ada35afdce1dcac918e72ae2251c892773e6cf41fa431c3613a1608668e999eb86a565870fecb55c47b4ba'
+            'd8fc1def3af3260f222f3b6d5693f36677d7fe08ea8b933c14367f013a7fabf11e0acafc63370a06708a4fad4fd2cc3795eda57f81117238272ffa3655f71fd0'
             'a8c7e4a2cc9c9987e3c957a1fc3afe8281f2281fffd2e890913dcf00cf704024fb80d86cb75f9314b99b0e03bac275b22de93307bfc226d8be9435497e95b7e6'
             '61032d29241b74a0f28446f8cf1be0e8ec46d0847a61dadb2a4f096e8686d5f57fe5c72bcf386003f6520bc4b5856c32d63bf3efe7eb0bc0deefc9f68159e648'
             'c416e2121df83067376bcaacb58c05b01990f4614ad9de657d74b6da3efa441af251d13bf21e3f0f71ddcb4c9ea658b81da3d915667dc5c309c87ec32a1cb5a5'
@@ -128,9 +135,9 @@ build() {
   CXXFLAGS+=" -fno-lto"
 
   local _meson_options=(
-    # internal version comparison is incompatible with pacman:
-    #   249~rc1 < 249 < 249.1 < 249rc
-    -Dversion-tag="${_tag_name/-/\~}-${pkgrel}-arch"
+    -Dversion-tag="${_tag_name}-${pkgrel}-arch"
+    # We use the version without tildes as the shared library tag because
+    # pacman looks at the shared library version.
     -Dshared-lib-tag="${pkgver}-${pkgrel}"
     -Dmode=release
 
@@ -170,22 +177,22 @@ build() {
     -Dsbat-distro-url="https://archlinuxarm.org/packages/${CARCH}/${pkgname}"
   )
 
-  # this uses malloc_usable_size, which is incompatible with fortification level 3
-  export CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-  export CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-
   arch-meson "$pkgbase-stable" build "${_meson_options[@]}"
 
   meson compile -C build
 }
 
 check() {
-  meson test -C build
+  meson test -C build --print-errorlogs
 }
 
 package_systemd() {
   pkgdesc='system and service manager'
-  license=('GPL2' 'LGPL2.1')
+  license+=(
+    'CC0-1.0' # siphash
+    'GPL-2.0-or-later' # udev
+    'MIT-0' # documentation and config files
+  )
   depends=('acl' 'libacl.so' 'bash' 'cryptsetup' 'libcryptsetup.so' 'dbus'
            'dbus-units' 'kbd' 'kmod' 'libkmod.so' 'hwdata' 'libcap' 'libcap.so'
            'libgcrypt' 'libxcrypt' 'libcrypt.so' 'systemd-libs' 'libidn2' 'lz4' 'pam'
@@ -294,7 +301,10 @@ package_systemd() {
 package_systemd-libs() {
   pkgdesc='systemd client libraries'
   depends=('glibc' 'gcc-libs' 'libcap' 'libgcrypt' 'lz4' 'xz' 'zstd')
-  license=('LGPL2.1')
+  license+=(
+    'CC0-1.0' # siphash
+    'GPL-2.0-or-later WITH Linux-syscall-note' # src/basic/linux/*
+  )
   provides=('libsystemd' 'libsystemd.so' 'libudev.so')
   conflicts=('libsystemd')
   replaces=('libsystemd')
@@ -307,7 +317,6 @@ package_systemd-libs() {
 
 package_systemd-resolvconf() {
   pkgdesc='systemd resolvconf replacement (for use with systemd-resolved)'
-  license=('LGPL2.1')
   depends=('systemd')
   provides=('openresolv' 'resolvconf')
   conflicts=('resolvconf')
@@ -321,7 +330,6 @@ package_systemd-resolvconf() {
 
 package_systemd-sysvcompat() {
   pkgdesc='sysvinit compat for systemd'
-  license=('GPL2')
   conflicts=('sysvinit')
   depends=('systemd')
 
@@ -337,7 +345,6 @@ package_systemd-sysvcompat() {
 
 package_systemd-ukify() {
   pkgdesc='Combine kernel and initrd into a signed Unified Kernel Image'
-  license=('GPL2')
   provides=('ukify')
   depends=('binutils' 'python-cryptography' 'python-pefile' 'systemd')
   optdepends=('python-pillow: Show the size of splash image'
