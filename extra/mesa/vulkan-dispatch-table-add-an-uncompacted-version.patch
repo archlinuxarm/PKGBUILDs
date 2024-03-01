@@ -1,0 +1,230 @@
+From 5d91db9666ea61be549b2edc28d5ad4c34b34aab Mon Sep 17 00:00:00 2001
+From: Mike Blumenkrantz <michael.blumenkrantz@gmail.com>
+Date: Tue, 27 Feb 2024 14:41:28 -0500
+Subject: [PATCH 1/2] vulkan/dispatch_table: add an uncompacted version of the
+ table
+
+this is a bandaid fix that allows users (zink) to actually call the
+functions intended to be called. the real fix would be to figure out
+which extensions are enabled on the device and then only GPA the
+functions associated with those extensions
+
+that's too hard though so I'm slapping some flex tape on it
+
+cc: mesa-stable
+
+Acked-by: Dave Airlie <airlied@redhat.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/27834>
+---
+ src/vulkan/util/vk_dispatch_table_gen.py | 109 +++++++++++++++++++++++
+ 1 file changed, 109 insertions(+)
+
+diff --git a/src/vulkan/util/vk_dispatch_table_gen.py b/src/vulkan/util/vk_dispatch_table_gen.py
+index 2db977b25deff..7a3b459b37155 100644
+--- a/src/vulkan/util/vk_dispatch_table_gen.py
++++ b/src/vulkan/util/vk_dispatch_table_gen.py
+@@ -152,6 +152,62 @@ ${entrypoint_table('instance', instance_entrypoints)}
+ ${entrypoint_table('physical_device', physical_device_entrypoints)}
+ ${entrypoint_table('device', device_entrypoints)}
+ 
++<%def name="uncompacted_dispatch_table(entrypoints)">
++% for e in entrypoints:
++  % if e.alias:
++    <% continue %>
++  % endif
++  % if e.guard is not None:
++#ifdef ${e.guard}
++  % endif
++    PFN_vk${e.name} ${e.name};
++  % if e.aliases:
++    % for a in e.aliases:
++    PFN_vk${a.name} ${a.name};
++    % endfor
++  % endif
++  % if e.guard is not None:
++#else
++    PFN_vkVoidFunction ${e.name};
++    % if e.aliases:
++      % for a in e.aliases:
++        PFN_vkVoidFunction ${a.name};
++      % endfor
++    % endif
++#endif
++  % endif
++% endfor
++</%def>
++
++
++struct vk_instance_uncompacted_dispatch_table {
++  ${uncompacted_dispatch_table(instance_entrypoints)}
++};
++
++struct vk_physical_device_uncompacted_dispatch_table {
++  ${uncompacted_dispatch_table(physical_device_entrypoints)}
++};
++
++struct vk_device_uncompacted_dispatch_table {
++  ${uncompacted_dispatch_table(device_entrypoints)}
++};
++
++struct vk_uncompacted_dispatch_table {
++    union {
++        struct {
++            struct vk_instance_uncompacted_dispatch_table instance;
++            struct vk_physical_device_uncompacted_dispatch_table physical_device;
++            struct vk_device_uncompacted_dispatch_table device;
++        };
++
++        struct {
++            ${uncompacted_dispatch_table(instance_entrypoints)}
++            ${uncompacted_dispatch_table(physical_device_entrypoints)}
++            ${uncompacted_dispatch_table(device_entrypoints)}
++        };
++    };
++};
++
+ void
+ vk_instance_dispatch_table_load(struct vk_instance_dispatch_table *table,
+                                 PFN_vkGetInstanceProcAddr gpa,
+@@ -165,6 +221,19 @@ vk_device_dispatch_table_load(struct vk_device_dispatch_table *table,
+                               PFN_vkGetDeviceProcAddr gpa,
+                               VkDevice device);
+ 
++void
++vk_instance_uncompacted_dispatch_table_load(struct vk_instance_uncompacted_dispatch_table *table,
++                                PFN_vkGetInstanceProcAddr gpa,
++                                VkInstance instance);
++void
++vk_physical_device_uncompacted_dispatch_table_load(struct vk_physical_device_uncompacted_dispatch_table *table,
++                                       PFN_vkGetInstanceProcAddr gpa,
++                                       VkInstance instance);
++void
++vk_device_uncompacted_dispatch_table_load(struct vk_device_uncompacted_dispatch_table *table,
++                              PFN_vkGetDeviceProcAddr gpa,
++                              VkDevice device);
++
+ void vk_instance_dispatch_table_from_entrypoints(
+     struct vk_instance_dispatch_table *dispatch_table,
+     const struct vk_instance_entrypoint_table *entrypoint_table,
+@@ -267,6 +336,46 @@ ${load_dispatch_table('physical_device', 'VkInstance', 'GetInstanceProcAddr',
+ ${load_dispatch_table('device', 'VkDevice', 'GetDeviceProcAddr',
+                       device_entrypoints)}
+ 
++<%def name="load_uncompacted_dispatch_table(type, VkType, ProcAddr, entrypoints)">
++void
++vk_${type}_uncompacted_dispatch_table_load(struct vk_${type}_uncompacted_dispatch_table *table,
++                               PFN_vk${ProcAddr} gpa,
++                               ${VkType} obj)
++{
++% if type != 'physical_device':
++    table->${ProcAddr} = gpa;
++% endif
++% for e in entrypoints:
++  % if e.alias or e.name == '${ProcAddr}':
++    <% continue %>
++  % endif
++  % if e.guard is not None:
++#ifdef ${e.guard}
++  % endif
++    table->${e.name} = (PFN_vk${e.name}) gpa(obj, "vk${e.name}");
++  % for a in e.aliases:
++    table->${a.name} = (PFN_vk${a.name}) gpa(obj, "vk${a.name}");
++    if (table->${e.name} && !table->${a.name})
++       table->${a.name} = (PFN_vk${a.name}) table->${e.name};
++    if (!table->${e.name})
++       table->${e.name} = (PFN_vk${e.name}) table->${a.name};
++  % endfor
++  % if e.guard is not None:
++#endif
++  % endif
++% endfor
++}
++</%def>
++
++${load_uncompacted_dispatch_table('instance', 'VkInstance', 'GetInstanceProcAddr',
++                      instance_entrypoints)}
++
++${load_uncompacted_dispatch_table('physical_device', 'VkInstance', 'GetInstanceProcAddr',
++                      physical_device_entrypoints)}
++
++${load_uncompacted_dispatch_table('device', 'VkDevice', 'GetDeviceProcAddr',
++                      device_entrypoints)}
++
+ 
+ struct string_map_entry {
+    uint32_t name;
+-- 
+GitLab
+
+
+From d4f3770ea232e015e445b9d1fcab699119417fac Mon Sep 17 00:00:00 2001
+From: Mike Blumenkrantz <michael.blumenkrantz@gmail.com>
+Date: Tue, 27 Feb 2024 16:20:48 -0500
+Subject: [PATCH 2/2] zink: use uncompacted vk_dispatch_table
+
+the dispatch table doesn't know which extensions zink wants to use,
+so let zink use the extensions it wants to use
+
+fixes #10513
+
+cc: mesa-stable
+
+Acked-by: Dave Airlie <airlied@redhat.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/27834>
+---
+ src/gallium/drivers/zink/zink_screen.c | 18 +++++++++---------
+ src/gallium/drivers/zink/zink_types.h  |  2 +-
+ 2 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/src/gallium/drivers/zink/zink_screen.c b/src/gallium/drivers/zink/zink_screen.c
+index 11e54a0054a09..035e742c98af7 100644
+--- a/src/gallium/drivers/zink/zink_screen.c
++++ b/src/gallium/drivers/zink/zink_screen.c
+@@ -3288,12 +3288,12 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
+       }
+    }
+ 
+-   vk_instance_dispatch_table_load(&screen->vk.instance,
+-                                   screen->vk_GetInstanceProcAddr,
+-                                   screen->instance);
+-   vk_physical_device_dispatch_table_load(&screen->vk.physical_device,
+-                                          screen->vk_GetInstanceProcAddr,
+-                                          screen->instance);
++   vk_instance_uncompacted_dispatch_table_load(&screen->vk.instance,
++                                                screen->vk_GetInstanceProcAddr,
++                                                screen->instance);
++   vk_physical_device_uncompacted_dispatch_table_load(&screen->vk.physical_device,
++                                                      screen->vk_GetInstanceProcAddr,
++                                                      screen->instance);
+ 
+    zink_verify_instance_extensions(screen);
+ 
+@@ -3390,9 +3390,9 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
+    if (!screen->dev)
+       goto fail;
+ 
+-   vk_device_dispatch_table_load(&screen->vk.device,
+-                                 screen->vk_GetDeviceProcAddr,
+-                                 screen->dev);
++   vk_device_uncompacted_dispatch_table_load(&screen->vk.device,
++                                             screen->vk_GetDeviceProcAddr,
++                                             screen->dev);
+ 
+    init_queue(screen);
+ 
+diff --git a/src/gallium/drivers/zink/zink_types.h b/src/gallium/drivers/zink/zink_types.h
+index bc668b60d8e64..ddfb2532c8432 100644
+--- a/src/gallium/drivers/zink/zink_types.h
++++ b/src/gallium/drivers/zink/zink_types.h
+@@ -1523,7 +1523,7 @@ struct zink_screen {
+    bool renderdoc_capture_all;
+ #endif
+ 
+-   struct vk_dispatch_table vk;
++   struct vk_uncompacted_dispatch_table vk;
+ 
+    void (*buffer_barrier)(struct zink_context *ctx, struct zink_resource *res, VkAccessFlags flags, VkPipelineStageFlags pipeline);
+    void (*image_barrier)(struct zink_context *ctx, struct zink_resource *res, VkImageLayout new_layout, VkAccessFlags flags, VkPipelineStageFlags pipeline);
+-- 
+GitLab
+

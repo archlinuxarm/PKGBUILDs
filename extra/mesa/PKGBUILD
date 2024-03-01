@@ -25,7 +25,7 @@ pkgname=(
   'mesa-vdpau'
   'mesa'
 )
-pkgver=24.0.1
+pkgver=24.0.2
 pkgrel=1
 epoch=1
 pkgdesc="An open-source implementation of the OpenGL specification"
@@ -82,13 +82,19 @@ makedepends=(
 )
 source=(
   https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
+  radeon_bo_can_reclaim_slab.diff
+  vulkan-dispatch-table-add-an-uncompacted-version.patch
   LICENSE
 )
-sha256sums=('f387192b08c471c545590dd12230a2a343244804b5fe866fec6aea02eab57613'
+sha256sums=('94e28a8edad06d8ed2b83eb53f253b9eb5aa62c3080f939702e1b3039b56c9e8'
             'SKIP'
+            '3fd1ad8cd29319502a6f80ecb96bb9a059e5de83a8b6e39f23de8d93921fd922'
+            '1733ec76f735788837833e7571b641fc64b56ec3176b93e9234fc0b5428ee6d8'
             '7052ba73bb07ea78873a2431ee4e828f4e72bda7d176d07f770fa48373dec537')
-b2sums=('05eb98f2fec0d15e63e8da2ca2e563d0b6fb7e29d639e66fc69074b7550939160e6f29121b80f2c64083625f2b13aa728221443b1f5adf2dd0fd92056ed9dc40'
+b2sums=('f69e0b3edb7b8611f528a2e04104fe14b2fe8c799921be2d112dba744133813a19f90aa11d39f3f87a282e518003c7cc7966143d25e845f1f4489c461b22f661'
         'SKIP'
+        'e7c3451a342cc648149375ce58697ae24273d47060e74ca2948d45ea8fe29b104f1daae4c91968fb6f37d41963d176987abf9ee21acfba0172a9b5d30300a72e'
+        'e057a085bf7a9faceaa90b29555626d79e8c818e84a9424ade53dd21c512b2ea37dabb1d8ecccdf0f8fa69a4c6e7b66a6fe970b65baf1d368d6b9cc94ba532c7'
         '1ecf007b82260710a7bf5048f47dd5d600c168824c02c595af654632326536a6527fbe0738670ee7b921dd85a70425108e0f471ba85a8e1ca47d294ad74b4adb')
 validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
               '946D09B5E4C9845E63075FF1D961C596A7203456'  # Andres Gomez <tanty@igalia.com>
@@ -99,6 +105,12 @@ validpgpkeys=('8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l
 
 prepare() {
   cd mesa-$pkgver
+
+  # Proposed crash fix from https://gitlab.freedesktop.org/mesa/mesa/-/issues/10613#note_2290167
+  patch -Np1 -i ../radeon_bo_can_reclaim_slab.diff
+
+  # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/27834
+  patch -Np1 -i ../vulkan-dispatch-table-add-an-uncompacted-version.patch
 
   # Include package release in version string so Chromium invalidates
   # its GPU cache; otherwise it can cause pages to render incorrectly.
