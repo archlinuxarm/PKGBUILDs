@@ -8,6 +8,8 @@
 #  - Removed Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, VMware svga).
 #  - added broadcom and panfrost vulkan packages
 #  - enable lto for aarch64
+#  ALARM: John Audia <therealgraysky@proton.me>
+#  - added freedreno driver, PR#1973 and PR#1996
 
 highmem=1
 
@@ -21,12 +23,13 @@ pkgname=(
   'vulkan-virtio'
   'vulkan-broadcom'
   'vulkan-panfrost'
+  'vulkan-freedreno'
   'libva-mesa-driver'
   'mesa-vdpau'
   'mesa'
 )
 pkgver=24.0.3
-pkgrel=1
+pkgrel=1.1
 epoch=1
 pkgdesc="An open-source implementation of the OpenGL specification"
 url="https://www.mesa3d.org/"
@@ -153,7 +156,7 @@ build() {
     -D shared-glapi=enabled
     -D valgrind=enabled
     -D video-codecs=all
-    -D vulkan-drivers=amd,swrast,broadcom,panfrost,virtio
+    -D vulkan-drivers=amd,swrast,broadcom,panfrost,virtio,freedreno
     -D vulkan-layers=device-select,overlay
   )
 
@@ -347,6 +350,18 @@ package_vulkan-panfrost() {
 
   _install fakeinstall/usr/share/vulkan/icd.d/panfrost_icd*.json
   _install fakeinstall/$_libdir/libvulkan_panfrost.so
+
+  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+}
+
+package_vulkan-freedreno() {
+  pkgdesc="Freedreno Vulkan mesa driver"
+  depends=('wayland' 'libx11' 'libxshmfence' 'libdrm')
+  optdepends=('vulkan-mesa-layers: additional vulkan layers')
+  provides=('vulkan-driver')
+
+  _install fakeinstall/usr/share/vulkan/icd.d/freedreno_icd*.json
+  _install fakeinstall/usr/lib/libvulkan_freedreno.so
 
   install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
 }
