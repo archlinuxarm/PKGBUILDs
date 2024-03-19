@@ -1,8 +1,32 @@
+detect_kernel_partition() {
+  if [ -s "/boot/vmlinux.kpart" ]; then
+    hashalgo="sha256"
+    krnlsize=$(stat -c%s "/boot/vmlinux.kpart")
+    krnlhash=$("$hashalgo"sum /boot/vmlinux.kpart | sed 's/ .*//g')
+    for i in $(echo $(cat /proc/partitions | sed 's/name//g' | sed 's/.* //g')); do
+      tst=$(mktemp /tmp/XXXXXXXX.tmp)
+      dd if=/dev/$i of=$tst bs=$krnlsize count=1 status=none
+      if [ "$("$hashalgo"sum $tst | sed 's/ .*//g')" == "$krnlhash" ]; then
+        echo found kernel partition - /dev/$i
+        echo "$i">/boot/krnlpart
+        rm -f $tst
+        break
+      fi
+      rm -f $tst
+    done
+  fi
+}
+
 flash_kernel() {
-  major=$(mountpoint -d / | cut -f 1 -d ':')
-  minor=$(mountpoint -d / | cut -f 2 -d ':')
-  device=$(cat /proc/partitions | awk {'if ($1 == "'${major}'" && $2 == "'${minor}'") print $4 '})
-  device="/dev/${device/%2/1}"
+  if [ -s "/boot/krnlpart" ]; then
+    device="/dev/$(cat /boot/krnlpart)"
+    rm -f /boot/krnlpart
+  else
+    major=$(mountpoint -d / | cut -f 1 -d ':')
+    minor=$(mountpoint -d / | cut -f 2 -d ':')
+    device=$(cat /proc/partitions | awk {'if ($1 == "'${major}'" && $2 == "'${minor}'") print $4 '})
+    device="/dev/${device/%2/1}"
+  fi
 
   echo "A new kernel version needs to be flashed onto ${device}."
   echo "Do you want to do this now? [y|N]"
@@ -14,6 +38,14 @@ flash_kernel() {
     echo "You can do this later by running:"
     echo "# dd if=/boot/vmlinux.kpart of=${device}"
   fi
+}
+
+pre_install() {
+  detect_kernel_partition
+}
+
+pre_upgrade() {
+  detect_kernel_partition
 }
 
 post_install () {
