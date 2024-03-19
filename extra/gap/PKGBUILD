@@ -9,18 +9,18 @@
 pkgbase=gap
 pkgname=(gap
          gap-packages)
-_pkgver=4.13.0
-pkgver=${_pkgver/-/.}
-pkgrel=1
+pkgver=4.13.0
+pkgrel=2
 pkgdesc='Groups, Algorithms, Programming: a system for computational discrete algebra'
 arch=(x86_64)
 url='https://www.gap-system.org/'
 license=(GPL-2.0-or-later)
-source=(https://github.com/gap-system/gap/releases/download/v$_pkgver/$pkgbase-$_pkgver.tar.gz
-        package-infos-$pkgver.json.gz::https://github.com/gap-system/gap/releases/download/v$_pkgver/package-infos.json.gz)
+source=(https://github.com/gap-system/gap/releases/download/v$pkgver/$pkgbase-$pkgver.tar.gz
+        package-infos-$pkgver.json.gz::https://github.com/gap-system/gap/releases/download/v$pkgver/package-infos.json.gz)
 sha256sums=('cc76ecbe33d6719450a593e613fb87e9e4247faa876f632dd0f97c398f92265d'
             'b3f606cc5e6f388aa311c3824042d301d75ace780f19023561ef9d78982dcb7a')
-makedepends=(boost
+makedepends=(bliss
+             boost
              c-xsc
              cddlib
              chrpath
@@ -33,13 +33,13 @@ makedepends=(boost
              libxaw
              mpfi
              normaliz
+             planarity
              wget
              zeromq)
 
 prepare() {
-  cd gap-$_pkgver
+  cd gap-$pkgver
 
-  rm -fr pkg/xgap
 # Use system normaliz
   rm pkg/normalizinterface/prerequisites.sh
 # Use system nauty
@@ -52,37 +52,38 @@ prepare() {
 }
 
 build() {
-  cd gap-$_pkgver
+  cd gap-$pkgver
   ./configure --prefix=/usr --with-gmp=system
-
-  # https://bugzilla.gnome.org/show_bug.cgi?id=655517
-#  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-
   make
 
   # Install libgap so we can link packages against it
   mkdir -p tmp-install
-  make DESTDIR="$srcdir"/gap-$_pkgver/tmp-install install-libgap
+  make DESTDIR="$srcdir"/gap-$pkgver/tmp-install install-libgap
 
   cd pkg
   export CXXFLAGS+=" -std=gnu++14" # Fix build of normalizinterface
-  export LDFLAGS+=" -L$srcdir/gap-$_pkgver/tmp-install/usr/lib -lgap" # See https://trac.sagemath.org/ticket/27372
+  export LDFLAGS+=" -L$srcdir/gap-$pkgver/tmp-install/usr/lib -lgap" # See https://trac.sagemath.org/ticket/27372
   export LD_LIBRARY_PATH="$srcdir"/gap-$pkgver/tmp-install/usr/lib
   ../bin/BuildPackages.sh --strict \
-    --add-package-config-Semigroups --with-external-libsemigroups
+    --add-package-config-Semigroups --with-external-libsemigroups \
+    --add-package-config-Digraphs "--with-external-planarity --with-external-bliss"
 }
 
 _standardpkgs=(gapdoc primgrp smallgrp transgrp atlasrep autpgrp alnuth crisp ctbllib factint fga irredsol laguna
                polenta polycyclic radiroot resclasses sophus tomlib utils autodoc)
 
 package_gap() {
-  depends=(gmp
+  depends=(glibc
+           gmp
+           perl
+           readline
+           sh
            zlib)
   optdepends=('gap-packages: extra packages')
   conflicts=(gap-doc)
   provides=(gap-doc)
   replaces=(gap-doc)
-  cd gap-$_pkgver
+  cd gap-$pkgver
 
   make DESTDIR="$pkgdir" install
 
@@ -99,8 +100,13 @@ package_gap() {
 }
 
 package_gap-packages() {
-  depends=(gap)
-  optdepends=('c-xsc: float package'
+  depends=(gap
+           gcc-libs
+           glibc
+           perl
+           sh)
+  optdepends=('bliss: digraph package'
+              'c-xsc: float package'
               'cddlib: CddLib interface package'
               'curl: curl interface package'
               'fplll: float package'
@@ -116,11 +122,17 @@ package_gap-packages() {
               'singular: singular package'
               'zeromq: ZeroMQ interface package')
   pkgdesc='Extra packages for GAP'
-  cd gap-$_pkgver
+  cd gap-$pkgver
 
   mkdir -p "$pkgdir"/usr/{bin,lib/gap}
   cp -r pkg "$pkgdir"/usr/lib/gap
   chmod 755 "$pkgdir"/usr/lib/gap/pkg
+
+# fix xgap launch script
+  sed -e "s|/build/gap/src/gap-$pkgver|/usr/lib/gap|g" -e 's|^GAP=.*|GAP=/usr/lib/gap/gap|g' \
+    "$pkgdir"/usr/lib/gap/pkg/xgap/xgap.sh > "$pkgdir"/usr/bin/xgap
+  chmod 755 "$pkgdir"/usr/bin/xgap
+  rm "$pkgdir"/usr/lib/gap/pkg/xgap/xgap.sh
 
 # provided by main gap package
   for _pkg in ${_standardpkgs[@]}; do
@@ -142,6 +154,7 @@ package_gap-packages() {
   rm -r "$pkgdir"/usr/lib/gap/pkg/caratinterface/carat*
   rm -r "$pkgdir"/usr/lib/gap/pkg/kbmag/standalone
   rm -r "$pkgdir"/usr/lib/gap/pkg/log
+  rm -r "$pkgdir"/usr/lib/gap/pkg/*/gen
 
 # Add provides for bundled packages
   for _pkg in $(ls "$pkgdir"/usr/lib/gap/pkg); do
