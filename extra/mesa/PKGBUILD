@@ -361,7 +361,7 @@ package_vulkan-virtio() {
   _install fakeinstall/usr/share/vulkan/icd.d/virtio_icd*.json
   _install fakeinstall/$_libdir/libvulkan_virtio.so
 
-  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_vulkan-broadcom() {
@@ -378,7 +378,7 @@ package_vulkan-broadcom() {
   _install fakeinstall/usr/share/vulkan/icd.d/broadcom_icd*.json
   _install fakeinstall/$_libdir/libvulkan_broadcom.so
 
-  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_vulkan-panfrost() {
@@ -395,7 +395,7 @@ package_vulkan-panfrost() {
   _install fakeinstall/usr/share/vulkan/icd.d/panfrost_icd*.json
   _install fakeinstall/$_libdir/libvulkan_panfrost.so
 
-  install -m644 -Dt "${pkgdir}/usr/share/licenses/${pkgname}" LICENSE
+  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
 package_vulkan-freedreno() {
