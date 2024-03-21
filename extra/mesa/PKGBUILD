@@ -19,6 +19,7 @@ pkgname=(
   'vulkan-mesa-layers'
   'opencl-clover-mesa'
   'opencl-rusticl-mesa'
+  'vulkan-nouveau'
   'vulkan-radeon'
   'vulkan-swrast'
   'vulkan-virtio'
