@@ -30,8 +30,8 @@ pkgname=(
   'mesa-vdpau'
   'mesa'
 )
-pkgver=24.0.3
-pkgrel=2
+pkgver=24.0.4
+pkgrel=1
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
 url="https://www.mesa3d.org/"
@@ -40,27 +40,32 @@ license=('MIT AND BSD-3-Clause AND SGI-B-2.0')
 makedepends=(
   'clang'
   'expat'
+  'gcc-libs'
+  'glibc'
   'libdrm'
   'libelf'
   'libglvnd'
-  'libunwind'
   'libva'
   'libvdpau'
   'libx11'
-  'libxdamage'
+  'libxcb'
+  'libxext'
+  'libxfixes'
   'libxml2'
   'libxrandr'
   'libxshmfence'
   'libxxf86vm'
   'llvm'
+  'llvm-libs'
   'lm_sensors'
   'rust'
   'spirv-llvm-translator'
   'spirv-tools'
-  'systemd'
+  'systemd-libs'
   'vulkan-icd-loader'
   'wayland'
   'xcb-util-keysyms'
+  'zlib'
   'zstd'
 
   # shared between mesa and lib32-mesa
@@ -87,7 +92,6 @@ makedepends=(
 )
 source=(
   https://mesa.freedesktop.org/archive/mesa-${pkgver}.tar.xz{,.sig}
-  radeon_bo_can_reclaim_slab.diff
 )
 validpgpkeys=(
   '8703B6700E7EE06D7A39B8D6EDAE37B02CEB490D'  # Emil Velikov <emil.l.velikov@gmail.com>
@@ -110,16 +114,14 @@ for _crate in "${!_crates[@]}"; do
   source+=($_crate-${_crates[$_crate]}.tar.gz::https://crates.io/api/v1/crates/$_crate/${_crates[$_crate]}/download)
 done
 
-sha256sums=('77aec9a2a37b7d3596ea1640b3cc53d0b5d9b3b52abed89de07e3717e91bfdbe'
+sha256sums=('90febd30a098cbcd97ff62ecc3dcf5c93d76f7fa314de944cfce81951ba745f0'
             'SKIP'
-            '3fd1ad8cd29319502a6f80ecb96bb9a059e5de83a8b6e39f23de8d93921fd922'
             '39278fbbf5fb4f646ce651690877f89d1c5811a3d4acb27700c1cb3cdb78fd3b'
             '3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b'
             '5267fca4496028628a95160fc423a33e8b2e6af8a5302579e322e4b520293cae'
             '23e78b90f2fcf45d3e842032ce32e3f2d1545ba6636271dcbf24fa306d87be7a')
-b2sums=('7af5dc7f11bb11a3d04b3d71b5122a5bf9fe9242440444f266c6d1fac5891b4380a5f792fb66216f1937a7d886402f786d44365c93362d31fb6840d0954c95b4'
+b2sums=('6de755081f7e9dd9303af791e1a405203388787c294f8163c9d6598aa66eed1c001eeb03203c49ed8a264065458228efd849e6e59091a5963155ce8edc47c63f'
         'SKIP'
-        'e7c3451a342cc648149375ce58697ae24273d47060e74ca2948d45ea8fe29b104f1daae4c91968fb6f37d41963d176987abf9ee21acfba0172a9b5d30300a72e'
         'fff0dec06b21e391783cc136790238acb783780eaedcf14875a350e7ceb46fdc100c8b9e3f09fb7f4c2196c25d4c6b61e574c0dad762d94533b628faab68cf5c'
         '4cede03c08758ccd6bf53a0d0057d7542dfdd0c93d342e89f3b90460be85518a9fd24958d8b1da2b5a09b5ddbee8a4263982194158e171c2bba3e394d88d6dac'
         '77c4b166f1200e1ee2ab94a5014acd334c1fe4b7d72851d73768d491c56c6779a0882a304c1f30c88732a6168351f0f786b10516ae537cff993892a749175848'
@@ -127,9 +129,6 @@ b2sums=('7af5dc7f11bb11a3d04b3d71b5122a5bf9fe9242440444f266c6d1fac5891b4380a5f79
 
 prepare() {
   cd mesa-$pkgver
-
-  # Proposed crash fix from https://gitlab.freedesktop.org/mesa/mesa/-/issues/10613#note_2290167
-  patch -Np1 -i ../radeon_bo_can_reclaim_slab.diff
 
   # Include package release in version string so Chromium invalidates
   # its GPU cache; otherwise it can cause pages to render incorrectly.
@@ -213,6 +212,8 @@ _libdir=usr/lib
 package_vulkan-mesa-layers() {
   pkgdesc="Mesa's Vulkan layers"
   depends=(
+    'gcc-libs'
+    'glibc'
     'libdrm'
     'libxcb'
     'wayland'
@@ -235,9 +236,14 @@ package_opencl-clover-mesa() {
   depends=(
     'clang'
     'expat'
+    'gcc-libs'
+    'glibc'
     'libdrm'
     'libelf'
+    'llvm-libs'
     'spirv-llvm-translator'
+    'spirv-tools'
+    'zlib'
     'zstd'
 
     'libclc'
@@ -259,10 +265,14 @@ package_opencl-rusticl-mesa() {
   depends=(
     'clang'
     'expat'
+    'gcc-libs'
+    'glibc'
     'libdrm'
     'libelf'
-    'lm_sensors'
+    'llvm-libs'
     'spirv-llvm-translator'
+    'spirv-tools'
+    'zlib'
     'zstd'
 
     'libclc'
@@ -281,12 +291,18 @@ package_opencl-rusticl-mesa() {
 package_vulkan-nouveau() {
   pkgdesc="Open-source Vulkan driver for Nvidia GPUs"
   depends=(
+    'expat'
+    'gcc-libs'
+    'glibc'
     'libdrm'
     'libx11'
+    'libxcb'
     'libxshmfence'
-    'systemd'
+    'systemd-libs'
+    'vulkan-icd-loader'
     'wayland'
     'xcb-util-keysyms'
+    'zlib'
     'zstd'
   )
   optdepends=('vulkan-mesa-layers: additional vulkan layers')
@@ -301,14 +317,20 @@ package_vulkan-nouveau() {
 package_vulkan-radeon() {
   pkgdesc="Open-source Vulkan driver for AMD GPUs"
   depends=(
+    'expat'
+    'gcc-libs'
+    'glibc'
     'libdrm'
     'libelf'
     'libx11'
+    'libxcb'
     'libxshmfence'
     'llvm-libs'
-    'systemd'
+    'systemd-libs'
+    'vulkan-icd-loader'
     'wayland'
     'xcb-util-keysyms'
+    'zlib'
     'zstd'
   )
   optdepends=('vulkan-mesa-layers: additional vulkan layers')
@@ -324,14 +346,19 @@ package_vulkan-radeon() {
 package_vulkan-swrast() {
   pkgdesc="Open-source Vulkan driver for CPUs (Software Rasterizer)"
   depends=(
+    'expat'
+    'gcc-libs'
+    'glibc'
     'libdrm'
-    'libunwind'
     'libx11'
+    'libxcb'
     'libxshmfence'
     'llvm-libs'
-    'systemd'
+    'systemd-libs'
+    'vulkan-icd-loader'
     'wayland'
     'xcb-util-keysyms'
+    'zlib'
     'zstd'
   )
   optdepends=('vulkan-mesa-layers: additional vulkan layers')
@@ -348,12 +375,18 @@ package_vulkan-swrast() {
 package_vulkan-virtio() {
   pkgdesc="Open-source Vulkan driver for Virtio-GPU (Venus)"
   depends=(
+    'expat'
+    'gcc-libs'
+    'glibc'
     'libdrm'
     'libx11'
+    'libxcb'
     'libxshmfence'
-    'systemd'
+    'systemd-libs'
+    'vulkan-icd-loader'
     'wayland'
     'xcb-util-keysyms'
+    'zlib'
     'zstd'
   )
   optdepends=('vulkan-mesa-layers: additional vulkan layers')
@@ -415,11 +448,15 @@ package_libva-mesa-driver() {
   pkgdesc="Open-source VA-API drivers"
   depends=(
     'expat'
+    'gcc-libs'
+    'glibc'
     'libdrm'
     'libelf'
     'libx11'
+    'libxcb'
     'libxshmfence'
     'llvm-libs'
+    'zlib'
     'zstd'
   )
   provides=('libva-driver')
@@ -433,11 +470,15 @@ package_mesa-vdpau() {
   pkgdesc="Open-source VDPAU drivers"
   depends=(
     'expat'
+    'gcc-libs'
+    'glibc'
     'libdrm'
     'libelf'
     'libx11'
+    'libxcb'
     'libxshmfence'
     'llvm-libs'
+    'zlib'
     'zstd'
   )
   provides=('vdpau-driver')
@@ -449,17 +490,22 @@ package_mesa-vdpau() {
 
 package_mesa() {
   depends=(
+    'expat'
+    'gcc-libs'
+    'glibc'
     'libdrm'
     'libelf'
     'libglvnd'
-    'libunwind'
-    'libxdamage'
+    'libx11'
+    'libxcb'
+    'libxext'
+    'libxfixes'
     'libxshmfence'
     'libxxf86vm'
     'llvm-libs'
     'lm_sensors'
-    'vulkan-icd-loader'
     'wayland'
+    'zlib'
     'zstd'
 
     'libomxil-bellagio'
