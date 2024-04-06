@@ -11,14 +11,7 @@
 #  - remove --with-native-debug-symbols=internal, OOM
 
 # TODO add test, see about packaging jtreg and using it here
-# TODO see about building with OpenJDK10
-# TODO add javazi
-# TODO when IcedTea provides it, package icedtea-web and add it as optdepends
-# TODO package OpenJFX for OpenJDK10 and add it as optdepends
 
-## EXPLORATIONS
-# TODO extract a jmods package from jdk10-openjdk?
-# TODO extract a jdk-headless package?
 
 pkgbase=java11-openjdk
 pkgname=('jre11-openjdk-headless' 'jre11-openjdk' 'jdk11-openjdk' 'openjdk11-src')
@@ -27,15 +20,15 @@ _minorver=0
 _securityver=22
 _updatever=7
 pkgver=${_majorver}.${_minorver}.${_securityver}.u${_updatever}
-pkgrel=1
-_git_tag=jdk-${_majorver}.${_minorver}.${_securityver}+${_updatever}
+pkgrel=3
+ _git_tag=jdk-${_majorver}.${_minorver}.${_securityver}+${_updatever}
 arch=('x86_64')
 url='https://openjdk.java.net/'
-license=('custom')
-makedepends=('java-environment>=10' 'java-environment<12' 'cpio' 'unzip' 'zip' 'libelf' 'libcups' 'libx11'
+license=('LicenseRef-Java')
+makedepends=('java-environment=11' 'cpio' 'unzip' 'zip' 'libelf' 'libcups' 'libx11'
              'libxrender' 'libxtst' 'libxt' 'libxext' 'libxrandr' 'alsa-lib'
              'graphviz' 'freetype2' 'libjpeg-turbo' 'giflib' 'libpng' 'lcms2'
-             'libnet' 'bash' 'harfbuzz' 'glibc' 'gcc-libs')
+             'libnet' 'bash' 'harfbuzz' 'gcc-libs' 'glibc')
 options=(!lto)
 source=(https://github.com/openjdk/jdk${_majorver}u/archive/${_git_tag}.tar.gz
         freedesktop-java.desktop
@@ -66,6 +59,10 @@ _nonheadless=(lib/libawt_xawt.so
               lib/libjsound.so
               lib/libsplashscreen.so)
 
+_commondeps=('java-runtime-common>=3' 'ca-certificates-utils' 'nss' 'libjpeg-turbo' 'libjpeg.so'
+           'lcms2' 'liblcms2.so' 'libnet' 'freetype2' 'libfreetype.so' 'harfbuzz' 'libharfbuzz.so'
+           'glibc' 'gcc-libs')
+
 build() {
   cd ${_jdkdir}
 
@@ -80,7 +77,7 @@ build() {
     NUM_PROC_OPT="--with-jobs=${MAKEFLAG_J}"
   fi
 
-  # Avoid optimization of HotSpot being lowered from O3 to O2
+  # Avoid optimization of HotSpot to be lowered from O3 to O2
   local _CFLAGS="${CFLAGS//-O2/-O3} ${CPPFLAGS} -fcommon"
   local _CXXFLAGS="${CXXFLAGS//-O2/-O3} ${CPPFLAGS} -fcommon"
   local _LDFLAGS=${LDFLAGS}
@@ -120,7 +117,7 @@ build() {
     --with-lcms=system \
     --with-zlib=system \
     --with-harfbuzz=system \
-    --with-jvm-features=zgc,shenandoahgc \
+    --with-jvm-features="zgc,shenandoahgc" \
     --enable-unlimited-crypto \
     --disable-warnings-as-errors \
     --with-jvm-variants=$_variants \
@@ -130,7 +127,7 @@ build() {
   make images legacy-jre-image
 
   # https://bugs.openjdk.java.net/browse/JDK-8173610
-  find "../${_imgdir}" -iname '*.so' -exec chmod +x {} \;
+  find "${srcdir}/${_imgdir}" -iname '*.so' -exec chmod +x {} \;
 }
 
 check() {
@@ -141,11 +138,10 @@ check() {
 
 package_jre11-openjdk-headless() {
   pkgdesc="OpenJDK Java ${_majorver} headless runtime environment"
-  depends=('java-runtime-common>=3' 'ca-certificates-utils' 'nss' 'libjpeg-turbo' 'libjpeg.so'
-           'lcms2' 'liblcms2.so' 'libnet' 'freetype2' 'libfreetype.so' 'harfbuzz' 'libharfbuzz.so'
-           'glibc' 'gcc-libs')
+  depends=("${_commondeps[@]}")
   optdepends=('java-rhino: for some JavaScript support')
   provides=("java-runtime-headless=${_majorver}" "java-runtime-headless-openjdk=${_majorver}" "jre${_majorver}-openjdk-headless=${pkgver}-${pkgrel}")
+  conflicts=("jdk11-openjdk" "jre11-openjdk")
   backup=(etc/${pkgbase}/logging.properties
           etc/${pkgbase}/management/jmxremote.access
           etc/${pkgbase}/management/jmxremote.password.template
@@ -173,8 +169,65 @@ package_jre11-openjdk-headless() {
     rm "${pkgdir}${_jvmdir}/${f}"
   done
 
-  cp ../jdk/release "${pkgdir}${_jvmdir}"
-  cp ../jdk/lib/modules "${pkgdir}${_jvmdir}/lib"
+  # Conf
+  install -dm 755 "${pkgdir}/etc"
+  cp -r conf "${pkgdir}/etc/${pkgbase}"
+  ln -s /etc/${pkgbase} "${pkgdir}/${_jvmdir}/conf"
+
+  # Legal
+  install -dm 755 "${pkgdir}/usr/share/licenses"
+  cp -r legal "${pkgdir}/usr/share/licenses/${pkgbase}"
+  ln -s ${pkgbase} "${pkgdir}/usr/share/licenses/${pkgname}"
+  ln -s /usr/share/licenses/${pkgbase} "${pkgdir}/${_jvmdir}/legal"
+
+  # Man pages
+  for f in bin/*; do
+    f=$(basename "${f}")
+    _man=../jdk/man/man1/"${f}.1"
+    test -f "${_man}" && install -Dm 644 "${_man}" "${pkgdir}/usr/share/man/man1/${f}-openjdk${_majorver}.1"
+  done
+  ln -s /usr/share/man "${pkgdir}/${_jvmdir}/man"
+
+  # Link JKS keystore from ca-certificates-utils
+  rm -f "${pkgdir}${_jvmdir}/lib/security/cacerts"
+  ln -sf /etc/ssl/certs/java/cacerts "${pkgdir}${_jvmdir}/lib/security/cacerts"
+}
+
+package_jre11-openjdk() {
+  pkgdesc="OpenJDK Java ${_majorver} full runtime environment"
+  depends=("${_commondeps[@]}" 'giflib' 'libgif.so' 'libpng')
+  optdepends=('alsa-lib: for basic sound support'
+              'gtk2: for the Gtk+ 2 look and feel - desktop usage'
+              'gtk3: for the Gtk+ 3 look and feel - desktop usage')
+  provides=("java-runtime=${_majorver}" "java-runtime-openjdk=${_majorver}" "jre${_majorver}-openjdk=${pkgver}-${pkgrel}"
+            "java-runtime-headless=${_majorver}" "java-runtime-headless-openjdk=${_majorver}" "jre${_majorver}-openjdk-headless=${pkgver}-${pkgrel}")
+  conflicts=("jdk11-openjdk" "jre11-openjdk-headless")
+  backup=(etc/${pkgbase}/logging.properties
+          etc/${pkgbase}/management/jmxremote.access
+          etc/${pkgbase}/management/jmxremote.password.template
+          etc/${pkgbase}/management/management.properties
+          etc/${pkgbase}/net.properties
+          etc/${pkgbase}/security/java.policy
+          etc/${pkgbase}/security/java.security
+          etc/${pkgbase}/security/policy/README.txt
+          etc/${pkgbase}/security/policy/limited/default_US_export.policy
+          etc/${pkgbase}/security/policy/limited/default_local.policy
+          etc/${pkgbase}/security/policy/limited/exempt_local.policy
+          etc/${pkgbase}/security/policy/unlimited/default_US_export.policy
+          etc/${pkgbase}/security/policy/unlimited/default_local.policy
+          etc/${pkgbase}/sound.properties)
+  install=install_jre-openjdk.sh
+
+  cd ${_imgdir}/jre
+
+  install -dm 755 "${pkgdir}${_jvmdir}"
+
+  cp -a bin lib \
+    "${pkgdir}${_jvmdir}"
+
+  for f in "${_nonheadless[@]}"; do
+    install -Dm 755 ${f} "${pkgdir}${_jvmdir}/${f}"
+  done
 
   # Conf
   install -dm 755 "${pkgdir}/etc"
@@ -188,80 +241,87 @@ package_jre11-openjdk-headless() {
   ln -s /usr/share/licenses/${pkgbase} "${pkgdir}/${_jvmdir}/legal"
 
   # Man pages
-  for f in man/man1/* man/ja/man1/*; do
-    install -Dm 644 "${f}" "${pkgdir}/usr/share/${f/\.1/-openjdk${_majorver}.1}"
+  for f in bin/*; do
+    f=$(basename "${f}")
+    _man=../jdk/man/man1/"${f}.1"
+    test -f "${_man}" && install -Dm 644 "${_man}" "${pkgdir}/usr/share/man/man1/${f}-openjdk${_majorver}.1"
   done
   ln -s /usr/share/man "${pkgdir}/${_jvmdir}/man"
 
   # Link JKS keystore from ca-certificates-utils
   rm -f "${pkgdir}${_jvmdir}/lib/security/cacerts"
   ln -sf /etc/ssl/certs/java/cacerts "${pkgdir}${_jvmdir}/lib/security/cacerts"
-}
 
-package_jre11-openjdk() {
-  pkgdesc="OpenJDK Java ${_majorver} full runtime environment"
-  depends=("jre${_majorver}-openjdk-headless=${pkgver}-${pkgrel}" 'giflib' 'libgif.so'
-           'glibc' 'gcc-libs' 'libpng')
-  optdepends=('alsa-lib: for basic sound support'
-              'gtk2: for the Gtk+ 2 look and feel - desktop usage'
-              'gtk3: for the Gtk+ 3 look and feel - desktop usage')
-  provides=("java-runtime=${_majorver}" "java-runtime-openjdk=${_majorver}" "jre${_majorver}-openjdk=${pkgver}-${pkgrel}")
-  install=install_jre-openjdk.sh
-
-  cd ${_imgdir}/jre
-
-  install -dm 755 "${pkgdir}${_jvmdir}"
-
-  for f in "${_nonheadless[@]}"; do
-    install -Dm 755 ${f} "${pkgdir}${_jvmdir}/${f}"
+  # Desktop files
+  for f in java; do
+    install -Dm 644 \
+      "${srcdir}/freedesktop-${f}.desktop" \
+      "${pkgdir}/usr/share/applications/${f}-${pkgbase}.desktop"
   done
-
-  # Licenses
-  install -dm 755 "${pkgdir}/usr/share/licenses"
-  ln -s ${pkgbase} "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
 package_jdk11-openjdk() {
   pkgdesc="OpenJDK Java ${_majorver} development kit"
-  depends=("jre${_majorver}-openjdk=${pkgver}-${pkgrel}" 'java-environment-common=3'
-           'hicolor-icon-theme' 'libelf' 'glibc' 'gcc-libs')
-  provides=("java-environment=${_majorver}" "java-environment-openjdk=${_majorver}" "jdk${_majorver}-openjdk=${pkgver}-${pkgrel}")
+  depends=("${_commondeps[@]}" 'java-environment-common=3'
+           'hicolor-icon-theme' 'libelf' 'libgif.so' 'libpng'
+           'ca-certificates-utils' 'nss' 'libjpeg-turbo' 'libjpeg.so'
+           'lcms2' 'liblcms2.so' 'libnet' 'freetype2' 'libfreetype.so' 'harfbuzz'
+           'libharfbuzz.so')
+  optdepends=('java-rhino: for some JavaScript support'
+              'alsa-lib: for basic sound support'
+              'gtk2: for the Gtk+ 2 look and feel - desktop usage'
+              'gtk3: for the Gtk+ 3 look and feel - desktop usage')
+  provides=("java-environment=${_majorver}" "java-environment-openjdk=${_majorver}" "jdk${_majorver}-openjdk=${pkgver}-${pkgrel}"
+            "java-runtime=${_majorver}" "java-runtime-openjdk=${_majorver}" "jre${_majorver}-openjdk=${pkgver}-${pkgrel}"
+            "java-runtime-headless=${_majorver}" "java-runtime-headless-openjdk=${_majorver}" "jre${_majorver}-openjdk-headless=${pkgver}-${pkgrel}")
+  conflicts=("jre11-openjdk" "jre11-openjdk-headless")
+  backup=(etc/${pkgbase}/logging.properties
+          etc/${pkgbase}/management/jmxremote.access
+          etc/${pkgbase}/management/jmxremote.password.template
+          etc/${pkgbase}/management/management.properties
+          etc/${pkgbase}/net.properties
+          etc/${pkgbase}/security/java.policy
+          etc/${pkgbase}/security/java.security
+          etc/${pkgbase}/security/policy/README.txt
+          etc/${pkgbase}/security/policy/limited/default_US_export.policy
+          etc/${pkgbase}/security/policy/limited/default_local.policy
+          etc/${pkgbase}/security/policy/limited/exempt_local.policy
+          etc/${pkgbase}/security/policy/unlimited/default_US_export.policy
+          etc/${pkgbase}/security/policy/unlimited/default_local.policy
+          etc/${pkgbase}/sound.properties)
   install=install_jdk-openjdk.sh
 
   cd ${_imgdir}/jdk
 
   install -dm 755 "${pkgdir}${_jvmdir}"
 
-  cp -a bin demo include jmods lib \
+  cp -a bin demo include jmods lib release\
     "${pkgdir}${_jvmdir}"
 
   rm "${pkgdir}${_jvmdir}/lib/src.zip"
 
-  # Remove files held by JRE
-  pushd ../jre
-  for d in bin lib; do
-    find ${d} ! -type d -exec rm "${pkgdir}${_jvmdir}/{}" \;
-  done
-  popd
-  find "${pkgdir}${_jvmdir}/lib" -type d -empty -delete
-
-  # Conf files all belong to JRE
+    # Conf
+  install -dm 755 "${pkgdir}/etc"
+  cp -r conf "${pkgdir}/etc/${pkgbase}"
+  ln -s /etc/${pkgbase} "${pkgdir}/${_jvmdir}/conf"
 
   # Legal
   install -dm 755 "${pkgdir}/usr/share/licenses"
   cp -r legal "${pkgdir}/usr/share/licenses/${pkgbase}"
-  pushd ../jre/legal
-  find . ! -type d -exec rm "${pkgdir}/usr/share/licenses/${pkgbase}/{}" \;
-  popd
-  find "${pkgdir}/usr/share/licenses" -type d -empty -delete
   ln -s ${pkgbase} "${pkgdir}/usr/share/licenses/${pkgname}"
+  ln -s /usr/share/licenses/${pkgbase} "${pkgdir}/${_jvmdir}/legal"
 
   # Man pages
-  for f in man/man1/* man/ja/man1/*; do
-    if [ ! -e "../jre/${f}" ]; then
-      install -Dm 644 "${f}" "${pkgdir}/usr/share/${f/\.1/-openjdk${_majorver}.1}"
-    fi
+  for f in bin/*; do
+    f=$(basename "${f}")
+    _man=../jdk/man/man1/"${f}.1"
+    test -f "${_man}" && install -Dm 644 "${_man}" "${pkgdir}/usr/share/man/man1/${f}-openjdk${_majorver}.1"
   done
+  ln -s /usr/share/man "${pkgdir}/${_jvmdir}/man"
+
+  # Link JKS keystore from ca-certificates-utils
+  rm -f "${pkgdir}${_jvmdir}/lib/security/cacerts"
+  ln -sf /etc/ssl/certs/java/cacerts "${pkgdir}${_jvmdir}/lib/security/cacerts"
 
   # Icons
   for s in 16 24 32 48; do
