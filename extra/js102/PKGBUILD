@@ -5,12 +5,12 @@
 #  - remove PGO build
 
 pkgname=js102
-pkgver=102.15.0
-pkgrel=1
+pkgver=102.15.1
+pkgrel=2
 pkgdesc="JavaScript interpreter and libraries - Version 102"
 url="https://spidermonkey.dev/"
 arch=(x86_64)
-license=(MPL)
+license=(MPL-2.0)
 depends=(
   gcc-libs
   readline
@@ -22,8 +22,7 @@ makedepends=(
   clang
   lld
   llvm
-  python-psutil
-  python-setuptools
+  python
   rust
   zip
 )
@@ -36,11 +35,15 @@ _relver=${pkgver}esr
 source=(
   https://archive.mozilla.org/pub/firefox/releases/$_relver/source/firefox-$_relver.source.tar.xz{,.asc}
 )
-b2sums=('b70727fa91d0d270673374bebb4745b87f6194191c1c9415547d772811a4a85f79a97e8985877eb5c9beef43fe15bef574172da35935e7024a947919ec11d883'
-        'SKIP')
 validpgpkeys=(
-  14F26682D0916CDD81E37B6D61B7B526D98F0353  # Mozilla Software Releases <release@mozilla.com>
+  # Mozilla Software Releases <release@mozilla.com>
+  # https://blog.mozilla.org/security/2023/05/11/updated-gpg-key-for-signing-firefox-releases/
+  14F26682D0916CDD81E37B6D61B7B526D98F0353
 )
+sha256sums=('09194fb765953bc6979a35aa8834118c453b9d6060bf1ec4e134551bad740113'
+            'SKIP')
+b2sums=('03506d41c5171d0fe6d4b00c7b0aaa019bc090dce74bc119e42e4d0ea049b4c72428d9388549d6b63d69262c3c8aa61cbadb6e4f6bb702f3b7c9e51cff5232a4'
+        'SKIP')
 
 # Make sure the duplication between bin and lib is found
 COMPRESSZST+=(--long)
@@ -64,7 +67,6 @@ ac_add_options --disable-bootstrap
 ac_add_options --disable-debug
 ac_add_options --disable-jemalloc
 ac_add_options --disable-strip
-ac_add_options --disable-unified-build
 
 # System libraries
 ac_add_options --with-system-zlib
@@ -83,9 +85,14 @@ END
 build() {
   cd firefox-$pkgver
 
-  export MOZ_NOSPAM=1
+  export MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE=pip
   export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
-  export MACH_USE_SYSTEM_PYTHON=1
+  export MOZ_BUILD_DATE="$(date -u${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH} +%Y%m%d%H%M%S)"
+  export MOZ_NOSPAM=1
+
+  # malloc_usable_size is used in various parts of the codebase
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
 
   cat >.mozconfig ../mozconfig
   ./mach build
