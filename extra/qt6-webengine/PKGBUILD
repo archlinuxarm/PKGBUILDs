@@ -9,7 +9,7 @@
 highmem=1
 
 pkgname=qt6-webengine
-_qtver=6.6.3
+_qtver=6.7.0
 pkgver=${_qtver/-/}
 pkgrel=1
 arch=(x86_64)
@@ -62,6 +62,7 @@ depends=(alsa-lib
        # system libvpx disabled since https://codereview.qt-project.org/c/qt/qtwebengine/+/454908
        # libvpx pciutils re2
 makedepends=(cmake
+             git
              gperf
              jsoncpp
              libepoxy
@@ -74,16 +75,21 @@ makedepends=(cmake
              qt6-websockets)
 optdepends=('pipewire: WebRTC desktop sharing under Wayland')
 groups=(qt6)
-_pkgfn=${pkgname/6-/}-everywhere-src-$_qtver
-source=(https://download.qt.io/official_releases/qt/${pkgver%.*}/$_qtver/submodules/$_pkgfn.tar.xz
+_pkgfn=${pkgname/6-/}
+source=(git+https://code.qt.io/qt/$_pkgfn#tag=v$pkgver
+        git+https://code.qt.io/qt/qtwebengine-chromium
         0001-ARM-toolchain-fixes.patch
         0002-Run-blink-bindings-generation-single-threaded.patch)
-sha256sums=('7c2bdc83b21b82a179a7bf098df47ebf66ba7693d67ebda55a4a28d9eadad804'
+sha256sums=('dbb5c0191c2907a405ec31c9a13b4b7010c53445ab2c76485310af9a56ffeace'
+            'SKIP'
             '772aeba76d16387e28ef629285965109a4bfaa02ca2dd466e9526fe2030773ec'
             'eff4ebf2e714185ef6e36e30c8d2158da6b41a46e3168d06472d35f6c9977aaf')
 
 prepare() {
   cd $_pkgfn
+  git submodule init
+  git submodule set-url src/3rdparty "$srcdir"/qtwebengine-chromium
+  git -c protocol.file.allow=always submodule update
 
   if [[ $CARCH == "armv7h" ]]; then
     export MAKEFLAGS="-j1"
@@ -95,10 +101,6 @@ prepare() {
 }
 
 build() {
-  # this uses malloc_usable_size, which is incompatible with fortification level 3
-  export CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-  export CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-
   cmake -B build -S $_pkgfn -G Ninja \
     -DCMAKE_MESSAGE_LOG_LEVEL=STATUS \
     -DCMAKE_TOOLCHAIN_FILE=/usr/lib/cmake/Qt6/qt.toolchain.cmake \
@@ -112,10 +114,6 @@ build() {
 }
 
 package() {
-  # this uses malloc_usable_size, which is incompatible with fortification level 3
-  export CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-  export CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
-
   DESTDIR="$pkgdir" cmake --install build
 
   install -Dm644 "$srcdir"/${_pkgfn}/src/3rdparty/chromium/LICENSE "$pkgdir"/usr/share/licenses/${pkgname}/LICENSE.chromium
