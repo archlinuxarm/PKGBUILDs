@@ -7,8 +7,8 @@ pkgbase=linux-firmware
 pkgname=(linux-firmware-whence linux-firmware amd-ucode
          linux-firmware-{nfp,mellanox,marvell,qcom,liquidio,qlogic,bnx2x}
 )
-_tag=20240312
-pkgver=20240312.3b128b60
+_tag=20240410
+pkgver=20240409.1addd7dc
 pkgrel=1
 pkgdesc="Firmware files for Linux"
 url="https://gitlab.com/kernel-firmware/linux-firmware"
@@ -17,7 +17,7 @@ arch=('any')
 makedepends=('git' 'rdfind')
 options=(!strip)
 source=("git+$url.git?signed#tag=${_tag}")
-sha256sums=('SKIP')
+sha256sums=('60e129b4b0deecc59542487bbff6afde580db47333a01ea34e51421f3b962fc2')
 validpgpkeys=('4CDE8575E547BF835FE15807A31B6BD72486CFD6') # Josh Boyer <jwboyer@fedoraproject.org>
 
 _backports=(
