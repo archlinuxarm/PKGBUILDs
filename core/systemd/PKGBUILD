@@ -13,8 +13,7 @@ pkgname=('systemd'
          'systemd-resolvconf'
          'systemd-sysvcompat'
          'systemd-ukify')
-_tag='4003dd6754e3446691402d3cc389fbfd4faccc90' # git rev-parse v${_tag_name}
-_tag_name=255.4
+_tag='255.5'
 # Upstream versioning is incompatible with pacman's version comparisons so we
 # replace tildes with the empty string to make sure pacman's version comparing
 # does the right thing for rc versions:
@@ -22,7 +21,7 @@ _tag_name=255.4
 # 1
 # ➜ vercmp 255rc1 255
 # -1
-pkgver="${_tag_name/~/}"
+pkgver="${_tag/~/}"
 pkgrel=2
 arch=('x86_64')
 license=('LGPL-2.1-or-later')
@@ -41,8 +40,8 @@ validpgpkeys=('63CDA1E5D3FC22B998D20DD6327F26951A015CC4'  # Lennart Poettering <
               'A9EA9081724FFAE0484C35A1A81CEA22BC8C7E2E'  # Luca Boccassi <luca.boccassi@gmail.com>
               '9A774DB5DB996C154EBBFBFDA0099A18E29326E1'  # Yu Watanabe <watanabe.yu+github@gmail.com>
               '5C251B5FC54EB2F80F407AAAC54CA336CFEB557E') # Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl>
-source=("git+https://github.com/systemd/systemd-stable#tag=${_tag}?signed"
-        "git+https://github.com/systemd/systemd#tag=v${_tag_name%.*}?signed"
+source=("git+https://github.com/systemd/systemd-stable#tag=v${_tag}?signed"
+        "git+https://github.com/systemd/systemd#tag=v${_tag%.*}?signed"
         '0001-Use-Arch-Linux-device-access-groups.patch'
         # bootloader files
         'arch.conf'
@@ -62,8 +61,8 @@ source=("git+https://github.com/systemd/systemd-stable#tag=${_tag}?signed"
         '30-systemd-tmpfiles.hook'
         '30-systemd-udev-reload.hook'
         '30-systemd-update.hook')
-sha512sums=('SKIP'
-            'SKIP'
+sha512sums=('ab0d47a29d60cb88f0934a9204c71cd78e2f5f568b9da532fdd4f8da55a352fce51cbcbaf17dc1a6f5b3c43ed7579876c724abcc2af5d8c4d3979f2ede60982f'
+            'd430427987309483c99062adb02741d25239ba5fbb97053ef817c0c5a0a935328af9c8b651de2b119b0e851dcf6623f01343859735ff81d7013ab0133e67c7ea'
             '3ccf783c28f7a1c857120abac4002ca91ae1f92205dcd5a84aff515d57e706a3f9240d75a0a67cff5085716885e06e62597baa86897f298662ec36a940cf410e'
             '61032d29241b74a0f28446f8cf1be0e8ec46d0847a61dadb2a4f096e8686d5f57fe5c72bcf386003f6520bc4b5856c32d63bf3efe7eb0bc0deefc9f68159e648'
             'c416e2121df83067376bcaacb58c05b01990f4614ad9de657d74b6da3efa441af251d13bf21e3f0f71ddcb4c9ea658b81da3d915667dc5c309c87ec32a1cb5a5'
@@ -80,6 +79,24 @@ sha512sums=('SKIP'
             'da7a97d5d3701c70dd5388b0440da39006ee4991ce174777931fea2aa8c90846a622b2b911f02ae4d5fffb92680d9a7e211c308f0f99c04896278e2ee0d9a4dc'
             'a50d202a9c2e91a4450b45c227b295e1840cc99a5e545715d69c8af789ea3dd95a03a30f050d52855cabdc9183d4688c1b534eaa755ebe93616f9d192a855ee3'
             '825b9dd0167c072ba62cabe0677e7cd20f2b4b850328022540f122689d8b25315005fa98ce867cf6e7460b2b26df16b88bb3b5c9ebf721746dce4e2271af7b97')
+
+_meson_version="${pkgver}-${pkgrel}"
+_meson_mode='release'
+_meson_compile=()
+_meson_install=()
+
+if ((_systemd_UPSTREAM)); then
+  _meson_version="${pkgver}"
+  _meson_mode='developer'
+  pkgname+=('systemd-tests')
+  makedepends+=('libarchive')
+  optdepends_upstream=('libarchive: convert DDIs to tarballs')
+  if ((_systemd_QUIET)); then
+    _meson_install=('--quiet')
+  else
+    _meson_compile=('--verbose')
+  fi
+fi
 
 _backports=(
 )
@@ -129,17 +146,18 @@ build() {
   CXXFLAGS+=" -fno-lto"
 
   local _meson_options=(
-    -Dversion-tag="${_tag_name}-${pkgrel}-arch"
+    -Dversion-tag="${_meson_version}-arch"
     # We use the version without tildes as the shared library tag because
     # pacman looks at the shared library version.
-    -Dshared-lib-tag="${pkgver}-${pkgrel}"
-    -Dmode=release
+    -Dshared-lib-tag="${_meson_version/~/}"
+    -Dmode="${_meson_mode}"
 
     -Dapparmor=false
     -Dbootloader=true
     -Dxenctrl=false
     -Dbpf-framework=true
     -Dima=false
+    -Dinstall-tests=true
     -Dlibidn2=true
     -Dlz4=true
     -Dman=true
@@ -171,9 +189,9 @@ build() {
     -Dsbat-distro-url="https://archlinuxarm.org/packages/${CARCH}/${pkgname}"
   )
 
-  arch-meson "$pkgbase-stable" build "${_meson_options[@]}"
+  arch-meson "$pkgbase-stable" build "${_meson_options[@]}" $MESON_EXTRA_CONFIGURE_OPTIONS
 
-  meson compile -C build
+  meson compile -C build "${_meson_compile[@]}"
 }
 
 check() {
@@ -187,9 +205,10 @@ package_systemd() {
     'GPL-2.0-or-later' # udev
     'MIT-0' # documentation and config files
   )
-  depends=('acl' 'libacl.so' 'bash' 'cryptsetup' 'libcryptsetup.so' 'dbus'
+  depends=("systemd-libs=${pkgver}"
+           'acl' 'libacl.so' 'bash' 'cryptsetup' 'libcryptsetup.so' 'dbus'
            'dbus-units' 'kbd' 'kmod' 'libkmod.so' 'hwdata' 'libcap' 'libcap.so'
-           'libgcrypt' 'libxcrypt' 'libcrypt.so' 'systemd-libs' 'libidn2' 'lz4' 'pam'
+           'libgcrypt' 'libxcrypt' 'libcrypt.so' 'libidn2' 'lz4' 'pam'
            'libelf' 'libseccomp' 'libseccomp.so' 'util-linux' 'libblkid.so'
            'libmount.so' 'xz' 'pcre2' 'audit' 'libaudit.so'
            'openssl' 'libcrypto.so' 'libssl.so')
@@ -210,6 +229,7 @@ package_systemd() {
               'libfido2: unlocking LUKS2 volumes with FIDO2 token'
               'libp11-kit: support PKCS#11'
               'tpm2-tss: unlocking LUKS2 volumes with TPM2')
+  optdepends+=("${_optdepends_upstream[@]}")
   backup=(etc/pam.d/systemd-user
           etc/systemd/coredump.conf
           etc/systemd/homed.conf
@@ -229,7 +249,7 @@ package_systemd() {
           etc/udev/udev.conf)
   install=systemd.install
 
-  meson install -C build --destdir "$pkgdir"
+  meson install -C build --destdir "$pkgdir" "${_meson_install[@]}"
 
   # we'll create this on installation
   rmdir "$pkgdir"/var/log/journal/remote
@@ -260,6 +280,10 @@ package_systemd() {
 
   # files shipped with systemd-resolvconf
   rm "$pkgdir"/usr/{bin/resolvconf,share/man/man1/resolvconf.1}
+
+  # tests shipped with systemd-tests (for upstream)
+  install -d -m0755 systemd-tests/
+  mv "$pkgdir"/usr/lib/systemd/tests systemd-tests/
 
   # avoid a potential conflict with [core]/filesystem
   rm "$pkgdir"/usr/share/factory/etc/{issue,nsswitch.conf}
@@ -306,7 +330,7 @@ package_systemd-libs() {
 
 package_systemd-resolvconf() {
   pkgdesc='systemd resolvconf replacement (for use with systemd-resolved)'
-  depends=('systemd')
+  depends=("systemd=${pkgver}")
   provides=('openresolv' 'resolvconf')
   conflicts=('resolvconf')
 
@@ -320,7 +344,7 @@ package_systemd-resolvconf() {
 package_systemd-sysvcompat() {
   pkgdesc='sysvinit compat for systemd'
   conflicts=('sysvinit')
-  depends=('systemd')
+  depends=("systemd=${pkgver}")
 
   install -D -m0644 -t "$pkgdir"/usr/share/man/man8 \
     build/man/{halt,poweroff,reboot,shutdown}.8
@@ -332,10 +356,18 @@ package_systemd-sysvcompat() {
   done
 }
 
+package_systemd-tests() {
+  pkgdesc='systemd tests'
+  depends=("systemd=${pkgver}")
+
+  install -d -m0755 "$pkgdir"/usr/lib/systemd
+  mv systemd-tests/tests "$pkgdir"/usr/lib/systemd/tests
+}
+
 package_systemd-ukify() {
   pkgdesc='Combine kernel and initrd into a signed Unified Kernel Image'
   provides=('ukify')
-  depends=('binutils' 'python-cryptography' 'python-pefile' 'systemd')
+  depends=("systemd=${pkgver}" 'binutils' 'python-cryptography' 'python-pefile')
   optdepends=('python-pillow: Show the size of splash image'
               'sbsigntools: Sign the embedded kernel')
 
