@@ -27,13 +27,15 @@ pkgname=(
   gst-plugin-wpe
   gst-plugins-ugly
   gst-libav
+  gst-devtools-libs
+  gst-devtools
   gst-rtsp-server
   gst-editing-services
   gstreamer-vaapi
   gst-python
   gstreamer-docs
 )
-pkgver=1.24.1
+pkgver=1.24.2
 pkgrel=2
 pkgdesc="Multimedia graph framework"
 url="https://gstreamer.freedesktop.org/"
@@ -74,11 +76,14 @@ makedepends=(
   # gst-libav
   ffmpeg
 
+  # gst-editing-services
+  opentimelineio
+
   # gstreamer-vaapi
   libxrandr
 
   # gst-python
-  python-gobject
+  python-gobject python-setuptools
 )
 checkdepends=(xorg-server-xvfb)
 source=(
@@ -86,10 +91,10 @@ source=(
   "https://gstreamer.freedesktop.org/src/gstreamer-docs/gstreamer-docs-$pkgver.tar.xz"{,.asc}
   0001-HACK-meson-Disable-broken-tests.patch
 )
-b2sums=('a91e46cf3757a825a060f75fcfd974ec65fcb0d24c96039ce79b481b1ea93e82a6e226f45fd0fae6421ccd2eb356871db670c93b32b3df2cba8b105d4e00cf19'
-        '08cd34a70aa2b7afa43ab29b272d7b51f8074fc994e0c9b85b0674e38e08b451d2f2d65c89cbda311ce646ff26274fb5cd296dbf15da7fd6a89f9990d13fe4f2'
+b2sums=('b701d3804d955d217ffefb393488eecdca96e3e1275d7c6997e9bd8ec9155a2aea60faa459e40490b77a16c9031c4f89dd95e5bbb7d7ec4f4e105e090673c0ba'
+        'b67e5d8c6fb52a794e2307a3944338342ed560895f8fac6876a92d1f81326c751ff5c6f7d6a11e2dde480d981db024fdc0ee4a1638c2af763b10a119887ace95'
         'SKIP'
-        '747019db064311d364696f747008c5d85bb0dc5120e837b1647fe2a3c4fe459eadcc818cf90de8e613b57a1d356204b8c356865df562b79972622b4c16b7de4b')
+        'e7c59c828883a3bb3aa47684d83b57cd4d463e1f8cffc0383f779fa60ecbe37bfa30c8a0f40e6b2a01f6e0edfbefc5b7041340837e0018741e5963671945a1f2')
 validpgpkeys=(
   D637032E45B8C6585B9456565D2EEE6F6F349D7C # Tim Müller <tim@gstreamer-foundation.org>
 )
@@ -104,7 +109,6 @@ prepare() {
 build() {
   local meson_options=(
     # Superproject options
-    -D devtools=disabled
     -D examples=disabled
     -D gobject-cast-checks=disabled
     -D gpl=enabled
@@ -149,7 +153,7 @@ build() {
     -D gst-plugins-bad:wic=disabled
     -D gst-plugins-bad:win32ipc=disabled
     -D gst-plugins-ugly:sidplay=disabled
-    -D gst-editing-services:validate=disabled
+    -D gst-devtools:debug_viewer=enabled
   )
 
   # https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3197
@@ -163,6 +167,8 @@ build() {
 check() (
   export XDG_RUNTIME_DIR="$PWD/runtime-dir"
   mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+
+  export NO_AT_BRIDGE=1 GTK_A11Y=none
 
   # Flaky due to timeouts
   xvfb-run -s '-nolisten local' \
@@ -681,6 +687,47 @@ package_gst-libav() {
   ); _install
 }
 
+package_gst-devtools-libs() {
+  pkgdesc+=" - development and debugging libraries"
+  depends=(
+    "gst-plugins-base-libs=$pkgver"
+    json-glib
+  )
+
+  cd root; local files=(
+    usr/include/gstreamer-1.0/gst/validate
+    usr/lib/libgstvalidate-*
+    usr/lib/pkgconfig/gstreamer-validate-1.0.pc
+    usr/lib/girepository-1.0/GstValidate-1.0.typelib
+    usr/share/gir-1.0/GstValidate-1.0.gir
+  ); _install
+}
+
+package_gst-devtools() {
+  pkgdesc+=" - development and debugging tools"
+  depends=(
+    "gst-devtools-libs=$pkgver"
+    "gst-plugins-bad-libs=$pkgver"
+    "gst-rtsp-server=$pkgver"
+    gtk3 python-gobject
+  )
+
+  cd root; local files=(
+    usr/bin/gst-validate-*
+    usr/lib/gst-validate-launcher
+    usr/lib/gstreamer-1.0/libgstvalidatetracer.so
+    usr/lib/gstreamer-1.0/validate
+    usr/share/gstreamer-1.0/validate
+
+    usr/bin/gst-debug-viewer
+    usr/lib/python*/site-packages/GstDebugViewer
+    usr/share/applications/org.freedesktop.GstDebugViewer.desktop
+    usr/share/gst-debug-viewer
+    usr/share/icons/hicolor/*/apps/gst-debug-viewer.*
+    usr/share/metainfo/org.freedesktop.GstDebugViewer.appdata.xml
+  ); _install
+}
+
 package_gst-rtsp-server() {
   pkgdesc+=" - rtsp server"
   depends=("gst-plugins-base-libs=$pkgver")
@@ -699,8 +746,12 @@ package_gst-rtsp-server() {
 package_gst-editing-services() {
   pkgdesc+=" - editing services"
   depends=(
+    "gst-devtools-libs=$pkgver"
     "gst-plugins-base-libs=$pkgver"
-    python
+    "gst-python=$pkgver"
+  )
+  optdepends=(
+    'opentimelineio: Support for the OpenTimelineIO format'
   )
 
   cd root; local files=(
@@ -756,6 +807,10 @@ package_gstreamer-docs() {
     LGPL-2.1-or-later
     MIT
     OPUBL-1.0
+  )
+  options=(
+    !debug
+    !strip
   )
 
   # make sure there are no files left to install
