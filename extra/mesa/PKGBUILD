@@ -91,6 +91,9 @@ makedepends=(
 
   # gallium-omx deps
   'libomxil-bellagio'
+
+  # etnaviv deps
+  'python-pycparser'
 )
 options=(
   # GCC 14 LTO causes segfault in LLVM under si_llvm_optimize_module
@@ -168,7 +171,8 @@ build() {
     -D gallium-xa=disabled
     -D gles1=disabled
     -D glx=dri
-    -D intel-clc=disabled
+    -D intel-clc=enabled
+    -D intel-rt=disabled
     -D libunwind=disabled
     -D microsoft-clc=disabled
     -D osmesa=true
