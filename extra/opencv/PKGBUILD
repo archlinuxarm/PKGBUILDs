@@ -4,38 +4,88 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - remove -DCPU_BASELINE_{ENABLE,DISABLE} flags for SSE
-#  - remove cuda package
+#  - remove cudnn makedepends
+#  - remove opencv-cuda package
 
 pkgbase=opencv
-pkgname=(opencv opencv-samples python-opencv)
-pkgver=4.6.0
-pkgrel=5
-pkgdesc="Open Source Computer Vision Library"
+pkgname=(opencv
+         opencv-samples
+         python-opencv)
+pkgver=4.9.0
+pkgrel=8
+pkgdesc='Open Source Computer Vision Library'
 arch=(x86_64)
-license=(BSD)
+license=(Apache-2.0)
 url='https://opencv.org/'
-depends=(tbb openexr gst-plugins-base libdc1394 cblas lapack libgphoto2 openjpeg2 ffmpeg protobuf)
-makedepends=(cmake python-numpy python-setuptools mesa eigen hdf5 lapacke qt5-base vtk glew ant java-environment pugixml openmpi fmt)
+depends=(abseil-cpp
+         cblas
+         ffmpeg
+         freetype2
+         gcc-libs
+         glib2
+         glibc
+         gst-plugins-base
+         gst-plugins-base-libs
+         gstreamer
+         harfbuzz
+         lapack
+         libdc1394
+         libglvnd
+         libjpeg-turbo
+         libpng
+         libtiff
+         libwebp
+         openexr
+         openjpeg2
+         verdict
+         protobuf
+         tbb
+         zlib)
+makedepends=(ant
+             cmake
+             eigen
+             fmt
+             git
+             glew
+             hdf5
+             java-environment
+             lapacke
+             mesa
+             nlohmann-json
+             openmpi
+             pugixml
+             python-numpy
+             python-setuptools
+             qt6-5compat
+             vtk)
 optdepends=('opencv-samples: samples'
             'vtk: for the viz module'
             'glew: for the viz module'
-            'qt5-base: for the HighGUI module'
+            'qt6-base: for the HighGUI module'
             'hdf5: for the HDF5 module'
             'opencl-icd-loader: For coding with OpenCL'
             'java-runtime: Java interface')
-source=(https://github.com/opencv/opencv/archive/$pkgver/$pkgname-$pkgver.tar.gz
-        https://github.com/opencv/opencv_contrib/archive/$pkgver/opencv_contrib-$pkgver.tar.gz
-        https://github.com/opencv/opencv/commit/496eed95.patch
-        vtk9.patch)
-sha256sums=('1ec1cba65f9f20fe5a41fda1586e01c70ea0c9a6d7b67c9e13edf0cfe2239277'
-            '1777d5fd2b59029cf537e5fd6f8aa68d707075822f90bde683fcde086f85f7a7'
-            'fc3e235c95874c1faa6c37e61a70623b92c4c307b2e258341a654ac3cfd44537'
-            'f35a2d4ea0d6212c7798659e59eda2cb0b5bc858360f7ce9c696c77d3029668e')
-
+source=(git+https://github.com/opencv/opencv#tag=$pkgver
+        git+https://github.com/opencv/opencv_contrib#tag=$pkgver
+        $pkgname-cccl-2.2.0.zip::https://github.com/NVIDIA/cccl/archive/refs/tags/v2.2.0.zip
+        vtk9.patch
+        fix-nppi-bufsize-type.patch
+        opencv-cudnn9.patch::https://patch-diff.githubusercontent.com/raw/opencv/opencv/pull/25412.patch)
+sha256sums=('b0d2012628b4224c7dd79aa98010586544e16858617c88c807014e11696b2ca3'
+            '36ddaddd6f50cf13115ecf1a4777940739c4727e64135a52e768fa28ac163d4a'
+            'f0899311b537614f3bb79fcb20e5fa09e72b857ba3e5ef5d13ef64c6710483e7'
+            'f35a2d4ea0d6212c7798659e59eda2cb0b5bc858360f7ce9c696c77d3029668e'
+            '993032a43a62faecc56f3f7aeaed29e471605dabdf28579fbeb36d52ecaa4060'
+            'db2a2dd99e52560e4c8b2ef7d578120f4bdc4232f71c871e732097232c83e2d4')
 
 prepare() {
-  patch -d $pkgname-$pkgver -p1 < vtk9.patch # Don't require all vtk optdepends
-  patch -d $pkgname-$pkgver -p1 < 496eed95.patch # Fix build with ffmpeg 5.1
+  patch -d $pkgname -p1 < vtk9.patch # Don't require all vtk optdepends
+
+  # fix type of several buffer size variables (NPP from CUDA 12.4 has breaking API change
+  # as several function parameters were changed from `int*` to `size_t*`)
+  patch -d opencv_contrib -Np1 < fix-nppi-bufsize-type.patch
+
+  patch -d opencv -p1 < opencv-cudnn9.patch # Fix build with CUDNN 9
 }
 
 build() {
@@ -43,6 +93,8 @@ build() {
   # cmake's FindLAPACK doesn't add cblas to LAPACK_LIBRARIES, so we need to specify them manually
   _opts="-DWITH_OPENCL=ON \
          -DWITH_OPENGL=ON \
+         -DOpenGL_GL_PREFERENCE=LEGACY \
+         -DCMAKE_CXX_STANDARD=17 \
          -DWITH_TBB=ON \
          -DWITH_VULKAN=ON \
          -DWITH_QT=ON \
@@ -55,7 +107,7 @@ build() {
          -DINSTALL_C_EXAMPLES=ON \
          -DINSTALL_PYTHON_EXAMPLES=ON \
          -DCMAKE_INSTALL_PREFIX=/usr \
-         -DOPENCV_EXTRA_MODULES_PATH=$srcdir/opencv_contrib-$pkgver/modules \
+         -DOPENCV_EXTRA_MODULES_PATH=$srcdir/opencv_contrib/modules \
          -DOPENCV_SKIP_PYTHON_LOADER=ON \
          -DLAPACK_LIBRARIES=/usr/lib/liblapack.so;/usr/lib/libblas.so;/usr/lib/libcblas.so \
          -DLAPACK_CBLAS_H=/usr/include/cblas.h \
@@ -64,17 +116,16 @@ build() {
          -DOPENCV_ENABLE_NONFREE=ON \
          -DOPENCV_JNI_INSTALL_PATH=lib \
          -DOPENCV_GENERATE_SETUPVARS=OFF \
-         -DEIGEN_INCLUDE_PATH=/usr/include/eigen3"
-
-  cmake -B build -S $pkgname-$pkgver $_opts
+         -DEIGEN_INCLUDE_PATH=/usr/include/eigen3 \
+         -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+         -Dprotobuf_MODULE_COMPATIBLE=ON"
+ 
+  cmake -B build -S $pkgname $_opts
   cmake --build build
 }
 
 package_opencv() {
   DESTDIR="$pkgdir" cmake --install build
-
-  # install license file
-  install -Dm644 $pkgbase-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 
   # separate samples package
   mv "$pkgdir"/usr/share/opencv4/samples "$srcdir"
@@ -94,18 +145,21 @@ package_opencv-samples() {
 
   mkdir -p "$pkgdir"/usr/share/opencv4
   mv samples "$pkgdir"/usr/share/opencv4
-
-  # install license file
-  install -Dm644 $pkgbase-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }
 
 package_python-opencv() {
   pkgdesc='Python bindings for OpenCV'
-  depends=(python-numpy opencv vtk glew qt5-base hdf5 jsoncpp openmpi pugixml fmt)
+  depends=(fmt
+           glew
+           hdf5
+           jsoncpp
+           opencv
+           openmpi
+           pugixml
+           python-numpy
+           qt6-base
+           vtk)
   unset optdepends
 
   DESTDIR="$pkgdir" cmake --install build/modules/python3
-
-  # install license file
-  install -Dm644 $pkgbase-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }

@@ -1,0 +1,92 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove cuda make/optdepends
+#  - move python-pyaml, pybind11 to makedepends
+#  - add python-setuptools to makedepends
+
+_pkgname=awkward
+pkgbase="python-${_pkgname}"
+# pkgname=("${pkgbase}" "${pkgbase}-docs") - docs require many new dependencies
+pkgname=$pkgbase
+pkgver=2.6.3
+pkgrel=1
+pkgdesc="Manipulate jagged, chunky, and/or bitmasked arrays as easily as Numpy"
+url="https://github.com/scikit-hep/awkward"
+license=('BSD')
+arch=('x86_64')
+depends=('python-numpy' 'python-packaging' 'python-importlib_resources')
+optdepends=('python-pyarrow: pyArrow connector'
+            'python-numexpr: numexpr connector'
+            'python-pandas: pandas connector')
+makedepends=('cmake' 'git' 'python-build' 'python-installer' 'python-hatchling' 'doxygen' 'python-sphinx' 'python-sphinx_rtd_theme' 'python-hatch-fancy-pypi-readme' 'python-scikit-build-core' 'python-nox' 'python-pyaml' 'pybind11' 'python-setuptools')
+checkdepends=('python-pytest' 'python-pytest-cov' 'python-hist' 'python-pandas' 'python-numexpr' 'python-pyarrow' 'python-scikit-hep-testdata' 'python-vector'
+              'root' 'rapidjson' 'python-fsspec')
+source=(
+  "${pkgname}::git+https://github.com/scikit-hep/${_pkgname}#tag=v${pkgver}"
+  "${pkgname}-dlpack::git+https://github.com/dmlc/dlpack.git"
+  "${pkgname}-rapidjson::git+https://github.com/Tencent/rapidjson.git"
+  "${pkgname}-pybind11::git+https://github.com/pybind/pybind11.git"
+)
+
+sha512sums=('a1ac20198307e3a3188f0d8643dd527ef99ae1c913a8762a8a533c73e2597abae5d7c173eb7602ed2c169595ce9199679d18c329f76d6c2e568a53616ee742b3'
+            'SKIP'
+            'SKIP'
+            'SKIP')
+
+get_pyver () {
+    python -c 'import sys; print(str(sys.version_info[0]) + "." + str(sys.version_info[1]))'
+}
+
+prepare() {
+  cd "${srcdir}/${pkgbase}"
+  git submodule init
+
+  git config submodule."pybind11".url "${srcdir}/${pkgname}"-pybind11
+  git config submodule."rapidjson".url "${srcdir}/${pkgname}"-rapidjson
+  git config submodule."dlpack".url "${srcdir}/${pkgname}"-dlpack
+
+  git -c protocol.file.allow=always submodule update --init --recursive
+
+  sed '/cmake/d' -i pyproject.toml
+}
+
+build() {
+  cd "${srcdir}/${pkgbase}"
+
+  nox -s prepare
+  python -m build --wheel --no-isolation
+
+  cd awkward-cpp
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "${srcdir}/${pkgbase}"
+  python -m venv --system-site-packages test-env
+  test-env/bin/python -m installer dist/*.whl
+  test-env/bin/python -m installer awkward-cpp/dist/*.whl
+  cd tests
+  ../test-env/bin/python -m pytest || echo 'some tests fail'
+}
+
+package_python-awkward() {
+  optdepends+=("${pkgbase}-docs: docs")
+  cd "${srcdir}/${pkgbase}"
+  python -m installer --destdir="${pkgdir}" dist/*.whl
+  install -Dm644 LICENSE "${pkgdir}"/usr/share/licenses/"${pkgname}"/LICENSE
+  cd awkward-cpp
+  python -m installer --destdir="${pkgdir}" dist/*.whl  
+}
+
+package_python-awkward-docs() {
+  cd "${srcdir}/${pkgbase}"
+
+  install -D LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -D README.md "${pkgdir}/usr/share/${pkgbase}/README.md"
+
+  python -m installer --destdir=tmp-install dist/*.whl
+  python -m installer --destdir=tmp-install awkward-cpp/dist/*.whl
+  install -d "${pkgdir}/usr/share/doc/${pkgbase}"
+  PYTHONPATH="${PWD}"/tmp-install/`python -c 'import site; print(site.getsitepackages()[0])'` sphinx-build "${PWD}/docs" "${pkgdir}/usr/share/doc/${pkgbase}"
+}

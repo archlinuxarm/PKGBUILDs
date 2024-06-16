@@ -1,4 +1,6 @@
-# Maintainer: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
 # Contributor: Sébastien Luttringer
 # Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
 # Contributor: Miroslaw Szot <mss@czlug.icis.pcz.pl>
@@ -9,37 +11,30 @@
 
 pkgbase=nginx
 pkgname=(nginx nginx-src)
-pkgver=1.22.0
-pkgrel=2
-pkgdesc='Lightweight HTTP server and IMAP/POP3 proxy server'
+pkgver=1.26.1
+pkgrel=1
+_tests_commit=2a607a31f583add7adfa1ac434a3f793d327ca6b
 arch=(x86_64)
+pkgdesc='Lightweight HTTP server and IMAP/POP3 proxy server'
 url='https://nginx.org'
-license=(custom)
-depends=(pcre2 zlib openssl geoip mailcap libxcrypt)
-makedepends=(mercurial)
+license=(BSD-2-Clause)
+makedepends=(mercurial pcre2 zlib openssl geoip mailcap libxcrypt)
 checkdepends=(perl perl-gd perl-io-socket-ssl perl-fcgi perl-cache-memcached
-              memcached ffmpeg) 
-backup=(etc/nginx/fastcgi.conf
-        etc/nginx/fastcgi_params
-        etc/nginx/koi-win
-        etc/nginx/koi-utf
-        etc/nginx/nginx.conf
-        etc/nginx/scgi_params
-        etc/nginx/uwsgi_params
-        etc/nginx/win-utf
-        etc/logrotate.d/nginx)
-install=nginx.install
+              perl-cryptx memcached ffmpeg coreutils)
 source=($url/download/nginx-$pkgver.tar.gz{,.asc}
-        hg+https://hg.nginx.org/nginx-tests#revision=34fc85598287
-        service
+        "hg+https://hg.nginx.org/nginx-tests#revision=${_tests_commit}"
+        nginx.service
         logrotate)
-validpgpkeys=('B0F4253373F8F6F510D42178520A9993A1C052F8' # Maxim Dounin <mdounin@mdounin.ru>
+# https://nginx.org/en/pgp_keys.html
+validpgpkeys=('B0F4253373F8F6F510D42178520A9993A1C052F8'  # Maxim Dounin <mdounin@mdounin.ru>
+              '43387825DDB1BB97EC36BA5D007C8D7C15D87369'  # Roman Arutyunyan <r.arutyunyan@f5.com>
+              'D6786CE303D9A9022998DC6CC8464D549AF75C0A'  # Sergey Kandaurov <s.kandaurov@f5.com>
               '13C82A63B603576156E30A4EA0EA981B66B0D967') # Konstantin Pavlov <thresh@nginx.com>
-sha512sums=('074782dba9cd5f8f493fbb57e20bda6dc9171814d919a47ee9f825d93f12c9f9d496e25d063c983191b55ad6a236bcef252ce16ecc1d253dc8b23433557559b1'
+sha512sums=('dfaadde78eb5cf8c8c3a43ead9ac49fc852c8de3e70e69754e3ffafc88c50c8bc08cdac0cc0ba8a9d8c155bdb334865e2e6c7dc1144c79959c426a9e087b3e37'
             'SKIP'
-            'SKIP'
-            'be2858613d9cca85d80e7b894e9d5fa7892cbddd7a677d2d2f68f419d75fdc1f6802de8014f43ce063b116afd4ff17369873a6adea2dd58ac6f94e617de66fec'
-            '9232342c0914575ce438c5a8ee7e1c25b0befb457a2934e9cb77d1fe9a103634ea403b57bc0ef0cd6cf72248aee5e5584282cea611bc79198aeac9a65d8df5d7')
+            '2c1efc38f4d36c10e7d13bb48e035246215c33213e42d733ef0c1bbbdbce71777b2430247d1c1fe922e03d10ce53c05fe555bd9fea547658e6c6d763af8d8b93'
+            'f469b3b14def666e955abf6f2d3c68a47631cad7bee90c92039ffe5bf629aa7e32bb4250844d52c0f963740fb07bf7fea5f8887cc1d5199403f07be6214fcb8d'
+            '2f4dfcfa711b8bcbc5918ba635f5e430ef7132e66276261ade62bb1cba016967432c8dce7f84352cb8b07dc7c6b18f09177aa3eb92c8e358b2a106c8ca142fe9')
 
 _common_flags=(
   --with-compat
@@ -54,6 +49,7 @@ _common_flags=(
   --with-http_gunzip_module
   --with-http_gzip_static_module
   --with-http_mp4_module
+  --with-http_random_index_module
   --with-http_realip_module
   --with-http_secure_link_module
   --with-http_slice_module
@@ -61,6 +57,7 @@ _common_flags=(
   --with-http_stub_status_module
   --with-http_sub_module
   --with-http_v2_module
+  --with-http_v3_module
   --with-mail
   --with-mail_ssl_module
   --with-pcre-jit
@@ -70,9 +67,6 @@ _common_flags=(
   --with-stream_ssl_module
   --with-stream_ssl_preread_module
   --with-threads
-)
-
-_stable_flags=(
 )
 
 prepare() {
@@ -101,18 +95,30 @@ build() {
     --http-uwsgi-temp-path=/var/lib/nginx/uwsgi \
     --with-cc-opt="$CFLAGS $CPPFLAGS" \
     --with-ld-opt="$LDFLAGS" \
-    ${_common_flags[@]} \
-    ${_stable_flags[@]}
+    "${_common_flags[@]}"
 
   make
 }
 
 check() {
   cd nginx-tests
-  TEST_NGINX_BINARY="$srcdir/$pkgbase-$pkgver/objs/nginx" prove .
+  local _jobs=$(nproc)
+  (( _jobs > 16 )) && _jobs=16
+  TEST_NGINX_BINARY="$srcdir/$pkgbase-$pkgver/objs/nginx" prove -j "$_jobs" .
 }
 
 package_nginx() {
+  depends=(glibc pcre2 zlib openssl geoip mailcap libxcrypt)
+  backup=(etc/nginx/fastcgi.conf
+          etc/nginx/fastcgi_params
+          etc/nginx/koi-win
+          etc/nginx/koi-utf
+          etc/nginx/nginx.conf
+          etc/nginx/scgi_params
+          etc/nginx/uwsgi_params
+          etc/nginx/win-utf
+          etc/logrotate.d/nginx)
+
   cd $pkgbase-$pkgver
   make DESTDIR="$pkgdir" install
 
@@ -134,13 +140,12 @@ package_nginx() {
   mv "$pkgdir"/etc/nginx/html/ "$pkgdir"/usr/share/nginx
 
   install -Dm644 ../logrotate "$pkgdir"/etc/logrotate.d/nginx
-  install -Dm644 ../service "$pkgdir"/usr/lib/systemd/system/nginx.service
+  install -Dm644 ../nginx.service "$pkgdir"/usr/lib/systemd/system/nginx.service
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 
   rmdir "$pkgdir"/run
 
-  install -d "$pkgdir"/usr/share/man/man8/
-  gzip -9c man/nginx.8 > "$pkgdir"/usr/share/man/man8/nginx.8.gz
+  install -Dm0644 objs/nginx.8 "$pkgdir"/usr/share/man/man8/nginx.8
 
   for i in ftdetect ftplugin indent syntax; do
     install -Dm644 contrib/vim/$i/nginx.vim \
@@ -150,7 +155,8 @@ package_nginx() {
 
 package_nginx-src() {
   pkgdesc="Source code of nginx $pkgver, useful for building modules"
-  depends=()
+
   install -d "$pkgdir/usr/src"
   cp -r $pkgbase-$pkgver-src "$pkgdir/usr/src/nginx"
+  install -Dm644 $pkgbase-$pkgver/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }

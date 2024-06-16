@@ -4,43 +4,100 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - patch for chromium GN
 #  - patch for chromium to run blink bindings generation single threaded
-#  - patch for chromium to backport 16k page support
 #  - restrict job count on v7 - RAM constraints
 
 highmem=1
 
 pkgname=qt6-webengine
-_qtver=6.4.0
-pkgver=${_qtver/-/}
-pkgrel=4
+pkgver=6.7.1
+pkgrel=1
 arch=(x86_64)
 url='https://www.qt.io'
 license=(GPL3 LGPL3 FDL custom)
 pkgdesc='Provides support for web applications using the Chromium browser project'
-depends=(qt6-webchannel qt6-positioning libxcomposite libxrandr libxkbfile 
-         snappy nss libxslt minizip ffmpeg re2 libvpx libxtst ttf-font) # pciutils
-makedepends=(cmake ninja python-html5lib gperf jsoncpp qt6-tools pipewire nodejs qt6-websockets libepoxy git)
+depends=(alsa-lib
+         dbus
+         expat
+         ffmpeg
+         fontconfig
+         freetype2
+         gcc-libs
+         glib2
+         glibc
+         harfbuzz
+         icu
+         lcms2
+         libdrm
+         libevent
+         libjpeg-turbo
+         libpng
+         libtiff
+         libwebp
+         libx11
+         libxcb
+         libxcomposite
+         libxfixes
+         libxkbcommon
+         libxkbfile
+         libxdamage
+         libxext
+         libxml2
+         libxrandr
+         libxslt
+         libxtst
+         mesa
+         minizip
+         nspr
+         nss
+         openjpeg2
+         opus
+         qt6-base
+         qt6-declarative
+         qt6-positioning
+         qt6-webchannel
+         snappy
+         ttf-font
+         zlib)
+       # system libvpx disabled since https://codereview.qt-project.org/c/qt/qtwebengine/+/454908
+       # libvpx pciutils re2
+makedepends=(cmake
+             git
+             gperf
+             jsoncpp
+             libepoxy
+             ninja
+             nodejs
+             perf
+             pipewire
+             python-html5lib
+             qt6-tools
+             qt6-websockets)
 optdepends=('pipewire: WebRTC desktop sharing under Wayland')
 groups=(qt6)
-#options=(debug) - hangs on stripping
-_pkgfn=${pkgname/6-/}-everywhere-src-$_qtver
-source=(https://download.qt.io/official_releases/qt/${pkgver%.*}/$_qtver/submodules/$_pkgfn.tar.xz
-        qtbug-107144.patch::https://code.qt.io/cgit/qt/qtwebengine.git/patch/?id=64b7da9d
+_pkgfn=${pkgname/6-/}
+source=(git+https://code.qt.io/qt/$_pkgfn#tag=v$pkgver
+        git+https://code.qt.io/qt/qtwebengine-chromium
+        qtwebengine-6.7.0-ninja1.12.patch
         0001-ARM-toolchain-fixes.patch
         0002-Run-blink-bindings-generation-single-threaded.patch)
-sha256sums=('662ae9ec599b00e902e2c2751ae4977fa95bedf1b035033547ea1b1b69e75303'
-            '8297f0375c8103828f3fd53bfd6005d009ae51cffa581c65cec93f098a6eb54e'
+sha256sums=('25cba11801528f31b1e043aa29395c695189ec145b993c633ca8e557b13f34f6'
+            'SKIP'
+            'c037cccc1d43bcd9d67045354ca48b405acec217149cb4b2bd3cfb7b5561cc33'
             '772aeba76d16387e28ef629285965109a4bfaa02ca2dd466e9526fe2030773ec'
             'eff4ebf2e714185ef6e36e30c8d2158da6b41a46e3168d06472d35f6c9977aaf')
 
 prepare() {
-  patch -d $_pkgfn -p1 < qtbug-107144.patch
-
   cd $_pkgfn
+  git submodule init
+  git submodule set-url src/3rdparty "$srcdir"/qtwebengine-chromium
+  git -c protocol.file.allow=always submodule update
+
+# Fix build with ninja 1.12 - Gentoo patch
+  patch -Np1 -i ../qtwebengine-6.7.0-ninja1.12.patch
 
   if [[ $CARCH == "armv7h" ]]; then
-    export MAKEFLAGS="-j4"
-    export ALARM_NINJA_JOBS="2"
+    export MAKEFLAGS="-j1"
+    export ALARM_NINJA_JOBS="1"
   fi
   cd "$srcdir/$_pkgfn/src/3rdparty"
   patch -p1 -i ${srcdir}/0001-ARM-toolchain-fixes.patch
@@ -57,7 +114,6 @@ build() {
     -DQT_FEATURE_webengine_proprietary_codecs=ON \
     -DQT_FEATURE_webengine_kerberos=ON \
     -DQT_FEATURE_webengine_webrtc_pipewire=ON
-#    -DQT_FEATURE_webengine_full_debug_info=ON
   cmake --build build
 }
 

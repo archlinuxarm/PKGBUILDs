@@ -1,0 +1,113 @@
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Contributor: Kyle Keen <keenerd@gmail.com>
+# Contributor: Gabriel Souza Franco <Z2FicmllbGZyYW5jb3NvdXphQGdtYWlsLmNvbQ==>
+# Contributor: Florian Pritz <bluewind@xinu.at>
+# Contributor: Giuseppe Borzi <gborzi@ieee.org>
+# Contributor: Brice Méalier <mealier_brice@yahoo.fr>
+# Contributor: Michele Mocciola <mickele>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - removed makedepends on adios2
+
+pkgname=opencascade
+pkgver=7.7.2
+pkgrel=6
+epoch=1
+pkgdesc='SDK intended for development of applications dealing with 3D CAD data'
+arch=('x86_64')
+url='https://www.opencascade.org'
+license=('LGPL2.1' 'custom:LGPL-exception')
+depends=(
+  'freeimage'
+  'gl2ps'
+  'tk'
+  'vtk'
+)
+makedepends=(
+  'git'
+  'boost'
+  'cmake'
+  'eigen'
+  'gdal'
+  'glew'
+  'libharu'
+  'liblas'
+  'openvr'
+  'pdal'
+  'proj'
+  'pugixml'
+  'python'
+  'python-mpi4py'
+  'qt5-base'
+  'rapidjson'
+  'unixodbc'
+  'utf8cpp'
+)
+_commit='cec1ecd0c9f3b3d2572c47035d11949e8dfa85e2'
+source=(
+  "$pkgname::git+https://git.dev.opencascade.org/repos/occt.git#commit=$_commit"
+  'opencascade.sh'
+  'fix-cmake-variable.patch'
+  'skip-license-installation.patch'
+)
+sha512sums=('SKIP'
+            'a7516028e55fd303dc1cfb61b75c9cb209d431d854b4d1c58f9c19df8ecee9d79da5c8745676c68a2de0980652de4c4d1c5a927c25db1e5146fb1f1f43c5906b'
+            'ad6ce2f52462989bd990b52fd5428f3e5cbd4fb15c38d92c0e0954e6afc3368fca961b92efead8e8957213352fb87a469e1bfaccaf14b484351acc0a0bc10485'
+            '86e6502c92cbb8c2736cdeaf25b2ea39b87a650e490e042d6d86c2d67d310ef4ee2050108228ff776061603840ec0aa74e534270fb5c53585475de715212c5fa')
+b2sums=('SKIP'
+        'da9db038ed2348d2d7736505eda2f40fe52c836bcedb74d9f369cc53f7d40a330bd87d6aedd773863745cd46e4dbe5876acda2d2d60177f00d5db9cae4f1f102'
+        'bb98b2b53a9a97ae15a353a9dbcc6d92a97ddaa56af0610cefe9de3a4b84c4a6021d9396f7e270c1d379278df069dbf90f9771db64947e52d38ad36bc3c6f913'
+        '7562ce632b9a0db7faba4f373de5f108b27395a4dd62721711a7cd1f519c44348a1df5c6834e7691072abbdcef66365fc9245dee8775c51d122e0455874f8236')
+
+pkgver() {
+  cd "$pkgname"
+  git describe --tags | sed -e "s/^V//" -e "s/_/./g" -e "s/p/./"
+}
+
+prepare() {
+  cd "$pkgname"
+
+  patch -p1 -i ../fix-cmake-variable.patch
+  patch -p1 -i ../skip-license-installation.patch
+}
+
+build() {
+  # TODO: Maybe remove VTK support as VTK now also depends on opencascade which
+  # gives us a circular dependency.
+  cmake \
+    -B build \
+    -S "$pkgname" \
+    -D CMAKE_BUILD_TYPE=Release \
+    -D CMAKE_INSTALL_PREFIX=/usr \
+    -D BUILD_RELEASE_DISABLE_EXCEPTIONS=OFF \
+    -D USE_FREEIMAGE=ON \
+    -D USE_FFMPEG=OFF \
+    -D USE_VTK=ON \
+    -D USE_RAPIDJSON=ON \
+    -D USE_TBB=OFF \
+    -D 3RDPARTY_VTK_INCLUDE_DIR=/usr/include/vtk
+
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  # environment variables (adapted from adm/templates/env.sh)
+  install -vDm644 -t "$pkgdir/etc/profile.d" opencascade.sh
+
+  # remove unnecessary shell scripts
+  rm -v "$pkgdir/usr/bin/"*.sh
+
+  cd "$pkgname"
+
+  # licenses
+  install -vDm755 -t "$pkgdir/usr/share/licenses/$pkgname" \
+    LICENSE_LGPL_21.txt OCCT_LGPL_EXCEPTION.txt
+
+  # what the *hell* is this crap?
+  cd "$pkgdir/usr/lib/cmake/opencascade"
+  sed -e 's/\\\${OCCT_INSTALL_BIN_LETTER}//' -i *.cmake
+}
+
+# vim:set ts=2 sw=2 et:

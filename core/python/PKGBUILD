@@ -1,5 +1,6 @@
-# Maintainer: Angel Velasquez <angvp@archlinux.org>
 # Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Contributor: morwel
+# Contributor: Angel Velasquez <angvp@archlinux.org>
 # Contributor: Stéphane Gaudreault <stephane@archlinux.org>
 # Contributor: Allan McRae <allan@archlinux.org>
 # Contributor: Jason Chu <jason@archlinux.org>
@@ -12,22 +13,24 @@ shopt -s extglob
 
 pkgbase=python
 pkgname=(python python-tests)
-pkgver=3.10.8
+pkgver=3.12.3
 pkgrel=1
 _pybasever=${pkgver%.*}
-pkgdesc="Next generation of the python high-level scripting language"
+pkgdesc="The Python programming language"
 arch=('x86_64')
-license=('custom')
+license=('PSF-2.0')
 url="https://www.python.org/"
-options=('debug')
-depends=('bzip2' 'expat' 'gdbm' 'libffi' 'libnsl' 'libxcrypt' 'openssl' 'zlib')
-makedepends=('tk' 'sqlite' 'bluez-libs' 'mpdecimal' 'llvm' 'gdb' 'xorg-server-xvfb' 'ttf-font')
-source=("https://www.python.org/ftp/python/${pkgver%rc*}/Python-${pkgver}.tar.xz"{,.asc})
-sha512sums=('40e3e77d79618c81d6fc57c5d119b99c2959dcf932f40aad6b26f2ec39c5e713e6ff298f7597b4fad2ab94680db3732483b5ca0a45e6ae58c14580b3ea44cb0f'
-            'SKIP')
+depends=('bzip2' 'expat' 'gdbm' 'libffi' 'libnsl' 'libxcrypt' 'openssl' 'zlib' 'tzdata' 'mpdecimal')
+makedepends=('tk' 'sqlite' 'bluez-libs' 'llvm' 'gdb' 'xorg-server-xvfb' 'ttf-font')
+source=("https://www.python.org/ftp/python/${pkgver%rc*}/Python-${pkgver}.tar.xz"{,.asc}
+        EXTERNALLY-MANAGED)
+sha512sums=('4a2213b108e7f1f1525baa8348e68b2a2336d925e60d0a59f0225fc470768a2c8031edafc0b8243f94dbae18afda335ee5adf2785328c2218fd64cbb439f13a4'
+            'SKIP'
+            '62a6fbfbaeaa3ba7c54e109d9c3b7f67e73bb21986da4c1fcc5d28cca83d71e0fcae28e1fc70ee8ddce7dea8cd0b64e18d1031dae3a2eae5eaa379c53efd53a0')
 validpgpkeys=('0D96DF4D4110E5C43FBFB17F2D347EA6AA65421D'  # Ned Deily (Python release signing key) <nad@python.org>
               'E3FF2839C048B25C084DEBE9B26995E310250568'  # Łukasz Langa (GPG langa.pl) <lukasz@langa.pl>
-              'A035C8C19219BA821ECEA86B64E628F8D684696D') # Pablo Galindo Salgado <pablogsal@gmail.com>
+              'A035C8C19219BA821ECEA86B64E628F8D684696D'  # Pablo Galindo Salgado <pablogsal@gmail.com>
+              '7169605F62C751356D054A26A821E680E5FA6305') # Thomas Wouters <thomas@xs4all.nl>
 
 prepare() {
   cd Python-${pkgver}
@@ -38,7 +41,6 @@ prepare() {
   # Ensure that we are using the system copy of various libraries (expat, libffi, and libmpdec),
   # rather than copies shipped in the tarball
   rm -r Modules/expat
-  rm -r Modules/_ctypes/{darwin,libffi}*
   rm -r Modules/_decimal/libmpdec
 }
 
@@ -56,7 +58,6 @@ build() {
               --enable-ipv6 \
               --with-system-expat \
               --with-dbmliborder=gdbm:ndbm \
-              --with-system-ffi \
               --with-system-libmpdec \
               --enable-loadable-sqlite-extensions \
               --without-ensurepip \
@@ -70,11 +71,13 @@ build() {
 }
 
 check() {
-  # test_socket: test.test_socket.RDSTest.testPeek hangs https://bugs.python.org/issue35247
-  # test_tk: tkinter.test.test_tkinter.test_colorchooser.DefaultRootTest hangs
+  # test_tk: test_askcolor tkinter.test.test_tkinter.test_colorchooser.DefaultRootTest hangs
   # test_pyexpat: our `debug` implementation rewrites source location, which breaks the build-time
   #               only test test.test_pyexpat.HandlerExceptionTest as it cannot find source file in
   #               the to-be-installed debug package
+  # test_socket: https://github.com/python/cpython/issues/79428
+  # test_unittest: https://github.com/python/cpython/issues/108927
+  # test_tkk: AssertionError: Tuples differ: (0,) != ('0',)
 
   cd Python-${pkgver}
 
@@ -84,18 +87,19 @@ check() {
 
   LD_LIBRARY_PATH="${srcdir}/Python-${pkgver}":${LD_LIBRARY_PATH} \
   LC_CTYPE=en_US.UTF-8 xvfb-run -s "-screen 0 1920x1080x16 -ac +extension GLX" -a -n "$servernum" \
-    "${srcdir}/Python-${pkgver}/python" -m test.regrtest -v -uall -x test_socket -x test_tk -x test_pyexpat
+    "${srcdir}/Python-${pkgver}/python" -m test.regrtest -v -uall -x test_tk -x test_ttk -x test_ttk.test_widgets \
+      -x test_tkinter -x test_pyexpat -x test_socket -x test_unittest
 }
 
 package_python() {
-  optdepends=('python-setuptools'
-              'python-pip'
-              'sqlite'
-              'mpdecimal: for decimal'
+  optdepends=('python-setuptools: for building Python packages using tooling that is usually bundled with Python'
+              'python-pip: for installing Python packages using tooling that is usually bundled with Python'
+              'python-pipx: for installing Python software not packaged on Arch Linux'
+              'sqlite: for a default database integration'
               'xz: for lzma'
               'tk: for tkinter')
-  provides=('python3')
-  replaces=('python3')
+  provides=('python3' 'python-externally-managed')
+  replaces=('python3' 'python-externally-managed')
 
   cd Python-${pkgver}
 
@@ -106,9 +110,6 @@ package_python() {
   CFLAGS="${CFLAGS/-O2/-O3}"
 
   make DESTDIR="${pkgdir}" EXTRA_CFLAGS="$CFLAGS" install
-
-  # Split tests
-  rm -r "$pkgdir"/usr/lib/python*/{test,ctypes/test,distutils/tests,idlelib/idle_test,lib2to3/tests,sqlite3/test,tkinter/test,unittest/test}
 
   # Why are these not done by default...
   ln -s python3               "${pkgdir}"/usr/bin/python
@@ -122,8 +123,12 @@ package_python() {
   install -m755 Tools/i18n/{msgfmt,pygettext}.py "${pkgdir}"/usr/lib/python${_pybasever}/Tools/i18n/
   install -m755 Tools/scripts/{README,*py} "${pkgdir}"/usr/lib/python${_pybasever}/Tools/scripts/
 
-  # License
-  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  # PEP668
+  install -Dm644 "$srcdir"/EXTERNALLY-MANAGED -t "${pkgdir}/usr/lib/python${_pybasever}/"
+
+  # Split tests
+  cd "$pkgdir"/usr/lib/python*/
+  rm -r {test,idlelib/idle_test}
 }
 
 package_python-tests() {
@@ -134,19 +139,5 @@ package_python-tests() {
 
   make DESTDIR="${pkgdir}" EXTRA_CFLAGS="$CFLAGS" libinstall
   cd "$pkgdir"/usr/lib/python*/
-  rm -r !(test|ctypes|distutils|idlelib|lib2to3|sqlite3|tkinter|unittest)
-  cd "$pkgdir"/usr/lib/python*/ctypes
-  rm -r !(test)
-  cd "$pkgdir"/usr/lib/python*/distutils
-  rm -r !(tests)
-  cd "$pkgdir"/usr/lib/python*/idlelib
-  rm -r !(idle_test)
-  cd "$pkgdir"/usr/lib/python*/lib2to3
-  rm -r !(tests)
-  cd "$pkgdir"/usr/lib/python*/sqlite3
-  rm -r !(test)
-  cd "$pkgdir"/usr/lib/python*/tkinter
-  rm -r !(test)
-  cd "$pkgdir"/usr/lib/python*/unittest
   rm -r !(test)
 }

@@ -1,8 +1,5 @@
 # /etc/profile
 
-# Set our umask
-umask 022
-
 # Append "$1" to $PATH when not already in.
 # This function API is accessible to scripts in /etc/profile.d
 append_path () {

@@ -1,0 +1,113 @@
+From bc3293299bc4981e83b7f37f3615a6b9b27b6837 Mon Sep 17 00:00:00 2001
+From: Markus Kuhn <Markus.Kuhn@cl.cam.ac.uk>
+Date: Mon, 3 Aug 2020 21:09:39 +0100
+Subject: [PATCH 13/15] new jbig.c limit s->maxmem: maximum decoded image size
+ (default: 2 GB)
+
+this helps users to reduce denial-of-service risks, as in CVE-2017-9937
+---
+ CHANGES          |  9 +++++++++
+ libjbig/jbig.c   |  5 +++++
+ libjbig/jbig.h   |  2 ++
+ libjbig/jbig.txt | 39 ++++++++++++++++++++++++++++-----------
+ 4 files changed, 44 insertions(+), 11 deletions(-)
+
+diff --git a/libjbig/jbig.c b/libjbig/jbig.c
+index fe54946..e9938e5 100644
+--- a/libjbig/jbig.c
++++ b/libjbig/jbig.c
+@@ -2051,6 +2051,7 @@ void jbg_dec_init(struct jbg_dec_state *s)
+   s->xmax = 4294967295UL;
+   s->ymax = 4294967295UL;
+   s->dmax = 256;
++  s->maxmem = 2000000000;  /* no final image larger than 2 GB by default */
+   s->s = NULL;
+ 
+   return;
+@@ -2640,6 +2641,10 @@ int jbg_dec_in(struct jbg_dec_state *s, unsigned char *data, size_t len,
+       return JBG_EIMPL | 5;
+     s->options = s->buffer[19];
+ 
++    /* will the final image require more bytes than permitted by s->maxmem? */
++    if (s->maxmem / s->planes / s->yd / jbg_ceil_half(s->xd, 3) == 0)
++      return JBG_ENOMEM;   /* increase s->maxmem if needed */
++
+     /* calculate number of stripes that will be required */
+     s->stripes = jbg_stripes(s->l0, s->yd, s->d);
+ 
+diff --git a/libjbig/jbig.h b/libjbig/jbig.h
+index 81c1adc..2577399 100644
+--- a/libjbig/jbig.h
++++ b/libjbig/jbig.h
+@@ -181,6 +181,8 @@ struct jbg_dec_state {
+   unsigned long xmax, ymax;         /* if possible abort before image gets *
+ 				     * larger than this size */
+   int dmax;                                      /* abort after this layer */
++  size_t maxmem;               /* return JBG_ENOMEM if final image layer D
++                                  would require more than maxmem bytes     */
+ };
+ 
+ 
+diff --git a/libjbig/jbig.txt b/libjbig/jbig.txt
+index 70ca464..4547b12 100644
+--- a/libjbig/jbig.txt
++++ b/libjbig/jbig.txt
+@@ -2,7 +2,7 @@
+ Using the JBIG-KIT library
+ --------------------------
+ 
+-Markus Kuhn -- 2013-09-10
++Markus Kuhn -- 2020-08-03
+ 
+ 
+ This text explains how to use the functions provided by the JBIG-KIT
+@@ -735,19 +735,36 @@ None of the above limitations can be exceeded by a JBIG data stream
+ that conforms to the ITU-T T.85 application profile for the use of
+ JBIG1 in fax machines.
+ 
+-The current implementation of the jbig.c decoder does not impose any
+-limits on the image size that it will process, as long as malloc() is
+-able to allocate enough heap space for the resulting bitmaps. The only
+-exception is that jbg_dec_in() will return "Input data stream uses
++The maximum image size that a BIE header (BIH) can indicate is X_D =
++2^32-1 pixels wide, Y_D = 2^32-1 lines high, with P = 255 bits per
++pixel. Such an image would, in uncompressed form, require about 588
++exabytes. Once jbg_dec_in() has received the 20-byte long BIH at the
++start of the BIE, it will call malloc() to allocate enough memory to
++hold the uncompressed image planes. Users may, therefore, want to
++defend their application against excessive image-size parameters in a
++received BIH, by checking X_D, Y_D, and P against appropriate safety
++limits before handing over the BIE header to jbg_dec_in(). BIE headers
++indicating too large images might be abused for denial of service
++attacks, to exhaust the memory of a system (e.g., CVE-2017-9937). To
++manage this risk, the jbig.c decoder will now, by default, return "Not
++enough memory available" (JBG_ENOMEM) if the resulting final image
++layer would occupy more than 2 gigabytes. Users can adjust this limit
++by changing sd->maxmem right after having called jbg_dec_init(&sd).
++The actual amount of memory allocated with malloc() calls during the
++decoding process is somewhat higher (at least 25%) than the limit set
++in sd->maxmem, as the decoder requires additional heap memory that
++depends on the image dimensions.
++
++The jbg_dec_in() function will return "Input data stream uses
+ unimplemented JBIG features" (JBG_EIMPL | 1) if Y_D equals 0xffffffff,
+ which is an extreme value commonly used to encode images according to
+ ITU-T T.85 where the height was unknown when the BIH was emitted.
+-After jbg_dec_in() received the 20-byte long BIH at the start of the
+-BIE, it will malloc() to allocate enough memory to hold the requested
+-image planes and layers. If you want to defend your application
+-against excessive image-size parameters in a received BIH, then do
+-make sure that you check X_D, Y_D, and P against appropriate safety
+-limits before handing over the BIH to jbg_dec_in().
++
++All malloc(), realloc() and free() functions called by jbig.c are
++wrapped by the functions checked_malloc(), checked_realloc() and
++checked_free(). These simply call abort() when memory allocation
++fails. Developpers of embedded systems may want to replace them with
++alternative forms of exception handling.
+ 
+ There are two more limitations of the current implementation of the
+ jbig.c decoder that might cause problems with processing JBIG data
+-- 
+2.45.0
+

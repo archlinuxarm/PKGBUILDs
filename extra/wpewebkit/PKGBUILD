@@ -4,29 +4,36 @@
 #  - build v7 with vfpv3, neon is broken
 
 pkgbase=wpewebkit
-pkgname=(wpewebkit wpewebkit-docs)
-pkgver=2.38.0
-pkgrel=2
+pkgname=(
+  wpewebkit
+  wpewebkit-docs
+)
+pkgver=2.44.2
+pkgrel=1
 pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
 arch=(x86_64)
 license=(custom)
 depends=(
-  at-spi2-atk
+  at-spi2-core
   atk
   bubblewrap
   cairo
   fontconfig
   freetype2
   glib2
+  gst-plugins-bad-libs
   gst-plugins-base-libs
   gstreamer
   harfbuzz
   harfbuzz-icu
   icu
+  libavif
+  libdrm
   libepoxy
   libgcrypt
   libjpeg
+  libjxl
   libpng
   libseccomp
   libsoup3
@@ -37,6 +44,7 @@ depends=(
   libxkbcommon
   libxml2
   libxslt
+  mesa
   openjpeg2
   sqlite
   wayland
@@ -46,29 +54,63 @@ depends=(
   zlib
 )
 makedepends=(
+  clang
   cmake
   gi-docgen
   gobject-introspection
   gperf
   gst-plugins-bad
+  lld
   ninja
   python
   ruby
   systemd
+  unifdef
   wayland-protocols
 )
-options=(debug)
-source=($url/releases/wpewebkit-$pkgver.tar.xz{,.asc})
-sha256sums=('e653e12eca63e6371c06d4cd9efcd5492db67f7d9ef324fd5d8668b1151e72b2'
+source=(
+  $url/releases/wpewebkit-$pkgver.tar.xz{,.asc}
+)
+sha256sums=('2a3d23cb4fb071ca0db3a09c5a85f27b8bcc6094a2026d3b7407bed4f99218f7'
             'SKIP')
-validpgpkeys=('D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
-              '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B') # Adrián Pérez de Castro <aperez@igalia.com>
+b2sums=('763340adf2031f512137982e4cded0214dff90652571ae32e8badcda0c108d83b8a35588a3050c161ab0bf5cee94a7ba91c9953a22cc87450826bfbf4ac2d012'
+        'SKIP')
+validpgpkeys=(
+  # https://wpewebkit.org/release/verify/
+  5AA3BC334FD7E3369E7C77B291C559DBE4C9123B # Adrián Pérez de Castro <aperez@igalia.com>
+  013A0127AC9C65B34FFA62526C1009B693975393 # Carlos Garcia Campos <cgarcia@igalia.com>
+)
 
 prepare() {
   cd wpewebkit-$pkgver
 }
 
 build() {
+  local cmake_options=(
+    -DPORT=WPE
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_INSTALL_LIBDIR=lib
+    -DCMAKE_INSTALL_LIBEXECDIR=lib
+    -DCMAKE_SKIP_RPATH=ON
+    -DUSE_LIBBACKTRACE=OFF
+    -DENABLE_DOCUMENTATION=ON
+    -DENABLE_MINIBROWSER=ON
+  )
+
+  # GCC with LTO fails to link jsc
+  #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_size_validate':
+  #     <artificial>:(.text+0x49f0f): undefined reference to `ipint_extern_table_size'
+  #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_fill_validate':
+  #     <artificial>:(.text+0x4a019): undefined reference to `ipint_extern_table_fill'
+  #     collect2: error: ld returned 1 exit status
+  #export CC=clang CXX=clang++
+  #LDFLAGS+=" -fuse-ld=lld"
+
+  # JITted code crashes when CET is used
+  #CFLAGS+=' -fcf-protection=none'
+  #CXXFLAGS+=' -fcf-protection=none'
+
   # Produce minimal debug info: 4.3 GB of debug data makes the
   # build too slow and is too much to package for debuginfod
   CFLAGS+=' -g1'
@@ -76,31 +118,29 @@ build() {
 
   [[ $CARCH == "armv7h" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/neon/vfpv3/'` && CXXFLAGS="$CFLAGS"
 
-  cmake -S wpewebkit-$pkgver -B build -G Ninja \
-    -DPORT=WPE \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_LIBDIR=lib \
-    -DCMAKE_INSTALL_LIBEXECDIR=lib \
-    -DCMAKE_SKIP_RPATH=ON \
-    -DUSE_SOUP2=OFF \
-    -DENABLE_DOCUMENTATION=ON \
-    -DENABLE_MINIBROWSER=ON
+  cmake -S wpewebkit-$pkgver -B build -G Ninja "${cmake_options[@]}"
   cmake --build build
 }
 
 package_wpewebkit() {
-  depends+=(libwpe-1.0.so libWPEBackend-fdo-1.0.so)
-  provides+=(libWPEWebKit-1.1.so)
-  optdepends=('geoclue: Geolocation support'
-              'gst-plugins-good: media decoding'
-              'gst-plugins-bad: media decoding'
-              'gst-libav: nonfree media decoding')
+  depends+=(
+    libWPEBackend-fdo-1.0.so
+    libwpe-1.0.so
+  )
+  provides+=(
+    libWPEWebKit-2.0.so
+  )
+  optdepends=(
+    'geoclue: Geolocation support'
+    'gst-libav: nonfree media decoding'
+    'gst-plugins-bad: media decoding'
+    'gst-plugins-good: media decoding'
+  )
 
   DESTDIR="$pkgdir" cmake --install build
 
   mkdir -p doc/usr/share
-  mv {"$pkgdir",doc}/usr/share/gtk-doc
+  mv {"$pkgdir",doc}/usr/share/doc
 
   cd wpewebkit-$pkgver
   find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | sort -z |

@@ -1,0 +1,210 @@
+# Maintainer: Evgeniy Alekseev <arcanis at archlinux dot org>
+# Maintainer: Bruno Pagani <archange at archlinux dot org>
+# Contributor: Michael Migliore <mcmigliore+aur@gmail.com>
+# Contributor: Ray Rashif <schiv at archlinux dot org>
+# Contributor: Andrzej Giniewicz <gginiu at gmail dot com>
+# Contributor: Thomas Dziedzic <gostrc at gmail>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove make/optdepends on adios2, openimagedenoise, ospray
+#  - add makedepend on tbb, previously pulled in by ospray
+#  - add makedepend on nlohmann-json, previously pulled in by adios2
+#  - explicitly disable the fides, adios2 modules due to -DVTK_BUILD_ALL_MODULES=ON
+#  - generalize moving .so files in install
+#  - removed -ffat-lto-objects from CFLAGS
+
+pkgname=vtk
+# May need bootstrapping on upgrades due to circular vtk <-> opencascade dependency
+pkgver=9.3.0
+pkgrel=17
+pkgdesc="Software system for 3D computer graphics, image processing, and visualization"
+arch=(x86_64)
+url="https://www.vtk.org"
+license=(BSD-3-Clause)
+depends=(
+  double-conversion
+  gcc-libs
+  glibc
+  libtiff
+  onetbb
+  pugixml
+)
+makedepends=(
+  boost
+  cgns
+  cli11
+  cmake
+  doxygen
+  eigen
+  expat
+  fast_float
+  ffmpeg
+  fmt
+  freetype2
+  gdal
+  git
+  gl2ps
+  glew
+  gnuplot
+  hdf5
+  java-environment=11
+  jsoncpp
+  libharu
+  libjpeg
+  liblas
+  libogg
+  libpng
+  libtheora
+  libxml2
+  libxt
+  lz4
+  mariadb-libs
+  netcdf
+  opencascade
+  nlohmann-json
+  openmp
+  openmpi
+  openvdb
+  openvr
+  openxr
+  pdal
+  postgresql-libs
+  proj
+  python-matplotlib
+  python-mpi4py
+  qt5-base
+  qt5-tools
+  qt5-declarative
+  rapidjson
+  sqlite
+  tk
+  unixodbc
+  utf8cpp
+  verdict
+  wget
+  xz
+  zfp
+  zlib
+)
+# pegtl: https://gitlab.kitware.com/vtk/vtk/-/issues/18151
+# exprtk, ioss: not packaged
+optdepends=(
+  cgns
+  ffmpeg
+  fmt
+  gdal
+  gl2ps
+  glew
+  'gnuplot: plotting tools'
+  'graphviz: drawing tools'
+  hdf5
+  'java-runtime=11: java bindings'
+  jsoncpp
+  libarchive
+  libharu
+  liblas
+  lz4
+  mariadb-libs
+  netcdf
+  'openmpi: OpenMPI support'
+  openvdb
+  opencascade
+  openvr
+  openxr
+  pdal
+  postgresql-libs
+  proj
+  'python: python bindings'
+  'python-matplotlib: for Matplotlib rendering'
+  'python-mpi4py: OpenMPI python support'
+  'qt5-declarative: QML plugin'
+  sqlite
+  'tk: tcl bindings'
+  unixodbc
+  verdict
+)
+options=(staticlibs)
+source=(${url}/files/release/${pkgver%.*}/VTK-${pkgver}.tar.gz
+        vtk-occt.patch
+        https://gitlab.kitware.com/vtk/vtk/-/commit/5055371e.patch
+        ospray-3.patch)
+sha256sums=('fdc7b9295225b34e4fdddc49cd06e66e94260cb00efee456e0f66568c9681be9'
+            'df958eabc7dc4f5b33383ce0fb0f90a3ba202c1c2a24d3b5b9e7cfb1fb38b011'
+            '54861a8667c505fedb96b49283521ce62af62148b629e953bbd065f831f02d04'
+            'faf3fd2eea2f73a07f5dcbd67920161a07ae554e008ad1e4099153fec2882278')
+
+prepare() {
+  cd ${pkgname^^}-${pkgver}
+  _fast_float_version=$(pacman -Q fast_float | sed -e 's/.* //; s/-.*//g')
+  sed -i "s|3.9.0|${_fast_float_version}|" ThirdParty/fast_float/CMakeLists.txt
+
+  patch -Np1 -i "$srcdir"/vtk-occt.patch
+  patch -Np1 -i ../5055371e.patch # Fix link to PDAL 2.6
+  patch -Np1 -i ../ospray-3.patch # Fix build with ospray 3.0
+}
+
+build() {
+  # To help cmake find java
+  export JAVA_HOME=/usr/lib/jvm/default
+  # To set tcl lib path
+  local _tkver=$(echo 'puts $tcl_version' | tclsh)
+  cmake -B build -S ${pkgname^^}-${pkgver} \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LICENSEDIR=share/licenses/vtk \
+    -DCMAKE_SKIP_RPATH=OFF \
+    -DCMAKE_SKIP_INSTALL_RPATH=ON \
+    -DCMAKE_JAVA_COMPILE_FLAGS="-Xlint:-options" \
+    -DBUILD_SHARED_LIBS=ON \
+    -DVTK_BUILD_ALL_MODULES=ON \
+    -DVTK_MODULE_ENABLE_VTK_IOADIOS2:STRING=NO \
+    -DVTK_MODULE_ENABLE_VTK_fides:STRING=NO \
+    -DVTK_INSTALL_TCL_DIR=/usr/lib/tcl${_tkver}/vtk/ \
+    -DVTK_LEGACY_REMOVE=ON \
+    -DVTK_SMP_ENABLE_OPENMP=ON \
+    -DVTK_SMP_IMPLEMENTATION_TYPE=TBB \
+    -DVTK_PYTHON_VERSION=3 \
+    -DVTK_QT_VERSION=5 \
+    -DVTK_USE_MPI=ON \
+    -DVTK_USE_TK=ON \
+    -DVTK_VERSIONED_INSTALL=OFF \
+    -DVTK_WRAP_JAVA=ON \
+    -DVTK_WRAP_PYTHON=ON \
+    -DVTKOSPRAY_ENABLE_DENOISER=OFF \
+    -DVTKm_ENABLE_HDF5_IO=ON \
+    -DVTKm_ENABLE_MPI=ON \
+    -DVTKm_ENABLE_OPENMP=ON \
+    -DVTK_ENABLE_OSPRAY=OFF \
+    -DVTK_USE_EXTERNAL=ON \
+    -DVTK_MODULE_USE_EXTERNAL_VTK_exprtk=OFF \
+    -DVTK_MODULE_USE_EXTERNAL_VTK_ioss=OFF \
+    -DVTK_MODULE_USE_EXTERNAL_VTK_pegtl=OFF \
+    -DVTK_MODULE_ENABLE_VTK_DomainsMicroscopy=NO \
+    -DVTK_MODULE_ENABLE_VTK_FiltersOpenTURNS=NO \
+    -DVTK_MODULE_ENABLE_VTK_RenderingZSpace=NO \
+    -DOpenGL_GL_PREFERENCE=LEGACY \
+    -DVTK_IGNORE_CMAKE_CXX11_CHECKS=ON \
+    -Wno-dev
+#    -DFIDES_USE_EXTERNAL_RAPIDJSON=ON \
+  cmake --build build
+}
+
+package() {
+  DESTDIR="${pkgdir}" cmake --install build
+
+  # Move the vtk.jar to the arch-specific location…
+  install -dv "${pkgdir}"/usr/share/java/vtk
+  mv -v "${pkgdir}"/usr/lib/java/vtk.jar "${pkgdir}"/usr/share/java/vtk
+  # …and the libs to the proper place
+  mv "${pkgdir}"/usr/lib/java/vtk-Linux-*/*.so "${pkgdir}"/usr/lib/
+  rmdir "${pkgdir}"/usr/lib/java/{vtk-Linux-*/,}
+
+  # byte-compile python modules since the CMake build does not do it
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  python -m compileall -o 0 -o 1 -o 2 --hardlink-dupes -s "${pkgdir}" "${pkgdir}"${site_packages}
+
+  # Remove third party CMake patching for older versions than ours
+  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/patches/3.{1{3,6,9},20}
+  # … as well as duplicate copies
+  rm -rv "${pkgdir}"/usr/lib/cmake/vtk/vtkm/{Find*.cmake,cmake/{Find*.cmake,3.15}}
+}

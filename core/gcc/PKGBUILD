@@ -13,18 +13,16 @@
 #  - disabled make check, too much stress, kills plugs :(
 #  - specifid build host, disabled distcc
 #  - replaced bugurl with our GitHub issue page
-#  - upstream patch to fix bctoolbox FTBFS
 
 noautobuild=1
 
-pkgname=(gcc gcc-libs gcc-fortran gcc-objc gcc-go gcc-d lto-dump libgccjit)
-pkgver=12.2.0
-_majorver=${pkgver%%.*}
-_commit=2ee5e4300186a92ad73f1a1a64cb918dc76c8d67
+pkgname=(gcc gcc-libs gcc-d gcc-fortran gcc-go gcc-m2 gcc-objc gcc-rust lto-dump libgccjit)
+pkgver=14.1.1+r58+gfc9fb69ad62
+_commit=fc9fb69ad624fd4cc89ff31ad0a7b8d88481c1f7
 pkgrel=1
 pkgdesc='The GNU Compiler Collection'
 arch=(x86_64)
-license=(GPL3 LGPL FDL custom)
+license=(GPL-3.0-with-GCC-exception GFDL-1.3-or-later)
 url='https://gcc.gnu.org'
 makedepends=(binutils libmpc doxygen python git libxcrypt zstd)
 checkdepends=(dejagnu inetutils tcl expect python-pytest)
@@ -35,8 +33,8 @@ makedepends=(
   git
   libisl
   libmpc
-  libxcrypt
   python
+  rust
   zstd
 )
 checkdepends=(
@@ -46,24 +44,25 @@ checkdepends=(
   python-pytest
   tcl
 )
-options=(!emptydirs !lto debug !distcc)
+options=(!emptydirs !lto !distcc)
 _libdir=usr/lib/gcc/$CHOST/${pkgver%%+*}
-# _commit=6beb39ee6c465c21d0cc547fd66b445100cdcc35
-# source=(git://gcc.gnu.org/git/gcc.git#commit=$_commit
 source=(git+https://sourceware.org/git/gcc.git#commit=${_commit}
         c89 c99
         gcc-ada-repro.patch
-        844a5c8ca.patch::'https://gcc.gnu.org/git/?p=gcc.git;a=patch;h=844a5c8ca768dc0cc90c1a943756610832d686a8'
 )
 validpgpkeys=(F3691687D867B81B51CE07D9BBE43771487328A9  # bpiotrowski@archlinux.org
               86CFFCA918CF3AF47147588051E8B148A9999C34  # evangelos@foutrelis.com
               13975A70E63C361C73AE69EF6EEB81F8981C74C7  # richard.guenther@gmail.com
               D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62) # Jakub Jelinek <jakub@redhat.com>
-sha256sums=('SKIP'
+sha256sums=('21867c99e9bb9128df18babac5f628caa610a9ec040d4cee7fe05cfc933eaf9b'
             'de48736f6e4153f03d0a5d38ceb6c6fdb7f054e8f47ddd6af0a3dbf14f27b931'
             '2513c6d9984dd0a2058557bf00f06d8d5181734e41dcfe07be7ed86f2959622a'
-            '1773f5137f08ac1f48f0f7297e324d5d868d55201c03068670ee4602babdef2f'
-            '6dc8d32e76bc6c7c1a24ae527062ec1b4f393c9f7e0e25f6ab4acc98f622a80f')
+            '1773f5137f08ac1f48f0f7297e324d5d868d55201c03068670ee4602babdef2f')
+
+pkgver() {
+  cd gcc
+  echo "$(cat gcc/BASE-VER)+$(git describe --tags | sed 's/[^-]*-[^-]*-//;s/[^-]*-/r&/;s/-/+/g;s/_/./')"
+}
 
 prepare() {
   [[ ! -d gcc ]] && ln -s gcc-${pkgver/+/-} gcc
@@ -80,9 +79,6 @@ prepare() {
 
   # Reproducible gcc-ada
   patch -Np0 < "$srcdir/gcc-ada-repro.patch"
-
-  # tree-optimization/105562 - avoid uninit diagnostic with better FRE
-  patch -Np1 < "$srcdir/844a5c8ca.patch"
 
   # ALARM: Specify build host types, triplet patch
   [[ $CARCH == "armv7h" ]] && CONFIGFLAG="--host=armv7l-unknown-linux-gnueabihf --build=armv7l-unknown-linux-gnueabihf --with-arch=armv7-a --with-float=hard --with-fpu=neon"
@@ -131,7 +127,7 @@ build() {
   CXXFLAGS=${CXXFLAGS/-Werror=format-security/}
 
   "$srcdir/gcc/configure" \
-    --enable-languages=c,c++,fortran,go,lto,objc,obj-c++,d \
+    --enable-languages=c,c++,d,fortran,go,lto,m2,objc,obj-c++,rust \
     --enable-bootstrap \
     "${_confflags[@]:?_confflags unset}"
 
@@ -228,8 +224,7 @@ package_gcc-libs() {
 package_gcc() {
   pkgdesc="The GNU Compiler Collection - C and C++ frontends"
   depends=("gcc-libs=$pkgver-$pkgrel" 'binutils>=2.28' libmpc zstd libisl.so)
-  groups=('base-devel')
-  options=(!emptydirs staticlibs debug)
+  options=(!emptydirs staticlibs)
 
   cd gcc-build
 
@@ -272,8 +267,8 @@ package_gcc() {
   make -C $CHOST/libsanitizer/lsan DESTDIR="$pkgdir" install-nodist_toolexeclibHEADERS
 
   make -C gcc DESTDIR="$pkgdir" install-man install-info
-  rm "$pkgdir"/usr/share/man/man1/{gccgo,gfortran,lto-dump,gdc}.1
-  rm "$pkgdir"/usr/share/info/{gccgo,gfortran,gdc}.info
+  rm "$pkgdir"/usr/share/man/man1/{gccgo,gfortran,lto-dump,gdc,gm2}.1
+  rm "$pkgdir"/usr/share/info/{gccgo,gfortran,gdc,m2}.info
 
   make -C libcpp DESTDIR="$pkgdir" install
   make -C gcc DESTDIR="$pkgdir" install-po
@@ -335,7 +330,7 @@ package_gcc-objc() {
 package_gcc-go() {
   pkgdesc='Go front-end for GCC'
   depends=("gcc=$pkgver-$pkgrel" libisl.so)
-  provides=("go=1.18")
+  provides=("go=1.17")
   conflicts=(go)
 
   cd gcc-build
@@ -357,7 +352,7 @@ package_gcc-d() {
   depends=("gcc=$pkgver-$pkgrel" libisl.so)
   provides=(gdc)
   replaces=(gdc)
-  options=(staticlibs debug)
+  options=(staticlibs)
 
   cd gcc-build
   make -C gcc DESTDIR="$pkgdir" d.install-{common,man,info}
@@ -373,6 +368,40 @@ package_gcc-d() {
   install -d "$pkgdir/usr/share/licenses/$pkgname/"
   ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
     "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_gcc-m2() {
+  pkgdesc='Modula-2 frontend for GCC'
+  depends=("gcc=$pkgver-$pkgrel" libisl.so)
+
+  cd gcc-build
+  make -C gcc DESTDIR="$pkgdir" m2.install-{common,man,info}
+
+  install -Dm755 gcc/cc1gm2 "$pkgdir/$_libdir"/cc1gm2
+  install -Dm755 gcc/gm2 "$pkgdir"/usr/bin/gm2
+
+  make -C $CHOST/libgm2 DESTDIR="$pkgdir" install
+
+  # Install Runtime Library Exception
+  install -d "$pkgdir/usr/share/licenses/$pkgname/"
+  ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+    "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_gcc-rust() {
+ pkgdesc="Rust frontend for GCC"
+ depends=("gcc=$pkgver-$pkgrel" libisl.so)
+
+ cd gcc-build
+ make -C gcc DESTDIR="$pkgdir" rust.install-{common,man,info}
+
+ install -Dm755 gcc/gccrs "$pkgdir"/usr/bin/gccrs
+ install -Dm755 gcc/crab1 "$pkgdir"/usr/bin/crab1
+
+  # Install Runtime Library Exception
+ install -d "$pkgdir/usr/share/licenses/$pkgname/"
+ ln -s /usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION \
+   "$pkgdir/usr/share/licenses/$pkgname/"
 }
 
 package_lto-dump() {

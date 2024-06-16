@@ -7,19 +7,17 @@ pkgbase=linux-firmware
 pkgname=(linux-firmware-whence linux-firmware amd-ucode
          linux-firmware-{nfp,mellanox,marvell,qcom,liquidio,qlogic,bnx2x}
 )
-_tag=20220913
-pkgver=20220913.f09bebf
+_tag=20240610
+pkgver=20240610.9c10a208
 pkgrel=1
 pkgdesc="Firmware files for Linux"
-url="https://git.kernel.org/?p=linux/kernel/git/firmware/linux-firmware.git;a=summary"
+url="https://gitlab.com/kernel-firmware/linux-firmware"
 license=('GPL2' 'GPL3' 'custom')
 arch=('any')
-makedepends=('git')
-options=(!strip)
-source=("git+https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git#tag=${_tag}?signed"
-         0001-Add-support-for-compressing-firmware-in-copy-firmware.patch)
-sha256sums=('SKIP'
-            'aa11b2eed9c0be42571b45eb7153908a43290f02a5fc715aefcaa81030a1832f')
+makedepends=('git' 'rdfind')
+options=(!strip !debug)
+source=("git+$url.git?signed#tag=${_tag}")
+sha256sums=('1703bbd60e9059d98ee1a5b8473f635d8006cb669a04f77307cbbb8cdfe6d9d3')
 validpgpkeys=('4CDE8575E547BF835FE15807A31B6BD72486CFD6') # Josh Boyer <jwboyer@fedoraproject.org>
 
 _backports=(
@@ -33,9 +31,6 @@ prepare() {
     git log --oneline -1 "${_c}"
     git cherry-pick -n "${_c}"
   done
-
-  # add firmware compression support - patch taken from Fedora
-  patch -Np1 -i ../0001-Add-support-for-compressing-firmware-in-copy-firmware.patch
 }
 
 pkgver() {
@@ -83,14 +78,19 @@ package_linux-firmware() {
 
   make DESTDIR="${pkgdir}" FIRMWAREDIR=/usr/lib/firmware install
 
-  # Trigger a microcode reload for configurations not using early updates
-  echo 'w /sys/devices/system/cpu/microcode/reload - - - - 1' |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/lib/tmpfiles.d/${pkgname}.conf"
+  # useless without CONFIG_MICROCODE_LATE_LOADING
+  # https://bugs.archlinux.org/task/46591
+  #
+  # # Trigger a microcode reload for configurations not using early updates
+  # echo 'w /sys/devices/system/cpu/microcode/reload - - - - 1' |
+  #   install -Dm644 /dev/stdin "${pkgdir}/usr/lib/tmpfiles.d/${pkgname}.conf"
 
   install -Dt "${pkgdir}/usr/share/licenses/${pkgname}" -m644 LICEN*
 
-  # split
   cd "${pkgdir}"
+
+  # split
+  _pick amd-ucode usr/lib/firmware/amd-ucode
 
   _pick linux-firmware-nfp usr/lib/firmware/netronome
   _pick linux-firmware-nfp usr/share/licenses/${pkgname}/LICENCE.Netronome
@@ -101,7 +101,7 @@ package_linux-firmware() {
   _pick linux-firmware-marvell usr/share/licenses/${pkgname}/LICENCE.{Marvell,NXP}
 
   _pick linux-firmware-qcom usr/lib/firmware/{qcom,a300_*}
-  _pick linux-firmware-qcom usr/share/licenses/${pkgname}/LICENSE.qcom
+  _pick linux-firmware-qcom usr/share/licenses/${pkgname}/LICENSE.qcom*
 
   _pick linux-firmware-liquidio usr/lib/firmware/liquidio
   _pick linux-firmware-liquidio usr/share/licenses/${pkgname}/LICENCE.cavium_liquidio
@@ -115,6 +115,8 @@ package_linux-firmware() {
 package_amd-ucode() {
   pkgdesc="Microcode update image for AMD CPUs"
   license=(custom)
+
+  mv -v $pkgname/* "$pkgdir"
 
   install -Dt "${pkgdir}/boot" -m644 amd-ucode.img
 

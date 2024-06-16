@@ -1,33 +1,49 @@
-# Maintainer: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
-# Maintainer: Christian Hesse <mail@eworm.de>
+# Maintainer: Christian Hesse <eworm@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - disable mroonga storage engine (doesn't build on ARM)
+#  - build v7 with -j1
 
 pkgbase=mariadb
 pkgname=('mariadb-libs' 'mariadb-clients' 'mariadb' 'mytop')
 pkgdesc='Fast SQL database server, derived from MySQL'
-pkgver=10.9.3
+pkgver=11.4.2
 pkgrel=1
 arch=('x86_64')
 license=('GPL')
 url='https://mariadb.org/'
-makedepends=('boost' 'bzip2' 'cmake' 'cracklib' 'curl' 'jemalloc' 'judy' 'krb5' 'libaio'
-             'libxcrypt' 'libxml2' 'lz4' 'openssl' 'systemd' 'zlib' 'zstd' 'xz')
-options=('debug')
-validpgpkeys=('199369E5404BD5FC7D2FE43BCBCB082A1BB943DB') # MariaDB Package Signing Key <package-signing-key@mariadb.org>
-# The default links with mirror redirection fail for signatures, specific
-# mirrors may be out of date every now and then. Let's use the upstream
-# rsync source via https and hope it does not hurt them too much.
-# https://mariadb.com/kb/en/library/mirror-sites-for-mariadb/
-source=("https://rsync.osuosl.org/pub/mariadb/mariadb-${pkgver}/source/mariadb-${pkgver}.tar.gz"{,.asc}
+makedepends=('git' 'boost' 'bzip2' 'cmake' 'cracklib' 'curl' 'jemalloc' 'judy' 'krb5' 'liburing'
+             'libxcrypt' 'libxml2' 'lz4' 'openssl' 'pcre2' 'systemd' 'zlib' 'zstd' 'xz')
+validpgpkeys=('177F4010FE56CA3336300305F1656F24C74CD1D8') # MariaDB Signing Key <signing-key@mariadb.org>
+source=("mariadb::git+https://github.com/MariaDB/server.git#tag=mariadb-${pkgver}?signed"
+        'git+https://github.com/MariaDB/mariadb-connector-c.git'
+        'git+https://github.com/facebook/rocksdb.git'
+        'git+https://github.com/codership/wsrep-lib.git'
+        'git+https://github.com/wolfSSL/wolfssl.git'
+        'git+https://github.com/mariadb-corporation/libmarias3.git'
+        'git+https://github.com/mariadb-corporation/mariadb-columnstore-engine.git'
         '0001-arch-specific.patch')
-sha256sums=('9a1e229972fcccc8270e633f68d3fb824da151dcf4f53da1df8d947aca876bee'
+sha256sums=('da69b2dee70ebf567cb5ff241a07bac2d45076ddf7465da85d1c17589f4b886d'
             'SKIP'
-            '3289efb3452d199aec872115f35da3f1d6fd4ce774615076690e9bc8afae1460')
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            '966ddd4fa21068e6ab5b560d69f607aa9291790fb15c3be424c20962a26032f9')
 
 prepare() {
-  cd $pkgbase-$pkgver/
+  cd mariadb/
+
+  # setup git submodules
+  git config --file=.gitmodules submodule.libmariadb.url ../mariadb-connector-c/
+  git config --file=.gitmodules submodule.storage/rocksdb/rocksdb.url ../rocksdb/
+  git config --file=.gitmodules submodule.wsrep-lib.url ../wsrep-lib/
+  git config --file=.gitmodules submodule.extra/wolfssl/wolfssl.url ../wolfssl/
+  git config --file=.gitmodules submodule.storage/maria/libmarias3.url ../libmarias3/
+  git config --file=.gitmodules submodule.storage/columnstore/columnstore.url ../mariadb-columnstore-engine/
+  git submodule init
+  git -c protocol.file.allow=always submodule update
 
   # Arch Linux specific patches:
   #  * enable PrivateTmp for a little bit more security
@@ -37,10 +53,13 @@ prepare() {
 }
 
 build() {
+  [[ $CARCH == "armv7h" ]] && MAKEFLAGS="-j1"
   local _cmake_options=(
     # build options
     -DCOMPILATION_COMMENT="Arch Linux"
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    #-DCMAKE_BUILD_TYPE=Debug
+    #-DMYSQL_MAINTAINER_MODE=WARN
     -Wno-dev
 
     # file paths
@@ -83,7 +102,7 @@ build() {
     -DWITH_EXTRA_CHARSETS=complex
     -DWITH_JEMALLOC=ON
     -DWITH_LIBWRAP=OFF
-    -DWITH_PCRE=bundled
+    -DWITH_PCRE2=system
     -DWITH_READLINE=ON
     -DWITH_SSL=system
     -DWITH_SYSTEMD=yes
@@ -91,10 +110,14 @@ build() {
     -DWITH_ZLIB=system
   )
 
+  # this uses malloc_usable_size, which is incompatible with fortification level 3
+  export CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  export CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+
   mkdir build
   cd build
 
-  cmake ../"$pkgbase-$pkgver" "${_cmake_options[@]}"
+  cmake ../mariadb/ "${_cmake_options[@]}"
 
   make
 }
@@ -108,7 +131,7 @@ check() {
 
 package_mariadb-libs() {
   pkgdesc='MariaDB libraries'
-  depends=('libaio' 'libxcrypt' 'libcrypt.so' 'openssl' 'zlib')
+  depends=('liburing' 'libxcrypt' 'libcrypt.so' 'openssl' 'pcre2' 'zlib' 'zstd')
   optdepends=('krb5: for gssapi authentication')
   conflicts=('libmysqlclient' 'libmariadbclient' 'mariadb-connector-c')
   provides=('libmariadbclient' 'mariadb-connector-c' 'libmariadb.so' 'libmariadbd.so')
@@ -120,35 +143,35 @@ package_mariadb-libs() {
     make -C "$dir" DESTDIR="$pkgdir" install
   done
 
-  ln -s mariadb_config "$pkgdir"/usr/bin/mariadb-config
-  ln -s mariadb_config "$pkgdir"/usr/bin/mysql_config
-  install -D -m0644 "$srcdir"/"$pkgbase-$pkgver"/man/mysql_config.1 "$pkgdir"/usr/share/man/man1/mysql_config.1
-
-  install -D -m0644 support-files/mariadb.pc "$pkgdir"/usr/share/pkgconfig/mariadb.pc
-  install -D -m0644 "$srcdir"/"$pkgbase-$pkgver"/support-files/mysql.m4 "$pkgdir"/usr/share/aclocal/mysql.m4
-
-  cd "$pkgdir"
-
   # remove static libraries
-  rm usr/lib/*.a
+  rm "${pkgdir}"/usr/lib/*.a
 
   # remove man pages
-  rm -r usr/share/man
+  rm -r "${pkgdir}"/usr/share/man
+
+  ln -s mariadb_config "$pkgdir"/usr/bin/mariadb-config
+  ln -s mariadb_config "$pkgdir"/usr/bin/mysql_config
+  install -D -m0644 "$srcdir"/mariadb/man/mariadb_config.1 "$pkgdir"/usr/share/man/man1/mariadb_config.1
+  ln -s mariadb_config.1 "$pkgdir"/usr/share/man/man1/mariadb-config.1
+  ln -s mariadb_config.1 "$pkgdir"/usr/share/man/man1/mysql_config.1
+
+  install -D -m0644 support-files/mariadb.pc "$pkgdir"/usr/share/pkgconfig/mariadb.pc
+  install -D -m0644 "$srcdir"/mariadb/support-files/mysql.m4 "$pkgdir"/usr/share/aclocal/mysql.m4
 }
 
 package_mariadb-clients() {
   pkgdesc='MariaDB client tools'
-  depends=("mariadb-libs=${pkgver}" 'jemalloc')
+  depends=("mariadb-libs=${pkgver}" 'jemalloc' 'ncurses')
   conflicts=('mysql-clients')
-  provides=("mysql-clients=$pkgver")
+  provides=("mysql-clients=${pkgver}")
 
-  cd build
-
-  make -C client DESTDIR="$pkgdir" install
+  make -C build/client DESTDIR="${pkgdir}" install
 
   # install man pages
-  for man in mysql mysql_plugin mysql_upgrade mysqladmin mysqlbinlog mysqlcheck mysqldump mysqlimport mysqlshow mysqlslap mysqltest; do
-    install -D -m0644 "$srcdir"/"$pkgbase-$pkgver"/man/"$man.1" "$pkgdir"/usr/share/man/man1/"$man.1"
+  make -C build/man DESTDIR="${srcdir}"/client-man install
+  install -d -m0755 "${pkgdir}"/usr/share/man/man1/
+  for man in $(find "${pkgdir}"/usr/bin/ ! -type d); do
+    install -D -m0644 -t "${pkgdir}"/usr/share/man/man1/ "${srcdir}"/client-man/usr/share/man/man1/"$(basename "${man}")".1
   done
 }
 
@@ -175,7 +198,7 @@ package_mariadb() {
               'python-mysqlclient: for myrocks_hotbackup'
               'xz: lzma provider')
   conflicts=('mysql')
-  provides=("mysql=$pkgver")
+  provides=('mariadb-server' "mysql=${pkgver}")
   options=('emptydirs')
 
   cd build
@@ -208,22 +231,22 @@ package_mariadb() {
   # provided by mariadb-libs
   rm usr/bin/{mariadb{_,-},mysql_}config
   rm -r usr/include/
-  rm usr/share/man/man1/mysql_config.1
+  rm usr/share/man/man1/{mariadb,mysql}_config.1
   rm -r usr/share/aclocal
   rm usr/lib/lib*
   rm -r usr/lib/pkgconfig
   rm usr/lib/mysql/plugin/{auth_gssapi_client,caching_sha2_password,client_ed25519,dialog,mysql_clear_password,sha256_password,zstd}.so
 
   # provided by mariadb-clients
-  rm usr/bin/mysql{,_plugin,_upgrade,admin,binlog,check,dump,import,show,slap,test}
-  rm usr/bin/mariadb{,-{admin,binlog,check,conv,dump,import,plugin,show,slap,test,upgrade}}
-  rm usr/share/man/man1/mysql{,_plugin,_upgrade,admin,binlog,check,dump,import,show,slap,test}.1
+  for bin in $(find "${pkgdir}/../${pkgbase}-clients/usr/bin/" ! -type d); do
+    rm "${pkgdir}"/usr/bin/"$(basename "${bin}")" "${pkgdir}"/usr/share/man/man1/"$(basename "${bin}")".1
+  done
 
   # provided by mytop
   rm usr/bin/mytop
 
   # not needed
-  rm -r usr/{mysql-test,sql-bench}
+  rm -r usr/{mariadb-test,sql-bench}
   rm usr/share/man/man1/mysql-test-run.pl.1
 }
 

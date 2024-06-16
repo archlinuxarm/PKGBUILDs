@@ -1,0 +1,114 @@
+#!/usr/bin/python
+
+"""
+Generates a list of packages which can be rebuild depending on the already
+rebuild packages in our staging repositories
+"""
+
+import argparse
+import tempfile
+
+from pyalpm import Handle
+import pyalpm
+
+ARCH = "x86_64"
+MIRROR_URL = "https://mirror.pkgbuild.com/{}/os/{}"
+
+def register_dbs(handle, reponames):
+    repos = []
+
+    for reponame in reponames:
+        repo = handle.register_syncdb(reponame, pyalpm.SIG_DATABASE_OPTIONAL)
+        repo.servers = [MIRROR_URL.format(reponame, ARCH)]
+        repo.update(False)
+        repos.append(repo)
+
+    return repos
+
+
+def find_package_anywhere(handle, pkgname):
+    for db in handle.get_syncdbs():
+        pkg = db.get_pkg(pkgname)
+        if pkg:
+            return pkg
+
+    return None
+
+
+def can_rebuild(rebuild_packages, stable_handle, staging_handle):
+    rebuild_packages_set = set(rebuild_packages)
+
+    def is_all_rebuild(depends):
+        for pkg in depends:
+            if pkg not in rebuild_packages_set:
+                continue
+
+            if not find_package_anywhere(staging_handle, pkg):
+                return False
+
+        return True
+
+    can_rebuild_list = []
+    for pkgname in rebuild_packages:
+        # Already rebuild
+        pkg = find_package_anywhere(staging_handle, pkgname)
+        if pkg is not None:
+            continue
+
+        pkg = find_package_anywhere(stable_handle, pkgname)
+        # Can never happen
+        if pkg is None:
+            continue
+
+        if is_all_rebuild(pkg.depends) and is_all_rebuild(pkg.makedepends) and is_all_rebuild(pkg.checkdepends):
+            can_rebuild_list.append(pkgname)
+
+    return can_rebuild_list
+
+
+def compare_repos(rebuild_packages, staging_handle):
+    missing = []
+    for pkgname in rebuild_packages:
+        if find_package_anywhere(staging_handle, pkgname) is None:
+            missing.append(pkgname)
+
+    return missing
+
+def main(filename, verify, output_format):
+    # Output of `genrebuild`.
+    rebuild_packages = []
+    packages = []
+
+    with open(filename, 'r') as fp:
+        rebuild_packages = fp.read().splitlines()
+
+    with tempfile.TemporaryDirectory() as stable_tmpdir:
+        with tempfile.TemporaryDirectory() as staging_tmpdir:
+            stable_handle = Handle(".", stable_tmpdir)
+            staging_handle = Handle(".", staging_tmpdir)
+
+            register_dbs(stable_handle, ["core", "extra", "multilib"])
+            register_dbs(staging_handle, ["core-staging", "extra-staging", "multilib-staging"])
+
+            if verify:
+                packages = compare_repos(rebuild_packages, staging_handle)
+            else:
+                packages = can_rebuild(rebuild_packages, stable_handle, staging_handle)
+
+            if output_format == 'space':
+                print(' '.join(packages))
+            elif output_format == 'newline':
+                print('\n'.join(packages))
+            else:
+                print('unsupported output format')
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+                        prog='canrebuild',
+                        description='Returns packges which can be rebuild in the staging repositories')
+    parser.add_argument('filename')
+    parser.add_argument('--format', default='space', choices=['space', 'newline'])
+    parser.add_argument('--verify', action=argparse.BooleanOptionalAction, help='compare staging versus stable packages')
+
+    args = parser.parse_args()
+    main(args.filename, args.verify, args.format)

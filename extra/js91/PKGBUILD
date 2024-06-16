@@ -5,20 +5,48 @@
 
 pkgname=js91
 pkgver=91.13.0
-pkgrel=1
+pkgrel=2
 pkgdesc="JavaScript interpreter and libraries - Version 91"
-arch=(x86_64)
 url="https://spidermonkey.dev/"
-license=(MPL)
-depends=(gcc-libs readline zlib sh)
-makedepends=(zip autoconf2.13 python-setuptools python-psutil rustup llvm clang lld)
-checkdepends=(mercurial git)
-options=(!lto debug)
+arch=(x86_64)
+license=(MPL-2.0)
+depends=(
+  gcc-libs
+  readline
+  sh
+  zlib
+)
+makedepends=(
+  autoconf2.13
+  clang
+  lld
+  llvm
+  python
+  python-setuptools
+  rustup
+  zip
+)
+checkdepends=(
+  git
+  mercurial
+)
+options=(!lto)
 _relver=${pkgver}esr
-source=(https://archive.mozilla.org/pub/firefox/releases/$_relver/source/firefox-$_relver.source.tar.xz{,.asc})
+source=(
+  https://archive.mozilla.org/pub/firefox/releases/$_relver/source/firefox-$_relver.source.tar.xz{,.asc}
+  0001-Bug-1769631-Remove-U-from-mode-parameters-for-variou.patch
+)
+validpgpkeys=(
+  # Mozilla Software Releases <release@mozilla.com>
+  # https://blog.mozilla.org/security/2023/05/11/updated-gpg-key-for-signing-firefox-releases/
+  14F26682D0916CDD81E37B6D61B7B526D98F0353
+)
 sha256sums=('53be2bcde0b5ee3ec106bd8ba06b8ae95e7d489c484e881dfbe5360e4c920762'
-            'SKIP')
-validpgpkeys=('14F26682D0916CDD81E37B6D61B7B526D98F0353') # Mozilla Software Releases <release@mozilla.com>
+            'SKIP'
+            '1b6fcec05714c0fbc52549059d570dddd79302ca787dec9983b046d54fa7a6ff')
+b2sums=('75d0daa512b3a2d41974a0169778be9ef19a100de2bd382add9831860ca93976585a41e760b6a7ec753268fb78f9f61049780fa7961834248bc8157cfdcc2827'
+        'SKIP'
+        '216206c7f0356267f4f29880b8b8e8e388f9dd483a56cd427de57756d64ef26ea6d6b36e33ca96dbc54c45bf78bbf2b9a666aa8b2029fa28d07dc41342101158')
 
 # Make sure the duplication between bin and lib is found
 COMPRESSZST+=(--long)
@@ -30,6 +58,9 @@ prepare() {
 
   mkdir mozbuild
   cd firefox-$pkgver
+
+  # Python 3.11
+  patch -Np1 -i ../0001-Bug-1769631-Remove-U-from-mode-parameters-for-variou.patch
 
   cat >../mozconfig <<END
 ac_add_options --enable-application=js
@@ -44,8 +75,8 @@ ac_add_options --disable-rust-simd
 ac_add_options --enable-linker=lld
 ac_add_options --disable-bootstrap
 ac_add_options --disable-debug
-ac_add_options --disable-debug-symbols
 ac_add_options --disable-jemalloc
+ac_add_options --disable-new-pass-manager
 ac_add_options --disable-strip
 
 # System libraries
@@ -63,9 +94,14 @@ END
 build() {
   cd firefox-$pkgver
 
-  export MOZ_NOSPAM=1
-  export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
   export MACH_USE_SYSTEM_PYTHON=1
+  export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
+  export MOZ_BUILD_DATE="$(date -u${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH} +%Y%m%d%H%M%S)"
+  export MOZ_NOSPAM=1
+
+  # malloc_usable_size is used in various parts of the codebase
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
 
   # Do 3-tier PGO
   echo "Building instrumented JS..."
@@ -131,4 +167,4 @@ package() {
   find "$pkgdir"/usr/{lib/pkgconfig,include} -type f -exec chmod -c a-x {} +
 }
 
-# vim:set sw=2 et:
+# vim:set sw=2 sts=-1 et:

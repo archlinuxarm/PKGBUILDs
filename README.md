@@ -23,7 +23,7 @@ what modifications have been done to have the package build correctly.  This
 allows us to identify and merge these changes into newer versions of the
 package.
 
-### core, extra and community
+### core and extra
 These folders contain packages only found in the upstream repositories by the
 same name.  Exceptions are packages such as our kernels or other packages we
 feel belong within the scope of these repos.

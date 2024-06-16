@@ -1,0 +1,150 @@
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Laurent Carlier <lordheavym@gmail.com>
+# Contributor: Stéphane Gaudreault <stephane@archlinux.org>
+# Contributor: Andrej Gelenberg <andrej.gelenberg@udo.edu>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove default debuginfod url pointing to upstream
+
+pkgbase=elfutils
+pkgname=(
+  elfutils
+  libelf
+  debuginfod
+)
+pkgver=0.191
+pkgrel=3.1
+pkgdesc="Handle ELF object files and DWARF debugging information"
+arch=(x86_64)
+url="https://sourceware.org/elfutils/"
+makedepends=(
+  bzip2
+  curl
+  gcc-libs
+  libarchive
+  libmicrohttpd
+  sqlite
+  xz
+  zlib
+  zstd
+)
+options=(staticlibs)
+source=(https://sourceware.org/$pkgbase/ftp/$pkgver/$pkgbase-$pkgver.tar.bz2{,.sig})
+sha512sums=('e22d85f25317a79b36d370347e50284c9120c86f9830f08791b7b6a7b4ad89b9bf4c7c71129133b8d193a0edffb2a2c17987b7e48428b9670aff5ce918777e04'
+            'SKIP')
+b2sums=('2a7ad251369eca7ba609ab8644181fd479ad8596ee58dc068398ca22be25a978e96b81a10a92a5555d7574fd1b9227c8d54fb41dceb4025aedfc6ae32870bbca'
+        'SKIP')
+validpgpkeys=(
+  'EC3CFE88F6CA0788774F5C1D1AA44BE649DE760A'  # Mark Wielaard <mjw@gnu.org>
+  '6C2B631563B8D330578D3CB474FD3FA2779E7073'  # Aaron Merey <amerey@redhat.com>
+)
+
+prepare() {
+  # remove failing test due to missing glibc debug package during test: https://bugs.archlinux.org/task/74875
+  sed -e 's/run-backtrace-native.sh//g' -i $pkgbase-$pkgver/tests/Makefile.am
+
+  cd $pkgbase-$pkgver
+  autoreconf -fiv
+}
+
+build() {
+  local configure_options=(
+    --prefix=/usr
+    --sysconfdir=/etc
+    --program-prefix="eu-"
+    --enable-deterministic-archives
+  )
+
+  # fat-lto-objects is required for non-mangled .a files in libelf
+  CFLAGS+=" -ffat-lto-objects"
+
+  # debugging information is required for test-suite
+  CFLAGS+=" -g"
+
+  cd $pkgbase-$pkgver
+  ./configure "${configure_options[@]}"
+  make
+}
+
+check() {
+  make -C $pkgbase-$pkgver check
+}
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_elfutils() {
+  pkgdesc+=" (utilities)"
+  license=(
+    GPL-3.0-or-later
+  )
+  depends=(
+    gcc-libs
+    glibc
+    libarchive libarchive.so
+    libelf=$pkgver
+    sh
+  )
+
+  make DESTDIR="$pkgdir" install -C $pkgbase-$pkgver
+
+  (
+    cd "$pkgdir"
+
+    _pick libelf etc/debuginfod
+    _pick libelf etc/profile.d/*
+    _pick libelf usr/{include,lib}
+    _pick debuginfod usr/bin/debuginfod*
+    _pick debuginfod usr/share/man/*/debuginfod*
+  )
+
+  install -vDm 644 $pkgbase-$pkgver/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
+}
+
+package_libelf() {
+  pkgdesc+=" (libraries)"
+  license=(
+    'GPL-2.0-or-later OR LGPL-3.0-or-later'
+  )
+  depends=(
+    bzip2 libbz2.so
+    curl libcurl.so
+    gcc-libs
+    glibc
+    xz liblzma.so
+    zlib
+    zstd libzstd.so
+  )
+  # NOTE: the shared objects can not be added to provides as they are not versioned
+
+  mv -v libelf/* "$pkgdir"
+  install -vDm 644 $pkgbase-$pkgver/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
+}
+
+package_debuginfod() {
+  pkgdesc+=" (debuginfod)"
+  license=(
+    GPL-3.0-or-later
+  )
+  depends=(
+    gcc-libs
+    glibc
+    libarchive libarchive.so
+    libelf=$pkgver
+    libmicrohttpd libmicrohttpd.so
+    sqlite libsqlite3.so
+  )
+  optdepends=("elfutils=$pkgver: for translations")
+
+  mv -v debuginfod/* "$pkgdir"
+  install -vDm 644 $pkgbase-$pkgver/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
+}
+
+# vim:set sw=2 sts=-1 et:

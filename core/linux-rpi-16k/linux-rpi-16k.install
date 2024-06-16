@@ -1,0 +1,60 @@
+disable_cma() {
+  if [[ -f /boot/config.txt && $(grep '^cma' /boot/config.txt) != '' ]]; then
+    cat <<END
+
+>>> You appear to have dynamic memory (CMA) enabled, which is currently broken
+    in newer kernels and will cause many issues if left enabled. Disabling that
+    for you now.
+
+END
+    sed -i 's/^cma_/#cma_/g' /boot/config.txt
+  fi
+}
+
+correct_fstab() {
+  # starting with v5.10.y, fstab requires a padded zero in the path to /boot
+  if [[ -f /etc/fstab ]]; then
+    if grep -q mmcblk1p1 /etc/fstab; then
+      sed -i 's/mmcblk1p1/mmcblk0p1/' /etc/fstab
+    fi
+  fi
+}
+
+check_not_rpi5() {
+  if [[ -f /sys/firmware/devicetree/base/model ]]; then
+    if ! grep -a -q 5 /sys/firmware/devicetree/base/model; then
+      cat <<END
+
+>>> WARNING: You appear to have installed linux-rpi-16k on incompatible hardware!
+             Rebooting will likely render this system unbootable!
+             Highly recommend installing linux-rpi before you reboot!
+
+END
+    fi
+  fi
+}
+
+post_install () {
+  post_upgrade
+}
+
+post_upgrade() {
+  check_not_rpi5
+  correct_fstab
+  disable_cma
+
+  if grep "^[^#]*[[:space:]]/boot" etc/fstab 2>&1 >/dev/null; then
+    if ! grep "[[:space:]]/boot" etc/mtab 2>&1 >/dev/null; then
+      cat <<END
+
+>>> WARNING: /boot appears to be a separate partition but is not mounted.
+    You probably just broke your system. Congratulations.
+
+END
+    fi
+  fi
+}
+
+post_remove() {
+  rm -f boot/initramfs-linux.img
+}

@@ -1,0 +1,120 @@
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - removed makedepend on pandoc
+#  - cmake with -DNO_MAN_PAGES=1
+
+pkgname=rdma-core
+pkgdesc="RDMA core userspace libraries and daemons"
+pkgver=52.0
+pkgrel=1
+arch=(x86_64)
+url="https://github.com/linux-rdma/rdma-core"
+license=(
+  'GPL-2.0-or-later OR LicenseRef-OpenIB.org-BSD-MIT'
+  'GPL-2.0-or-later OR LicenseRef-OpenIB.org-BSD-FreeBSD'
+  'GPL-2.0-or-later OR LicenseRef-Intel-BSD-3-Clause'
+  'GPL-2.0-or-later OR LicenseRef-PathScale-BSD-Patent-License'
+  CC0-1.0
+  MIT
+  BSD-2-Clause
+  'CPL-1.0 OR BSD-2-Clause OR GPL-2.0-or-later'
+)
+depends=(
+  bash
+  glibc
+  libnl
+  perl
+  systemd-libs
+)
+makedepends=(
+  cmake
+  cython
+  git
+  libdrm
+  ninja
+  python
+  python-docutils
+  systemd
+  valgrind
+)
+optdepends=(
+  'python: for the Python API (pyverbs)'
+)
+_provides=(
+  ibacm
+  infiniband-diags
+  libcxgb3
+  libcxgb4
+  libibcm
+  libibmad
+  libibumad
+  libibverbs
+  libiwpm
+  libmlx4
+  libmlx5
+  libmthca
+  libnes
+  libocrdma
+  librdmacm
+  rdma
+  srptools
+)
+provides=("${_provides[@]}")
+conflicts=("${_provides[@]}")
+replaces=("${_provides[@]}")
+backup=(etc/rdma/{rdma.conf,mlx4.conf})
+source=("https://github.com/linux-rdma/rdma-core/archive/v$pkgver/$pkgname-$pkgver.tar.gz")
+sha512sums=('aae49f8b30d96902e3bb49d74168061e1e318876460a713ca7758455a049770e1f15139583a8bb5112856c5843155afd352a9d3122a6525070b1fea2c1286eae')
+
+prepare() {
+    cd $pkgname-$pkgver
+    find redhat -type f -exec sed --in-place \
+        --expression='s|/usr/libexec|/usr/lib/rdma|g' \
+        --expression='s|/usr/sbin|/usr/bin|g' \
+        --expression='s|/sbin|/usr/bin|g' \
+        '{}' '+'
+
+    sed -e 's|"drm"|"libdrm"|' -i CMakeLists.txt # Fix drm include dir
+}
+
+build() {
+    cmake -B build -S $pkgname-$pkgver -G Ninja \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_INSTALL_RUNDIR=/run \
+        -DCMAKE_INSTALL_SBINDIR=/usr/bin \
+        -DCMAKE_INSTALL_LIBEXECDIR=/usr/lib/rdma \
+        -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+        -DCMAKE_INSTALL_PERLDIR=/usr/share/perl5/vendor_perl \
+        -DNO_MAN_PAGES=1
+    cmake --build build
+}
+
+check() {
+    cd $pkgname-$pkgver
+    PYTHONPATH="$srcdir/build/python" tests/run_tests.py
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+
+    rm -vr "$pkgdir"/etc/init.d
+    rm -vr "$pkgdir"/usr/share/doc/$pkgname/tests
+
+    cd "$srcdir"/$pkgname-$pkgver/redhat
+    install -D --mode=0644 rdma.conf "$pkgdir"/etc/rdma/rdma.conf
+    install -D --mode=0755 rdma.mlx4-setup.sh "$pkgdir"/usr/lib/rdma/mlx4-setup.sh
+    install -D --mode=0644 rdma.mlx4.conf "$pkgdir"/etc/rdma/mlx4.conf
+    install -D --mode=0644 rdma.mlx4.sys.modprobe "$pkgdir"/usr/lib/modprobe.d/libmlx4.conf
+    install -D --mode=0755 rdma.modules-setup.sh "$pkgdir"/usr/lib/dracut/modules.d/05rdma/module-setup.sh
+
+    cd "$srcdir"/$pkgname-$pkgver
+    install -vDm 644 COPYING.md -t "$pkgdir"/usr/share/licenses/$pkgname/
+    install -vDm 644 COPYING.BSD_MIT -t "$pkgdir"/usr/share/licenses/$pkgname/
+    install -vDm 644 COPYING.BSD_FB -t "$pkgdir"/usr/share/licenses/$pkgname/
+    install -vDm 644 COPYING.GPL2 -t "$pkgdir"/usr/share/licenses/$pkgname/
+    install -vDm 644 providers/ipathverbs/COPYING -t "$pkgdir"/usr/share/licenses/$pkgname/providers/ipathverbs/
+    install -vDm 644 ccan/LICENSE.CCO -t "$pkgdir"/usr/share/licenses/$pkgname/ccan/
+    install -vDm 644 ccan/LICENSE.MIT -t "$pkgdir"/usr/share/licenses/$pkgname/ccan/
+}

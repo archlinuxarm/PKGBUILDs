@@ -1,0 +1,132 @@
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - --disable-rust-simd, --disable-lto
+#  - remove PGO build
+
+pkgname=js115
+pkgver=115.12.0
+pkgrel=1
+pkgdesc="JavaScript interpreter and libraries - Version 115"
+url="https://spidermonkey.dev/"
+arch=(x86_64)
+license=(MPL-2.0)
+depends=(
+  gcc-libs
+  glibc
+  readline
+  sh
+  zlib
+)
+makedepends=(
+  autoconf2.13
+  clang
+  lld
+  llvm
+  python
+  rust
+  zip
+)
+checkdepends=(
+  git
+  mercurial
+)
+options=(
+  !lto
+)
+_relver=${pkgver}esr
+source=(
+  https://archive.mozilla.org/pub/firefox/releases/$_relver/source/firefox-$_relver.source.tar.xz{,.asc}
+)
+validpgpkeys=(
+  # Mozilla Software Releases <release@mozilla.com>
+  # https://blog.mozilla.org/security/2023/05/11/updated-gpg-key-for-signing-firefox-releases/
+  14F26682D0916CDD81E37B6D61B7B526D98F0353
+)
+sha256sums=('b59e1625a0bb2f0565a737394f2bf8a7ce3171314b0d871bde533a101847a8ef'
+            'SKIP')
+b2sums=('6d2cc80daca9977f73ea0c0fe7e7cac999f2d7a99c324332d69d9438a6d954fe72ffb35e4df4c2a86abcdc94231c4847bb3e64dd612240f8a6d86e63abdb1be2'
+        'SKIP')
+
+# Make sure the duplication between bin and lib is found
+COMPRESSZST+=(--long)
+
+prepare() {
+  # packed_simd no longer builds with 1.78.0
+  #rustup toolchain update --profile minimal 1.77.2
+  #rustup default 1.77.2
+
+  mkdir mozbuild
+  cd firefox-$pkgver
+
+  cat >../mozconfig <<END
+ac_add_options --enable-application=js
+mk_add_options MOZ_OBJDIR=${PWD@Q}/obj
+
+ac_add_options --prefix=/usr
+ac_add_options --enable-release
+ac_add_options --enable-hardening
+ac_add_options --enable-optimize
+ac_add_options --disable-rust-simd
+ac_add_options --enable-linker=lld
+ac_add_options --disable-bootstrap
+ac_add_options --disable-debug
+ac_add_options --disable-lto
+ac_add_options --disable-jemalloc
+ac_add_options --disable-strip
+
+# System libraries
+ac_add_options --with-system-zlib
+ac_add_options --without-system-icu
+
+# Features
+ac_add_options --enable-readline
+ac_add_options --enable-shared-js
+ac_add_options --enable-tests
+ac_add_options --with-intl-api
+END
+}
+
+build() {
+  cd firefox-$pkgver
+
+  export MACH_BUILD_PYTHON_NATIVE_PACKAGE_SOURCE=pip
+  export MOZBUILD_STATE_PATH="$srcdir/mozbuild"
+  export MOZ_BUILD_DATE="$(date -u${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH} +%Y%m%d%H%M%S)"
+  export MOZ_NOSPAM=1
+
+  # malloc_usable_size is used in various parts of the codebase
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+
+  cat >.mozconfig ../mozconfig
+  ./mach build --priority normal
+}
+
+check() {
+  local jstests_extra_args=(
+    --format=none
+    --exclude-random
+    --wpt=disabled
+  ) jittest_extra_args=(
+    --format=none
+    --timeout 300
+  ) jittest_test_args=(
+    basic
+  )
+
+  cd firefox-$pkgver/obj
+  make -C js/src check-jstests check-jit-test \
+    JSTESTS_EXTRA_ARGS="${jstests_extra_args[*]}" \
+    JITTEST_EXTRA_ARGS="${jittest_extra_args[*]}" \
+    JITTEST_TEST_ARGS="${jittest_test_args[*]}"
+}
+
+package() {
+  cd firefox-$pkgver/obj
+  make DESTDIR="$pkgdir" install
+  rm "$pkgdir"/usr/lib/*.ajs
+  find "$pkgdir"/usr/{lib/pkgconfig,include} -type f -exec chmod -c a-x {} +
+}
+
+# vim:set sw=2 sts=-1 et:
