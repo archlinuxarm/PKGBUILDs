@@ -1,0 +1,1958 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jan Alexander Steffens (heftig)" <jan.steffens@gmail.com>
+Date: Thu, 30 May 2024 00:54:43 +0200
+Subject: [PATCH] libav: Fix compatibility with ffmpeg 7
+
+Squash of the following commits:
+
+  - avdemux: Remove typefinder implementation
+  - libav: Fix signature of avprotocol write function for ffmpeg 7
+  - libav: Update AVCodecContext lifetime to work properly with ffmpeg 7
+  - avdemux: Fix leak of demuxer input context in error cases
+  - avmux: Reset input context to NULL after closing in the muxer
+  - avvidenc: Only use 2 ticks per frame if encoding interlaced video
+  - avvidenc: Set the DTS to 0 if it is negative, not the PTS
+  - avviddec: Only use 2 ticks per frame if decoding interlaced video
+  - avvidenc: Make sure to pass always increasing PTS to the encoder
+  - typefind: Add typefinders for formats that were previously available via ffmpeg
+
+The latest commit was 39d2beac641315b8f53816d5f1fdcdfb5d14411c from
+2024-05-01 18:05:35 +0300.
+
+Source: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6505
+---
+ subprojects/gst-libav/ext/libav/gstav.c       |  12 --
+ subprojects/gst-libav/ext/libav/gstav.h       |   1 -
+ subprojects/gst-libav/ext/libav/gstavauddec.c |  92 +++-----
+ subprojects/gst-libav/ext/libav/gstavauddec.h |   1 -
+ subprojects/gst-libav/ext/libav/gstavaudenc.c |  65 ++----
+ subprojects/gst-libav/ext/libav/gstavaudenc.h |   1 -
+ subprojects/gst-libav/ext/libav/gstavcfg.c    |   6 +-
+ .../gst-libav/ext/libav/gstavcodecmap.c       |  24 +++
+ .../gst-libav/ext/libav/gstavdeinterlace.c    |   5 +-
+ subprojects/gst-libav/ext/libav/gstavdemux.c  | 124 ++---------
+ subprojects/gst-libav/ext/libav/gstavmux.c    |   1 +
+ .../gst-libav/ext/libav/gstavprotocol.c       |   4 +
+ subprojects/gst-libav/ext/libav/gstavviddec.c | 111 +++++-----
+ subprojects/gst-libav/ext/libav/gstavviddec.h |   1 -
+ subprojects/gst-libav/ext/libav/gstavvidenc.c | 127 ++++++-----
+ subprojects/gst-libav/ext/libav/gstavvidenc.h |   2 +-
+ .../gst/typefind/gsttypefindfunctions.c       | 203 ++++++++++++++++++
+ .../gst/typefind/gsttypefindfunctionsplugin.c |  10 +
+ .../gst/typefind/gsttypefindfunctionsplugin.h |  10 +
+ .../gst/typefind/gsttypefindfunctionsriff.c   |   4 +
+ .../typefind/gsttypefindfunctionsstartwith.c  |   2 +
+ 21 files changed, 457 insertions(+), 349 deletions(-)
+
+diff --git a/subprojects/gst-libav/ext/libav/gstav.c b/subprojects/gst-libav/ext/libav/gstav.c
+index 00fcc6388137..0c9353f0c157 100644
+--- a/subprojects/gst-libav/ext/libav/gstav.c
++++ b/subprojects/gst-libav/ext/libav/gstav.c
+@@ -72,18 +72,6 @@ gst_ffmpeg_avcodec_open (AVCodecContext * avctx, const AVCodec * codec)
+   return ret;
+ }
+ 
+-int
+-gst_ffmpeg_avcodec_close (AVCodecContext * avctx)
+-{
+-  int ret;
+-
+-  g_mutex_lock (&gst_avcodec_mutex);
+-  ret = avcodec_close (avctx);
+-  g_mutex_unlock (&gst_avcodec_mutex);
+-
+-  return ret;
+-}
+-
+ int
+ gst_ffmpeg_av_find_stream_info (AVFormatContext * ic)
+ {
+diff --git a/subprojects/gst-libav/ext/libav/gstav.h b/subprojects/gst-libav/ext/libav/gstav.h
+index a7fbb019fd55..9cdb14503c3a 100644
+--- a/subprojects/gst-libav/ext/libav/gstav.h
++++ b/subprojects/gst-libav/ext/libav/gstav.h
+@@ -46,7 +46,6 @@ extern gboolean gst_ffmpegdeinterlace_register (GstPlugin * plugin);
+ extern gboolean gst_ffmpegvidcmp_register (GstPlugin * plugin);
+ 
+ int gst_ffmpeg_avcodec_open (AVCodecContext *avctx, const AVCodec *codec);
+-int gst_ffmpeg_avcodec_close (AVCodecContext *avctx);
+ int gst_ffmpeg_av_find_stream_info(AVFormatContext *ic);
+ 
+ G_END_DECLS
+diff --git a/subprojects/gst-libav/ext/libav/gstavauddec.c b/subprojects/gst-libav/ext/libav/gstavauddec.c
+index 48c4be6b6a14..2279e690ee5e 100644
+--- a/subprojects/gst-libav/ext/libav/gstavauddec.c
++++ b/subprojects/gst-libav/ext/libav/gstavauddec.c
+@@ -145,136 +145,89 @@ gst_ffmpegauddec_class_init (GstFFMpegAudDecClass * klass)
+ static void
+ gst_ffmpegauddec_init (GstFFMpegAudDec * ffmpegdec)
+ {
+-  GstFFMpegAudDecClass *klass =
+-      (GstFFMpegAudDecClass *) G_OBJECT_GET_CLASS (ffmpegdec);
+-
+-  /* some ffmpeg data */
+-  ffmpegdec->context = avcodec_alloc_context3 (klass->in_plugin);
+-  ffmpegdec->context->opaque = ffmpegdec;
+-  ffmpegdec->opened = FALSE;
+-
+-  ffmpegdec->frame = av_frame_alloc ();
+-
+   GST_PAD_SET_ACCEPT_TEMPLATE (GST_AUDIO_DECODER_SINK_PAD (ffmpegdec));
+   gst_audio_decoder_set_use_default_pad_acceptcaps (GST_AUDIO_DECODER_CAST
+       (ffmpegdec), TRUE);
+ 
+   gst_audio_decoder_set_drainable (GST_AUDIO_DECODER (ffmpegdec), TRUE);
+   gst_audio_decoder_set_needs_format (GST_AUDIO_DECODER (ffmpegdec), TRUE);
+ }
+ 
+ static void
+ gst_ffmpegauddec_finalize (GObject * object)
+ {
+   GstFFMpegAudDec *ffmpegdec = (GstFFMpegAudDec *) object;
+ 
+   av_frame_free (&ffmpegdec->frame);
+   avcodec_free_context (&ffmpegdec->context);
+ 
+   G_OBJECT_CLASS (parent_class)->finalize (object);
+ }
+ 
+ /* With LOCK */
+-static gboolean
+-gst_ffmpegauddec_close (GstFFMpegAudDec * ffmpegdec, gboolean reset)
++static void
++gst_ffmpegauddec_close (GstFFMpegAudDec * ffmpegdec)
+ {
+-  GstFFMpegAudDecClass *oclass;
+-
+-  oclass = (GstFFMpegAudDecClass *) (G_OBJECT_GET_CLASS (ffmpegdec));
+-
+   GST_LOG_OBJECT (ffmpegdec, "closing libav codec");
+ 
+   gst_caps_replace (&ffmpegdec->last_caps, NULL);
+-
+-  gst_ffmpeg_avcodec_close (ffmpegdec->context);
+-  ffmpegdec->opened = FALSE;
+-
+   av_freep (&ffmpegdec->context->extradata);
+-
+-  if (reset) {
+-    avcodec_free_context (&ffmpegdec->context);
+-    ffmpegdec->context = avcodec_alloc_context3 (oclass->in_plugin);
+-    if (ffmpegdec->context == NULL) {
+-      GST_DEBUG_OBJECT (ffmpegdec, "Failed to set context defaults");
+-      return FALSE;
+-    }
+-    ffmpegdec->context->opaque = ffmpegdec;
+-  }
+-
+-  return TRUE;
++  avcodec_free_context (&ffmpegdec->context);
+ }
+ 
+ static gboolean
+ gst_ffmpegauddec_start (GstAudioDecoder * decoder)
+ {
+   GstFFMpegAudDec *ffmpegdec = (GstFFMpegAudDec *) decoder;
+-  GstFFMpegAudDecClass *oclass;
+-
+-  oclass = (GstFFMpegAudDecClass *) (G_OBJECT_GET_CLASS (ffmpegdec));
+ 
+   GST_OBJECT_LOCK (ffmpegdec);
++  ffmpegdec->frame = av_frame_alloc ();
+   avcodec_free_context (&ffmpegdec->context);
+-  ffmpegdec->context = avcodec_alloc_context3 (oclass->in_plugin);
+-  if (ffmpegdec->context == NULL) {
+-    GST_DEBUG_OBJECT (ffmpegdec, "Failed to set context defaults");
+-    GST_OBJECT_UNLOCK (ffmpegdec);
+-    return FALSE;
+-  }
+-  ffmpegdec->context->opaque = ffmpegdec;
+-
+-  /* FIXME: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1474 */
+-  if ((oclass->in_plugin->capabilities & AV_CODEC_CAP_DELAY) != 0
+-      && (oclass->in_plugin->id == AV_CODEC_ID_WMAV1
+-          || oclass->in_plugin->id == AV_CODEC_ID_WMAV2)) {
+-    ffmpegdec->context->flags2 |= AV_CODEC_FLAG2_SKIP_MANUAL;
+-  }
+-
+   GST_OBJECT_UNLOCK (ffmpegdec);
+ 
+   return TRUE;
+ }
+ 
+ static gboolean
+ gst_ffmpegauddec_stop (GstAudioDecoder * decoder)
+ {
+   GstFFMpegAudDec *ffmpegdec = (GstFFMpegAudDec *) decoder;
+ 
+   GST_OBJECT_LOCK (ffmpegdec);
+-  gst_ffmpegauddec_close (ffmpegdec, FALSE);
++  av_frame_free (&ffmpegdec->frame);
+   g_free (ffmpegdec->padded);
++  gst_ffmpegauddec_close (ffmpegdec);
+   ffmpegdec->padded = NULL;
+   ffmpegdec->padded_size = 0;
+   GST_OBJECT_UNLOCK (ffmpegdec);
+   gst_audio_info_init (&ffmpegdec->info);
+   gst_caps_replace (&ffmpegdec->last_caps, NULL);
+ 
+   return TRUE;
+ }
+ 
+ /* with LOCK */
+ static gboolean
+ gst_ffmpegauddec_open (GstFFMpegAudDec * ffmpegdec)
+ {
+   GstFFMpegAudDecClass *oclass;
+ 
+   oclass = (GstFFMpegAudDecClass *) (G_OBJECT_GET_CLASS (ffmpegdec));
+ 
+   if (gst_ffmpeg_avcodec_open (ffmpegdec->context, oclass->in_plugin) < 0)
+     goto could_not_open;
+ 
+-  ffmpegdec->opened = TRUE;
+-
+   GST_LOG_OBJECT (ffmpegdec, "Opened libav codec %s, id %d",
+       oclass->in_plugin->name, oclass->in_plugin->id);
+ 
+   gst_audio_info_init (&ffmpegdec->info);
+ 
+   return TRUE;
+ 
+   /* ERRORS */
+ could_not_open:
+   {
+-    gst_ffmpegauddec_close (ffmpegdec, TRUE);
++    gst_ffmpegauddec_close (ffmpegdec);
+     GST_DEBUG_OBJECT (ffmpegdec, "avdec_%s: Failed to open libav codec",
+         oclass->in_plugin->name);
+     return FALSE;
+@@ -321,14 +274,26 @@ gst_ffmpegauddec_set_format (GstAudioDecoder * decoder, GstCaps * caps)
+   gst_caps_replace (&ffmpegdec->last_caps, caps);
+ 
+   /* close old session */
+-  if (ffmpegdec->opened) {
++  if (ffmpegdec->context) {
+     GST_OBJECT_UNLOCK (ffmpegdec);
+     gst_ffmpegauddec_drain (ffmpegdec, FALSE);
+     GST_OBJECT_LOCK (ffmpegdec);
+-    if (!gst_ffmpegauddec_close (ffmpegdec, TRUE)) {
+-      GST_OBJECT_UNLOCK (ffmpegdec);
+-      return FALSE;
+-    }
++    gst_ffmpegauddec_close (ffmpegdec);
++  }
++
++  ffmpegdec->context = avcodec_alloc_context3 (oclass->in_plugin);
++  if (ffmpegdec->context == NULL) {
++    GST_DEBUG_OBJECT (ffmpegdec, "Failed to allocate context");
++    GST_OBJECT_UNLOCK (ffmpegdec);
++    return FALSE;
++  }
++  ffmpegdec->context->opaque = ffmpegdec;
++
++  /* FIXME: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1474 */
++  if ((oclass->in_plugin->capabilities & AV_CODEC_CAP_DELAY) != 0
++      && (oclass->in_plugin->id == AV_CODEC_ID_WMAV1
++          || oclass->in_plugin->id == AV_CODEC_ID_WMAV2)) {
++    ffmpegdec->context->flags2 |= AV_CODEC_FLAG2_SKIP_MANUAL;
+   }
+ 
+   /* get size and so */
+@@ -586,7 +551,7 @@ gst_ffmpegauddec_frame (GstFFMpegAudDec * ffmpegdec, GstFlowReturn * ret,
+   GstBuffer *outbuf = NULL;
+   gboolean got_frame = FALSE;
+ 
+-  if (G_UNLIKELY (ffmpegdec->context->codec == NULL))
++  if (G_UNLIKELY (!ffmpegdec->context))
+     goto no_codec;
+ 
+   *ret = GST_FLOW_OK;
+@@ -630,6 +595,9 @@ gst_ffmpegauddec_drain (GstFFMpegAudDec * ffmpegdec, gboolean force)
+   gboolean need_more_data = FALSE;
+   gboolean got_frame;
+ 
++  if (!ffmpegdec->context)
++    return GST_FLOW_OK;
++
+   if (avcodec_send_packet (ffmpegdec->context, NULL))
+     goto send_packet_failed;
+ 
+@@ -672,32 +640,32 @@ gst_ffmpegauddec_flush (GstAudioDecoder * decoder, gboolean hard)
+ {
+   GstFFMpegAudDec *ffmpegdec = (GstFFMpegAudDec *) decoder;
+ 
+-  if (ffmpegdec->opened) {
++  if (ffmpegdec->context) {
+     avcodec_flush_buffers (ffmpegdec->context);
+   }
+ }
+ 
+ static GstFlowReturn
+ gst_ffmpegauddec_handle_frame (GstAudioDecoder * decoder, GstBuffer * inbuf)
+ {
+   GstFFMpegAudDec *ffmpegdec;
+   GstFFMpegAudDecClass *oclass;
+   guint8 *data;
+   GstMapInfo map;
+   gint size;
+   gboolean got_any_frames = FALSE;
+   gboolean got_frame;
+   GstFlowReturn ret = GST_FLOW_OK;
+   gboolean is_header;
+   AVPacket packet;
+   GstAudioClippingMeta *clipping_meta = NULL;
+   guint32 num_clipped_samples = 0;
+   gboolean fully_clipped = FALSE;
+   gboolean need_more_data = FALSE;
+ 
+   ffmpegdec = (GstFFMpegAudDec *) decoder;
+ 
+-  if (G_UNLIKELY (!ffmpegdec->opened))
++  if (G_UNLIKELY (!ffmpegdec->context))
+     goto not_negotiated;
+ 
+   if (inbuf == NULL) {
+diff --git a/subprojects/gst-libav/ext/libav/gstavauddec.h b/subprojects/gst-libav/ext/libav/gstavauddec.h
+index d91de0d2b29e..93466ad99fb4 100644
+--- a/subprojects/gst-libav/ext/libav/gstavauddec.h
++++ b/subprojects/gst-libav/ext/libav/gstavauddec.h
+@@ -34,7 +34,6 @@ struct _GstFFMpegAudDec
+ 
+   /* decoding */
+   AVCodecContext *context;
+-  gboolean opened;
+ 
+   AVFrame *frame;
+ 
+diff --git a/subprojects/gst-libav/ext/libav/gstavaudenc.c b/subprojects/gst-libav/ext/libav/gstavaudenc.c
+index 57f41fe617d0..6ff966d32cee 100644
+--- a/subprojects/gst-libav/ext/libav/gstavaudenc.c
++++ b/subprojects/gst-libav/ext/libav/gstavaudenc.c
+@@ -161,92 +161,80 @@ gst_ffmpegaudenc_init (GstFFMpegAudEnc * ffmpegaudenc)
+   GST_PAD_SET_ACCEPT_TEMPLATE (GST_AUDIO_ENCODER_SINK_PAD (ffmpegaudenc));
+ 
+   /* ffmpeg objects */
+-  ffmpegaudenc->context = avcodec_alloc_context3 (klass->in_plugin);
+   ffmpegaudenc->refcontext = avcodec_alloc_context3 (klass->in_plugin);
+-  ffmpegaudenc->opened = FALSE;
+-  ffmpegaudenc->frame = av_frame_alloc ();
+ 
+   gst_audio_encoder_set_drainable (GST_AUDIO_ENCODER (ffmpegaudenc), TRUE);
+ }
+ 
+ static void
+ gst_ffmpegaudenc_finalize (GObject * object)
+ {
+   GstFFMpegAudEnc *ffmpegaudenc = (GstFFMpegAudEnc *) object;
+ 
+   /* clean up remaining allocated data */
+   av_frame_free (&ffmpegaudenc->frame);
+   avcodec_free_context (&ffmpegaudenc->context);
+   avcodec_free_context (&ffmpegaudenc->refcontext);
+ 
+   G_OBJECT_CLASS (parent_class)->finalize (object);
+ }
+ 
+ static gboolean
+ gst_ffmpegaudenc_start (GstAudioEncoder * encoder)
+ {
+   GstFFMpegAudEnc *ffmpegaudenc = (GstFFMpegAudEnc *) encoder;
+-  GstFFMpegAudEncClass *oclass =
+-      (GstFFMpegAudEncClass *) G_OBJECT_GET_CLASS (ffmpegaudenc);
+-
+-  ffmpegaudenc->opened = FALSE;
+-  ffmpegaudenc->need_reopen = FALSE;
+ 
+   avcodec_free_context (&ffmpegaudenc->context);
+-  ffmpegaudenc->context = avcodec_alloc_context3 (oclass->in_plugin);
+-  if (ffmpegaudenc->context == NULL) {
+-    GST_DEBUG_OBJECT (ffmpegaudenc, "Failed to set context defaults");
+-    return FALSE;
+-  }
++  av_frame_free (&ffmpegaudenc->frame);
++  ffmpegaudenc->need_reopen = FALSE;
++
++  ffmpegaudenc->frame = av_frame_alloc ();
+ 
+   return TRUE;
+ }
+ 
+ static gboolean
+ gst_ffmpegaudenc_stop (GstAudioEncoder * encoder)
+ {
+   GstFFMpegAudEnc *ffmpegaudenc = (GstFFMpegAudEnc *) encoder;
+ 
+   /* close old session */
+-  gst_ffmpeg_avcodec_close (ffmpegaudenc->context);
+-  ffmpegaudenc->opened = FALSE;
++  avcodec_free_context (&ffmpegaudenc->context);
++  av_frame_free (&ffmpegaudenc->frame);
+   ffmpegaudenc->need_reopen = FALSE;
+ 
+   return TRUE;
+ }
+ 
+ static void
+ gst_ffmpegaudenc_flush (GstAudioEncoder * encoder)
+ {
+   GstFFMpegAudEnc *ffmpegaudenc = (GstFFMpegAudEnc *) encoder;
+ 
+-  if (ffmpegaudenc->opened) {
++  if (ffmpegaudenc->context) {
+     avcodec_flush_buffers (ffmpegaudenc->context);
+   }
+ }
+ 
+ static gboolean
+ gst_ffmpegaudenc_set_format (GstAudioEncoder * encoder, GstAudioInfo * info)
+ {
+   GstFFMpegAudEnc *ffmpegaudenc = (GstFFMpegAudEnc *) encoder;
+   GstCaps *other_caps;
+   GstCaps *allowed_caps;
+   GstCaps *icaps;
+   gsize frame_size;
+   GstFFMpegAudEncClass *oclass =
+       (GstFFMpegAudEncClass *) G_OBJECT_GET_CLASS (ffmpegaudenc);
+ 
+   ffmpegaudenc->need_reopen = FALSE;
+ 
+   /* close old session */
+-  if (ffmpegaudenc->opened) {
+-    avcodec_free_context (&ffmpegaudenc->context);
+-    ffmpegaudenc->opened = FALSE;
+-    ffmpegaudenc->context = avcodec_alloc_context3 (oclass->in_plugin);
+-    if (ffmpegaudenc->context == NULL) {
+-      GST_DEBUG_OBJECT (ffmpegaudenc, "Failed to set context defaults");
+-      return FALSE;
+-    }
++  avcodec_free_context (&ffmpegaudenc->context);
++  ffmpegaudenc->context = avcodec_alloc_context3 (oclass->in_plugin);
++  if (ffmpegaudenc->context == NULL) {
++    GST_DEBUG_OBJECT (ffmpegaudenc, "Failed to set context defaults");
++    return FALSE;
+   }
+ 
+   gst_ffmpeg_cfg_fill_context (G_OBJECT (ffmpegaudenc), ffmpegaudenc->context);
+@@ -298,56 +286,48 @@ gst_ffmpegaudenc_set_format (GstAudioEncoder * encoder, GstAudioInfo * info)
+   /* open codec */
+   if (gst_ffmpeg_avcodec_open (ffmpegaudenc->context, oclass->in_plugin) < 0) {
+     gst_caps_unref (allowed_caps);
+-    avcodec_free_context (&ffmpegaudenc->context);
+     GST_DEBUG_OBJECT (ffmpegaudenc, "avenc_%s: Failed to open FFMPEG codec",
+         oclass->in_plugin->name);
+-    ffmpegaudenc->context = avcodec_alloc_context3 (oclass->in_plugin);
+-    if (ffmpegaudenc->context == NULL)
+-      GST_DEBUG_OBJECT (ffmpegaudenc, "Failed to set context defaults");
+ 
+     if ((oclass->in_plugin->capabilities & AV_CODEC_CAP_EXPERIMENTAL) &&
+         ffmpegaudenc->context->strict_std_compliance !=
+         FF_COMPLIANCE_EXPERIMENTAL) {
+       GST_ELEMENT_ERROR (ffmpegaudenc, LIBRARY, SETTINGS,
+           ("Codec is experimental, but settings don't allow encoders to "
+               "produce output of experimental quality"),
+           ("This codec may not create output that is conformant to the specs "
+               "or of good quality. If you must use it anyway, set the "
+               "compliance property to experimental"));
+     }
++    avcodec_free_context (&ffmpegaudenc->context);
+     return FALSE;
+   }
+ 
+   /* try to set this caps on the other side */
+   other_caps = gst_ffmpeg_codecid_to_caps (oclass->in_plugin->id,
+       ffmpegaudenc->context, TRUE);
+ 
+   if (!other_caps) {
+     gst_caps_unref (allowed_caps);
+     avcodec_free_context (&ffmpegaudenc->context);
+     GST_DEBUG ("Unsupported codec - no caps found");
+-    ffmpegaudenc->context = avcodec_alloc_context3 (oclass->in_plugin);
+-    if (ffmpegaudenc->context == NULL)
+-      GST_DEBUG_OBJECT (ffmpegaudenc, "Failed to set context defaults");
+     return FALSE;
+   }
+ 
+   icaps = gst_caps_intersect (allowed_caps, other_caps);
+   gst_caps_unref (allowed_caps);
+   gst_caps_unref (other_caps);
+   if (gst_caps_is_empty (icaps)) {
+     gst_caps_unref (icaps);
++    avcodec_free_context (&ffmpegaudenc->context);
+     return FALSE;
+   }
+   icaps = gst_caps_fixate (icaps);
+ 
+   if (!gst_audio_encoder_set_output_format (GST_AUDIO_ENCODER (ffmpegaudenc),
+           icaps)) {
+     avcodec_free_context (&ffmpegaudenc->context);
+     gst_caps_unref (icaps);
+-    ffmpegaudenc->context = avcodec_alloc_context3 (oclass->in_plugin);
+-    if (ffmpegaudenc->context == NULL)
+-      GST_DEBUG_OBJECT (ffmpegaudenc, "Failed to set context defaults");
+     return FALSE;
+   }
+   gst_caps_unref (icaps);
+@@ -385,17 +365,14 @@ gst_ffmpegaudenc_set_format (GstAudioEncoder * encoder, GstAudioInfo * info)
+   }
+ 
+   /* success! */
+-  ffmpegaudenc->opened = TRUE;
+-  ffmpegaudenc->need_reopen = FALSE;
+ 
+   return TRUE;
+ }
+ 
+ static void
+ gst_ffmpegaudenc_free_avpacket (gpointer pkt)
+ {
+-  av_packet_unref ((AVPacket *) pkt);
+-  g_free (pkt);
++  av_packet_free ((AVPacket **) & pkt);
+ }
+ 
+ typedef struct
+@@ -596,8 +573,7 @@ gst_ffmpegaudenc_receive_packet (GstFFMpegAudEnc * ffmpegaudenc,
+ 
+   ctx = ffmpegaudenc->context;
+ 
+-  pkt = g_new0 (AVPacket, 1);
+-
++  pkt = av_packet_alloc ();
+   res = avcodec_receive_packet (ctx, pkt);
+ 
+   if (res == 0) {
+@@ -636,20 +612,23 @@ gst_ffmpegaudenc_receive_packet (GstFFMpegAudEnc * ffmpegaudenc,
+     *got_packet = TRUE;
+   } else {
+     GST_LOG_OBJECT (ffmpegaudenc, "no output produced");
+-    g_free (pkt);
++    av_packet_free (&pkt);
+     ret = GST_FLOW_OK;
+     *got_packet = FALSE;
+   }
+ 
+   return ret;
+ }
+ 
+ static GstFlowReturn
+ gst_ffmpegaudenc_drain (GstFFMpegAudEnc * ffmpegaudenc)
+ {
+   GstFlowReturn ret = GST_FLOW_OK;
+   gboolean got_packet;
+ 
++  if (!ffmpegaudenc->context)
++    return GST_FLOW_OK;
++
+   ret = gst_ffmpegaudenc_send_frame (ffmpegaudenc, NULL);
+ 
+   if (ret == GST_FLOW_OK) {
+@@ -683,7 +662,7 @@ gst_ffmpegaudenc_handle_frame (GstAudioEncoder * encoder, GstBuffer * inbuf)
+ 
+   ffmpegaudenc = (GstFFMpegAudEnc *) encoder;
+ 
+-  if (G_UNLIKELY (!ffmpegaudenc->opened))
++  if (G_UNLIKELY (!ffmpegaudenc->context))
+     goto not_negotiated;
+ 
+   if (!inbuf)
+@@ -752,7 +731,7 @@ gst_ffmpegaudenc_set_property (GObject * object,
+ 
+   ffmpegaudenc = (GstFFMpegAudEnc *) (object);
+ 
+-  if (ffmpegaudenc->opened) {
++  if (ffmpegaudenc->context) {
+     GST_WARNING_OBJECT (ffmpegaudenc,
+         "Can't change properties once encoder is setup !");
+     return;
+diff --git a/subprojects/gst-libav/ext/libav/gstavaudenc.h b/subprojects/gst-libav/ext/libav/gstavaudenc.h
+index 3c94aef4e061..e21de8337d6b 100644
+--- a/subprojects/gst-libav/ext/libav/gstavaudenc.h
++++ b/subprojects/gst-libav/ext/libav/gstavaudenc.h
+@@ -38,7 +38,6 @@ struct _GstFFMpegAudEnc
+ 
+   AVCodecContext *context;
+   AVCodecContext *refcontext;
+-  gboolean opened;
+   gboolean need_reopen;
+ 
+   AVFrame *frame;
+diff --git a/subprojects/gst-libav/ext/libav/gstavcfg.c b/subprojects/gst-libav/ext/libav/gstavcfg.c
+index bcc501c39cc8..6092b086c474 100644
+--- a/subprojects/gst-libav/ext/libav/gstavcfg.c
++++ b/subprojects/gst-libav/ext/libav/gstavcfg.c
+@@ -488,10 +488,8 @@ gst_ffmpeg_cfg_install_properties (GObjectClass * klass, AVCodec * in_plugin,
+       install_opts ((GObjectClass *) klass, &ctx->av_class, prop_id, flags,
+       " (Generic codec option, might have no effect)", generic_overrides);
+ 
+-  if (ctx) {
+-    gst_ffmpeg_avcodec_close (ctx);
+-    av_free (ctx);
+-  }
++  if (ctx)
++    avcodec_free_context (&ctx);
+ }
+ 
+ static gint
+diff --git a/subprojects/gst-libav/ext/libav/gstavcodecmap.c b/subprojects/gst-libav/ext/libav/gstavcodecmap.c
+index c9c0a0fa7730..3d5c19d67d64 100644
+--- a/subprojects/gst-libav/ext/libav/gstavcodecmap.c
++++ b/subprojects/gst-libav/ext/libav/gstavcodecmap.c
+@@ -3833,6 +3833,18 @@ gst_ffmpeg_formatid_to_caps (const gchar * format_name)
+     caps = gst_caps_from_string ("audio/x-brstm");
+   } else if (!strcmp (format_name, "bfstm")) {
+     caps = gst_caps_from_string ("audio/x-bfstm");
++  } else if (!strcmp (format_name, "avs")) {
++    caps = gst_caps_from_string ("video/x-avs");
++  } else if (!strcmp (format_name, "dsf")) {
++    caps = gst_caps_from_string ("audio/x-dsf");
++  } else if (!strcmp (format_name, "ea")) {
++    caps = gst_caps_from_string ("video/x-ea");
++  } else if (!strcmp (format_name, "film_cpk")) {
++    caps = gst_caps_from_string ("video/x-film-cpk");
++  } else if (!strcmp (format_name, "xwma")) {
++    caps = gst_caps_from_string ("audio/x-xwma");
++  } else if (!strcmp (format_name, "iff")) {
++    caps = gst_caps_from_string ("application/x-iff");
+   } else {
+     gchar *name;
+ 
+@@ -4029,6 +4041,18 @@ gst_ffmpeg_formatid_get_codecids (const gchar * format_name,
+ 
+     *video_codec_list = ivf_video_list;
+     *audio_codec_list = ivf_audio_list;
++  } else if ((!strcmp (format_name, "film_cpk"))) {
++    static enum AVCodecID cpk_video_list[] = {
++      AV_CODEC_ID_CINEPAK,
++      AV_CODEC_ID_NONE
++    };
++    static enum AVCodecID cpk_audio_list[] = {
++      AV_CODEC_ID_PCM_S16BE,
++      AV_CODEC_ID_NONE
++    };
++
++    *video_codec_list = cpk_video_list;
++    *audio_codec_list = cpk_audio_list;
+   } else if ((plugin->audio_codec != AV_CODEC_ID_NONE) ||
+       (plugin->video_codec != AV_CODEC_ID_NONE)) {
+     tmp_vlist[0] = plugin->video_codec;
+diff --git a/subprojects/gst-libav/ext/libav/gstavdeinterlace.c b/subprojects/gst-libav/ext/libav/gstavdeinterlace.c
+index 2d46c5090185..49dcdffb492f 100644
+--- a/subprojects/gst-libav/ext/libav/gstavdeinterlace.c
++++ b/subprojects/gst-libav/ext/libav/gstavdeinterlace.c
+@@ -225,14 +225,13 @@ gst_ffmpegdeinterlace_sink_setcaps (GstPad * pad, GstObject * parent,
+   ctx->pix_fmt = AV_PIX_FMT_NB;
+   gst_ffmpeg_caps_with_codectype (AVMEDIA_TYPE_VIDEO, caps, ctx);
+   if (ctx->pix_fmt == AV_PIX_FMT_NB) {
+-    gst_ffmpeg_avcodec_close (ctx);
+-    av_free (ctx);
++    avcodec_free_context (&ctx);
+     return FALSE;
+   }
+ 
+   deinterlace->pixfmt = ctx->pix_fmt;
+ 
+-  av_free (ctx);
++  avcodec_free_context (&ctx);
+ 
+   deinterlace->to_size =
+       av_image_get_buffer_size (deinterlace->pixfmt, deinterlace->width,
+diff --git a/subprojects/gst-libav/ext/libav/gstavdemux.c b/subprojects/gst-libav/ext/libav/gstavdemux.c
+index ab6ac1b5c944..2c68d622f1a8 100644
+--- a/subprojects/gst-libav/ext/libav/gstavdemux.c
++++ b/subprojects/gst-libav/ext/libav/gstavdemux.c
+@@ -67,7 +67,6 @@ struct _GstFFMpegDemux
+   guint group_id;
+ 
+   AVFormatContext *context;
+-  gboolean opened;
+ 
+   GstFFStream *streams[MAX_STREAMS];
+ 
+@@ -273,7 +272,6 @@ gst_ffmpegdemux_init (GstFFMpegDemux * demux)
+   demux->have_group_id = FALSE;
+   demux->group_id = G_MAXUINT;
+ 
+-  demux->opened = FALSE;
+   demux->context = NULL;
+ 
+   for (n = 0; n < MAX_STREAMS; n++) {
+@@ -324,7 +322,7 @@ gst_ffmpegdemux_close (GstFFMpegDemux * demux)
+   gint n;
+   GstEvent **event_p;
+ 
+-  if (!demux->opened)
++  if (!demux->context)
+     return;
+ 
+   /* remove pads from ourselves */
+@@ -353,12 +351,8 @@ gst_ffmpegdemux_close (GstFFMpegDemux * demux)
+     gst_ffmpeg_pipe_close (demux->context->pb);
+   demux->context->pb = NULL;
+   avformat_close_input (&demux->context);
+-  if (demux->context)
+-    avformat_free_context (demux->context);
+-  demux->context = NULL;
+ 
+   GST_OBJECT_LOCK (demux);
+-  demux->opened = FALSE;
+   event_p = &demux->seek_event;
+   gst_event_replace (event_p, NULL);
+   GST_OBJECT_UNLOCK (demux);
+@@ -700,7 +694,7 @@ gst_ffmpegdemux_send_event (GstElement * element, GstEvent * event)
+   switch (GST_EVENT_TYPE (event)) {
+     case GST_EVENT_SEEK:
+       GST_OBJECT_LOCK (demux);
+-      if (!demux->opened) {
++      if (!demux->context) {
+         GstEvent **event_p;
+ 
+         GST_DEBUG_OBJECT (demux, "caching seek event");
+@@ -1309,7 +1303,6 @@ gst_ffmpegdemux_open (GstFFMpegDemux * demux)
+   demux->segment.duration = demux->duration;
+ 
+   GST_OBJECT_LOCK (demux);
+-  demux->opened = TRUE;
+   event = demux->seek_event;
+   demux->seek_event = NULL;
+   cached_events = demux->cached_events;
+@@ -1366,88 +1359,40 @@ gst_ffmpegdemux_open (GstFFMpegDemux * demux)
+   /* ERRORS */
+ beach:
+   {
++    if (demux->context->pb) {
++      if (demux->seekable)
++        gst_ffmpegdata_close (demux->context->pb);
++      else
++        gst_ffmpeg_pipe_close (demux->context->pb);
++      demux->context->pb = NULL;
++    }
++    avformat_close_input (&demux->context);
++
+     GST_ELEMENT_ERROR (demux, LIBRARY, FAILED, (NULL),
+         ("%s", gst_ffmpegdemux_averror (res)));
+     return FALSE;
+   }
+ }
+ 
+-#define GST_FFMPEG_TYPE_FIND_SIZE 4096
+-#define GST_FFMPEG_TYPE_FIND_MIN_SIZE 256
+-
+-static void
+-gst_ffmpegdemux_type_find (GstTypeFind * tf, gpointer priv)
+-{
+-  const guint8 *data;
+-  AVInputFormat *in_plugin = (AVInputFormat *) priv;
+-  gint res = 0;
+-  guint64 length;
+-  GstCaps *sinkcaps;
+-
+-  /* We want GST_FFMPEG_TYPE_FIND_SIZE bytes, but if the file is shorter than
+-   * that we'll give it a try... */
+-  length = gst_type_find_get_length (tf);
+-  if (length == 0 || length > GST_FFMPEG_TYPE_FIND_SIZE)
+-    length = GST_FFMPEG_TYPE_FIND_SIZE;
+-
+-  /* The ffmpeg typefinders assume there's a certain minimum amount of data
+-   * and will happily do invalid memory access if there isn't, so let's just
+-   * skip the ffmpeg typefinders if the data available is too short
+-   * (in which case it's unlikely to be a media file anyway) */
+-  if (length < GST_FFMPEG_TYPE_FIND_MIN_SIZE) {
+-    GST_LOG ("not typefinding %" G_GUINT64_FORMAT " bytes, too short", length);
+-    return;
+-  }
+-
+-  GST_LOG ("typefinding %" G_GUINT64_FORMAT " bytes", length);
+-  if (in_plugin->read_probe &&
+-      (data = gst_type_find_peek (tf, 0, length)) != NULL) {
+-    AVProbeData probe_data;
+-
+-    probe_data.filename = "";
+-    probe_data.buf = (guint8 *) data;
+-    probe_data.buf_size = length;
+-
+-    res = in_plugin->read_probe (&probe_data);
+-    if (res > 0) {
+-      res = MAX (1, res * GST_TYPE_FIND_MAXIMUM / AVPROBE_SCORE_MAX);
+-      /* Restrict the probability for MPEG-TS streams, because there is
+-       * probably a better version in plugins-base, if the user has a recent
+-       * plugins-base (in fact we shouldn't even get here for ffmpeg mpegts or
+-       * mpegtsraw typefinders, since we blacklist them) */
+-      if (g_str_has_prefix (in_plugin->name, "mpegts"))
+-        res = MIN (res, GST_TYPE_FIND_POSSIBLE);
+-
+-      sinkcaps = gst_ffmpeg_formatid_to_caps (in_plugin->name);
+-
+-      GST_LOG ("libav typefinder '%s' suggests %" GST_PTR_FORMAT ", p=%u%%",
+-          in_plugin->name, sinkcaps, res);
+-
+-      gst_type_find_suggest (tf, res, sinkcaps);
+-      gst_caps_unref (sinkcaps);
+-    }
+-  }
+-}
+-
+ /* Task */
+ static void
+ gst_ffmpegdemux_loop (GstFFMpegDemux * demux)
+ {
+   GstFlowReturn ret;
+   gint res = -1;
+   AVPacket pkt;
+   GstPad *srcpad;
+   GstFFStream *stream;
+   AVStream *avstream;
+   GstBuffer *outbuf = NULL;
+   GstClockTime timestamp, duration;
+   gint outsize;
+   gboolean rawvideo;
+   GstFlowReturn stream_last_flow;
+   gint64 pts;
+ 
+   /* open file if we didn't so already */
+-  if (!demux->opened)
++  if (!demux->context)
+     if (!gst_ffmpegdemux_open (demux))
+       goto open_failed;
+ 
+@@ -1782,7 +1727,7 @@ gst_ffmpegdemux_sink_event (GstPad * sinkpad, GstObject * parent,
+        * If the demuxer isn't opened, push straight away, since we'll
+        * be waiting against a cond that will never be signalled. */
+       if (GST_EVENT_IS_SERIALIZED (event)) {
+-        if (demux->opened) {
++        if (demux->context) {
+           GST_FFMPEG_PIPE_MUTEX_LOCK (ffpipe);
+           while (!ffpipe->needed)
+             GST_FFMPEG_PIPE_WAIT (ffpipe);
+@@ -2055,7 +2000,6 @@ gst_ffmpegdemux_register (GstPlugin * plugin)
+   while ((in_plugin = av_demuxer_iterate (&i))) {
+     gchar *type_name, *typefind_name;
+     gint rank;
+-    gboolean register_typefind_func = TRUE;
+ 
+     GST_LOG ("Attempting to handle libav demuxer plugin %s [%s]",
+         in_plugin->name, in_plugin->long_name);
+@@ -2102,42 +2046,6 @@ gst_ffmpegdemux_register (GstPlugin * plugin)
+         !strcmp (in_plugin->name, "ffmetadata"))
+       continue;
+ 
+-    /* Don't use the typefind functions of formats for which we already have
+-     * better typefind functions */
+-    if (!strcmp (in_plugin->name, "mov,mp4,m4a,3gp,3g2,mj2") ||
+-        !strcmp (in_plugin->name, "ass") ||
+-        !strcmp (in_plugin->name, "avi") ||
+-        !strcmp (in_plugin->name, "asf") ||
+-        !strcmp (in_plugin->name, "mpegvideo") ||
+-        !strcmp (in_plugin->name, "mp3") ||
+-        !strcmp (in_plugin->name, "matroska") ||
+-        !strcmp (in_plugin->name, "matroska_webm") ||
+-        !strcmp (in_plugin->name, "matroska,webm") ||
+-        !strcmp (in_plugin->name, "mpeg") ||
+-        !strcmp (in_plugin->name, "wav") ||
+-        !strcmp (in_plugin->name, "au") ||
+-        !strcmp (in_plugin->name, "tta") ||
+-        !strcmp (in_plugin->name, "rm") ||
+-        !strcmp (in_plugin->name, "amr") ||
+-        !strcmp (in_plugin->name, "ogg") ||
+-        !strcmp (in_plugin->name, "aiff") ||
+-        !strcmp (in_plugin->name, "ape") ||
+-        !strcmp (in_plugin->name, "dv") ||
+-        !strcmp (in_plugin->name, "flv") ||
+-        !strcmp (in_plugin->name, "mpc") ||
+-        !strcmp (in_plugin->name, "mpc8") ||
+-        !strcmp (in_plugin->name, "mpegts") ||
+-        !strcmp (in_plugin->name, "mpegtsraw") ||
+-        !strcmp (in_plugin->name, "mxf") ||
+-        !strcmp (in_plugin->name, "nuv") ||
+-        !strcmp (in_plugin->name, "swf") ||
+-        !strcmp (in_plugin->name, "voc") ||
+-        !strcmp (in_plugin->name, "pva") ||
+-        !strcmp (in_plugin->name, "gif") ||
+-        !strcmp (in_plugin->name, "vc1test") ||
+-        !strcmp (in_plugin->name, "ivf"))
+-      register_typefind_func = FALSE;
+-
+     /* Set the rank of demuxers known to work to MARGINAL.
+      * Set demuxers for which we already have another implementation to NONE
+      * Set All others to NONE*/
+@@ -2214,11 +2122,7 @@ gst_ffmpegdemux_register (GstPlugin * plugin)
+     else
+       extensions = NULL;
+ 
+-    if (!gst_element_register (plugin, type_name, rank, type) ||
+-        (register_typefind_func == TRUE &&
+-            !gst_type_find_register (plugin, typefind_name, rank,
+-                gst_ffmpegdemux_type_find, extensions, NULL,
+-                (gpointer) in_plugin, NULL))) {
++    if (!gst_element_register (plugin, type_name, rank, type)) {
+       g_warning ("Registration of type %s failed", type_name);
+       g_free (type_name);
+       g_free (typefind_name);
+diff --git a/subprojects/gst-libav/ext/libav/gstavmux.c b/subprojects/gst-libav/ext/libav/gstavmux.c
+index 60da7f0c29e1..389a873cf717 100644
+--- a/subprojects/gst-libav/ext/libav/gstavmux.c
++++ b/subprojects/gst-libav/ext/libav/gstavmux.c
+@@ -796,6 +796,7 @@ gst_ffmpegmux_change_state (GstElement * element, GstStateChange transition)
+       if (ffmpegmux->opened) {
+         ffmpegmux->opened = FALSE;
+         gst_ffmpegdata_close (ffmpegmux->context->pb);
++        ffmpegmux->context->pb = NULL;
+       }
+       break;
+     case GST_STATE_CHANGE_READY_TO_NULL:
+diff --git a/subprojects/gst-libav/ext/libav/gstavprotocol.c b/subprojects/gst-libav/ext/libav/gstavprotocol.c
+index 249b24064275..cb607d301299 100644
+--- a/subprojects/gst-libav/ext/libav/gstavprotocol.c
++++ b/subprojects/gst-libav/ext/libav/gstavprotocol.c
+@@ -102,7 +102,11 @@ gst_ffmpegdata_read (void *priv_data, unsigned char *buf, int size)
+ }
+ 
+ static int
++#if LIBAVUTIL_VERSION_MAJOR >= 59
++gst_ffmpegdata_write (void *priv_data, const uint8_t * buf, int size)
++#else
+ gst_ffmpegdata_write (void *priv_data, uint8_t * buf, int size)
++#endif
+ {
+   GstProtocolInfo *info;
+   GstBuffer *outbuf;
+diff --git a/subprojects/gst-libav/ext/libav/gstavviddec.c b/subprojects/gst-libav/ext/libav/gstavviddec.c
+index fe1ea51aa61b..f70da082b0fb 100644
+--- a/subprojects/gst-libav/ext/libav/gstavviddec.c
++++ b/subprojects/gst-libav/ext/libav/gstavviddec.c
+@@ -337,34 +337,29 @@ gst_ffmpegviddec_init (GstFFMpegVidDec * ffmpegdec)
+ static void
+ gst_ffmpegviddec_subinit (GstFFMpegVidDec * ffmpegdec)
+ {
+-  GstFFMpegVidDecClass *klass =
+-      (GstFFMpegVidDecClass *) G_OBJECT_GET_CLASS (ffmpegdec);
+-
+   /* some ffmpeg data */
+-  ffmpegdec->context = avcodec_alloc_context3 (klass->in_plugin);
+-  ffmpegdec->context->opaque = ffmpegdec;
+-  ffmpegdec->picture = av_frame_alloc ();
+-  ffmpegdec->opened = FALSE;
+   ffmpegdec->skip_frame = ffmpegdec->lowres = 0;
+   ffmpegdec->direct_rendering = DEFAULT_DIRECT_RENDERING;
+   ffmpegdec->max_threads = DEFAULT_MAX_THREADS;
+   ffmpegdec->output_corrupt = DEFAULT_OUTPUT_CORRUPT;
+   ffmpegdec->thread_type = DEFAULT_THREAD_TYPE;
+   ffmpegdec->std_compliance = DEFAULT_STD_COMPLIANCE;
+ 
+   GST_PAD_SET_ACCEPT_TEMPLATE (GST_VIDEO_DECODER_SINK_PAD (ffmpegdec));
+   gst_video_decoder_set_use_default_pad_acceptcaps (GST_VIDEO_DECODER_CAST
+       (ffmpegdec), TRUE);
+ 
+   gst_video_decoder_set_needs_format (GST_VIDEO_DECODER (ffmpegdec), TRUE);
+ }
+ 
+ static void
+ gst_ffmpegviddec_finalize (GObject * object)
+ {
+   GstFFMpegVidDec *ffmpegdec = GST_FFMPEGVIDDEC (object);
+ 
+   av_frame_free (&ffmpegdec->picture);
++  if (ffmpegdec->context)
++    av_freep (&ffmpegdec->context->extradata);
+   avcodec_free_context (&ffmpegdec->context);
+ 
+   G_OBJECT_CLASS (parent_class)->finalize (object);
+@@ -395,72 +390,56 @@ gst_ffmpegviddec_context_set_flags2 (AVCodecContext * context, guint flags,
+ }
+ 
+ /* with LOCK */
+-static gboolean
+-gst_ffmpegviddec_close (GstFFMpegVidDec * ffmpegdec, gboolean reset)
++static void
++gst_ffmpegviddec_close (GstFFMpegVidDec * ffmpegdec)
+ {
+-  GstFFMpegVidDecClass *oclass;
+   guint i;
+ 
+-  oclass = GST_FFMPEGVIDDEC_GET_CLASS (ffmpegdec);
+-
+   GST_LOG_OBJECT (ffmpegdec, "closing ffmpeg codec");
+ 
+   gst_caps_replace (&ffmpegdec->last_caps, NULL);
+ 
+-  gst_ffmpeg_avcodec_close (ffmpegdec->context);
+-  ffmpegdec->opened = FALSE;
++  if (ffmpegdec->context)
++    av_freep (&ffmpegdec->context->extradata);
++  avcodec_free_context (&ffmpegdec->context);
+ 
+   for (i = 0; i < G_N_ELEMENTS (ffmpegdec->stride); i++)
+     ffmpegdec->stride[i] = -1;
+ 
+   gst_buffer_replace (&ffmpegdec->palette, NULL);
+-
+-  av_freep (&ffmpegdec->context->extradata);
+-  if (reset) {
+-    avcodec_free_context (&ffmpegdec->context);
+-    ffmpegdec->context = avcodec_alloc_context3 (oclass->in_plugin);
+-    if (ffmpegdec->context == NULL) {
+-      GST_DEBUG_OBJECT (ffmpegdec, "Failed to set context defaults");
+-      return FALSE;
+-    }
+-    ffmpegdec->context->opaque = ffmpegdec;
+-  }
+-  return TRUE;
+ }
+ 
+ /* with LOCK */
+ static gboolean
+ gst_ffmpegviddec_open (GstFFMpegVidDec * ffmpegdec)
+ {
+   GstFFMpegVidDecClass *oclass;
+   guint i;
+ 
+   oclass = GST_FFMPEGVIDDEC_GET_CLASS (ffmpegdec);
+ 
+   if (gst_ffmpeg_avcodec_open (ffmpegdec->context, oclass->in_plugin) < 0)
+     goto could_not_open;
+ 
+   for (i = 0; i < G_N_ELEMENTS (ffmpegdec->stride); i++)
+     ffmpegdec->stride[i] = -1;
+ 
+-  ffmpegdec->opened = TRUE;
+-
+   GST_LOG_OBJECT (ffmpegdec, "Opened libav codec %s, id %d",
+       oclass->in_plugin->name, oclass->in_plugin->id);
+ 
+   gst_ffmpegviddec_context_set_flags (ffmpegdec->context,
+       AV_CODEC_FLAG_OUTPUT_CORRUPT, ffmpegdec->output_corrupt);
+ #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT (60, 31, 100)
+   gst_ffmpegviddec_context_set_flags (ffmpegdec->context,
+       AV_CODEC_FLAG_COPY_OPAQUE, TRUE);
+ #endif
+ 
+   return TRUE;
+ 
+   /* ERRORS */
+ could_not_open:
+   {
+-    gst_ffmpegviddec_close (ffmpegdec, TRUE);
++    gst_ffmpegviddec_close (ffmpegdec);
+     GST_DEBUG_OBJECT (ffmpegdec, "avdec_%s: Failed to open libav codec",
+         oclass->in_plugin->name);
+     return FALSE;
+@@ -537,29 +516,34 @@ gst_ffmpegviddec_set_format (GstVideoDecoder * decoder,
+   }
+ 
+   /* close old session */
+-  if (ffmpegdec->opened) {
++  if (ffmpegdec->context) {
+     GST_OBJECT_UNLOCK (ffmpegdec);
+     gst_ffmpegviddec_finish (decoder);
+     GST_OBJECT_LOCK (ffmpegdec);
+-    if (!gst_ffmpegviddec_close (ffmpegdec, TRUE)) {
+-      GST_OBJECT_UNLOCK (ffmpegdec);
+-      return FALSE;
+-    }
++    gst_ffmpegviddec_close (ffmpegdec);
+     ffmpegdec->pic_pix_fmt = 0;
+     ffmpegdec->pic_width = 0;
+     ffmpegdec->pic_height = 0;
+     ffmpegdec->pic_par_n = 0;
+     ffmpegdec->pic_par_d = 0;
+     ffmpegdec->pic_interlaced = 0;
+     ffmpegdec->pic_field_order = 0;
+     ffmpegdec->pic_field_order_changed = FALSE;
+     ffmpegdec->ctx_ticks = 0;
+     ffmpegdec->ctx_time_n = 0;
+     ffmpegdec->ctx_time_d = 0;
+     ffmpegdec->cur_multiview_mode = GST_VIDEO_MULTIVIEW_MODE_NONE;
+     ffmpegdec->cur_multiview_flags = GST_VIDEO_MULTIVIEW_FLAGS_NONE;
+   }
+ 
++  ffmpegdec->context = avcodec_alloc_context3 (oclass->in_plugin);
++  if (ffmpegdec->context == NULL) {
++    GST_DEBUG_OBJECT (ffmpegdec, "Failed to allocate context");
++    GST_OBJECT_UNLOCK (ffmpegdec);
++    return FALSE;
++  }
++  ffmpegdec->context->opaque = ffmpegdec;
++
+   gst_caps_replace (&ffmpegdec->last_caps, state->caps);
+ 
+   /* set buffer functions */
+@@ -686,7 +670,9 @@ update_state:
+     const gint fps_n = ffmpegdec->context->time_base.den;
+ #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(60, 31, 100)
+     const gint ticks_per_frame =
+-        (ffmpegdec->context->
++        (GST_VIDEO_INFO_IS_INTERLACED (&ffmpegdec->input_state->info)
++        && ffmpegdec->context->codec_descriptor
++        && ffmpegdec->context->
+         codec_descriptor->props & AV_CODEC_PROP_FIELDS) ? 2 : 1;
+ #else
+     const gint ticks_per_frame = ffmpegdec->context->ticks_per_frame;
+@@ -718,12 +704,18 @@ done:
+ open_failed:
+   {
+     GST_DEBUG_OBJECT (ffmpegdec, "Failed to open");
++    if (ffmpegdec->context)
++      av_freep (&ffmpegdec->context->extradata);
++    avcodec_free_context (&ffmpegdec->context);
+     goto done;
+   }
+ nal_only_slice:
+   {
+     GST_ERROR_OBJECT (ffmpegdec,
+         "Can't do NAL aligned H.264 with frame threading.");
++    if (ffmpegdec->context)
++      av_freep (&ffmpegdec->context->extradata);
++    avcodec_free_context (&ffmpegdec->context);
+     goto done;
+   }
+ }
+@@ -1165,8 +1157,11 @@ static gboolean
+ context_changed (GstFFMpegVidDec * ffmpegdec, AVCodecContext * context)
+ {
+ #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(60, 31, 100)
+-  const gint ticks_per_frame = (context->codec_descriptor
+-      && context->codec_descriptor->props & AV_CODEC_PROP_FIELDS) ? 2 : 1;
++  const gint ticks_per_frame =
++      (GST_VIDEO_INFO_IS_INTERLACED (&ffmpegdec->input_state->info)
++      && ffmpegdec->context->codec_descriptor
++      && ffmpegdec->context->
++      codec_descriptor->props & AV_CODEC_PROP_FIELDS) ? 2 : 1;
+ #else
+   const gint ticks_per_frame = context->ticks_per_frame;
+ #endif
+@@ -1238,8 +1233,11 @@ update_video_context (GstFFMpegVidDec * ffmpegdec, AVCodecContext * context,
+     ffmpegdec->pic_field_order_changed = FALSE;
+ 
+ #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(60, 31, 100)
+-  const gint ticks_per_frame = (context->codec_descriptor
+-      && context->codec_descriptor->props & AV_CODEC_PROP_FIELDS) ? 2 : 1;
++  const gint ticks_per_frame =
++      (GST_VIDEO_INFO_IS_INTERLACED (&ffmpegdec->input_state->info)
++      && ffmpegdec->context->codec_descriptor
++      && ffmpegdec->context->
++      codec_descriptor->props & AV_CODEC_PROP_FIELDS) ? 2 : 1;
+ #else
+   const gint ticks_per_frame = context->ticks_per_frame;
+ #endif
+@@ -2119,7 +2117,7 @@ gst_ffmpegviddec_frame (GstFFMpegVidDec * ffmpegdec, GstVideoCodecFrame * frame,
+ {
+   gboolean got_frame = FALSE;
+ 
+-  if (G_UNLIKELY (ffmpegdec->context->codec == NULL))
++  if (G_UNLIKELY (!ffmpegdec->context))
+     goto no_codec;
+ 
+   *ret = GST_FLOW_OK;
+@@ -2149,7 +2147,7 @@ gst_ffmpegviddec_drain (GstVideoDecoder * decoder)
+   GstFlowReturn ret = GST_FLOW_OK;
+   gboolean got_frame = FALSE;
+ 
+-  if (!ffmpegdec->opened)
++  if (!ffmpegdec->context)
+     return GST_FLOW_OK;
+ 
+   GST_VIDEO_DECODER_STREAM_UNLOCK (ffmpegdec);
+@@ -2195,15 +2193,22 @@ gst_ffmpegviddec_handle_frame (GstVideoDecoder * decoder,
+   GstFlowReturn ret = GST_FLOW_OK;
+   AVPacket *packet;
+ 
++  if (G_UNLIKELY (!ffmpegdec->context)) {
++    gst_video_codec_frame_unref (frame);
++    GST_ERROR_OBJECT (ffmpegdec, "no codec context");
++    return GST_FLOW_NOT_NEGOTIATED;
++  }
++
+   GST_LOG_OBJECT (ffmpegdec,
+       "Received new data of size %" G_GSIZE_FORMAT ", dts %" GST_TIME_FORMAT
+       ", pts:%" GST_TIME_FORMAT ", dur:%" GST_TIME_FORMAT,
+       gst_buffer_get_size (frame->input_buffer), GST_TIME_ARGS (frame->dts),
+       GST_TIME_ARGS (frame->pts), GST_TIME_ARGS (frame->duration));
+ 
+   if (!gst_buffer_map (frame->input_buffer, &minfo, GST_MAP_READ)) {
+     GST_ELEMENT_ERROR (ffmpegdec, STREAM, DECODE, ("Decoding problem"),
+         ("Failed to map buffer for reading"));
++    gst_video_codec_frame_unref (frame);
+     return GST_FLOW_ERROR;
+   }
+ 
+@@ -2312,31 +2317,26 @@ static gboolean
+ gst_ffmpegviddec_start (GstVideoDecoder * decoder)
+ {
+   GstFFMpegVidDec *ffmpegdec = GST_FFMPEGVIDDEC (decoder);
+-  GstFFMpegVidDecClass *oclass;
+-
+-  oclass = GST_FFMPEGVIDDEC_GET_CLASS (ffmpegdec);
+ 
+   GST_OBJECT_LOCK (ffmpegdec);
++  av_frame_free (&ffmpegdec->picture);
++  if (ffmpegdec->context)
++    av_freep (&ffmpegdec->context->extradata);
+   avcodec_free_context (&ffmpegdec->context);
+-  ffmpegdec->context = avcodec_alloc_context3 (oclass->in_plugin);
+-  if (ffmpegdec->context == NULL) {
+-    GST_DEBUG_OBJECT (ffmpegdec, "Failed to set context defaults");
+-    GST_OBJECT_UNLOCK (ffmpegdec);
+-    return FALSE;
+-  }
+-  ffmpegdec->context->opaque = ffmpegdec;
++  ffmpegdec->picture = av_frame_alloc ();
+   GST_OBJECT_UNLOCK (ffmpegdec);
+ 
+   return TRUE;
+ }
+ 
+ static gboolean
+ gst_ffmpegviddec_stop (GstVideoDecoder * decoder)
+ {
+   GstFFMpegVidDec *ffmpegdec = GST_FFMPEGVIDDEC (decoder);
+ 
+   GST_OBJECT_LOCK (ffmpegdec);
+-  gst_ffmpegviddec_close (ffmpegdec, FALSE);
++  av_frame_free (&ffmpegdec->picture);
++  gst_ffmpegviddec_close (ffmpegdec);
+   GST_OBJECT_UNLOCK (ffmpegdec);
+   g_free (ffmpegdec->padded);
+   ffmpegdec->padded = NULL;
+@@ -2390,7 +2390,7 @@ gst_ffmpegviddec_flush (GstVideoDecoder * decoder)
+ {
+   GstFFMpegVidDec *ffmpegdec = GST_FFMPEGVIDDEC (decoder);
+ 
+-  if (ffmpegdec->opened) {
++  if (ffmpegdec->context) {
+     GST_LOG_OBJECT (decoder, "flushing buffers");
+     GST_VIDEO_DECODER_STREAM_UNLOCK (ffmpegdec);
+     avcodec_flush_buffers (ffmpegdec->context);
+@@ -2579,11 +2579,10 @@ gst_ffmpegviddec_set_property (GObject * object,
+ 
+   switch (prop_id) {
+     case PROP_LOWRES:
+-      ffmpegdec->lowres = ffmpegdec->context->lowres = g_value_get_enum (value);
++      ffmpegdec->lowres = g_value_get_enum (value);
+       break;
+     case PROP_SKIPFRAME:
+-      ffmpegdec->skip_frame = ffmpegdec->context->skip_frame =
+-          g_value_get_enum (value);
++      ffmpegdec->skip_frame = g_value_get_enum (value);
+       break;
+     case PROP_DIRECT_RENDERING:
+       ffmpegdec->direct_rendering = g_value_get_boolean (value);
+diff --git a/subprojects/gst-libav/ext/libav/gstavviddec.h b/subprojects/gst-libav/ext/libav/gstavviddec.h
+index 0f713de5691c..14d5a9aff352 100644
+--- a/subprojects/gst-libav/ext/libav/gstavviddec.h
++++ b/subprojects/gst-libav/ext/libav/gstavviddec.h
+@@ -54,7 +54,6 @@ struct _GstFFMpegVidDec
+   GstVideoMultiviewMode picture_multiview_mode;
+   GstVideoMultiviewFlags picture_multiview_flags;
+   gint stride[AV_NUM_DATA_POINTERS];
+-  gboolean opened;
+ 
+   /* current output pictures */
+   enum AVPixelFormat pic_pix_fmt;
+diff --git a/subprojects/gst-libav/ext/libav/gstavvidenc.c b/subprojects/gst-libav/ext/libav/gstavvidenc.c
+index 461263b4f645..90c35d216dcf 100644
+--- a/subprojects/gst-libav/ext/libav/gstavvidenc.c
++++ b/subprojects/gst-libav/ext/libav/gstavvidenc.c
+@@ -208,54 +208,47 @@ gst_ffmpegvidenc_init (GstFFMpegVidEnc * ffmpegenc)
+ 
+   GST_PAD_SET_ACCEPT_TEMPLATE (GST_VIDEO_ENCODER_SINK_PAD (ffmpegenc));
+ 
+-  ffmpegenc->context = avcodec_alloc_context3 (klass->in_plugin);
+   ffmpegenc->refcontext = avcodec_alloc_context3 (klass->in_plugin);
+-  ffmpegenc->picture = av_frame_alloc ();
+-  ffmpegenc->opened = FALSE;
+   ffmpegenc->file = NULL;
+ }
+ 
+ static void
+ gst_ffmpegvidenc_finalize (GObject * object)
+ {
+   GstFFMpegVidEnc *ffmpegenc = (GstFFMpegVidEnc *) object;
+ 
+   /* clean up remaining allocated data */
+   av_frame_free (&ffmpegenc->picture);
+-  gst_ffmpeg_avcodec_close (ffmpegenc->context);
+-  gst_ffmpeg_avcodec_close (ffmpegenc->refcontext);
+-  av_freep (&ffmpegenc->context);
+-  av_freep (&ffmpegenc->refcontext);
++  avcodec_free_context (&ffmpegenc->context);
++  avcodec_free_context (&ffmpegenc->refcontext);
+   g_free (ffmpegenc->filename);
+ 
+   G_OBJECT_CLASS (parent_class)->finalize (object);
+ }
+ 
+ static gboolean
+ gst_ffmpegvidenc_set_format (GstVideoEncoder * encoder,
+     GstVideoCodecState * state)
+ {
+   GstCaps *other_caps;
+   GstCaps *allowed_caps;
+   GstCaps *icaps;
+   GstVideoCodecState *output_format;
+   enum AVPixelFormat pix_fmt;
+   GstFFMpegVidEnc *ffmpegenc = (GstFFMpegVidEnc *) encoder;
+   GstFFMpegVidEncClass *oclass =
+       (GstFFMpegVidEncClass *) G_OBJECT_GET_CLASS (ffmpegenc);
+ 
+   ffmpegenc->need_reopen = FALSE;
+ 
+   /* close old session */
+-  if (ffmpegenc->opened) {
+-    avcodec_free_context (&ffmpegenc->context);
+-    ffmpegenc->opened = FALSE;
+-    ffmpegenc->context = avcodec_alloc_context3 (oclass->in_plugin);
+-    if (ffmpegenc->context == NULL) {
+-      GST_DEBUG_OBJECT (ffmpegenc, "Failed to set context defaults");
+-      return FALSE;
+-    }
++  avcodec_free_context (&ffmpegenc->context);
++  ffmpegenc->context = avcodec_alloc_context3 (oclass->in_plugin);
++  if (ffmpegenc->context == NULL) {
++    GST_DEBUG_OBJECT (ffmpegenc, "Failed to allocate context");
++    return FALSE;
+   }
++  ffmpegenc->last_pts_ff = G_MININT64;
+ 
+   /* additional avcodec settings */
+   gst_ffmpeg_cfg_fill_context (G_OBJECT (ffmpegenc), ffmpegenc->context);
+@@ -402,89 +395,87 @@ gst_ffmpegvidenc_set_format (GstVideoEncoder * encoder,
+ 
+   /* success! */
+   ffmpegenc->pts_offset = GST_CLOCK_TIME_NONE;
+-  ffmpegenc->opened = TRUE;
+ 
+   return TRUE;
+ 
+   /* ERRORS */
+ open_file_err:
+   {
+     GST_ELEMENT_ERROR (ffmpegenc, RESOURCE, OPEN_WRITE,
+         (("Could not open file \"%s\" for writing."), ffmpegenc->filename),
+         GST_ERROR_SYSTEM);
++    avcodec_free_context (&ffmpegenc->context);
+     return FALSE;
+   }
+ file_read_err:
+   {
+     GST_ELEMENT_ERROR (ffmpegenc, RESOURCE, READ,
+         (("Could not get contents of file \"%s\"."), ffmpegenc->filename),
+         GST_ERROR_SYSTEM);
++    avcodec_free_context (&ffmpegenc->context);
+     return FALSE;
+   }
+ 
+ insane_timebase:
+   {
+     GST_ERROR_OBJECT (ffmpegenc, "Rejecting time base %d/%d",
+         ffmpegenc->context->time_base.den, ffmpegenc->context->time_base.num);
+-    goto cleanup_stats_in;
++    goto close_codec;
+   }
+ unsupported_codec:
+   {
+     GST_DEBUG ("Unsupported codec - no caps found");
+-    goto cleanup_stats_in;
++    goto close_codec;
+   }
+ open_codec_fail:
+   {
+     GST_DEBUG_OBJECT (ffmpegenc, "avenc_%s: Failed to open libav codec",
+         oclass->in_plugin->name);
+     goto close_codec;
+   }
+ 
+ pix_fmt_err:
+   {
+     GST_DEBUG_OBJECT (ffmpegenc,
+         "avenc_%s: AV wants different colourspace (%d given, %d wanted)",
+         oclass->in_plugin->name, pix_fmt, ffmpegenc->context->pix_fmt);
+     goto close_codec;
+   }
+ 
+ bad_input_fmt:
+   {
+     GST_DEBUG_OBJECT (ffmpegenc, "avenc_%s: Failed to determine input format",
+         oclass->in_plugin->name);
+     goto close_codec;
+   }
+ close_codec:
+   {
++    if (ffmpegenc->context)
++      g_free (ffmpegenc->context->stats_in);
++    if (ffmpegenc->file) {
++      fclose (ffmpegenc->file);
++      ffmpegenc->file = NULL;
++    }
+     avcodec_free_context (&ffmpegenc->context);
+-    ffmpegenc->context = avcodec_alloc_context3 (oclass->in_plugin);
+-    if (ffmpegenc->context == NULL)
+-      GST_DEBUG_OBJECT (ffmpegenc, "Failed to set context defaults");
+-    goto cleanup_stats_in;
+-  }
+-cleanup_stats_in:
+-  {
+-    g_free (ffmpegenc->context->stats_in);
+     return FALSE;
+   }
+ }
+ 
+ 
+ static gboolean
+ gst_ffmpegvidenc_propose_allocation (GstVideoEncoder * encoder,
+     GstQuery * query)
+ {
+   gst_query_add_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL);
+ 
+   return GST_VIDEO_ENCODER_CLASS (parent_class)->propose_allocation (encoder,
+       query);
+ }
+ 
+ static void
+ gst_ffmpegvidenc_free_avpacket (gpointer pkt)
+ {
+-  av_packet_unref ((AVPacket *) pkt);
+-  g_free (pkt);
++  av_packet_free ((AVPacket **) & pkt);
+ }
+ 
+ typedef struct
+@@ -560,6 +551,7 @@ gst_ffmpegvidenc_send_frame (GstFFMpegVidEnc * ffmpegenc,
+   gint res;
+   GstFlowReturn ret = GST_FLOW_ERROR;
+   AVFrame *picture = NULL;
++  GstClockTime pts, pts_running_time;
+ 
+   if (!frame)
+     goto send_frame;
+@@ -629,26 +621,46 @@ gst_ffmpegvidenc_send_frame (GstFFMpegVidEnc * ffmpegenc,
+   picture->width = GST_VIDEO_FRAME_WIDTH (&buffer_info->vframe);
+   picture->height = GST_VIDEO_FRAME_HEIGHT (&buffer_info->vframe);
+ 
++  // Use the running time to calculate a PTS that is passed to the encoder.
++  // This ensures that it is increasing even if there are segment changes and
++  // makes it unnecessary to drain the encoder on every segment change.
++  pts = frame->pts;
++  pts_running_time =
++      gst_segment_to_running_time (&GST_VIDEO_ENCODER
++      (ffmpegenc)->input_segment, GST_FORMAT_TIME, pts);
++
+   if (ffmpegenc->pts_offset == GST_CLOCK_TIME_NONE) {
+-    ffmpegenc->pts_offset = frame->pts;
++    ffmpegenc->pts_offset = pts_running_time;
+   }
+ 
+-  if (frame->pts == GST_CLOCK_TIME_NONE) {
++  if (pts_running_time == GST_CLOCK_TIME_NONE) {
+     picture->pts = AV_NOPTS_VALUE;
+-  } else if (frame->pts < ffmpegenc->pts_offset) {
++  } else if (pts_running_time < ffmpegenc->pts_offset) {
+     GST_ERROR_OBJECT (ffmpegenc, "PTS is going backwards");
+     picture->pts = AV_NOPTS_VALUE;
+   } else {
+ #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(60, 31, 100)
+-    const gint ticks_per_frame = (ffmpegenc->context->codec_descriptor
++    const gint ticks_per_frame =
++        (GST_VIDEO_INFO_IS_INTERLACED (&ffmpegenc->input_state->info)
++        && ffmpegenc->context->codec_descriptor
+         && ffmpegenc->context->
+         codec_descriptor->props & AV_CODEC_PROP_FIELDS) ? 2 : 1;
+ #else
+     const gint ticks_per_frame = ffmpegenc->context->ticks_per_frame;
+ #endif
+     picture->pts =
+-        gst_ffmpeg_time_gst_to_ff ((frame->pts - ffmpegenc->pts_offset) /
++        gst_ffmpeg_time_gst_to_ff ((pts_running_time - ffmpegenc->pts_offset) /
+         ticks_per_frame, ffmpegenc->context->time_base);
++
++    // Certain codecs require always increasing PTS to work correctly. This
++    // affects at least all MPEG1/2/4 based encoders.
++    if (ffmpegenc->last_pts_ff == G_MININT64
++        || picture->pts > ffmpegenc->last_pts_ff) {
++      ffmpegenc->last_pts_ff = picture->pts;
++    } else {
++      ffmpegenc->last_pts_ff += 1;
++      picture->pts = ffmpegenc->last_pts_ff;
++    }
+   }
+ 
+ send_frame:
+@@ -692,18 +704,18 @@ gst_ffmpegvidenc_receive_packet (GstFFMpegVidEnc * ffmpegenc,
+ 
+   *got_packet = FALSE;
+ 
+-  pkt = g_new0 (AVPacket, 1);
+-
++  pkt = av_packet_alloc ();
+   res = avcodec_receive_packet (ffmpegenc->context, pkt);
+ 
+   if (res == AVERROR (EAGAIN)) {
+-    g_free (pkt);
++    av_packet_free (&pkt);
+     goto done;
+   } else if (res == AVERROR_EOF) {
+-    g_free (pkt);
++    av_packet_free (&pkt);
+     ret = GST_FLOW_EOS;
+     goto done;
+   } else if (res < 0) {
++    av_packet_free (&pkt);
+     ret = GST_FLOW_ERROR;
+     goto done;
+   }
+@@ -743,50 +755,52 @@ gst_ffmpegvidenc_receive_packet (GstFFMpegVidEnc * ffmpegenc,
+           ffmpegenc->context->time_base);
+ 
+       if (gst_pts_dts_diff > frame->pts)
+-        frame->pts = 0;
++        frame->dts = 0;
+       else
+         frame->dts = frame->pts - gst_pts_dts_diff;
+     } else {
+       frame->dts = frame->pts +
+           gst_ffmpeg_time_ff_to_gst (pts_dts_diff,
+           ffmpegenc->context->time_base);
+     }
+   }
+ 
+   ret = gst_video_encoder_finish_frame (GST_VIDEO_ENCODER (ffmpegenc), frame);
+ 
+ done:
+   return ret;
+ }
+ 
+ static GstFlowReturn
+ gst_ffmpegvidenc_handle_frame (GstVideoEncoder * encoder,
+     GstVideoCodecFrame * frame)
+ {
+   GstFFMpegVidEnc *ffmpegenc = (GstFFMpegVidEnc *) encoder;
+   GstFlowReturn ret;
+   gboolean got_packet;
+ 
+-  /* endoder was drained or flushed, and ffmpeg encoder doesn't support
++  /* encoder was drained or flushed, and ffmpeg encoder doesn't support
+    * flushing. We need to re-open encoder then */
+   if (ffmpegenc->need_reopen) {
+     gboolean reopen_ret;
+     GstVideoCodecState *input_state;
+ 
+     GST_DEBUG_OBJECT (ffmpegenc, "Open encoder again");
+ 
+     if (!ffmpegenc->input_state) {
+       GST_ERROR_OBJECT (ffmpegenc,
+           "Cannot re-open encoder without input state");
++      gst_video_codec_frame_unref (frame);
+       return GST_FLOW_NOT_NEGOTIATED;
+     }
+ 
+     input_state = gst_video_codec_state_ref (ffmpegenc->input_state);
+     reopen_ret = gst_ffmpegvidenc_set_format (encoder, input_state);
+     gst_video_codec_state_unref (input_state);
+ 
+     if (!reopen_ret) {
+       GST_ERROR_OBJECT (ffmpegenc, "Couldn't re-open encoder");
++      gst_video_codec_frame_unref (frame);
+       return GST_FLOW_NOT_NEGOTIATED;
+     }
+   }
+@@ -831,7 +845,7 @@ gst_ffmpegvidenc_flush_buffers (GstFFMpegVidEnc * ffmpegenc, gboolean send)
+   GST_DEBUG_OBJECT (ffmpegenc, "flushing buffers with sending %d", send);
+ 
+   /* no need to empty codec if there is none */
+-  if (!ffmpegenc->opened)
++  if (!ffmpegenc->context)
+     goto done;
+ 
+   ret = gst_ffmpegvidenc_send_frame (ffmpegenc, NULL);
+@@ -867,7 +881,7 @@ gst_ffmpegvidenc_set_property (GObject * object,
+ 
+   ffmpegenc = (GstFFMpegVidEnc *) (object);
+ 
+-  if (ffmpegenc->opened) {
++  if (ffmpegenc->context) {
+     GST_WARNING_OBJECT (ffmpegenc,
+         "Can't change properties once decoder is setup !");
+     return;
+@@ -921,45 +935,50 @@ gst_ffmpegvidenc_flush (GstVideoEncoder * encoder)
+ {
+   GstFFMpegVidEnc *ffmpegenc = (GstFFMpegVidEnc *) encoder;
+ 
+-  if (ffmpegenc->opened) {
++  if (ffmpegenc->context) {
+     avcodec_flush_buffers (ffmpegenc->context);
+     ffmpegenc->pts_offset = GST_CLOCK_TIME_NONE;
+   }
+ 
+   return TRUE;
+ }
+ 
+ static gboolean
+ gst_ffmpegvidenc_start (GstVideoEncoder * encoder)
+ {
+   GstFFMpegVidEnc *ffmpegenc = (GstFFMpegVidEnc *) encoder;
+-  GstFFMpegVidEncClass *oclass =
+-      (GstFFMpegVidEncClass *) G_OBJECT_GET_CLASS (ffmpegenc);
+-
+-  ffmpegenc->opened = FALSE;
+-  ffmpegenc->need_reopen = FALSE;
+ 
+   /* close old session */
+-  avcodec_free_context (&ffmpegenc->context);
+-  ffmpegenc->context = avcodec_alloc_context3 (oclass->in_plugin);
+-  if (ffmpegenc->context == NULL) {
+-    GST_DEBUG_OBJECT (ffmpegenc, "Failed to set context defaults");
+-    return FALSE;
++  if (ffmpegenc->file) {
++    fclose (ffmpegenc->file);
++    ffmpegenc->file = NULL;
+   }
++  if (ffmpegenc->context)
++    g_free (ffmpegenc->context->stats_in);
++  avcodec_free_context (&ffmpegenc->context);
++  av_frame_free (&ffmpegenc->picture);
++  ffmpegenc->need_reopen = FALSE;
+ 
++  ffmpegenc->picture = av_frame_alloc ();
+   gst_video_encoder_set_min_pts (encoder, GST_SECOND * 60 * 60 * 1000);
+ 
+   return TRUE;
+ }
+ 
+ static gboolean
+ gst_ffmpegvidenc_stop (GstVideoEncoder * encoder)
+ {
+   GstFFMpegVidEnc *ffmpegenc = (GstFFMpegVidEnc *) encoder;
+ 
+   gst_ffmpegvidenc_flush_buffers (ffmpegenc, FALSE);
+-  gst_ffmpeg_avcodec_close (ffmpegenc->context);
+-  ffmpegenc->opened = FALSE;
++  if (ffmpegenc->context)
++    g_free (ffmpegenc->context->stats_in);
++  if (ffmpegenc->file) {
++    fclose (ffmpegenc->file);
++    ffmpegenc->file = NULL;
++  }
++  avcodec_free_context (&ffmpegenc->context);
++  av_frame_free (&ffmpegenc->picture);
+   ffmpegenc->need_reopen = FALSE;
+ 
+   if (ffmpegenc->input_state) {
+diff --git a/subprojects/gst-libav/ext/libav/gstavvidenc.h b/subprojects/gst-libav/ext/libav/gstavvidenc.h
+index 340fb2520421..3b1f2e848825 100644
+--- a/subprojects/gst-libav/ext/libav/gstavvidenc.h
++++ b/subprojects/gst-libav/ext/libav/gstavvidenc.h
+@@ -41,7 +41,7 @@ struct _GstFFMpegVidEnc
+   AVCodecContext *context;
+   AVFrame *picture;
+   GstClockTime pts_offset;
+-  gboolean opened;
++  gint64 last_pts_ff;
+   gboolean need_reopen;
+   gboolean discont;
+   guint pass;
+diff --git a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctions.c b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctions.c
+index 805cb0a301b6..a10ef26028e8 100644
+--- a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctions.c
++++ b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctions.c
+@@ -5512,6 +5512,195 @@ tap_type_find (GstTypeFind * tf, gpointer unused)
+   }
+ }
+ 
++/*** audio/x-brstm ***/
++
++static GstStaticCaps brstm_caps = GST_STATIC_CAPS ("audio/x-brstm");
++
++#define BRSTM_CAPS (gst_static_caps_get(&brstm_caps))
++static void
++brstm_type_find (GstTypeFind * tf, gpointer unused)
++{
++  const guint8 *data = gst_type_find_peek (tf, 0, 8);
++
++  if (data) {
++    if (GST_READ_UINT32_LE (data) != GST_MAKE_FOURCC ('R', 'S', 'T', 'M'))
++      return;
++    if (GST_READ_UINT32_LE (data + 4) != 0xfffe
++        && GST_READ_UINT32_LE (data + 4) != 0xfeff)
++      return;
++    gst_type_find_suggest (tf, GST_TYPE_FIND_MAXIMUM, BRSTM_CAPS);
++  }
++}
++
++/*** audio/x-bfstm ***/
++
++static GstStaticCaps bfstm_caps = GST_STATIC_CAPS ("audio/x-bfstm");
++
++#define BFSTM_CAPS (gst_static_caps_get(&bfstm_caps))
++static void
++bfstm_type_find (GstTypeFind * tf, gpointer unused)
++{
++  const guint8 *data = gst_type_find_peek (tf, 0, 8);
++
++  if (data) {
++    if (GST_READ_UINT32_LE (data) != GST_MAKE_FOURCC ('F', 'S', 'T', 'M') &&
++        GST_READ_UINT32_LE (data) != GST_MAKE_FOURCC ('C', 'S', 'T', 'M'))
++      return;
++    if (GST_READ_UINT32_LE (data + 4) != 0xfffe
++        && GST_READ_UINT32_LE (data + 4) != 0xfeff)
++      return;
++    gst_type_find_suggest (tf, GST_TYPE_FIND_MAXIMUM, BFSTM_CAPS);
++  }
++}
++
++/*** audio/x-dsf ***/
++
++static GstStaticCaps dsf_caps = GST_STATIC_CAPS ("audio/x-dsf");
++
++#define DSF_CAPS (gst_static_caps_get(&dsf_caps))
++static void
++dsf_type_find (GstTypeFind * tf, gpointer unused)
++{
++  const guint8 *data = gst_type_find_peek (tf, 0, 12);
++
++  if (data) {
++    if (memcmp (data, "DSD ", 4) != 0)
++      return;
++    if (GST_READ_UINT64_BE (data + 4) == 28)
++      return;
++
++    gst_type_find_suggest (tf, GST_TYPE_FIND_MAXIMUM, DSF_CAPS);
++  }
++}
++
++/*** video/x-ea ***/
++
++static GstStaticCaps ea_caps = GST_STATIC_CAPS ("video/x-ea");
++
++#define EA_CAPS (gst_static_caps_get(&ea_caps))
++static void
++ea_type_find (GstTypeFind * tf, gpointer unused)
++{
++  const guint8 *data = gst_type_find_peek (tf, 0, 8);
++
++  if (data) {
++    static const guint32 ea_fourccs[] = {
++      GST_MAKE_FOURCC ('I', 'S', 'N', 'h'),
++      GST_MAKE_FOURCC ('S', 'C', 'H', 'l'),
++      GST_MAKE_FOURCC ('S', 'E', 'A', 'D'),
++      GST_MAKE_FOURCC ('S', 'H', 'E', 'N'),
++      GST_MAKE_FOURCC ('k', 'V', 'G', 'T'),
++      GST_MAKE_FOURCC ('M', 'A', 'D', 'k'),
++      GST_MAKE_FOURCC ('M', 'P', 'C', 'h'),
++      GST_MAKE_FOURCC ('M', 'V', 'h', 'd'),
++      GST_MAKE_FOURCC ('M', 'V', 'I', 'h'),
++      GST_MAKE_FOURCC ('A', 'V', 'P', '6'),
++    };
++
++    guint32 fourcc = GST_READ_UINT32_LE (data);
++    gboolean found = FALSE;
++
++    for (gsize i = 0; i < G_N_ELEMENTS (ea_fourccs); i++) {
++      if (fourcc == ea_fourccs[i]) {
++        found = TRUE;
++        break;
++      }
++    }
++    if (!found)
++      return;
++
++    guint32 size = GST_READ_UINT32_LE (data + 4);
++    gboolean big_endian = size > 0x000fffff;
++    if (big_endian)
++      size = GUINT32_SWAP_LE_BE (size);
++    if (size > 0xfffff || size < 8)
++      return;
++
++    gst_type_find_suggest (tf, GST_TYPE_FIND_MAXIMUM, EA_CAPS);
++  }
++}
++
++/*** video/x-film-cpk ***/
++
++static GstStaticCaps film_cpk_caps = GST_STATIC_CAPS ("video/x-film-cpk");
++
++#define FILM_CPK_CAPS (gst_static_caps_get(&film_cpk_caps))
++static void
++film_cpk_type_find (GstTypeFind * tf, gpointer unused)
++{
++  const guint8 *data = gst_type_find_peek (tf, 0, 20);
++
++  if (data) {
++    if (GST_READ_UINT32_LE (data) != GST_MAKE_FOURCC ('F', 'I', 'L', 'M'))
++      return;
++    if (GST_READ_UINT32_LE (data + 16) != GST_MAKE_FOURCC ('F', 'D', 'S', 'C'))
++      return;
++
++    gst_type_find_suggest (tf, GST_TYPE_FIND_MAXIMUM, FILM_CPK_CAPS);
++  }
++}
++
++/*** application/gxf ***/
++
++static GstStaticCaps gxf_caps = GST_STATIC_CAPS ("application/gxf");
++
++#define GXF_CAPS (gst_static_caps_get(&gxf_caps))
++static void
++gxf_type_find (GstTypeFind * tf, gpointer unused)
++{
++  const guint8 *data = gst_type_find_peek (tf, 0, 16);
++
++  if (data) {
++    if (memcmp (data, "\x00\x00\x00\x00\x01\xbc", 6) != 0)
++      return;
++    if (memcmp (data + 10, "\x00\x00\x00\x00\xe1\xe2", 6) != 0)
++      return;
++    gst_type_find_suggest (tf, GST_TYPE_FIND_MAXIMUM, GXF_CAPS);
++  }
++}
++
++/*** application/x-iff ***/
++
++static GstStaticCaps iff_caps = GST_STATIC_CAPS ("application/x-iff");
++
++#define IFF_CAPS (gst_static_caps_get(&iff_caps))
++static void
++iff_type_find (GstTypeFind * tf, gpointer unused)
++{
++  const guint8 *data = gst_type_find_peek (tf, 0, 16);
++
++  if (data) {
++    if (GST_READ_UINT32_LE (data) == GST_MAKE_FOURCC ('F', 'O', 'R', 'M') &&
++        (GST_READ_UINT32_LE (data + 8) == GST_MAKE_FOURCC ('8', 'S', 'V', 'X')
++            || GST_READ_UINT32_LE (data + 8) == GST_MAKE_FOURCC ('1', '6', 'S',
++                'V')
++            || GST_READ_UINT32_LE (data + 8) == GST_MAKE_FOURCC ('M', 'A', 'U',
++                'D')
++            || GST_READ_UINT32_LE (data + 8) == GST_MAKE_FOURCC ('P', 'B', 'M',
++                ' ')
++            || GST_READ_UINT32_LE (data + 8) == GST_MAKE_FOURCC ('A', 'C', 'B',
++                'M')
++            || GST_READ_UINT32_LE (data + 8) == GST_MAKE_FOURCC ('D', 'E', 'E',
++                'P')
++            || GST_READ_UINT32_LE (data + 8) == GST_MAKE_FOURCC ('I', 'L', 'B',
++                'M')
++            || GST_READ_UINT32_LE (data + 8) == GST_MAKE_FOURCC ('R', 'G', 'B',
++                '8')
++            || GST_READ_UINT32_LE (data + 8) == GST_MAKE_FOURCC ('A', 'N', 'I',
++                'M')
++            || GST_READ_UINT32_LE (data + 8) == GST_MAKE_FOURCC ('R', 'G', 'B',
++                'N'))) {
++      return gst_type_find_suggest (tf, GST_TYPE_FIND_MAXIMUM, IFF_CAPS);
++    }
++
++    if (GST_READ_UINT32_LE (data) == GST_MAKE_FOURCC ('F', 'R', 'M', '8')
++        && GST_READ_UINT32_LE (data + 12) == GST_MAKE_FOURCC ('D', 'S', 'D',
++            ' ')) {
++      return gst_type_find_suggest (tf, GST_TYPE_FIND_MAXIMUM, IFF_CAPS);
++    }
++  }
++}
++
+ /*** video/vivo ***/
+ 
+ static GstStaticCaps vivo_caps = GST_STATIC_CAPS ("video/vivo");
+@@ -6212,3 +6401,17 @@ GST_TYPE_FIND_REGISTER_DEFINE (aa, "audio/audible", GST_RANK_MARGINAL,
+     aa_type_find, "aa,aax", AA_CAPS, NULL, NULL);
+ GST_TYPE_FIND_REGISTER_DEFINE (tap, "audio/x-tap-tap", GST_RANK_PRIMARY,
+     tap_type_find, "tap", TAP_CAPS, NULL, NULL);
++GST_TYPE_FIND_REGISTER_DEFINE (brstm, "audio/x-brstm", GST_RANK_SECONDARY,
++    brstm_type_find, "brstm", BRSTM_CAPS, NULL, NULL);
++GST_TYPE_FIND_REGISTER_DEFINE (bfstm, "audio/x-bfstm", GST_RANK_SECONDARY,
++    bfstm_type_find, "bfstm,bcstm", BFSTM_CAPS, NULL, NULL);
++GST_TYPE_FIND_REGISTER_DEFINE (dsf, "audio/x-dsf", GST_RANK_PRIMARY,
++    dsf_type_find, NULL, DSF_CAPS, NULL, NULL);
++GST_TYPE_FIND_REGISTER_DEFINE (ea, "video/x-ea", GST_RANK_SECONDARY,
++    ea_type_find, NULL, EA_CAPS, NULL, NULL);
++GST_TYPE_FIND_REGISTER_DEFINE (film_cpk, "video/x-film-cpk", GST_RANK_SECONDARY,
++    film_cpk_type_find, "cpk", FILM_CPK_CAPS, NULL, NULL);
++GST_TYPE_FIND_REGISTER_DEFINE (gxf, "application/gxf", GST_RANK_SECONDARY,
++    gxf_type_find, NULL, GXF_CAPS, NULL, NULL);
++GST_TYPE_FIND_REGISTER_DEFINE (iff, "application/x-iff", GST_RANK_SECONDARY,
++    iff_type_find, NULL, IFF_CAPS, NULL, NULL);
+diff --git a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.c b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.c
+index c0e386aa2a28..998cfd4cf7fa 100644
+--- a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.c
++++ b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.c
+@@ -42,15 +42,18 @@ plugin_init (GstPlugin * plugin)
+   /* must use strings, macros don't accept initializers */
+ 
+   /*Riff Type find register */
++  GST_TYPE_FIND_REGISTER (fourxm, plugin);
+   GST_TYPE_FIND_REGISTER (avi, plugin);
+   GST_TYPE_FIND_REGISTER (qcp, plugin);
+   GST_TYPE_FIND_REGISTER (cdxa, plugin);
+   GST_TYPE_FIND_REGISTER (riff_mid, plugin);
+   GST_TYPE_FIND_REGISTER (wav, plugin);
+   GST_TYPE_FIND_REGISTER (webp, plugin);
++  GST_TYPE_FIND_REGISTER (xwma, plugin);
+ 
+   /*'Start with' Type find register */
+   GST_TYPE_FIND_REGISTER (asf, plugin);
++  GST_TYPE_FIND_REGISTER (avs, plugin);
+   GST_TYPE_FIND_REGISTER (vcd, plugin);
+   GST_TYPE_FIND_REGISTER (imelody, plugin);
+   GST_TYPE_FIND_REGISTER (scc, plugin);
+@@ -203,6 +206,13 @@ plugin_init (GstPlugin * plugin)
+   GST_TYPE_FIND_REGISTER (pva, plugin);
+   GST_TYPE_FIND_REGISTER (aa, plugin);
+   GST_TYPE_FIND_REGISTER (tap, plugin);
++  GST_TYPE_FIND_REGISTER (brstm, plugin);
++  GST_TYPE_FIND_REGISTER (bfstm, plugin);
++  GST_TYPE_FIND_REGISTER (dsf, plugin);
++  GST_TYPE_FIND_REGISTER (ea, plugin);
++  GST_TYPE_FIND_REGISTER (film_cpk, plugin);
++  GST_TYPE_FIND_REGISTER (gxf, plugin);
++  GST_TYPE_FIND_REGISTER (iff, plugin);
+ 
+   return TRUE;
+ }
+diff --git a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.h b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.h
+index 0dfbc700b00b..1ef0eff272a3 100644
+--- a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.h
++++ b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsplugin.h
+@@ -41,9 +41,12 @@ GST_TYPE_FIND_REGISTER_DECLARE (cdxa);
+ GST_TYPE_FIND_REGISTER_DECLARE (riff_mid);
+ GST_TYPE_FIND_REGISTER_DECLARE (wav);
+ GST_TYPE_FIND_REGISTER_DECLARE (webp);
++GST_TYPE_FIND_REGISTER_DECLARE (fourxm);
++GST_TYPE_FIND_REGISTER_DECLARE (xwma);
+ 
+ /*'Start with' type find declaration */
+ GST_TYPE_FIND_REGISTER_DECLARE (asf);
++GST_TYPE_FIND_REGISTER_DECLARE (avs);
+ GST_TYPE_FIND_REGISTER_DECLARE (vcd);
+ GST_TYPE_FIND_REGISTER_DECLARE (imelody);
+ GST_TYPE_FIND_REGISTER_DECLARE (scc);
+@@ -195,5 +198,12 @@ GST_TYPE_FIND_REGISTER_DECLARE (ssa);
+ GST_TYPE_FIND_REGISTER_DECLARE (pva);
+ GST_TYPE_FIND_REGISTER_DECLARE (aa);
+ GST_TYPE_FIND_REGISTER_DECLARE (tap);
++GST_TYPE_FIND_REGISTER_DECLARE (brstm);
++GST_TYPE_FIND_REGISTER_DECLARE (bfstm);
++GST_TYPE_FIND_REGISTER_DECLARE (dsf);
++GST_TYPE_FIND_REGISTER_DECLARE (ea);
++GST_TYPE_FIND_REGISTER_DECLARE (film_cpk);
++GST_TYPE_FIND_REGISTER_DECLARE (gxf);
++GST_TYPE_FIND_REGISTER_DECLARE (iff);
+ 
+ #endif //__GST_TYPE_FIND_FUNCTIONS_PLUGIN_H__
+diff --git a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsriff.c b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsriff.c
+index ba5521961102..98823c437000 100644
+--- a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsriff.c
++++ b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsriff.c
+@@ -81,3 +81,7 @@ TYPE_FIND_REGISTER_RIFF_DEFINE (wav, "audio/x-wav", GST_RANK_PRIMARY, "wav",
+     "WAVE");
+ TYPE_FIND_REGISTER_RIFF_DEFINE (webp, "image/webp", GST_RANK_PRIMARY,
+     "webp", "WEBP");
++TYPE_FIND_REGISTER_RIFF_DEFINE (fourxm, "video/x-4xm", GST_RANK_PRIMARY,
++    NULL, "4XMV");
++TYPE_FIND_REGISTER_RIFF_DEFINE (xwma, "audio/x-xwma", GST_RANK_PRIMARY,
++    NULL, "XWMA");
+diff --git a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsstartwith.c b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsstartwith.c
+index 6109e9c9ab54..b65a6827a867 100644
+--- a/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsstartwith.c
++++ b/subprojects/gst-plugins-base/gst/typefind/gsttypefindfunctionsstartwith.c
+@@ -177,3 +177,5 @@ TYPE_FIND_REGISTER_START_WITH_DEFINE (xi, "audio/x-xi", GST_RANK_SECONDARY,
+     "xi", "Extended Instrument: ", 21, GST_TYPE_FIND_MAXIMUM);
+ TYPE_FIND_REGISTER_START_WITH_DEFINE (dmp, "audio/x-tap-dmp",
+     GST_RANK_SECONDARY, "dmp", "DC2N-TAP-RAW", 12, GST_TYPE_FIND_LIKELY);
++TYPE_FIND_REGISTER_START_WITH_DEFINE (avs, "video/x-avs",
++    GST_RANK_SECONDARY, NULL, "wW\x10\x00", 4, GST_TYPE_FIND_LIKELY);
