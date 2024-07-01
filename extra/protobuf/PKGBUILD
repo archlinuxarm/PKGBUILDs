@@ -1,0 +1,87 @@
+# Maintainer: Lukas Fleischer <lfleischer@archlinux.org>
+# Contributor: David Runge <dvzrv@archlinux.org>
+# Contributor: Aleksey Filippov <sarum9in@gmail.com>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Sven-Hendrik Haase <sh@lutzhaase.com>
+# Contributor: Thomas S Hatch <thatch45@gmail.com>
+# Contributor: Geoffroy Carrier <geoffroy@archlinux.org>
+# Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove makedpends on bazel
+#  - remove python package
+
+pkgbase='protobuf'
+pkgname=('protobuf')
+pkgver=27.2
+pkgrel=1
+# Note: libphonenumber needs a rebuild for every version bump
+pkgdesc="Protocol Buffers - Google's data interchange format"
+arch=('x86_64')
+url='https://developers.google.com/protocol-buffers/'
+license=('BSD')
+depends=(
+  'gcc-libs'
+  'glibc'
+  'zlib'
+  'abseil-cpp'
+)
+makedepends=(
+  'cmake'
+  'gtest'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+)
+checkdepends=(
+  python-pytest
+  python-numpy
+)
+source=(https://github.com/protocolbuffers/protobuf/archive/v$pkgver/$pkgname-$pkgver.tar.gz
+        https://github.com/protocolbuffers/protobuf/commit/2e62ef1e.patch
+        soversion.patch)
+sha512sums=('664c66b62cf1ed0c65d9b910d8e67d4d5d471113697f1b8edf1573cd5c0fc8e850ac53ce984e48e6c6b9cbbefa12f8530058384e7388e65a59c1e46d03772397'
+            '18bc71031bbcbc3810a9985fa670465040f06a6c104ab8079b56bdfc499bb6cec40805a0cefd455031142490a576dc60aa8000523877ac0353b93558e9beabbd'
+            'f0813a415cff5639e4709400f15b0c5565294e7907ae164e620b76258734c643115d8e5170bf0e4aee264c347fb7e01ac4be60d19be2a91c0ce9c561dad8c8e9')
+
+prepare() {
+  patch -d $pkgname-$pkgver -p1 < 2e62ef1e.patch # Fix cmake config compatibility mode
+  patch -d $pkgbase-$pkgver -p1 < soversion.patch # Restore soversion
+}
+
+build() {
+  local cmake_options=(
+    -B build
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_C_FLAGS="$CFLAGS -ffat-lto-objects" 
+    -D CMAKE_CXX_FLAGS="$CXXFLAGS -ffat-lto-objects"
+    -D protobuf_BUILD_SHARED_LIBS=ON
+    -D protobuf_USE_EXTERNAL_GTEST=ON
+    -D protobuf_ABSL_PROVIDER=package
+    -S "$pkgbase-$pkgver"
+    -W no-dev
+  )
+
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
+}
+
+check() {
+  ctest --test-dir build
+}
+
+package_protobuf() {
+  replaces=('protobuf-cpp')
+  provides=('libprotoc.so' 'libprotobuf.so' 'libprotobuf-lite.so')
+
+  DESTDIR="$pkgdir" cmake --install build
+
+  cd $pkgbase-$pkgver
+  install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -vDm 644 editors/protobuf-mode.el \
+    -t "$pkgdir/usr/share/emacs/site-lisp/"
+  install -vDm 644 editors/proto.vim \
+    -t "${pkgdir}/usr/share/vim/vimfiles/syntax"
+}
