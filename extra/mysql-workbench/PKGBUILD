@@ -11,11 +11,11 @@ highmem=1
 buildarch=8
 
 pkgname=mysql-workbench
-pkgver=8.0.36
-pkgrel=5
+pkgver=8.0.38
+pkgrel=2
 _mysql_version=8.4.0
 _connector_version=8.4.0
-_gdal_version=3.9.0
+_gdal_version=3.9.1
 _boost_version=1.77.0
 # bump the antlr4 version as required, this is to match the jar file name
 _antlr4_version=4.13.1
@@ -37,25 +37,17 @@ source=("https://cdn.mysql.com/Downloads/MySQLGUITools/mysql-workbench-community
 	"https://downloads.sourceforge.net/project/boost/boost/${_boost_version}/boost_${_boost_version//./_}.tar.bz2"
 	'0001-mysql-workbench-no-check-for-updates.patch'
 	'0002-disable-unsupported-operating-system-warning.patch'
-	'0003-include-list.patch'
-	'0004-libxml2.patch'
-	'0005-python-3-12.patch'
-	'0006-library-ssh-include.patch'
 	'arch_linux_profile.xml')
-sha256sums=('634d8a66b6c2777491058a60aba8187e947e4c49a0e7ae83df312fa70714637c'
+sha256sums=('5b646c03684845468d44ad10e6937560e0db122c3a1c4ddc7de8ac3dd51c60f6'
             'SKIP'
             '47a5433fcdd639db836b99e1b5459c2b813cbdad23ff2b5dd4ad27f792ba918e'
             'SKIP'
             '540b3d3b4d20ecf9f900bf55bba870718e50672f54fa2cdb124adf385796ce8b'
             'SKIP'
-            '577f80e9d14ff7c90b6bfbc34201652b4546700c01543efb4f4c3050e0b3fda2'
+            'aff3086fee75f5773e33a5598df98d8a4d10be411f777d3ce23584b21d8171ca'
             'fc9f85fc030e233142908241af7a846e60630aa7388de9a5fafb1f3a26840854'
             'cdf687f23bc6e8d52dbee9fa02b23d755e80f88476f0fc2e7c4c71cdfed3792f'
             '2d0f6dcf38f22e49ef7ab9de0230484f1ffac41b7ac40feaf5ef4538ae2f7a18'
-            'e7e66ba68a21a0da87f0513f2b9550359c923a94aa7d16afe6ead063322e3d53'
-            'a9f1d3262350b22850f9720647c806be8959f2ed387d0095e6134b7f3251363c'
-            'e596ef8ed8479c5052c78fe17139309182d22bfd5765f32866367fd3e787277d'
-            '208ecb77f2ea62340fc77456aab9cfbb89ff78d47d6aa5fde2003a894e4d872d'
             'd816164098c90c432b4fe590708c14f95ab137abfe16ad1b7d498b2e83c0e265')
 
 prepare() {
@@ -68,26 +60,13 @@ prepare() {
 	# disable unsupported operating system warning
 	patch -Np1 < "${srcdir}"/0002-disable-unsupported-operating-system-warning.patch
 
-	# add missing include
-	patch -Np1 < "${srcdir}"/0003-include-list.patch
-
-	# fix build with libxml2
-	patch -Np1 < "${srcdir}"/0004-libxml2.patch
-
-	# fix build with python 3.12
-	patch -Np1 < "${srcdir}"/0005-python-3-12.patch
-
-	# add missing include
-	patch -Np1 < "${srcdir}"/0006-library-ssh-include.patch
-
-	# remove left over requirement on PCRE
-	sed -i '/PCRE REQUIRED/d' CMakeLists.txt
-
 	# remove '-Werror'
 	sed -i '/^\s*set/s| -Werror||' CMakeLists.txt
 
-	# GCC 7.x complains about unsupported flag
-	sed -i 's| -Wno-deprecated-register||' ext/scintilla/gtk/CMakeLists.txt
+	# work around crashes on query:
+	# disable LTO (link time optimization) for libsqlparser.so
+	# TODO: drop when fixed!
+	sed -i '/target_compile_options/s|PRIVATE|PRIVATE -fno-lto|' library/sql.parser/source/CMakeLists.txt
 
 	# be happy with more recent antlr
 	sed -i "/set(ANTLR_JAR_FILENAME/s/4.11.1/${_antlr4_version}/" CMakeLists.txt
@@ -143,22 +122,14 @@ build() {
 	make LD_LIBRARY_PATH="${srcdir}/install-bundle/usr/lib/" DESTDIR="${srcdir}/install-bundle/" -C build-gdal install
 	ln -s '.' "${srcdir}/install-bundle/usr/include/gdal"
 
-	# work around crashes on query:
-	# disable LTO (link time optimization), but for last step (workbench itself) only...
-	# TODO: drop when fixed!
-	export CFLAGS="${CFLAGS/-flto=auto/}"
-	export CXXFLAGS="${CXXFLAGS/-flto=auto}"
-
 	# Build MySQL Workbench itself with bundled libs
-	# include cstdint to fix building with gcc 13
-	# TODO: remove when fixed upstream
 	mkdir "${srcdir}/mysql-workbench-community-${pkgver}-src-build"
 	cd "${srcdir}/mysql-workbench-community-${pkgver}-src-build"
 	echo "Configure mysql-workbench..."
 	cmake "${srcdir}/mysql-workbench-community-${pkgver}-src" \
 		-Wno-dev \
 		-DCMAKE_INSTALL_PREFIX:PATH=/usr \
-		-DCMAKE_CXX_FLAGS="$CXXFLAGS -include cstdint -fsigned-char" \
+		-DCMAKE_CXX_FLAGS="$CXXFLAGS -fsigned-char" \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DMySQL_CONFIG_PATH="${srcdir}/install-bundle/usr/bin/mysql_config" \
 		-DMySQLCppConn_LIBRARY="${srcdir}/install-bundle/usr/lib/libmysqlcppconn.so" \
@@ -192,8 +163,9 @@ package() {
 	# icons
 	for SIZE in 16 24 32 48 64 96 128; do
 		# set modify/create for reproducible builds
-		convert -scale ${SIZE} +set date:create +set date:modify \
+		magick \
 			"${srcdir}/mysql-workbench-community-${pkgver}-src/images/icons/MySQLWorkbench-128.png" \
+			-scale ${SIZE} +set date:create +set date:modify \
 			"${srcdir}/mysql-workbench.png"
 		install -D -m0644 "${srcdir}/mysql-workbench.png" "${pkgdir}/usr/share/icons/hicolor/${SIZE}x${SIZE}/apps/mysql-workbench.png"
 	done
