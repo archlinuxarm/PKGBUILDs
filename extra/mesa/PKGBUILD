@@ -30,7 +30,7 @@ pkgname=(
   vulkan-panfrost
   vulkan-freedreno
 )
-pkgver=24.1.2
+pkgver=24.1.3
 pkgrel=1
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
@@ -130,7 +130,14 @@ for _crate in "${!_crates[@]}"; do
   )
 done
 
-b2sums=('8c66d22101c516b8f9323fcfd92bc242a9d6133a65611cd8b5616eeed9f9825423ecd696a1bbe80832d9d6c1b3b14b34fb54bbe13527ac41af6d0d00a10126f2'
+sha256sums=('63236426b25a745ba6aa2d6daf8cd769d5ea01887b0745ab7124d2ef33a9020d'
+            'SKIP'
+            '39278fbbf5fb4f646ce651690877f89d1c5811a3d4acb27700c1cb3cdb78fd3b'
+            '3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b'
+            '5267fca4496028628a95160fc423a33e8b2e6af8a5302579e322e4b520293cae'
+            'de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c'
+            '23e78b90f2fcf45d3e842032ce32e3f2d1545ba6636271dcbf24fa306d87be7a')
+b2sums=('2e8e4ee98f904aa02f304a6c3cbbb81d04802203e270e6b8ad2b7a62b334ac28f5e91687d7a92501f66b0043255a533d024537ff5ef3f2f03d986e46a7272eeb'
         'SKIP'
         'fff0dec06b21e391783cc136790238acb783780eaedcf14875a350e7ceb46fdc100c8b9e3f09fb7f4c2196c25d4c6b61e574c0dad762d94533b628faab68cf5c'
         '4cede03c08758ccd6bf53a0d0057d7542dfdd0c93d342e89f3b90460be85518a9fd24958d8b1da2b5a09b5ddbee8a4263982194158e171c2bba3e394d88d6dac'
@@ -139,13 +146,6 @@ b2sums=('8c66d22101c516b8f9323fcfd92bc242a9d6133a65611cd8b5616eeed9f9825423ecd69
         '2cff6626624d03f70f1662af45a8644c28a9f92e2dfe38999bef3ba4a4c1ce825ae598277e9cb7abd5585eebfb17b239effc8d0bbf1c6ac196499f0d288e5e01')
 
 # https://docs.mesa3d.org/relnotes.html
-sha256sums=('a2c584c8d57d3bd8ba11790a6e9ae3713f8821df96c059b78afb29dd975c9f45'
-            'SKIP'
-            '39278fbbf5fb4f646ce651690877f89d1c5811a3d4acb27700c1cb3cdb78fd3b'
-            '3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b'
-            '5267fca4496028628a95160fc423a33e8b2e6af8a5302579e322e4b520293cae'
-            'de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c'
-            '23e78b90f2fcf45d3e842032ce32e3f2d1545ba6636271dcbf24fa306d87be7a')
 
 prepare() {
   cd mesa-$pkgver
