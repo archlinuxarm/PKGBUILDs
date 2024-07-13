@@ -1,0 +1,64 @@
+# Maintainer: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
+# Contributor: damir <damir@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch from Gentoo and set -D_FILE_OFFSET_BITS=64 to fix 32bit FTBFS
+
+pkgname=libcdio
+pkgver=2.1.0
+pkgrel=4
+pkgdesc="GNU Compact Disc Input and Control Library"
+url="https://www.gnu.org/software/libcdio/"
+arch=(x86_64)
+license=(GPL3)
+depends=(ncurses gcc-libs)
+makedepends=(git help2man)
+_commit=9c7a2779846da161279bc1501e83c849cf89a594  # tags/release-2.1.0
+source=("git+https://git.savannah.gnu.org/git/libcdio.git#commit=$_commit"
+        "libcdio-2.1.0-no-lfs-shims.patch")
+sha256sums=('SKIP'
+            'c52c1af97c6ba8f6b0bd70020479bffa966ea3d5569f8977354b8bd893d79f9f')
+validpgpkeys=('DAA63BC2582034A02B923D521A8DE5008275EC21') # R. Bernstein
+
+pkgver() {
+  cd $pkgname
+  git describe --tags | sed 's/^release-//;s/[^-]*-g/r&/;s/-/+/g'
+}
+
+prepare() {
+  cd $pkgname
+
+  # Format security
+  git cherry-pick -n 2adb43c60afc6e98e94d86dad9f93d3df52862b1
+
+  # realpath test failure
+  git cherry-pick -n 56335fff0f21d294cd0e478d49542a43e9495ed0
+
+  # gentoo patch for 32bit
+  patch -p1 -i ../libcdio-2.1.0-no-lfs-shims.patch
+
+  autoreconf -fvi
+}
+
+build() {
+  cd $pkgname
+  CPPFLAGS+=' -D_FILE_OFFSET_BITS=64'
+  ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
+    --disable-vcd-info --disable-cddb --enable-cpp-progs --disable-static \
+    --enable-maintainer-mode
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+  make
+}
+
+check() {
+  cd $pkgname
+  make -C test check
+}
+
+package() {
+  cd $pkgname
+  make DESTDIR="$pkgdir" install
+
+  sed -e "/define CDIO_LIBCDIO_SOURCE_PATH/s|.*|/* #undef CDIO_LIBCDIO_SOURCE_PATH */|" \
+      -i "$pkgdir/usr/include/cdio/cdio_config.h"
+}
