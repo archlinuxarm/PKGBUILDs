@@ -30,8 +30,8 @@ pkgname=(
   vulkan-panfrost
   vulkan-freedreno
 )
-pkgver=24.1.3
-pkgrel=1
+pkgver=24.1.4
+pkgrel=2
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
 url="https://www.mesa3d.org/"
@@ -104,6 +104,7 @@ options=(
 )
 source=(
   "https://mesa.freedesktop.org/archive/mesa-$pkgver.tar.xz"{,.sig}
+  0001-Revert-frontends-va-Fix-AV1-slice_data_offset-with-m.patch
 )
 validpgpkeys=(
   946D09B5E4C9845E63075FF1D961C596A7203456 # Andres Gomez <tanty@igalia.com>
@@ -130,15 +131,9 @@ for _crate in "${!_crates[@]}"; do
   )
 done
 
-sha256sums=('63236426b25a745ba6aa2d6daf8cd769d5ea01887b0745ab7124d2ef33a9020d'
-            'SKIP'
-            '39278fbbf5fb4f646ce651690877f89d1c5811a3d4acb27700c1cb3cdb78fd3b'
-            '3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b'
-            '5267fca4496028628a95160fc423a33e8b2e6af8a5302579e322e4b520293cae'
-            'de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c'
-            '23e78b90f2fcf45d3e842032ce32e3f2d1545ba6636271dcbf24fa306d87be7a')
-b2sums=('2e8e4ee98f904aa02f304a6c3cbbb81d04802203e270e6b8ad2b7a62b334ac28f5e91687d7a92501f66b0043255a533d024537ff5ef3f2f03d986e46a7272eeb'
+b2sums=('2109fc604858a0927271d7b1edb76a24514acac6117e564c6999c99f068624964f5cf0b7d022cac5726e432353a32a5278b3aa00b64dd4118bb2f0b7123c3b41'
         'SKIP'
+        'bc2897ab0a7718d38e7843f85f15aa50b06fd89aed1ea494119f9e486ef0a82c500554913fb8ca26f2c0df4ce4fe9067188341a6c90556453fc80558afaaada9'
         'fff0dec06b21e391783cc136790238acb783780eaedcf14875a350e7ceb46fdc100c8b9e3f09fb7f4c2196c25d4c6b61e574c0dad762d94533b628faab68cf5c'
         '4cede03c08758ccd6bf53a0d0057d7542dfdd0c93d342e89f3b90460be85518a9fd24958d8b1da2b5a09b5ddbee8a4263982194158e171c2bba3e394d88d6dac'
         '77c4b166f1200e1ee2ab94a5014acd334c1fe4b7d72851d73768d491c56c6779a0882a304c1f30c88732a6168351f0f786b10516ae537cff993892a749175848'
@@ -146,9 +141,22 @@ b2sums=('2e8e4ee98f904aa02f304a6c3cbbb81d04802203e270e6b8ad2b7a62b334ac28f5e9168
         '2cff6626624d03f70f1662af45a8644c28a9f92e2dfe38999bef3ba4a4c1ce825ae598277e9cb7abd5585eebfb17b239effc8d0bbf1c6ac196499f0d288e5e01')
 
 # https://docs.mesa3d.org/relnotes.html
+sha256sums=('7cf7c6f665263ad0122889c1d4b076654c1eedea7a2f38c69c8c51579937ade1'
+            'SKIP'
+            'db209e829f8888396dc89f06cc650048170ab8a830247a8a243de206a8121937'
+            '39278fbbf5fb4f646ce651690877f89d1c5811a3d4acb27700c1cb3cdb78fd3b'
+            '3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b'
+            '5267fca4496028628a95160fc423a33e8b2e6af8a5302579e322e4b520293cae'
+            'de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c'
+            '23e78b90f2fcf45d3e842032ce32e3f2d1545ba6636271dcbf24fa306d87be7a')
 
 prepare() {
   cd mesa-$pkgver
+
+  # Fix AV1 decode
+  # https://gitlab.freedesktop.org/mesa/mesa/-/issues/11533
+  # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/30255
+  patch -Np1 -i ../0001-Revert-frontends-va-Fix-AV1-slice_data_offset-with-m.patch
 
   # Include package release in version string so Chromium invalidates
   # its GPU cache; otherwise it can cause pages to render incorrectly.
