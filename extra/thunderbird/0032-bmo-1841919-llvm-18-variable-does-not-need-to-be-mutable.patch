@@ -1,0 +1,108 @@
+
+# HG changeset patch
+# User Mike Hommey <mh+mozilla@glandium.org>
+# Date 1688610847 0
+# Node ID c4d6ad7c5e4422f2d6de27f92bf53a776371b325
+# Parent  ce5753685c87f3fbdaaee65c62d7ff1bd0f11637
+Bug 1841919 - Fix "variable does not need to be mutable" warnings in webrender. r=gfx-reviewers,lsalzman
+
+Differential Revision: https://phabricator.services.mozilla.com/D182851
+
+diff --git a/gfx/wr/webrender/src/compositor/sw_compositor.rs b/gfx/wr/webrender/src/compositor/sw_compositor.rs
+--- a/gfx/wr/webrender/src/compositor/sw_compositor.rs
++++ b/gfx/wr/webrender/src/compositor/sw_compositor.rs
+@@ -1021,17 +1021,17 @@ impl SwCompositor {
+         }
+     }
+ 
+     /// Lock a surface with an attached external image for compositing.
+     fn try_lock_composite_surface(&mut self, device: &mut Device, id: &NativeSurfaceId) {
+         if let Some(surface) = self.surfaces.get_mut(id) {
+             if let Some(external_image) = surface.external_image {
+                 assert!(!surface.tiles.is_empty());
+-                let mut tile = &mut surface.tiles[0];
++                let tile = &mut surface.tiles[0];
+                 if let Some(info) = self.composite_surfaces.get(&external_image) {
+                     tile.valid_rect = DeviceIntRect::from_size(info.size);
+                     return;
+                 }
+                 // If the surface has an attached external image, attempt to lock the external image
+                 // for compositing. Yields a descriptor of textures and data necessary for their
+                 // interpretation on success.
+                 let mut info = SWGLCompositeSurfaceInfo {
+diff --git a/gfx/wr/webrender/src/picture.rs b/gfx/wr/webrender/src/picture.rs
+--- a/gfx/wr/webrender/src/picture.rs
++++ b/gfx/wr/webrender/src/picture.rs
+@@ -2883,17 +2883,17 @@ impl TileCacheInstance {
+         surfaces: &mut [SurfaceInfo],
+     ) {
+         // This primitive exists on the last element on the current surface stack.
+         profile_scope!("update_prim_dependencies");
+         let prim_surface_index = surface_stack.last().unwrap().1;
+         let prim_clip_chain = &prim_instance.vis.clip_chain;
+ 
+         // Accumulate the exact (clipped) local rect in to the parent surface
+-        let mut surface = &mut surfaces[prim_surface_index.0];
++        let surface = &mut surfaces[prim_surface_index.0];
+         surface.clipped_local_rect = surface.clipped_local_rect.union(&prim_clip_chain.pic_coverage_rect);
+ 
+         // If the primitive is directly drawn onto this picture cache surface, then
+         // the pic_coverage_rect is in the same space. If not, we need to map it from
+         // the surface space into the picture cache space.
+         let on_picture_surface = prim_surface_index == self.surface_index;
+         let pic_coverage_rect = if on_picture_surface {
+             prim_clip_chain.pic_coverage_rect
+diff --git a/gfx/wr/webrender_api/src/display_item_cache.rs b/gfx/wr/webrender_api/src/display_item_cache.rs
+--- a/gfx/wr/webrender_api/src/display_item_cache.rs
++++ b/gfx/wr/webrender_api/src/display_item_cache.rs
+@@ -53,23 +53,23 @@ struct CacheEntry {
+ 
+ #[derive(Clone, Deserialize, MallocSizeOf, Serialize)]
+ pub struct DisplayItemCache {
+     entries: Vec<CacheEntry>,
+ }
+ 
+ impl DisplayItemCache {
+     fn add_item(&mut self, key: ItemKey, item: CachedDisplayItem) {
+-        let mut entry = &mut self.entries[key as usize];
++        let entry = &mut self.entries[key as usize];
+         entry.items.push(item);
+         entry.occupied = true;
+     }
+ 
+     fn clear_entry(&mut self, key: ItemKey) {
+-        let mut entry = &mut self.entries[key as usize];
++        let entry = &mut self.entries[key as usize];
+         entry.items.clear();
+         entry.occupied = false;
+     }
+ 
+     fn grow_if_needed(&mut self, capacity: usize) {
+         if capacity > self.entries.len() {
+             self.entries.resize_with(capacity, || CacheEntry {
+                 items: Vec::new(),
+
+diff --git a/gfx/wr/wrench/src/reftest.rs b/gfx/wr/wrench/src/reftest.rs
+--- a/gfx/wr/wrench/src/reftest.rs
++++ b/gfx/wr/wrench/src/reftest.rs
+@@ -509,17 +509,17 @@ impl ReftestManifest {
+             // only a single (or no) 'fuzzy' keyword means we use the max
+             // of that fuzzy and options.allow_.. (we don't want that to
+             // turn into a test that allows fuzzy.allow_ *plus* options.allow_):
+             match fuzziness.len() {
+                 0 => fuzziness.push(RefTestFuzzy {
+                         max_difference: options.allow_max_difference,
+                         num_differences: options.allow_num_differences }),
+                 1 => {
+-                    let mut fuzzy = &mut fuzziness[0];
++                    let fuzzy = &mut fuzziness[0];
+                     fuzzy.max_difference = cmp::max(fuzzy.max_difference, options.allow_max_difference);
+                     fuzzy.num_differences = cmp::max(fuzzy.num_differences, options.allow_num_differences);
+                 },
+                 _ => {
+                     // ignore options, use multiple fuzzy keywords instead. make sure
+                     // the list is sorted to speed up counting violations.
+                     fuzziness.sort_by(|a, b| a.max_difference.cmp(&b.max_difference));
+                     for pair in fuzziness.windows(2) {
+
+
