@@ -30,8 +30,8 @@ pkgname=(
   vulkan-panfrost
   vulkan-freedreno
 )
-pkgver=24.1.5
-pkgrel=2
+pkgver=24.1.6
+pkgrel=1
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
 url="https://www.mesa3d.org/"
@@ -104,7 +104,6 @@ options=(
 )
 source=(
   "https://mesa.freedesktop.org/archive/mesa-$pkgver.tar.xz"{,.sig}
-  0001-radeonsi-vcn-Add-decode-DPB-buffers-as-CS-dependency.patch
 )
 validpgpkeys=(
   946D09B5E4C9845E63075FF1D961C596A7203456 # Andres Gomez <tanty@igalia.com>
@@ -131,9 +130,8 @@ for _crate in "${!_crates[@]}"; do
   )
 done
 
-b2sums=('ea29b3b8b6f178dd21d7ee3042ea829755e398f8876dfac6c744de77c08d85abb2736add2141204e6d3343de46040f49d96e1ad455714880b4be46d7b36581f1'
+b2sums=('295634438e1a2ae64bd1c5b0309a253e72a4d95e559cabad72f94aa2b91e5b05179c69cce5e371b69707419399dae0bfe808cb16b2e9ee112277e18b8f0f31f9'
         'SKIP'
-        'e823803cb9b49e15d5e245f2c4a4a62347d70871c82776d20699213eab7aacdefa9581cf28bbb12977038dcb4f41d8e2f14b7e7090b9ebd0612c56b08637c694'
         'fff0dec06b21e391783cc136790238acb783780eaedcf14875a350e7ceb46fdc100c8b9e3f09fb7f4c2196c25d4c6b61e574c0dad762d94533b628faab68cf5c'
         '4cede03c08758ccd6bf53a0d0057d7542dfdd0c93d342e89f3b90460be85518a9fd24958d8b1da2b5a09b5ddbee8a4263982194158e171c2bba3e394d88d6dac'
         '77c4b166f1200e1ee2ab94a5014acd334c1fe4b7d72851d73768d491c56c6779a0882a304c1f30c88732a6168351f0f786b10516ae537cff993892a749175848'
@@ -141,9 +139,8 @@ b2sums=('ea29b3b8b6f178dd21d7ee3042ea829755e398f8876dfac6c744de77c08d85abb2736ad
         '2cff6626624d03f70f1662af45a8644c28a9f92e2dfe38999bef3ba4a4c1ce825ae598277e9cb7abd5585eebfb17b239effc8d0bbf1c6ac196499f0d288e5e01')
 
 # https://docs.mesa3d.org/relnotes.html
-sha256sums=('02761ffd965dd64b95421ebfca1191d73724aba00f30034009237564f34cf976'
+sha256sums=('da94c0908d5662467369b69ed8236da1e1577141a6e7d25171a9bf56383b34e8'
             'SKIP'
-            'a8fb1efea63eeec07af76b51d64c8a1c9748f903e511a7cd68438eb977dd0d4f'
             '39278fbbf5fb4f646ce651690877f89d1c5811a3d4acb27700c1cb3cdb78fd3b'
             '3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b'
             '5267fca4496028628a95160fc423a33e8b2e6af8a5302579e322e4b520293cae'
@@ -152,13 +149,6 @@ sha256sums=('02761ffd965dd64b95421ebfca1191d73724aba00f30034009237564f34cf976'
 
 prepare() {
   cd mesa-$pkgver
-
-  # Fix video decoding memory bugs on AMD 7840H
-  # https://gitlab.archlinux.org/archlinux/packaging/packages/mesa/-/issues/16
-  # https://gitlab.freedesktop.org/drm/amd/-/issues/3437
-  # https://gitlab.freedesktop.org/drm/amd/-/issues/3497
-  # https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/30510
-  patch -Np1 -i ../0001-radeonsi-vcn-Add-decode-DPB-buffers-as-CS-dependency.patch
 
   # Include package release in version string so Chromium invalidates
   # its GPU cache; otherwise it can cause pages to render incorrectly.
