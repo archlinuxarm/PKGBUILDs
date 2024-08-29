@@ -204,8 +204,8 @@ prepare() {
 
 build() {
   case "${CARCH}" in
-    armv7h)  GALLIUM=",etnaviv,kmsro,lima,panfrost,tegra,v3d,vc4" ;;
-    aarch64) GALLIUM=",etnaviv,kmsro,lima,panfrost,svga,v3d,vc4" ;;
+    armv7h)  GALLIUM=",etnaviv,lima,panfrost,tegra,v3d,vc4" ;;
+    aarch64) GALLIUM=",etnaviv,lima,panfrost,svga,v3d,vc4" ;;
   esac
 
   local meson_options=(
