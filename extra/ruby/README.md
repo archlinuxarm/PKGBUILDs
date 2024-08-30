@@ -55,6 +55,7 @@ Build the following packages in the given order:
 - ruby-bundler
 - ruby-webrick
 - ruby-rake-compiler
+- ruby-test-unit-ruby-core
 - ruby-erb
 - ruby-power_assert
 - ruby-test-unit
@@ -85,3 +86,9 @@ libraries are compatible with the new Ruby version. This rebuild must be
 carefully managed to maintain dependency integrity.
 
 - rebuild all packages in order
+
+#### command to find packages to rebuild
+
+```bash
+./build-rebuild-todo-list.sh <old_ruby_version>
+```
