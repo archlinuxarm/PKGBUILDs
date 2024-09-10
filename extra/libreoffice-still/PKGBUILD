@@ -20,7 +20,7 @@ pkgbase=libreoffice-still
 pkgname=('libreoffice-still-sdk' 'libreoffice-still')
 _LOver=24.2.6.2
 pkgver=24.2.6
-pkgrel=2
+pkgrel=3
 arch=('x86_64')
 license=('MPL-2.0' 'LGPL-3.0-or-later')
 url="https://www.libreoffice.org/"
@@ -71,7 +71,6 @@ source=(${_mirror}/libreoffice{,-help,-translations}-${_LOver}.tar.xz{,.asc}
     ${_additional_source_url2}/8249374c274932a21846fa7629c2aa9b-officeotron-0.7.4-master.jar  # for test suite
     ${_additional_source_url2}/odfvalidator-1.2.0-incubating-SNAPSHOT-jar-with-dependencies-971c54fd38a968f5860014b44301872706f9e540.jar # for test suite
     ${_additional_source_url2}/f543e6e2d7275557a839a164941c0a86e5f2c3f2a0042bfc434c88c6dde9e140-opens___.ttf
-    make-pyuno-work-with-system-wide-module-install.diff
     623ea5c.diff
     libreoffice-7.5.8.2-icu-74-compatibility.patch
     soffice-template.desktop.in
@@ -126,7 +125,6 @@ sha256sums=('f6ea4df022696065b5dcdca4e28bf06906ac852df4ba6dc50aa8fe59c8e11db3'
             'f2443f27561af52324eee03a1892d9f569adc8db9e7bca55614898bc2a13a770'
             '984f2a479df79e27e7b01a5815ac53ae64e07746b882262d8a64566494515504'
             'f543e6e2d7275557a839a164941c0a86e5f2c3f2a0042bfc434c88c6dde9e140'
-            'c463654a73ecfbc242ff109726fb4faecdbfb3d91affafe919b24bea65afb563'
             '440c9af5f3d1213d8ed7177282380f25cbc981cabc8b590dcb777aaae84178e5'
             'd7b952a51e1e40d3faf2f465b68f46d56828d8c46948748fa82fe82a29af2599'
             'd0be8099cbee3c9dfda694a828149b881c345b204ab68826f317580aafb50879'
@@ -143,10 +141,6 @@ prepare() {
     ln -s "${srcdir}"/$source .
     done
     popd
-
-# should be obsolete - Debian has dropped this long time ago
-    # fix not upstreamable pyuno paths - FS#54250
-#    patch -Np1 -i "${srcdir}"/make-pyuno-work-with-system-wide-module-install.diff
 
     # fix build - https://gerrit.libreoffice.org/c/core/+/145421
     patch -Np1 -i "${srcdir}"/623ea5c.diff
@@ -370,14 +364,28 @@ package_libreoffice-still() {
     install -dm755 "${pkgdir}"/etc/profile.d
     install -m644 "${srcdir}"/libreoffice-still.{sh,csh} "${pkgdir}"/etc/profile.d/
 
-    # make pyuno find its modules
+    # move python bits into site-packages
     local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-
     install -dm755 "${pkgdir}"/$site_packages
-    ln -svf /usr/lib/libreoffice/program/uno.py \
-        "${pkgdir}"/$site_packages/uno.py
-    ln -svf /usr/lib/libreoffice/program/unohelper.py \
-        "${pkgdir}"/$site_packages/unohelper.py
+
+    pushd "${pkgdir}"/$site_packages
+        echo "import sys, os" > uno.py
+        echo "sys.path.append('/usr/lib/libreoffice/program/')" >> uno.py
+        echo "os.putenv('URE_BOOTSTRAP', 'vnd.sun.star.pathname:/usr/lib/libreoffice/program/fundamentalrc')" >> uno.py
+        cat "${pkgdir}"/usr/lib/libreoffice/program/uno.py >> uno.py
+        rm -f "${pkgdir}"/usr/lib/libreoffice/program/uno.py*
+        mv -f "${pkgdir}"/usr/lib/libreoffice/program/unohelper.py* .
+        mv -f "${pkgdir}"/usr/lib/libreoffice/program/officehelper.py* .
+    popd
+
+#     # make pyuno find its modules
+#     local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+#
+#     install -dm755 "${pkgdir}"/$site_packages
+#     ln -svf /usr/lib/libreoffice/program/uno.py \
+#         "${pkgdir}"/$site_packages/uno.py
+#     ln -svf /usr/lib/libreoffice/program/unohelper.py \
+#         "${pkgdir}"/$site_packages/unohelper.py
 
     # add a symlink required for gnome-documents; FS#51887
     # https://lists.freedesktop.org/archives/libreoffice/2016-March/073787.html
