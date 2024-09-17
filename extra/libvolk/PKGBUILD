@@ -1,54 +1,61 @@
-# Maintainer:
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: Kyle Keen <keenerd@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - build v7 without neon to fix FTBFS
 
-_name=volk
 pkgname=libvolk
-epoch=2
+_pkgname=volk
 pkgver=3.1.2
-_cpuver=0.9.0
-pkgrel=2
+pkgrel=3
+epoch=2
 pkgdesc="The Vector-Optimized Library of Kernels from Gnuradio"
-arch=('x86_64')
+arch=(x86_64)
 url="https://www.libvolk.org/"
-license=('GPL3')
-depends=('gcc-libs' 'orc' 'python')
-makedepends=('cmake' 'python-mako')
-source=("volk-$pkgver.tgz::https://github.com/gnuradio/volk/archive/v$pkgver.tar.gz"
-        "cpufeatures-$_cpuver.tgz::https://github.com/google/cpu_features/archive/v$_cpuver.tar.gz")
-sha256sums=('90082bf68d76d00aa6c35f8bff0e93891b4204d817e1a3ba829486b445f715dc'
-            'bdb3484de8297c49b59955c3b22dba834401bc2df984ef5cfc17acbe69c5018e')
-validpgpkeys=('09E749D885FA881A7E84E823385323EE6402091D'
-              'D74F9F146E7F755783583158B343B2BA293E5174')
+license=(LGPL-3.0-or-later)
+depends=(
+  gcc-libs
+  glibc
+  orc
+  python
+)
+makedepends=(
+  cmake
+  git
+  python-mako
+)
+provides=(libvolk.so)
+source=(
+  "git+https://github.com/gnuradio/volk.git#tag=v$pkgver"
+  "git+https://github.com/google/cpu_features.git"
+)
+sha256sums=('9b3b30f8428ae7813e1d0d22896b717b8dd802027869065c42d552157652e288'
+            'SKIP')
 
 prepare() {
-  cd $_name-$pkgver
-  rmdir cpu_features
-  ln -sf "$srcdir/cpu_features-$_cpuver" cpu_features
+  cd $_pkgname
+  git submodule init
+  git config submodule.cpu_features.url "$srcdir/cpu_features"
+  git -c protocol.file.allow=always submodule update
 }
 
 build() {
-  local cmake_options=(
-    -B build
-    -D PYTHON_EXECUTABLE=/usr/bin/python
-    -D CMAKE_C_FLAGS="$CFLAGS -ffat-lto-objects"
-    -D CMAKE_INSTALL_PREFIX=/usr
-    -W no-dev
-    -S $_name-$pkgver
-  )
-
+  cd $_pkgname
   [[ $CARCH == "armv7h" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/neon/vfpv3/'` && CXXFLAGS="$CFLAGS"
-  export PYTHON_EXECUTABLE=/usr/bin/python
-  cmake "${cmake_options[@]}"
-  cmake --build build --verbose
+  cmake -S . -B build \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_BUILD_TYPE=None \
+    -Wno-dev
+  cmake --build build
 }
 
 check() {
-  ctest --test-dir build --output-on-failure -E 'check_lgpl'
+  cd $_pkgname
+  ctest --test-dir build --output-on-failure
 }
 
 package() {
+  cd $_pkgname
   DESTDIR="$pkgdir" cmake --install build
+  rm -vr "$pkgdir/usr/include/volk/asm"
 }
