@@ -31,7 +31,7 @@ pkgname=(
   vulkan-freedreno
   mesa-docs
 )
-pkgver=24.2.3
+pkgver=24.2.4
 pkgrel=1
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
@@ -146,7 +146,7 @@ for _crate in "${!_crates[@]}"; do
   )
 done
 
-b2sums=('3c480bd9f5948ae4d66a833cfc059b1b872fca989296a070deaa46aeb72298eaca6a3fa9d13574859623cec4a6af978f44d2c9562b9757be2257364c27600be6'
+b2sums=('a0a977e5032e1c9a5b59dc9212d50b6f023fb9d42d325e692a3c680e77a06e2ccd66843b9eaeeadbf3614b65798c5c4649fb0bb74f134334e662ee9dd47ac21f'
         'SKIP'
         'a6d47c903be6094423d89b8ec3ca899d0a84df6dbd6e76632bb6c9b9f40ad9c216f8fa400310753d392f85072756b43ac3892e0a2c4d55f87ab6463002554823'
         '9c34f1ab14ad5ae124882513e0f14b1d731d06a43203bdc37fa3b202dd3ce93dbe8ebb554d01bab475689fe6ffd3ec0cbc0d5365c9b984cb83fb34ea3e9e732e'
@@ -165,7 +165,7 @@ b2sums=('3c480bd9f5948ae4d66a833cfc059b1b872fca989296a070deaa46aeb72298eaca6a3fa
         '8bc6f68ed286bea617a2cfaf3949bb699d3a0466faeca735314a51596ce950e4ee57eda88154bd562c1728cfaff4cdb5bc1ba701b9d47a9c50d4c4f011bee975')
 
 # https://docs.mesa3d.org/relnotes.html
-sha256sums=('4ea18b1155a4544a09f7361848974768f6f73c19d88f63de2ec650be313b2d0c'
+sha256sums=('5ea42a8bb6d58aec9754c9f553b1e413f67c09403741f8e2786c3f9e63d3461a'
             'SKIP'
             'ed646292ffc8188ef8ea4d1e0e0150fb15a5c2e12ad9b8fc191ae7a8a7f3c4b9'
             'a941429fea7e08bedec25e4f6785b6ffaacc6b755da98df5ef3e7dcf4a124c4f'
