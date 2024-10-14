@@ -31,7 +31,9 @@ Build the following packages in the given order:
 - ruby-rake
 - ruby-hoe
 - ruby-kpeg
+- ruby-test-unit-ruby-core
 - ruby-rdoc
+- ruby-tracer
 - ruby-irb
 - ruby-power_assert `--nocheck`
 - ruby-test-unit
@@ -76,6 +78,8 @@ Build the following packages in the given order:
 - ruby-racc
 - ruby-rdoc
 - ruby-typeprof
+- ruby-test-unit-ruby-core
+- ruby-tracer
 
 ### rebuild all packages
 
