@@ -13,14 +13,16 @@ pkgname=(
   debuginfod
 )
 pkgver=0.192
-pkgrel=1
+pkgrel=2
 pkgdesc="Handle ELF object files and DWARF debugging information"
 arch=(x86_64)
 url="https://sourceware.org/elfutils/"
+_url=https://sourceware.org/git/elfutils.git
 makedepends=(
   bzip2
   curl
   gcc-libs
+  git
   json-c
   libarchive
   libmicrohttpd
@@ -30,21 +32,23 @@ makedepends=(
   zstd
 )
 options=(staticlibs)
-source=(https://sourceware.org/$pkgbase/ftp/$pkgver/$pkgbase-$pkgver.tar.bz2{,.sig})
-sha512sums=('543188f5f2cfe5bc7955a878416c5f252edff9926754e5de0c6c57b132f21d9285c9b29e41281e93baad11d4ae7efbbf93580c114579c182103565fe99bd3909'
-            'SKIP')
-b2sums=('cf9036a1fca416e0d47c76471093609230545aee63e31e30991dc3c88417d7c621c930bb74809374da3bf142501cee91a2b861a5a89efcb5e1ac184df5defce1'
-        'SKIP')
+source=(git+$_url?signed#tag=$pkgbase-$pkgver)
+sha512sums=('ac5f968fc855bd1a504d8b0c676601d9ec7095efe85bb6e2d29980dee9399a921d707a93c16667f979649a166cc3c86e5192898318c5b572f9bf4d3e7229f754')
+b2sums=('fdd1d3857ea5061562e91f17e08ebc1b556fb092fd5e32040b9176b7799583d716b31ef5c2652b4ddcd71ec46fa7ddd852e253f9f4f2a21c5e0425f77a3e8310')
 validpgpkeys=(
   'EC3CFE88F6CA0788774F5C1D1AA44BE649DE760A'  # Mark Wielaard <mjw@gnu.org>
   '6C2B631563B8D330578D3CB474FD3FA2779E7073'  # Aaron Merey <amerey@redhat.com>
 )
 
 prepare() {
-  # remove failing test due to missing glibc debug package during test: https://bugs.archlinux.org/task/74875
-  sed -e 's/run-backtrace-native.sh//g' -i $pkgbase-$pkgver/tests/Makefile.am
+  cd $pkgbase
+  # fix issue with /etc/profile.d/debuginfod.sh for zsh:
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/elfutils/-/issues/2
+  git cherry-pick -n 00cb3efe36337f27925dbff9b2e7d97c7df95bf8
 
-  cd $pkgbase-$pkgver
+  # remove failing test due to missing glibc debug package during test: https://bugs.archlinux.org/task/74875
+  sed -e 's/run-backtrace-native.sh//g' -i tests/Makefile.am
+
   autoreconf -fiv
 }
 
@@ -54,6 +58,7 @@ build() {
     --sysconfdir=/etc
     --program-prefix="eu-"
     --enable-deterministic-archives
+    --enable-maintainer-mode
   )
 
   # fat-lto-objects is required for non-mangled .a files in libelf
@@ -62,13 +67,13 @@ build() {
   # debugging information is required for test-suite
   CFLAGS+=" -g"
 
-  cd $pkgbase-$pkgver
+  cd $pkgbase
   ./configure "${configure_options[@]}"
   make
 }
 
 check() {
-  make -C $pkgbase-$pkgver check
+  make -C $pkgbase check
 }
 
 _pick() {
@@ -94,7 +99,7 @@ package_elfutils() {
     sh
   )
 
-  make DESTDIR="$pkgdir" install -C $pkgbase-$pkgver
+  make DESTDIR="$pkgdir" install -C $pkgbase
 
   (
     cd "$pkgdir"
@@ -108,7 +113,7 @@ package_elfutils() {
     _pick debuginfod usr/share/man/*/debuginfod*
   )
 
-  install -vDm 644 $pkgbase-$pkgver/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 $pkgbase/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
 }
 
 package_libelf() {
@@ -128,7 +133,7 @@ package_libelf() {
   # NOTE: the shared objects can not be added to provides as they are not versioned
 
   mv -v $pkgname/* "$pkgdir"
-  install -vDm 644 $pkgbase-$pkgver/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 $pkgbase/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
 }
 
 package_debuginfod() {
@@ -149,7 +154,7 @@ package_debuginfod() {
   optdepends=("elfutils=$pkgver: for translations")
 
   mv -v $pkgname/* "$pkgdir"
-  install -vDm 644 $pkgbase-$pkgver/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -vDm 644 $pkgbase/{AUTHORS,ChangeLog,NEWS,NOTES,README} -t "$pkgdir/usr/share/doc/$pkgname/"
 }
 
 # vim:set sw=2 sts=-1 et:
