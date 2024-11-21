@@ -12,10 +12,9 @@ buildarch=8
 
 pkgname=mysql-workbench
 pkgver=8.0.40
-pkgrel=3
+pkgrel=4
 _mysql_version=8.4.3
 _connector_version=8.4.0
-_gdal_version=3.9.3
 _boost_version=1.77.0
 # bump the antlr4 version as required, this is to match the jar file name
 _antlr4_version=4.13.2
@@ -32,6 +31,7 @@ depends=('antlr4-runtime' 'libantlr4-runtime.so'
          'expat' 'libexpat.so'
          'freetype2'
          'gcc-libs'
+         'gdal'
          'gdk-pixbuf2' 'libgdk_pixbuf-2.0.so'
          'giflib' 'libgif.so'
          'glib2' 'libgio-2.0.so' 'libglib-2.0.so' 'libgmodule-2.0.so' 'libgobject-2.0.so'
@@ -71,7 +71,6 @@ validpgpkeys=('BCA43417C3B485DD128EC6D4B7B3B788A8D3785C') # MySQL Release Engine
 source=("https://cdn.mysql.com/Downloads/MySQLGUITools/mysql-workbench-community-${pkgver}-src.tar.gz"{,.asc}
 	"https://cdn.mysql.com/Downloads/MySQL-${_mysql_version%.*}/mysql-${_mysql_version}.tar.gz"{,.asc}
 	"https://cdn.mysql.com/archives/mysql-connector-c++/mysql-connector-c++-${_connector_version}-src.tar.gz"{,.asc}
-	"https://download.osgeo.org/gdal/${_gdal_version}/gdal-${_gdal_version}.tar.xz"
 	"https://downloads.sourceforge.net/project/boost/boost/${_boost_version}/boost_${_boost_version//./_}.tar.bz2"
 	'0001-mysql-workbench-no-check-for-updates.patch'
 	'0002-disable-unsupported-operating-system-warning.patch'
@@ -82,7 +81,6 @@ sha256sums=('fc2ae31e067720516f501d48c5e51199ef19e81a19c746f4dcc5a4f1009ed128'
             'SKIP'
             '540b3d3b4d20ecf9f900bf55bba870718e50672f54fa2cdb124adf385796ce8b'
             'SKIP'
-            '34a037852ffe6d2163f1b8948a1aa7019ff767148aea55876c1339b22ad751f1'
             'fc9f85fc030e233142908241af7a846e60630aa7388de9a5fafb1f3a26840854'
             'cdf687f23bc6e8d52dbee9fa02b23d755e80f88476f0fc2e7c4c71cdfed3792f'
             '2d0f6dcf38f22e49ef7ab9de0230484f1ffac41b7ac40feaf5ef4538ae2f7a18'
@@ -144,22 +142,6 @@ build() {
 	echo "Install mysql-connector-c++..."
 	make DESTDIR="${srcdir}/install-bundle/" install
 
-	# Build gdal
-	cd "${srcdir}/"
-	echo "Configure gdal..."
-	cmake -B build-gdal -S "${srcdir}/gdal-${_gdal_version}" \
-		-DCMAKE_INSTALL_PREFIX='/usr' \
-		-DGDAL_USE_JASPER='OFF' \
-		-DGDAL_USE_MYSQL='OFF' \
-		-DBUILD_CSHARP_BINDINGS='FALSE' \
-		-DBUILD_JAVA_BINDINGS='FALSE' \
-		-DBUILD_PYTHON_BINDINGS='FALSE'
-	echo "Build gdal..."
-	make LD_LIBRARY_PATH="${srcdir}/install-bundle/usr/lib/" -C build-gdal
-	echo "Install gdal..."
-	make LD_LIBRARY_PATH="${srcdir}/install-bundle/usr/lib/" DESTDIR="${srcdir}/install-bundle/" -C build-gdal install
-	ln -s '.' "${srcdir}/install-bundle/usr/include/gdal"
-
 	# Build MySQL Workbench itself with bundled libs
 	mkdir "${srcdir}/mysql-workbench-community-${pkgver}-src-build"
 	cd "${srcdir}/mysql-workbench-community-${pkgver}-src-build"
@@ -172,8 +154,6 @@ build() {
 		-DMySQL_CONFIG_PATH="${srcdir}/install-bundle/usr/bin/mysql_config" \
 		-DMySQLCppConn_LIBRARY="${srcdir}/install-bundle/usr/lib/libmysqlcppconn.so" \
 		-DMySQLCppConn_INCLUDE_DIR="${srcdir}/install-bundle/usr/include/jdbc" \
-		-DGDAL_INCLUDE_DIR="${srcdir}/install-bundle/usr/include" \
-		-DGDAL_LIBRARY="${srcdir}/install-bundle/usr/lib/libgdal.so" \
 		-DUNIXODBC_CONFIG_PATH='/usr/bin/odbc_config' \
 		-DUSE_BUNDLED_MYSQLDUMP=1 \
 		-DWITH_ANTLR_JAR="/usr/share/java/antlr-${_antlr4_version}-complete.jar"
@@ -183,7 +163,7 @@ build() {
 
 package() {
 	# install bundled libraries
-	for LIBRARY in $(find "${srcdir}/install-bundle/usr/lib/" -type f -regex '.*/lib\(gdal\|mysql\(client\|cppconn\)\)\.so\..*'); do
+	for LIBRARY in $(find "${srcdir}/install-bundle/usr/lib/" -type f -regex '.*/lib\(mysql\(client\|cppconn\)\)\.so\..*'); do
 		BASENAME="$(basename "${LIBRARY}")"
 		SONAME="$(readelf -d "${LIBRARY}" | grep -Po '(?<=(Library soname: \[)).*(?=\])')"
 		install -D -m0755 "${LIBRARY}" "${pkgdir}"/usr/lib/mysql-workbench/"${BASENAME}"
