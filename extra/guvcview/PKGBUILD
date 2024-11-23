@@ -7,67 +7,66 @@
 
 pkgbase=guvcview
 pkgname=(guvcview guvcview-common guvcview-qt)
-pkgver=2.1.0
-pkgrel=5
+pkgver=2.2.1
+pkgrel=1
 pkgdesc='Simple interface for capturing and viewing video from v4l2 devices'
 arch=('x86_64')
 url='http://guvcview.sourceforge.net/'
 license=('GPL3')
-depends=('ffmpeg' 'gsl' 'gtk3' 'qt5-base' 'portaudio')
-makedepends=('intltool')
+depends=('ffmpeg' 'gsl' 'gtk3' 'qt6-base' 'portaudio')
+makedepends=('cmake')
 options=('!emptydirs' '!distcc')
 source=("https://downloads.sourceforge.net/$pkgbase/$pkgbase-src-$pkgver.tar.bz2")
-sha256sums=('3d93e4c9fab8d1a7a9bde1a6dbbf04d6cf9d347c134b5128b4586a1d90b63cfb')
+sha256sums=('d2adc7ce762961e853c3e16b511bad61504492d12f3e2eb7e30da4a2f7ade5af')
 noextract=($pkgbase-src-$pkgver-2.tar.bz2) # missing root dir
 
 prepare() {
-  cp -a $pkgbase{-src-$pkgver,-qt}
+# Fix appdata install dir
+  sed -e 's|\/appdata|\/metainfo|' -i $pkgbase-src-$pkgver/data/CMakeLists.txt
 }
 
 build() {
   # GTK+ version
-  cd $pkgbase-src-$pkgver
-  ./configure --prefix=/usr --disable-debian-menu
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  make
+  cmake -B build-gtk -S $pkgbase-src-$pkgver \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DUSE_SFML=ON
+  cmake --build build-gtk
 
   # Qt version
-  cd ../$pkgbase-qt
-  ./configure --prefix=/usr --disable-debian-menu --disable-gtk3 --enable-qt5
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-  make
+  cmake -B build-qt -S $pkgbase-src-$pkgver \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DUSE_SFML=ON \
+    -DUSE_QT6=ON \
+    -DUSE_GTK3=OFF
+  cmake --build build-qt
 }
 
 package_guvcview-common() {
   pkgdesc="Common files for guvcview"
   depends=('ffmpeg' 'gsl' 'libusb' 'portaudio')
 
-  cd $pkgbase-src-$pkgver
-  make DESTDIR="$pkgdir" install
-  make -C guvcview DESTDIR="$pkgdir" uninstall
-  make -C data DESTDIR="$pkgdir" uninstall-man1 uninstall-appdataDATA uninstall-desktopDATA
-  install -Dm644 data/icons/guvcview.png "$pkgdir"/usr/share/icons/hicolor/128x128/apps/guvcview.png
+  DESTDIR="$pkgdir" cmake --install build-gtk
+  rm -r "$pkgdir"/usr/{bin,share/{man,metainfo,applications}}
+  install -Dm644 $pkgbase-src-$pkgver/data/icons/guvcview.png "$pkgdir"/usr/share/icons/hicolor/128x128/apps/guvcview.png
 }
 
 package_guvcview() {
   pkgdesc="Simple GTK+ interface for capturing and viewing video from v4l2 devices"
   depends=('guvcview-common' 'gtk3')
 
-  cd $pkgbase-src-$pkgver
-  make -C guvcview DESTDIR="$pkgdir" install
-  make -C data DESTDIR="$pkgdir" install-man1 install-appdataDATA install-desktopDATA
+  DESTDIR="$pkgdir" cmake --install build-gtk
+  rm -r "$pkgdir"/usr/{lib,share/{pixmaps,locale}}
   sed -i 's/^Icon=.*/Icon=guvcview/' "$pkgdir"/usr/share/applications/guvcview.desktop
 }
 
 package_guvcview-qt() {
   pkgdesc="Simple Qt interface for capturing and viewing video from v4l2 devices"
-  depends=('guvcview-common' 'qt5-base')
+  depends=('guvcview-common' 'qt6-base')
 
-  cd $pkgbase-qt
-  make -C guvcview DESTDIR="$pkgdir" install
-  make -C data DESTDIR="$pkgdir" install-man1 install-appdataDATA install-desktopDATA
+  DESTDIR="$pkgdir" cmake --install build-qt
+  rm -r "$pkgdir"/usr/{lib,share/{pixmaps,locale}}
   mv "$pkgdir"/usr/bin/guvcview{,-qt}
-  mv "$pkgdir"/usr/share/man/man1/guvcview{,-qt}.1
+  mv "$pkgdir"/usr/share/man/man1/guvcview{,-qt}.1.gz
   mv "$pkgdir"/usr/share/applications/guvcview{,-qt}.desktop
   sed -i 's/Exec=guvcview/Exec=guvcview-qt/
           s/^Icon=.*/Icon=guvcview/' "$pkgdir"/usr/share/applications/guvcview-qt.desktop
