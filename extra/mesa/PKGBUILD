@@ -30,7 +30,7 @@ pkgname=(
   mesa-docs
 )
 pkgver=24.3.1
-pkgrel=1
+pkgrel=2
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
 url="https://www.mesa3d.org/"
@@ -105,6 +105,7 @@ options=(
 )
 source=(
   "https://mesa.freedesktop.org/archive/mesa-$pkgver.tar.xz"{,.sig}
+  0001-Revert-dri-revert-INVALID-modifier-special-casing.patch
 )
 validpgpkeys=(
   946D09B5E4C9845E63075FF1D961C596A7203456 # Andres Gomez <tanty@igalia.com>
@@ -143,6 +144,7 @@ done
 
 b2sums=('d3efc322388e29f651b15b0396fef8a6acc0cf24881165900845e429dd6cb53d51511f174d6a4017f48962b764b9a42f069825196af9f4ca969a4b46e1108a0e'
         'SKIP'
+        '811fa4d6f66d86dcfe08bce96d43b4c1b597c99682d0466081d795ed06c572fc25b4d49502861a9266cf36964e6831ba2fbd2c6f130e6b3385edfc34a0968f19'
         'a6d47c903be6094423d89b8ec3ca899d0a84df6dbd6e76632bb6c9b9f40ad9c216f8fa400310753d392f85072756b43ac3892e0a2c4d55f87ab6463002554823'
         '9c34f1ab14ad5ae124882513e0f14b1d731d06a43203bdc37fa3b202dd3ce93dbe8ebb554d01bab475689fe6ffd3ec0cbc0d5365c9b984cb83fb34ea3e9e732e'
         'fac5cf6339dc3c0a40b100035a5c874cc7b2efeafeb31c51488d25156e392dc9db86a497e76eead351d2126f69d060422faa9c55d73407a0de9f5be18d234123'
@@ -162,6 +164,7 @@ b2sums=('d3efc322388e29f651b15b0396fef8a6acc0cf24881165900845e429dd6cb53d51511f1
 # https://docs.mesa3d.org/relnotes.html
 sha256sums=('9c795900449ce5bc7c526ba0ab3532a22c3c951cab7e0dd9de5fcac41b0843af'
             'SKIP'
+            '3397cdff30322f9e27db820df5f1709bb682953d14773604357ba46ec247d551'
             'ed646292ffc8188ef8ea4d1e0e0150fb15a5c2e12ad9b8fc191ae7a8a7f3c4b9'
             'a941429fea7e08bedec25e4f6785b6ffaacc6b755da98df5ef3e7dcf4a124c4f'
             '168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26'
@@ -180,6 +183,10 @@ sha256sums=('9c795900449ce5bc7c526ba0ab3532a22c3c951cab7e0dd9de5fcac41b0843af'
 
 prepare() {
   cd mesa-$pkgver
+
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/mesa/-/issues/19
+  # https://gitlab.freedesktop.org/mesa/mesa/-/issues/12253
+  patch -Np1 -i ../0001-Revert-dri-revert-INVALID-modifier-special-casing.patch
 
   # Include package release in version string so Chromium invalidates
   # its GPU cache; otherwise it can cause pages to render incorrectly.

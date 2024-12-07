@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Jan Alexander Steffens (heftig)" <jan.steffens@gmail.com>
+Date: Fri, 6 Dec 2024 15:03:49 +0100
+Subject: [PATCH] Revert "dri: revert INVALID modifier special-casing"
+
+Causes crashes on some older Radeon GPUs. This reverts commit
+4c065158927d7bacc5eb1e4f2491b1db93f1dc12.
+
+Closes: https://gitlab.archlinux.org/archlinux/packaging/packages/mesa/-/issues/19
+See: https://gitlab.freedesktop.org/mesa/mesa/-/issues/12253
+---
+ .pick_status.json                |  2 +-
+ src/gallium/frontends/dri/dri2.c | 22 ++++++++++++++++++++--
+ 2 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/.pick_status.json b/.pick_status.json
+index 140cbe3b7d22..a29c6a60575a 100644
+--- a/.pick_status.json
++++ b/.pick_status.json
+@@ -2114,7 +2114,7 @@
+         "description": "dri: revert INVALID modifier special-casing",
+         "nominated": true,
+         "nomination_type": 2,
+-        "resolution": 1,
++        "resolution": 0,
+         "main_sha": null,
+         "because_sha": "361f3622587e5bc452a62dbd671969b713273b79",
+         "notes": null
+diff --git a/src/gallium/frontends/dri/dri2.c b/src/gallium/frontends/dri/dri2.c
+index 18baf444f82c..d8ee9536479e 100644
+--- a/src/gallium/frontends/dri/dri2.c
++++ b/src/gallium/frontends/dri/dri2.c
+@@ -1130,8 +1130,26 @@ dri_create_image(struct dri_screen *screen,
+    if (!map)
+       return NULL;
+ 
+-   if (!pscreen->resource_create_with_modifiers && count > 0)
+-      return NULL;
++   if (count == 1 && modifiers[0] == DRM_FORMAT_MOD_INVALID) {
++      count = 0;
++      modifiers = NULL;
++   }
++
++   if (!pscreen->resource_create_with_modifiers && count > 0) {
++      bool invalid_ok = false;
++
++      for (unsigned i = 0; i < _count; i++) {
++         if (modifiers[i] == DRM_FORMAT_MOD_INVALID)
++            invalid_ok = true;
++      }
++
++      if (invalid_ok) {
++         count = 0;
++         modifiers = NULL;
++      } else {
++         return NULL;
++      }
++   }
+ 
+    if (pscreen->is_format_supported(pscreen, map->pipe_format, screen->target,
+                                     0, 0, PIPE_BIND_RENDER_TARGET))
