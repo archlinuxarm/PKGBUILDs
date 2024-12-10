@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Simon Ser <contact@emersion.fr>
+Date: Sat, 7 Dec 2024 13:12:40 +0100
+Subject: [PATCH] egl/wayland: only supply LINEAR modifier when supported
+
+If we supply modifiers to dri_create_image_with_modifiers() and
+the driver doesn't support them, the function will fail. We pass
+__DRI_IMAGE_USE_LINEAR anyways so stripping the modifier is fine.
+
+Signed-off-by: Simon Ser <contact@emersion.fr>
+Fixes: 4c065158927d ("dri: revert INVALID modifier special-casing")
+---
+ src/egl/drivers/dri2/platform_wayland.c | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/src/egl/drivers/dri2/platform_wayland.c b/src/egl/drivers/dri2/platform_wayland.c
+index 513d2d0709b1..472665a36b0d 100644
+--- a/src/egl/drivers/dri2/platform_wayland.c
++++ b/src/egl/drivers/dri2/platform_wayland.c
+@@ -45,11 +45,13 @@
+ #include "util/u_vector.h"
+ #include "util/format/u_formats.h"
+ #include "main/glconfig.h"
++#include "pipe/p_screen.h"
+ #include "egl_dri2.h"
+ #include "eglglobals.h"
+ #include "kopper_interface.h"
+ #include "loader.h"
+ #include "loader_dri_helper.h"
++#include "dri_screen.h"
+ #include "dri_util.h"
+ #include <loader_wayland_helper.h>
+ 
+@@ -1193,14 +1195,25 @@ get_back_bo(struct dri2_egl_surface *dri2_surf)
+    if (dri2_dpy->fd_render_gpu != dri2_dpy->fd_display_gpu &&
+        dri2_surf->back->linear_copy == NULL) {
+       uint64_t linear_mod = DRM_FORMAT_MOD_LINEAR;
++      const uint64_t *render_modifiers = NULL, *display_modifiers = NULL;
++      unsigned int render_num_modifiers = 0, display_num_modifiers = 0;
+       struct dri_image *linear_copy_display_gpu_image = NULL;
+ 
++      if (dri2_dpy->dri_screen_render_gpu->base.screen->resource_create_with_modifiers) {
++         render_modifiers = &linear_mod;
++         render_num_modifiers = 1;
++      }
++      if (dri2_dpy->dri_screen_display_gpu->base.screen->resource_create_with_modifiers) {
++         display_modifiers = &linear_mod;
++         display_num_modifiers = 1;
++      }
++
+       if (dri2_dpy->dri_screen_display_gpu) {
+          linear_copy_display_gpu_image = dri_create_image_with_modifiers(
+             dri2_dpy->dri_screen_display_gpu,
+             dri2_surf->base.Width, dri2_surf->base.Height,
+             linear_pipe_format, use_flags | __DRI_IMAGE_USE_LINEAR,
+-            &linear_mod, 1, NULL);
++            display_modifiers, display_num_modifiers, NULL);
+ 
+          if (linear_copy_display_gpu_image) {
+             int i, ret = 1;
+@@ -1285,7 +1298,7 @@ get_back_bo(struct dri2_egl_surface *dri2_surf)
+             dri2_dpy->dri_screen_render_gpu,
+             dri2_surf->base.Width, dri2_surf->base.Height,
+             linear_pipe_format, use_flags | __DRI_IMAGE_USE_LINEAR,
+-            &linear_mod, 1, NULL);
++            render_modifiers, render_num_modifiers, NULL);
+       }
+ 
+       if (dri2_surf->back->linear_copy == NULL)
