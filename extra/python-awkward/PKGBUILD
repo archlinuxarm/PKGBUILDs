@@ -1,4 +1,6 @@
-# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Konstantin Gizdov <arch at kge dot pw>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - remove cuda make/optdepends
@@ -9,50 +11,74 @@ _pkgname=awkward
 pkgbase="python-${_pkgname}"
 # pkgname=("${pkgbase}" "${pkgbase}-docs") - docs require many new dependencies
 pkgname=$pkgbase
-pkgver=2.6.5
-pkgrel=3
+pkgver=2.7.2
+pkgrel=1
 pkgdesc="Manipulate jagged, chunky, and/or bitmasked arrays as easily as Numpy"
 url="https://github.com/scikit-hep/awkward"
-license=('BSD')
-arch=('x86_64')
-depends=('python-numpy' 'python-packaging' 'python-importlib_resources')
-optdepends=('python-pyarrow: pyArrow connector'
-            'python-numexpr: numexpr connector'
-            'python-pandas: pandas connector')
-makedepends=('cmake' 'git' 'python-build' 'python-installer' 'python-hatchling' 'doxygen' 'python-sphinx' 'python-sphinx_rtd_theme' 'python-hatch-fancy-pypi-readme' 'python-scikit-build-core' 'python-nox' 'python-pyaml' 'pybind11' 'python-setuptools')
-checkdepends=('python-pytest' 'python-hist' 'python-pandas' 'python-numexpr' 'python-pyarrow' 'python-scikit-hep-testdata' 'python-vector'
-              'root' 'rapidjson' 'python-fsspec')
+license=(BSD-3-Clause)
+arch=(x86_64)
+depends=(
+  gcc-libs
+  glibc
+  python
+  python-fsspec
+  python-numpy
+  python-packaging
+  python-typing_extensions
+)
+makedepends=(
+  cmake
+  doxygen
+  git
+  pybind11
+  python-build
+  python-hatch-fancy-pypi-readme
+  python-hatchling
+  python-installer
+  python-nox
+  python-pyaml
+  python-scikit-build-core
+  python-setuptools
+  python-sphinx
+  python-sphinx_rtd_theme
+)
+checkdepends=(
+  python-hist
+  python-numba
+  python-numexpr
+  python-pandas
+  python-pyarrow
+  python-pytest
+  python-scikit-hep-testdata
+  python-vector
+  root
+)
+optdepends=(
+  'python-pyarrow: pyArrow connector'
+  'python-numexpr: numexpr connector'
+  'python-pandas: pandas connector'
+  'python-numba: for using in Numba JIT functions'
+  'root: rdataframe connector'
+)
 source=(
   "${pkgname}::git+https://github.com/scikit-hep/${_pkgname}#tag=v${pkgver}"
-  "${pkgname}-dlpack::git+https://github.com/dmlc/dlpack.git"
   "${pkgname}-rapidjson::git+https://github.com/Tencent/rapidjson.git"
-  "${pkgname}-pybind11::git+https://github.com/pybind/pybind11.git"
 )
 
-sha512sums=('64b3e6e7295e1fcd11d096419d3dbdb2627b70f9b4d2fea0f2c38d9f5ab0a9de9f45c003a0835ddcaeaf2c3b6f08b88a3f84e882efc9052d32b48e76e419acc2'
-            'SKIP'
-            'SKIP'
+sha512sums=('9afb41331dc2bf4d6da297bb738a1c3ccb530a58d0299e0019bf5ff78fab6940d93c7c2270411a2f6e56e9c05f87164cac66fdba85eb84eec35faa6328f494c0'
             'SKIP')
 
-get_pyver () {
-    python -c 'import sys; print(str(sys.version_info[0]) + "." + str(sys.version_info[1]))'
-}
-
 prepare() {
-  cd "${srcdir}/${pkgbase}"
+  cd $pkgbase
   git submodule init
 
-  git config submodule."pybind11".url "${srcdir}/${pkgname}"-pybind11
   git config submodule."rapidjson".url "${srcdir}/${pkgname}"-rapidjson
-  git config submodule."dlpack".url "${srcdir}/${pkgname}"-dlpack
 
   git -c protocol.file.allow=always submodule update --init --recursive
-
-  sed '/cmake/d' -i pyproject.toml
 }
 
 build() {
-  cd "${srcdir}/${pkgbase}"
+  cd $pkgbase
 
   nox -s prepare
   python -m build --wheel --no-isolation
@@ -62,25 +88,33 @@ build() {
 }
 
 check() {
-  cd "${srcdir}/${pkgbase}"
+  local pytest_options=(
+      -vv
+      #  AttributeError: 'FrameLocalsProxy' object has no attribute 'clear'
+      --deselect tests/test_0119_numexpr_and_broadcast_arrays.py::test_numexpr
+  )
+
+  cd $pkgbase
   python -m venv --system-site-packages test-env
   test-env/bin/python -m installer dist/*.whl
   test-env/bin/python -m installer awkward-cpp/dist/*.whl
-  cd tests
-  ../test-env/bin/python -m pytest || echo 'some tests fail'
+  test-env/bin/python -m pytest "${pytest_options[@]}" tests
 }
 
 package_python-awkward() {
-  optdepends+=("${pkgbase}-docs: docs")
-  cd "${srcdir}/${pkgbase}"
+  optdepends+=("${pkgbase}-docs: documentation")
+
+  cd $pkgbase
   python -m installer --destdir="${pkgdir}" dist/*.whl
   install -Dm644 LICENSE "${pkgdir}"/usr/share/licenses/"${pkgname}"/LICENSE
   cd awkward-cpp
-  python -m installer --destdir="${pkgdir}" dist/*.whl  
+  python -m installer --destdir="${pkgdir}" dist/*.whl
 }
 
 package_python-awkward-docs() {
-  cd "${srcdir}/${pkgbase}"
+  pkgdesc+=" - documentation"
+
+  cd $pkgbase
 
   install -D LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
   install -D README.md "${pkgdir}/usr/share/${pkgbase}/README.md"
