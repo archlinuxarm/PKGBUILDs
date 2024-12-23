@@ -1,0 +1,51 @@
+From cb8d855fad89b89044bb5ae3812f86a6578d4955 Mon Sep 17 00:00:00 2001
+From: Hans Verkuil <hverkuil@xs4all.nl>
+Date: Thu, 7 Nov 2024 16:54:51 +0100
+Subject: [PATCH] qv4l2/qvidcap: bind shader program in paintGL()
+
+Starting in Qt 6.7.0, vertex buffers and shader programs are unbound
+just before calling QOpenGLWidget::paintGL(). In the case of qv4l2
+and qvidcap this means that in order to stay compatible with Qt 6.7
+the shader program has to be bound in paintGL each time, otherwise
+nothing would be rendered.
+
+In the case of qv4l2 it would still render (although I am not quite
+sure how), but it would generate openGL errors, and in the case of
+qvidcap nothing would be shown after the first frame was rendered.
+
+Adding the extra bind calls fixes this issue.
+
+Many thanks to Laurent Pinchart for pointing me to a similar fix in
+libcamera.
+
+Signed-off-by: Hans Verkuil <hverkuil@xs4all.nl>
+---
+ utils/qv4l2/capture-win-gl.cpp | 1 +
+ utils/qvidcap/paint.cpp        | 2 ++
+ 2 files changed, 3 insertions(+)
+
+diff --git a/utils/qv4l2/capture-win-gl.cpp b/utils/qv4l2/capture-win-gl.cpp
+index 5b635eb7e..5558365d0 100644
+--- a/utils/qv4l2/capture-win-gl.cpp
++++ b/utils/qv4l2/capture-win-gl.cpp
+@@ -622,6 +622,7 @@ void CaptureWinGLEngine::paintGL()
+ 
+ 	if (m_formatChange)
+ 		changeShader();
++	m_shaderProgram.bind();
+ 
+ 	if (m_frameData == NULL) {
+ 		paintFrame();
+diff --git a/utils/qvidcap/paint.cpp b/utils/qvidcap/paint.cpp
+index 0246de60e..8c62bcbde 100644
+--- a/utils/qvidcap/paint.cpp
++++ b/utils/qvidcap/paint.cpp
+@@ -116,6 +116,8 @@ void CaptureWin::paintGL()
+ 	if (!supportedFmt(m_v4l_fmt.g_pixelformat()))
+ 		return;
+ 
++	m_program->bind();
++
+ 	switch (m_v4l_fmt.g_pixelformat()) {
+ 	case V4L2_PIX_FMT_YUYV:
+ 	case V4L2_PIX_FMT_YVYU:
