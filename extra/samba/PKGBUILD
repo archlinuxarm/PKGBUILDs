@@ -1,0 +1,360 @@
+# Maintainer: Tobias Powalowski <tpowa@archlinux.org>
+# Contributor: judd <jvinet@zeroflux.org>
+# Contributor: Michael Hansen <zrax0111 gmail com>
+# Contributor: Marco A Rojas <marquicus at gmail.com>
+# Contributor: Netanel Shine <netanel at archlinux.org.il >
+# Contributor: ngoonee <ngoonee.talk@gmail.com>
+# Contributor: Adam Russell <adamlr6+arch@gmail.com>
+# Contributor: Dhananjay Sathe <dhananjaysathe@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - generalize python install path for v7
+
+pkgbase=samba
+pkgname=('libwbclient' 'ldb' 'smbclient' 'samba')
+pkgver=4.21.3
+pkgrel=1
+arch=(x86_64)
+url="https://www.samba.org"
+license=('GPL-3.0-or-later')
+makedepends=(
+  acl
+  dateutils
+  dbus
+  docbook-xsl
+  glusterfs
+  gnutls
+  jansson
+  krb5
+  libbsd
+  libcap
+  libcups
+  libldap
+  libnsl
+  libtirpc
+  liburing
+  pam
+  perl-json
+  perl-parse-yapp
+  pkg-config
+  popt
+  python
+  python-dnspython
+  python-markdown
+  readline
+  rpcsvc-proto
+  systemd
+  talloc
+  tdb
+  tevent
+)
+#checkdepends=(
+#  git
+#  python-cryptography
+#  python-iso8601
+#  python-pyasn1
+#)
+optdepends=(
+  'python-dnspython: samba_dnsupdate and samba_upgradedns in AD setup'
+  'python-markdown: for samba-tool domain schemeupgrade'
+  'glusterfs: for vfs_glusterfs support'
+)
+epoch=2
+source=(
+  https://us1.samba.org/samba/ftp/stable/${pkgbase}-${pkgver}.tar{.gz,.asc}
+  samba.logrotate
+  samba.pam
+  samba.conf
+)
+validpgpkeys=('81F5E2832BD2545A1897B713AA99442FB680B620') #Samba Distribution Verification Key <samba-bugs@samba.org>
+b2sums=('6e7bb59d6dee89c797023d172048f10504179256da448d5606748c56d481a29754eef1d8ef3f0ae3ac94b033c359a5fb38ed9ee6d4619dcfe8678b6415574ffd'
+        'SKIP'
+        '72ecb413ca3499af984a0bb391f96e678a24a19d8e5c96050ba227878f0770f03466ac7a0ee328416e08204e92e9d16ec22d63ef25b53c20d957a17221cd3a98'
+        '3eab84d332d96678fe6e435ee243c8f1a82b838f601d61d3604d11e918aed7a62202edca5e476c4b9031ed284570e6fcd6c659cfdbd9624aa0019d3233755f81'
+        'e1f49e14d34cf1a48378cad9f427215101ff55b2461340e0dc2376192f07c45fc238463a07672348c0823e3aa7892c83a939a7d358aabac818e2108ca2c1900f')
+### UNINSTALL dmapi package before building!!!
+
+# Use samba-pkg as a staging directory for the split packages
+# (This is so RPATHS and symlinks are generated correctly via
+# make install, but the otherwise unsplit pieces can be split)
+build() {
+_samba4_idmap_modules=idmap_ad,idmap_rid,idmap_adex,idmap_hash,idmap_tdb2
+_samba4_pdb_modules=pdb_tdbsam,pdb_ldap,pdb_ads,pdb_smbpasswd,pdb_wbc_sam,pdb_samba4
+_samba4_auth_modules=auth_unix,auth_wbc,auth_server,auth_netlogond,auth_script,auth_samba4
+_pkgsrc="${srcdir}"/samba-pkg
+  rm -rf ${_pkgsrc}
+  cd ${pkgbase}-${pkgver}
+  ./configure --enable-fhs \
+    --prefix=/usr \
+    --sysconfdir=/etc \
+    --sbindir=/usr/bin \
+    --libdir=/usr/lib \
+    --libexecdir=/usr/lib/samba \
+    --localstatedir=/var \
+    --with-configdir=/etc/samba \
+    --with-lockdir=/var/cache/samba \
+    --with-sockets-dir=/run/samba \
+    --with-piddir=/run \
+    --with-ads \
+    --with-ldap \
+    --with-winbind \
+    --with-acl-support \
+    --with-systemd \
+    --systemd-install-services \
+    --with-pam \
+    --with-pammodulesdir=/usr/lib/security \
+    --private-libraries='!ldb' \
+    --bundled-libraries='!tdb,!talloc,!pytalloc-util,!tevent,!popt,!pyldb-util' \
+    --with-shared-modules="${_samba4_idmap_modules},${_samba4_pdb_modules},${_samba4_auth_modules},vfs_io_uring" \
+    --disable-rpath-install \
+    --with-profiling-data
+  # Add this to the options once it's working...
+  #--with-system-mitkrb5 /opt/heimdal
+  
+  make
+  make DESTDIR="${_pkgsrc}/" install
+
+  # This gets skipped somehow
+  if [ ! -e "${_pkgsrc}"/usr/bin/smbtar ]; then
+      install -m755 "${srcdir}"/samba-${pkgver}/source3/script/smbtar "${_pkgsrc}"/usr/bin/
+  fi
+}
+
+# --enable-selftest for checks
+#check() {
+# cd samba-${pkgver}
+# make check
+#}
+
+package_libwbclient() {
+pkgdesc="winbind client library"
+depends=('libbsd')
+_pkgsrc="${srcdir}"/samba-pkg
+  install -d -m755 "${pkgdir}"/usr/lib
+  for lib in "${_pkgsrc}"/usr/lib/libwbclient.so*; do
+    mv ${lib} "${pkgdir}"/usr/lib/
+  done
+  install -d -m755 "${pkgdir}"/usr/lib/pkgconfig
+  mv "${_pkgsrc}"/usr/lib/pkgconfig/wbclient.pc "${pkgdir}"/usr/lib/pkgconfig/
+  install -d -m755 "${pkgdir}"/usr/include/samba-4.0
+  mv "${_pkgsrc}"/usr/include/samba-4.0/wbclient.h "${pkgdir}"/usr/include/samba-4.0/
+}
+
+package_ldb() {
+pkgdesc='Schema-less, ldap like, API and database'
+url="https://ldb.samba.org/"
+depends=(
+  libtevent.so
+  lmdb
+  popt
+  talloc
+  tdb
+  libtdb.so
+)
+optdepends=(
+  'python: for python bindings'
+)
+_ldb_bins=(
+  ldbadd
+  ldbdel
+  ldbedit
+  ldbmodify
+  ldbrename
+  ldbsearch
+)
+_ldb_headers=(
+  ldb.h
+  ldb_errors.h
+  ldb_handlers.h
+  ldb_module.h
+  ldb_version.h
+)
+provides=(libldb.so)
+_pkgsrc="${srcdir}"/samba-pkg
+
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+  install -d -m755 "${pkgdir}"/usr/bin
+  for bin in ${_ldb_bins[@]}; do
+    mv "${_pkgsrc}"/usr/bin/${bin} "${pkgdir}"/usr/bin/
+  done
+  install -d -m755 "${pkgdir}"/usr/lib
+  for lib in "${_pkgsrc}"/usr/lib/libldb*; do
+    mv ${lib} "${pkgdir}"/usr/lib/
+  done
+  install -d -m755 "${pkgdir}"/usr/lib/samba
+  mv "${_pkgsrc}"/usr/lib/samba/ldb "${pkgdir}"/usr/lib/samba
+  install -d -m755 "${pkgdir}"/usr/lib/pkgconfig
+  mv "${_pkgsrc}"/usr/lib/pkgconfig/ldb.pc "${pkgdir}"/usr/lib/pkgconfig/
+  install -d -m755 "${pkgdir}"/usr/include/samba-4.0
+  for headers in ${_ldb_headers[@]}; do
+    mv "${_pkgsrc}"/usr/include/samba-4.0/${headers} "${pkgdir}"/usr/include/samba-4.0/
+  done
+  install -d -m755 "${pkgdir}${site_packages}/"
+  mv "${_pkgsrc}${site_packages}/"{_ldb_text.py,ldb.cpython-$(python -c 'import sys; print("".join(map(str, sys.version_info[:2])))')-*-linux-gnu*.so} \
+    "${pkgdir}${site_packages}/"
+
+  install -d -m755 "${pkgdir}"/usr/share/man/man1
+  for bin in ${_ldb_bins[@]}; do
+    mv "${_pkgsrc}"/usr/share/man/man1/${bin}.1 "${pkgdir}"/usr/share/man/man1/
+  done
+  mv "${_pkgsrc}"/usr/share/man/man3 "${pkgdir}"/usr/share/man/
+
+}
+
+package_smbclient() {
+pkgdesc="Tools to access a server's filespace and printers via SMB"
+depends=(
+  cifs-utils
+  gnutls
+  icu
+  jansson
+  ldb
+  libarchive
+  libbsd
+  libcups
+  libldap
+  libldb.so
+  libnsl
+  libreadline.so
+  libtdb.so
+  libtevent.so
+  libwbclient
+  popt
+  python
+  readline
+  talloc
+  tdb
+  tevent
+)
+_smbclient_bins=(
+  smbclient
+  rpcclient
+  smbspool
+  smbtree
+  smbcacls
+  smbcquotas
+  smbget
+  net
+  nmblookup
+  smbtar
+)
+_pkgsrc="${srcdir}"/samba-pkg
+
+  install -d -m755 "${pkgdir}"/usr/bin
+  for bin in ${_smbclient_bins[@]}; do
+    mv "${_pkgsrc}"/usr/bin/${bin} "${pkgdir}"/usr/bin/
+  done
+
+  # smbclient binaries link to the majority of the samba
+  # libs, so this is a shortcut instead of resolving the
+  # whole dependency tree by hand
+  install -d -m755 "${pkgdir}"/usr/lib
+  for lib in "${_pkgsrc}"/usr/lib/lib*.so*; do
+    mv ${lib} "${pkgdir}"/usr/lib/
+  done
+
+  install -d -m755 "${pkgdir}"/usr/lib/samba
+  for lib in "${_pkgsrc}"/usr/lib/samba/lib*.so*; do
+    mv ${lib} "${pkgdir}"/usr/lib/samba/
+  done
+
+  install -d -m755 "${pkgdir}"/usr/lib/pkgconfig
+  mv "${_pkgsrc}"/usr/lib/pkgconfig/smbclient.pc "${pkgdir}"/usr/lib/pkgconfig/
+  mv "${_pkgsrc}"/usr/lib/pkgconfig/netapi.pc "${pkgdir}"/usr/lib/pkgconfig/
+
+  install -d -m755 "${pkgdir}"/usr/share/man/man1
+  install -d -m755 "${pkgdir}"/usr/share/man/man7
+  install -d -m755 "${pkgdir}"/usr/share/man/man8
+  for bin in ${_smbclient_bins[@]}; do
+    if [ -e "${_pkgsrc}"/usr/share/man/man1/${bin}.1 ]; then
+      mv "${_pkgsrc}"/usr/share/man/man1/${bin}.1 "${pkgdir}"/usr/share/man/man1/
+    fi
+    if [ -e "${_pkgsrc}"/usr/share/man/man8/${bin}.8 ]; then
+      mv "${_pkgsrc}"/usr/share/man/man8/${bin}.8 "${pkgdir}"/usr/share/man/man8/
+    fi
+  done
+  mv "${_pkgsrc}"/usr/share/man/man7/libsmbclient.7 "${pkgdir}"/usr/share/man/man7/
+
+  install -d -m755 "${pkgdir}"/usr/include/samba-4.0
+  mv "${_pkgsrc}"/usr/include/samba-4.0/libsmbclient.h "${pkgdir}"/usr/include/samba-4.0/
+  mv "${_pkgsrc}"/usr/include/samba-4.0/netapi.h "${pkgdir}"/usr/include/samba-4.0/
+
+  mkdir -p "${pkgdir}"/usr/lib/cups/backend
+  ln -sf /usr/bin/smbspool "${pkgdir}"/usr/lib/cups/backend/smb
+}
+
+package_samba() {
+pkgdesc="SMB Fileserver and AD Domain server"
+depends=(
+  "gnutls>=2.4.1"
+  gpgme
+  ldb
+  libbsd
+  libcups
+  "libcap>=2.16"
+  libldb.so
+  libtdb.so
+  libtevent.so
+  liburing
+  libwbclient
+  popt
+  python
+  "smbclient>=${pkgver}"
+  talloc
+  tdb
+)
+optdepends=(
+  'python-dnspython: netads_dns.py, dnsresolver.py and traffic_packets.py '
+  'python-markdown: ms_schema_markdown.py and ms_forest_updates_markdown.py'
+  'python-cryptography: lockout_tests.py gp_cert_auto_enroll_ext.py gpo.py and kcrypto.py'
+)
+backup=(
+  etc/logrotate.d/samba
+  etc/pam.d/samba
+  etc/conf.d/samba
+)
+install=samba.install
+
+  local site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
+_pkgsrc="${srcdir}"/samba-pkg
+  # Everything that libwbclient and smbclient didn't install goes
+  # into the samba package...
+  mv "${_pkgsrc}"/* "${pkgdir}"
+  rmdir "${_pkgsrc}"
+
+  # Make admin scripts look in the right place for the samba python module
+  for script in bin/samba_dnsupdate bin/samba_kcc bin/samba_spnupdate \
+                bin/samba_upgradedns bin/samba-tool
+  do
+    sed -i "/^sys\.path\.insert/ asys.path.insert(0, '$site_packages')" \
+      "${pkgdir}"/usr/${script}
+  done
+
+  # packaging/wscript_build to use /etc/conf.d
+  sed -i -e '/^EnvironmentFile/ s/sysconfig/conf.d/' "${pkgdir}"/usr/lib/systemd/system/*.service
+  install -d -m755  "${pkgdir}"/etc/conf.d
+  install -m644 "${srcdir}"/samba-${pkgver}/packaging/systemd/samba.sysconfig "${pkgdir}"/etc/conf.d/samba
+
+  # create ephemeral dirs via tmpfiles rather than shipping them in package
+  install -D -m644 "${srcdir}"/samba.conf "${pkgdir}"/usr/lib/tmpfiles.d/samba.conf
+  # create config dir
+  install -d -m755 "${pkgdir}"/etc/samba
+
+  mkdir -p "${pkgdir}"/etc/samba/private
+  chmod 700 "${pkgdir}"/etc/samba/private
+
+  install -D -m644 "${srcdir}"/samba.logrotate "${pkgdir}"/etc/logrotate.d/samba
+  install -D -m644 "${srcdir}"/samba.pam "${pkgdir}"/etc/pam.d/samba 
+  
+  # spool directory
+  install -d -m1777 "${pkgdir}"/var/spool/samba
+  
+  rm -rf "${pkgdir}"/run
+  rm -rf "${pkgdir}"/var/run
+  rm -rf "${pkgdir}"/etc/sysconfig
+  
+  # copy ldap example
+  install -D -m644 "${srcdir}"/samba-${pkgver}/examples/LDAP/samba.schema \
+    "${pkgdir}"/usr/share/doc/samba/examples/LDAP/samba.schema
+}
+
