@@ -1,0 +1,131 @@
+# Maintainer: Bruno Pagani <archange@archlinux.org>
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
+# Contributor: Guillaume Horel <guillaume.horel@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove depends on awe packages, set -DARROW_S3=OFF
+
+pkgname=arrow
+pkgver=18.1.0
+pkgrel=3
+pkgdesc="Columnar in-memory analytics layer for big data."
+arch=(x86_64)
+url="https://arrow.apache.org"
+license=(Apache-2.0)
+depends=(
+  abseil-cpp
+  apache-orc
+  brotli
+  bzip2
+  gcc-libs
+  glibc
+  google-glog
+  grpc
+  libutf8proc
+  lz4
+  openssl
+  protobuf
+  re2
+  snappy
+  thrift
+  zlib
+  zstd
+)
+makedepends=(
+  boost
+  cmake
+  flatbuffers
+  git
+  gmock
+  ninja
+  rapidjson
+  xsimd
+)
+checkdepends=(
+  minio
+  python
+)
+provides=(parquet-cpp)
+conflicts=(parquet-cpp)
+source=(
+  https://archive.apache.org/dist/$pkgname/$pkgname-$pkgver/apache-$pkgname-$pkgver.tar.gz{,.asc}
+  git+https://github.com/apache/parquet-testing.git
+  git+https://github.com/apache/arrow-testing.git
+  fix-repetition-levels-for-encryption-test.patch
+)
+sha512sums=('7249c03a6097bc64fb0092143e4d4aaef3227565147e6254f026ddd504177c8dd565a184a0df39743dc989070dc3785e5b66f738c8e310ed9c982b61c2ec4914'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            '225c1d3b513ab3f82ffa946c22a2aebc7f43af0cdbbede55cbbd9746637d8a032a2e7b888bed6d6e152d28d6d78c842a298187fab94d8864867ba436eeee835d')
+validpgpkeys=(265F80AB84FE03127E14F01125BCCA5220D84079  # Krisztian Szucs (apache) <szucs.krisztian@gmail.com>
+              08D3564B7C6A9CAFBFF6A66791D18FCF079F8007  # Kouhei Sutou <kou@cozmixng.org>
+              AF6AADA4C9835B75973FF5DA275C532289DD0F4A) # Raúl Cumplido Domínguez (CODE SIGNING KEY) <raulcd@apache.org>
+
+prepare() {
+  cd apache-$pkgname-$pkgver
+  # Fix generation of repetition levels for encryption test data https://github.com/apache/arrow/pull/45074
+  # (needed due to a change https://github.com/apache/parquet-testing/pull/65 in parquet-testing)
+  patch -Np1 -i ../fix-repetition-levels-for-encryption-test.patch
+
+  # Patch out unused AWS-SDK component https://github.com/apache/arrow/pull/45191
+  sed -i 's|COMPONENTS config|COMPONENTS|' cpp/cmake_modules/FindAWSSDKAlt.cmake
+}
+
+build() {
+  # Arrow options are defined in https://github.com/apache/arrow/blob/main/cpp/cmake_modules/DefineOptions.cmake
+  # Documentation for building from source: https://arrow.apache.org/docs/developers/cpp/building.html
+  local cmake_options=(
+    -B build
+    -S apache-$pkgname-$pkgver/cpp
+    -G Ninja
+    -W no-dev
+    # one pyarrow test fails when the build type is none of 'debug', 'release', 'minsizerel', 'relwithdebinfo'
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    -DCMAKE_INSTALL_PREFIX="/usr"
+    -DCMAKE_INSTALL_LIBDIR="lib"
+    -DARROW_SIMD_LEVEL=NONE
+    -DARROW_RUNTIME_SIMD_LEVEL=MAX
+    -DARROW_DEPENDENCY_SOURCE=SYSTEM
+    -DARROW_BUILD_STATIC=OFF
+    -DARROW_BUILD_TESTS=ON
+    -DARROW_BUILD_UTILITIES=ON
+    -DARROW_COMPUTE=ON
+    -DARROW_CSV=ON
+    -DARROW_FILESYSTEM=ON
+    -DARROW_FLIGHT=ON
+    -DARROW_FLIGHT_SQL=ON
+    -DARROW_GANDIVA=OFF  # depends on LLVMAlt
+    -DARROW_HDFS=ON
+    -DARROW_IPC=ON
+    -DARROW_JEMALLOC=ON
+    -DARROW_JSON=ON
+    -DARROW_ORC=ON
+    -DARROW_PARQUET=ON
+    -DARROW_S3=OFF
+    -DARROW_SUBSTRAIT=ON
+    -DARROW_TENSORFLOW=ON
+    -DARROW_USE_GLOG=ON
+    -DARROW_WITH_BROTLI=ON
+    -DARROW_WITH_BZ2=ON
+    -DARROW_WITH_LZ4=ON
+    -DARROW_WITH_SNAPPY=ON
+    -DARROW_WITH_ZLIB=ON
+    -DARROW_WITH_ZSTD=ON
+    -DPARQUET_REQUIRE_ENCRYPTION=ON
+  )
+  cmake "${cmake_options[@]}"
+  cmake --build build
+}
+
+check() {
+  PARQUET_TEST_DATA="$srcdir"/parquet-testing/data \
+  ARROW_TEST_DATA="$srcdir"/arrow-testing/data \
+  ctest --test-dir build --output-on-failure
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  # remove testing libraries
+  find "$pkgdir"/usr/lib/ -name '*testing*' -delete
+}
