@@ -1,0 +1,100 @@
+From 313d78c92cb3344baa416aeeba8d4403017e82ea Mon Sep 17 00:00:00 2001
+From: Stephan Sundermann <stephansundermann@gmail.com>
+Date: Sun, 15 Dec 2024 17:08:34 +0100
+Subject: [PATCH 1/4] [nfs] Fix API breakage in libnfs 6.0
+
+---
+ xbmc/filesystem/NFSFile.cpp | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/xbmc/filesystem/NFSFile.cpp b/xbmc/filesystem/NFSFile.cpp
+index b96b2bc4fad4b..a64fc860635b6 100644
+--- a/xbmc/filesystem/NFSFile.cpp
++++ b/xbmc/filesystem/NFSFile.cpp
+@@ -477,7 +477,11 @@ void CNfsConnection::keepAlive(const std::string& _exportPath, struct nfsfh* _pF
+ 
+   nfs_lseek(pContext, _pFileHandle, 0, SEEK_CUR, &offset);
+ 
++#ifdef LIBNFS_API_V2
++  int bytes = nfs_read(pContext, _pFileHandle, buffer, sizeof(buffer));
++#else
+   int bytes = nfs_read(pContext, _pFileHandle, 32, buffer);
++#endif
+   if (bytes < 0)
+   {
+     CLog::LogF(LOGERROR, "nfs_read - Error ({}, {})", bytes, nfs_get_error(pContext));
+@@ -741,8 +745,11 @@ ssize_t CNFSFile::Read(void *lpBuf, size_t uiBufSize)
+ 
+   if (m_pFileHandle == NULL || m_pNfsContext == NULL )
+     return -1;
+-
++#ifdef LIBNFS_API_V2
++  numberOfBytesRead = nfs_read(m_pNfsContext, m_pFileHandle, lpBuf, uiBufSize);
++#else
+   numberOfBytesRead = nfs_read(m_pNfsContext, m_pFileHandle, uiBufSize, (char *)lpBuf);
++#endif
+ 
+   lock.unlock(); //no need to keep the connection lock after that
+ 
+@@ -841,12 +848,17 @@ ssize_t CNFSFile::Write(const void* lpBuf, size_t uiBufSize)
+     {
+       chunkSize = leftBytes;//write last chunk with correct size
+     }
++#ifdef LIBNFS_API_V2
++    writtenBytes = nfs_write(m_pNfsContext, m_pFileHandle,
++                             static_cast<const char*>(lpBuf) + numberOfBytesWritten, chunkSize);
++#else
+     //write chunk
+     //! @bug libnfs < 2.0.0 isn't const correct
+     writtenBytes = nfs_write(m_pNfsContext,
+                                   m_pFileHandle,
+                                   chunkSize,
+                                   const_cast<char*>((const char *)lpBuf) + numberOfBytesWritten);
++#endif
+     //decrease left bytes
+     leftBytes-= writtenBytes;
+     //increase overall written bytes
+
+From b78237b97ec2d5837cafb8921ec18c8f66df2536 Mon Sep 17 00:00:00 2001
+From: Stephan Sundermann <stephansundermann@gmail.com>
+Date: Sun, 15 Dec 2024 17:07:05 +0100
+Subject: [PATCH 2/4] [depends] Update to libnfs 6.0.2
+
+---
+ tools/depends/target/libnfs/LIBNFS-VERSION | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/depends/target/libnfs/LIBNFS-VERSION b/tools/depends/target/libnfs/LIBNFS-VERSION
+index 892aa7afcfd48..699a31c70fcae 100644
+--- a/tools/depends/target/libnfs/LIBNFS-VERSION
++++ b/tools/depends/target/libnfs/LIBNFS-VERSION
+@@ -1,6 +1,6 @@
+ LIBNAME=libnfs
+-VERSION=5.0.2
++VERSION=6.0.2
+ ARCHIVE=$(LIBNAME)-$(VERSION).tar.gz
+-SHA512=6dcf4ea8a01b35beb53694625d20fbebd858a88725c2742671878ad6fe7877999f93d262fb58a435b00c283c3e6fb6fa7222d04bb4540bf674b7ce196e9424f5
++SHA512=539790ab98aac7b2f25755b745d1f5e016518f1adb3748b8c58df187048bc31e091915d59e6359bb95c49dd986361cbbf2536edcda02598b0fac236762b61a46
+ BYPRODUCT=libnfs.a
+ BYPRODUCT_WIN=nfs.lib
+
+From 28857698a05aba4b7168ed775b4ffce381421fc1 Mon Sep 17 00:00:00 2001
+From: Stephan Sundermann <stephansundermann@gmail.com>
+Date: Sun, 15 Dec 2024 17:28:21 +0100
+Subject: [PATCH 3/4] [depends] TEMP: BASE_URL change
+
+---
+ tools/depends/target/libnfs/LIBNFS-VERSION | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tools/depends/target/libnfs/LIBNFS-VERSION b/tools/depends/target/libnfs/LIBNFS-VERSION
+index 699a31c70fcae..a6cc0bc8da16a 100644
+--- a/tools/depends/target/libnfs/LIBNFS-VERSION
++++ b/tools/depends/target/libnfs/LIBNFS-VERSION
+@@ -4,3 +4,5 @@ ARCHIVE=$(LIBNAME)-$(VERSION).tar.gz
+ SHA512=539790ab98aac7b2f25755b745d1f5e016518f1adb3748b8c58df187048bc31e091915d59e6359bb95c49dd986361cbbf2536edcda02598b0fac236762b61a46
+ BYPRODUCT=libnfs.a
+ BYPRODUCT_WIN=nfs.lib
++
++BASE_URL=https://github.com/sahlberg/libnfs/archive/refs/tags
+
