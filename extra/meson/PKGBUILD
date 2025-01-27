@@ -6,7 +6,7 @@
 #  - disable lto in arch-meson
 
 pkgname=meson
-pkgver=1.6.1
+pkgver=1.7.0
 pkgrel=1
 pkgdesc="High productivity build system"
 url="https://mesonbuild.com/"
@@ -19,9 +19,12 @@ depends=(
   python-tqdm
 )
 makedepends=(
+  git
+  python-aiohttp
   python-build
   python-installer
   python-setuptools
+  python-strictyaml
   python-wheel
 )
 checkdepends=(
@@ -50,6 +53,7 @@ checkdepends=(
   java-environment=8
   ldc
   libelf
+  libpcap
   libwmf
   llvm
   mercurial
@@ -63,6 +67,9 @@ checkdepends=(
   python-pytest-xdist
   qt5-base
   qt5-tools
+  qt6-base
+  qt6-declarative
+  qt6-tools
   rust
   rust-bindgen
   sdl2
@@ -73,59 +80,53 @@ checkdepends=(
   wxgtk3
 )
 source=(
-  https://github.com/mesonbuild/meson/releases/download/$pkgver/meson-$pkgver.tar.gz{,.asc}
-  meson-reference-$pkgver.3::https://github.com/mesonbuild/meson/releases/download/$pkgver/meson-reference.3
-  meson-reference-$pkgver.json::https://github.com/mesonbuild/meson/releases/download/$pkgver/reference_manual.json
+  "git+https://github.com/mesonbuild/meson?signed#tag=$pkgver"
   arch-meson
   cross-lib32
   native-clang
   0001-Skip-broken-tests.patch
-  0002-tests-Avoid-modifying-test-dirs-in-allplatformtests.patch
 )
-b2sums=('7ccdb3bf3f701fc787fabf91413db8301a8658b89e08c1d712711bd35845dc2468211e4b666cf46ad68ad9462e62b12b62d60c3767a2804f9b695b4390bb8235'
-        'SKIP'
-        '55df822192781a70e4bc44cfe14fb363e3f820406260ca9705d7fdb5fad1bf0117e3f1325d37e58e23477bc075ab6bd84056409355ec694f72eeaa5bf982ecc7'
-        'ba2e37d7cf18adfefbff230f140b702b87b22ee409de9dc5407afbe153b90cb66ab6d4063c4b4ce72cbcef2db84288981d52c47698fc7cc2e181924be651c0fa'
+b2sums=('2969a68dced75e7536686e6c13acb19afaf802d8b42a32de28f25d62213b05c1c6b01c843795f71ea3a48ba010b1152db8dd6c69837617da65ebbb7f6df30bc7'
         '70f042a7603d1139f6cef33aec028da087cacabe278fd47375e1b2315befbfde1c0501ad1ecc63d04d31b232a04f08c735d61ce59d7244521f3d270e417fb5af'
         '9b16477aa77a706492e26fb3ad42e90674b8f0dfe657dd3bd9ba044f921be12ceabeb0050a50a15caee4d999e1ec33ed857bd3bed9e4444d73bb4a4f06381081'
         '7d88929d5a3b49d91c5c9969f19d9b47f3151706526b889515acaeda0141257d5115875ac84832e9ea46f83a7700d673adcc5db84b331cd798c70ae6e90eac1e'
-        '41b5d1fea3ef014b9c52f292bf35bf87f589909a4de316ca324fb717f997a36cfc7bcd82c6f18039ea066131cd630381d275984fb9f3462d468a93d1ca437b2d'
-        '9202300b5ddac7017fdc1865a4e4298f606d39e39ccb379284de998decc621491761804bb88f7e1b2cd8893e5f8f7300f3b37f305ef3cbad40ee4693418e8167')
+        '076f1650bf889b79a390da82e2e0a3d3b14e3383cdf4cd81ee06d7b776e070bb3d681295926828af123c16f950ab5cca127236f3030124fa9e8c7787a2c98297')
 validpgpkeys=(
   19E2D6D9B46D8DAA6288F877C24E631BABB1FE70  # Jussi Pakkanen <jpakkane@gmail.com>
 )
 
 prepare() {
-  cd $pkgname-$pkgver
+  cd meson
 
   # Pass tests
   patch -Np1 -i ../0001-Skip-broken-tests.patch
-  patch -Np1 -i ../0002-tests-Avoid-modifying-test-dirs-in-allplatformtests.patch
 }
 
 build() {
-  cd $pkgname-$pkgver
+  cd meson
   python -m build --wheel --no-isolation
+  ./meson.py setup docs docs.build --prefix /usr -D html=false
+  ./meson.py compile -C docs.build
 }
 
 check() (
-  cd $pkgname-$pkgver
+  cd meson
   export LC_CTYPE=en_US.UTF-8 CPPFLAGS= CFLAGS= CXXFLAGS= LDFLAGS=
   ./run_tests.py --failfast
 )
 
 package() {
-  cd $pkgname-$pkgver
+  cd meson
   python -m installer --destdir="$pkgdir" dist/*.whl
+
+  ./meson.py install -C docs.build --destdir "$pkgdir"
+  install -Dm644 docs.build/reference_manual.json -t "$pkgdir/usr/share/doc/$pkgname"
 
   install -d "$pkgdir/usr/share/vim/vimfiles"
   cp -rt "$pkgdir/usr/share/vim/vimfiles" data/syntax-highlighting/vim/*/
 
   install -Dm644 data/shell-completions/bash/* -t "$pkgdir/usr/share/bash-completion/completions"
   install -Dm644 data/shell-completions/zsh/*  -t "$pkgdir/usr/share/zsh/site-functions"
-
-  install -Dm644 ../meson-reference-$pkgver.3    "$pkgdir/usr/share/man/man3/meson-reference.3"
-  install -Dm644 ../meson-reference-$pkgver.json "$pkgdir/usr/share/doc/$pkgname/reference_manual.json"
 
   install -D ../arch-meson -t "$pkgdir/usr/bin"
 
