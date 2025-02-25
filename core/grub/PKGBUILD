@@ -30,9 +30,10 @@ pkgname='grub'
 pkgdesc='GNU GRand Unified Bootloader (2)'
 epoch=2
 _pkgver=2.12
-_unifont_ver='16.0.01'
-pkgver=${_pkgver/-/}
-pkgrel=3
+_unifont_ver='16.0.02'
+#pkgver=${_pkgver/-/}
+pkgver='2.12.r212.g4dc616657'
+pkgrel=2
 url='https://www.gnu.org/software/grub/'
 arch=('x86_64')
 license=('GPL-3.0-or-later')
@@ -115,22 +116,27 @@ source=(
   '0001-00_header-add-GRUB_COLOR_-variables.patch'
   '0002-10_linux-detect-archlinux-initramfs.patch'
   '0003-support-dropins-for-default-configuration.patch'
+  '1001-loopback-ext.patch'
   '0004-10_linux-add-archlinuxarm-s-default-kernel-path.patch'
   'grub.default'
   'sbat.csv'
 )
 b2sums=('SKIP'
         'SKIP'
-        '9f306564a63961f3a9f7a45f3f3363b1cc44a1651c3fb858ca4e87cdad79668f9aaa4b2989f91032cd614e37a98e5ca5eda2e2b0315d99deab6d0732b6f57a0d'
+        '03d2c64d795e0dc904d3648ff0d74e49ca4003964cd1c784dc82e61b3d070cc35c295a3291163c3c990db61a8590df0f718fb212ea96e4a4b4734e02d005bc2c'
         'SKIP'
         '992c71790785304c28fbaf0dba21dab3e283b199509f0e7e1aa0df08126da75e15b6626c3638279ff2ecaa59b925096d7dbd67d6a53cebd0ce4326ff3719d25b'
         'b4cd9ac976a579eca19d54c0b31c8d6324525fe5a0b9f5405deb63845367ac1adaa80ece4c166dfd5304608c41aa44b4f64efe235c03f437523b993be06e06e3'
+        'b8316136261563a411d30fd44b71c20c8c8c65b94fd576ac4122ac40a15c8b948547c31b17cc31757f224dd2bb79fb8936aa0d20315e988ed1e9f5b55f649044'
         'a7820bfe9bddc34af49de63222b3d2a9788367083e29db13b33120269adbfa1619ac421d8597f662f756592889f5cc5538544a17d9936d1420bd5742282c710c'
         '879f50775080fd189b7a7f0a96e72196d0be31b292cde092ad941691e42a427f5bc48a497c5ca991daa285e9dea1d913695cff667e74f96da2520a49648c1cdd'
         '5e42db2161e8f594b82005b26e590a20a0e8d32b01119bdd7b1a7f7c4b0f3360e8730a3ecdd5912a4dc7af5bd9aed1c3e780965ad6747d831b470158da19388d'
-        '052b55f53ec82d805f952afcd485bfc21623e0e427fc449f29208fecf5c321b9503d33e9025fef34ef3211b60043acfe5db08b057baaf72542a1c48cdc89b3c2')
+        'ce9b3904ce4bd00463c226ab1c97d3af94c6151c408bcd6483a0dd07ae4c343ee135907ad887c1d93525ec95d87409ef703ac7278698d49e99342332e483c436')
 
 _backports=(
+  # current git master for loads of security fixes
+  # https://lists.gnu.org/archive/html/grub-devel/2025-02/msg00024.html
+  "grub-${_pkgver}..4dc6166571645780c459dde2cdc1b001a5ec844c"
 )
 
 _reverts=(
@@ -163,17 +169,19 @@ prepare() {
   cd "${srcdir}/grub/"
 
   echo "Apply backports..."
-  local _c
+  local _c _l
   for _c in "${_backports[@]}"; do
-    git log --oneline -1 "${_c}"
-    git cherry-pick -n "${_c}"
+    if [[ "${_c}" == *..* ]]; then _l='--reverse'; else _l='--max-count=1'; fi
+    git log --oneline "${_l}" "${_c}"
+    git cherry-pick --mainline 1 --no-commit "${_c}"
   done
 
   echo "Apply reverts..."
-  local _c
+  local _c _l
   for _c in "${_reverts[@]}"; do
-    git log --oneline -1 "${_c}"
-    git revert -n "${_c}"
+    if [[ "${_c}" == *..* ]]; then _l='--reverse'; else _l='--max-count=1'; fi
+    git log --oneline "${_l}" "${_c}"
+    git revert --mainline 1 --no-commit "${_c}"
   done
 
   echo "Patch to enable GRUB_COLOR_* variables in grub-mkconfig..."
@@ -188,6 +196,9 @@ prepare() {
 
   echo "Patch to detect of Arch Linux ARM kernel images by grub-mkconfig..."
   patch -Np1 -i "${srcdir}/0004-10_linux-add-archlinuxarm-s-default-kernel-path.patch"
+
+  echo "Patch: fs/ext2: Rework out-of-bounds read for inline and external exten"
+  patch -Np1 -i "${srcdir}/1001-loopback-ext.patch"
 
   echo "Fix DejaVuSans.ttf location so that grub-mkfont can create *.pf2 files for starfield theme..."
   sed 's|/usr/share/fonts/dejavu|/usr/share/fonts/dejavu /usr/share/fonts/TTF|g' -i "configure.ac"
