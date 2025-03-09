@@ -1,0 +1,61 @@
+From fe489a0ad1543fb92ba35a999c66c0320b9f5763 Mon Sep 17 00:00:00 2001
+From: Evangelos Foutras <evangelos@foutras.com>
+Date: Sun, 9 Mar 2025 19:52:19 +0200
+Subject: [PATCH] Fix cfi-icall failure with use_system_libjpeg=true
+
+When Chromium is built with use_system_libjpeg=true, the following call:
+
+  info->err->format_message(info, buffer);
+
+will trigger a CFI violation due to missing type information in the
+system libjpeg DSO. This can be worked around by disabling this CFI
+check for print_message() found in SkJpegDecoderMgr.cpp.
+
+CFI diagnostics will print:
+
+  ../../third_party/skia/src/codec/SkJpegDecoderMgr.cpp:28:5:
+  runtime error: control flow integrity check for type
+  'void (jpeg_common_struct *, char *)' failed during indirect function call
+
+  (/usr/lib/libjpeg.so.8+0x71f80): note: (unknown) defined here
+
+  ../../third_party/skia/src/codec/SkJpegDecoderMgr.cpp:28:5:
+  note: check failed in /usr/lib/chromium/chromium,
+  destination function located in /usr/lib/libjpeg.so.8
+
+  SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior
+  ../../third_party/skia/src/codec/SkJpegDecoderMgr.cpp:28:5
+---
+ include/private/base/SkAttributes.h | 2 ++
+ src/codec/SkJpegDecoderMgr.cpp      | 3 +++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/include/private/base/SkAttributes.h b/include/private/base/SkAttributes.h
+index ff1adaa9a7..2a636d673f 100644
+--- a/include/private/base/SkAttributes.h
++++ b/include/private/base/SkAttributes.h
+@@ -74,8 +74,10 @@
+  */
+ #if defined(__clang__)
+   #define SK_NO_SANITIZE_CFI SK_NO_SANITIZE("cfi")
++  #define SK_NO_SANITIZE_CFI_ICALL SK_NO_SANITIZE("cfi-icall")
+ #else
+   #define SK_NO_SANITIZE_CFI
++  #define SK_NO_SANITIZE_CFI_ICALL
+ #endif
+ 
+ /**
+diff --git a/src/codec/SkJpegDecoderMgr.cpp b/src/codec/SkJpegDecoderMgr.cpp
+index c905ee188c..d24019fad5 100644
+--- a/src/codec/SkJpegDecoderMgr.cpp
++++ b/src/codec/SkJpegDecoderMgr.cpp
+@@ -23,6 +23,9 @@ class SkStream;
+ /*
+  * Print information, warning, and error messages
+  */
++#if defined(USE_SYSTEM_LIBJPEG)
++SK_NO_SANITIZE_CFI_ICALL
++#endif
+ static void print_message(const j_common_ptr info, const char caller[]) {
+     char buffer[JMSG_LENGTH_MAX];
+     info->err->format_message(info, buffer);
