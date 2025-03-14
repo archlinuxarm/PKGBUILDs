@@ -19,6 +19,7 @@ pkgname=(
   mesa
   opencl-clover-mesa
   opencl-rusticl-mesa
+  vulkan-gfxstream
   vulkan-mesa-layers
   vulkan-nouveau
   vulkan-radeon
@@ -29,8 +30,8 @@ pkgname=(
   vulkan-freedreno
   mesa-docs
 )
-pkgver=24.3.4
-pkgrel=1
+pkgver=25.0.0
+pkgrel=2
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
 url="https://www.mesa3d.org/"
@@ -105,6 +106,11 @@ options=(
 )
 source=(
   "https://mesa.freedesktop.org/archive/mesa-$pkgver.tar.xz"{,.sig}
+  0001-docs-Fix-build-with-Sphinx-8.2.patch
+  0002-gfxstream-Fix-log-format-error-on-x86.patch
+  0003-gallium-radeon-Make-sure-radeonsi-PCI-IDs-are-also-i.patch
+  0004-aco-insert-dependency-waits-in-certain-situations.patch
+  0005-radv-amdgpu-fix-device-deduplication.patch
 )
 validpgpkeys=(
   946D09B5E4C9845E63075FF1D961C596A7203456 # Andres Gomez <tanty@igalia.com>
@@ -141,8 +147,13 @@ for _crate in "${!_crates[@]}"; do
   )
 done
 
-b2sums=('a5cf1f49c6d809d19510793f5d1dcec1a3842495d3b4166e303d7f2d4744d179811697d264c5c9b39f2819ebc64a76357195b3eae6b1d2a83128de141354e3c2'
+b2sums=('9aca2416ea4e304d46fda648cb9b8e04caa053458b91893fb874e9a30d8293722c3bed1098c2720b04b0c7278eba3b0387900b56e13b6133a23c0f6be705025c'
         'SKIP'
+        '1782fae4e7a323564b791f5762e1bc1084d9124ebe471b4cc7a9ac65795c3ea41ef075d36a6281689d7398b8d14311723ccec759d246fbdfd246d1b757c036f2'
+        '3d604a2f81177f0373230af0c036acd3f0da3933cb490a9f09eb1982b91dc8709a3f67f11fc761b023df4fbbd4ea6dbc3f4dae85e084aa44270100c06948a6d5'
+        'b7911c050d25ff4cb3ce5e69a2e0d27d19b91c42bfe4561024044fa764eac8314e8176f20cef7547538b9ee129bf9b5bb878ff9b2c599be83d9aec1f49bc156a'
+        'e71295b76584394d18ecc8263308d214599d4b4b8f6959b1de96a95f5172e46ae0d33916ac156cc65304c54c5be7bdadefd69720a8de040edb8018dba849d743'
+        'b4154879a10495a4e8f65b09bc1c87aedbe733af5918d2e4388fd2a838994537ea370115c990b4f824f7954685141b31434207c2d173f6944365ef28b0366e16'
         'a6d47c903be6094423d89b8ec3ca899d0a84df6dbd6e76632bb6c9b9f40ad9c216f8fa400310753d392f85072756b43ac3892e0a2c4d55f87ab6463002554823'
         '9c34f1ab14ad5ae124882513e0f14b1d731d06a43203bdc37fa3b202dd3ce93dbe8ebb554d01bab475689fe6ffd3ec0cbc0d5365c9b984cb83fb34ea3e9e732e'
         'fac5cf6339dc3c0a40b100035a5c874cc7b2efeafeb31c51488d25156e392dc9db86a497e76eead351d2126f69d060422faa9c55d73407a0de9f5be18d234123'
@@ -160,8 +171,13 @@ b2sums=('a5cf1f49c6d809d19510793f5d1dcec1a3842495d3b4166e303d7f2d4744d179811697d
         '8bc6f68ed286bea617a2cfaf3949bb699d3a0466faeca735314a51596ce950e4ee57eda88154bd562c1728cfaff4cdb5bc1ba701b9d47a9c50d4c4f011bee975')
 
 # https://docs.mesa3d.org/relnotes.html
-sha256sums=('e641ae27191d387599219694560d221b7feaa91c900bcec46bf444218ed66025'
+sha256sums=('96a53501fd59679654273258c6c6a1055a20e352ee1429f0b123516c7190e5b0'
             'SKIP'
+            'a8fa6befb380e613a288f605c290400eb0f92642b9fe7c534d6a40e315dc1e5b'
+            'a481c2d56d91b936d0c445bf90ab4475e3c35698b2474fdaf85a8405a793bfcf'
+            'd531eb66a4b9512f9d2f3db68eba4a6b155a795c3b42ef25e357426896fe1b80'
+            '05f6962555267a6e1607579f4a4287069726203da6237679872d09437c4299cb'
+            'f18ae4812431152bd325396e0ddce2f9dc55f3fb9d6d958b6b10de23f0ddb400'
             'ed646292ffc8188ef8ea4d1e0e0150fb15a5c2e12ad9b8fc191ae7a8a7f3c4b9'
             'a941429fea7e08bedec25e4f6785b6ffaacc6b755da98df5ef3e7dcf4a124c4f'
             '168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26'
@@ -180,6 +196,19 @@ sha256sums=('e641ae27191d387599219694560d221b7feaa91c900bcec46bf444218ed66025'
 
 prepare() {
   cd mesa-$pkgver
+
+  # Fix build with Sphinx 8.2
+  patch -Np1 -i ../0001-docs-Fix-build-with-Sphinx-8.2.patch
+
+  # Fix compilation error on x86
+  patch -Np1 -i ../0002-gfxstream-Fix-log-format-error-on-x86.patch
+
+  # Various fixes for AMD issues
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/mesa/-/issues/23
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/mesa/-/issues/24
+  patch -Np1 -i ../0003-gallium-radeon-Make-sure-radeonsi-PCI-IDs-are-also-i.patch
+  patch -Np1 -i ../0004-aco-insert-dependency-waits-in-certain-situations.patch
+  patch -Np1 -i ../0005-radv-amdgpu-fix-device-deduplication.patch
 
   # Include package release in version string so Chromium invalidates
   # its GPU cache; otherwise it can cause pages to render incorrectly.
@@ -208,19 +237,14 @@ build() {
     -D gallium-rusticl=true
     -D gallium-xa=disabled
     -D gles1=disabled
-    -D glx=dri
     -D html-docs=enabled
-    -D intel-clc=enabled
-    -D intel-rt=disabled
     -D libunwind=disabled
     -D microsoft-clc=disabled
     -D osmesa=true
-    -D platforms=x11,wayland
-    -D rust_std=2021
     -D valgrind=enabled
     -D video-codecs=all
-    -D vulkan-drivers=amd,swrast,broadcom,panfrost,virtio,freedreno,nouveau
-    -D vulkan-layers=device-select,overlay,screenshot
+    -D vulkan-drivers=amd,gfxstream,swrast,broadcom,panfrost,virtio,freedreno,nouveau
+    -D vulkan-layers=device-select,overlay,screenshot,vram-report-limit
   )
 
   # Build only minimal debug info to reduce size
@@ -298,6 +322,9 @@ package_mesa() {
     _pick clrust $libdir/libRusticlOpenCL*
     _pick clrust etc/OpenCL/vendors/rusticl.icd
 
+    _pick vkgfxstr $icddir/gfxstream*.json
+    _pick vkgfxstr $libdir/libvulkan_gfxstream*.so
+
     _pick vklayer $libdir/libVkLayer_*.so
     _pick vklayer usr/bin/mesa-*-control.py
     _pick vklayer usr/share/vulkan/{ex,im}plicit_layer.d
@@ -343,6 +370,7 @@ package_opencl-clover-mesa() {
     libdrm
     libelf
     llvm-libs
+    spirv-tools
     zlib
     zstd
 
@@ -381,6 +409,29 @@ package_opencl-rusticl-mesa() {
   conflicts=(opencl-mesa)
 
   mv clrust/* "$pkgdir"
+
+  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+package_vulkan-gfxstream() {
+  pkgdesc="Open-source Vulkan driver for Graphics Streaming Kit"
+  depends=(
+    expat
+    gcc-libs
+    glibc
+    libdrm
+    libx11
+    libxcb
+    libxshmfence
+    systemd-libs
+    vulkan-icd-loader
+    wayland
+    xcb-util-keysyms
+  )
+  optdepends=("vulkan-mesa-layers: additional vulkan layers")
+  provides=(vulkan-driver)
+
+  mv vkgfxstr/* "$pkgdir"
 
   install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
