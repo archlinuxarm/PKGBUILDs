@@ -31,7 +31,7 @@ pkgname=(
   vulkan-freedreno
   mesa-docs
 )
-pkgver=25.0.3
+pkgver=25.0.4
 pkgrel=1
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
@@ -106,7 +106,6 @@ options=(
 source=(
   "https://mesa.freedesktop.org/archive/mesa-$pkgver.tar.xz"{,.sig}
   0001-docs-Fix-HTML-build-with-Sphinx-8.2.patch
-  0002-gfxstream-Use-proper-log-format-for-32-bit-Vulkan.patch
 )
 validpgpkeys=(
   946D09B5E4C9845E63075FF1D961C596A7203456 # Andres Gomez <tanty@igalia.com>
@@ -143,10 +142,9 @@ for _crate in "${!_crates[@]}"; do
   )
 done
 
-b2sums=('8b32119756c422b780b466ed4ba60660d2c91f8f460b617f7417e5f3ae2a5cd44a95abedbcdfb8e2f38d99fb2e4f1610586e846fe13b9db979f5156dcc268614'
+b2sums=('b661bc1534bff848c32c559ecc790fd7770682aa7f35403c2fb50b899ad83dbbafb2baecf0e372972849378a4a539eeafe5e9c9e1497ab4313ebcafa89f6e248'
         'SKIP'
         'cd708e65f7d46cfda58017b11968fe8142402807ba93a7972213d2bef9fca7c29d3fc048731cb551f2fd0dfc82411bd78f023e1a5a370184113a5d04fdc23865'
-        '148b683008b52af6b64a29e3153cdb9a39fb684bfd00687d50cbb9fd55290708b9ad2a174f5092e5024828b3344f8bb8a10370dab79c23a1f1dd2a1267f8cb3a'
         'a6d47c903be6094423d89b8ec3ca899d0a84df6dbd6e76632bb6c9b9f40ad9c216f8fa400310753d392f85072756b43ac3892e0a2c4d55f87ab6463002554823'
         '9c34f1ab14ad5ae124882513e0f14b1d731d06a43203bdc37fa3b202dd3ce93dbe8ebb554d01bab475689fe6ffd3ec0cbc0d5365c9b984cb83fb34ea3e9e732e'
         'fac5cf6339dc3c0a40b100035a5c874cc7b2efeafeb31c51488d25156e392dc9db86a497e76eead351d2126f69d060422faa9c55d73407a0de9f5be18d234123'
@@ -164,10 +162,9 @@ b2sums=('8b32119756c422b780b466ed4ba60660d2c91f8f460b617f7417e5f3ae2a5cd44a95abe
         '8bc6f68ed286bea617a2cfaf3949bb699d3a0466faeca735314a51596ce950e4ee57eda88154bd562c1728cfaff4cdb5bc1ba701b9d47a9c50d4c4f011bee975')
 
 # https://docs.mesa3d.org/relnotes.html
-sha256sums=('5ff426ed6ce0588fd96d18975bdff451ae2ab2fe98b5d1528842ee71ec66711b'
+sha256sums=('76293cf4372ca4e4e73fd6c36c567b917b608a4db9d11bd2e33068199a7df04d'
             'SKIP'
             '279a54c7c531fa89a491b38f4467530c44d2f8d4e84e903ef5e460e05d283532'
-            '8eb946f7a59ed7c553851da7fa5ae19d74c2dd4a39d52acfec65b2f5484ded6b'
             'ed646292ffc8188ef8ea4d1e0e0150fb15a5c2e12ad9b8fc191ae7a8a7f3c4b9'
             'a941429fea7e08bedec25e4f6785b6ffaacc6b755da98df5ef3e7dcf4a124c4f'
             '168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26'
@@ -189,9 +186,6 @@ prepare() {
 
   # Fix build with Sphinx 8.2
   patch -Np1 -i ../0001-docs-Fix-HTML-build-with-Sphinx-8.2.patch
-
-  # Fix compilation error on x86
-  patch -Np1 -i ../0002-gfxstream-Use-proper-log-format-for-32-bit-Vulkan.patch
 
   # Include package release in version string so Chromium invalidates
   # its GPU cache; otherwise it can cause pages to render incorrectly.
