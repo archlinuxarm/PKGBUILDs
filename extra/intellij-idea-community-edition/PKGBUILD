@@ -1,0 +1,93 @@
+# Maintainer: Lukas Jirkovsky <l.jirkovsky@gmail.com>
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Maxime Gauduin <alucryd@archlinux.org>
+# Maintainer: Orhun Parmaksız <orhun@archlinux.org>
+
+buildarch=8
+highmem=1
+
+# ALARM: The one with the braid <info@braid.business>
+# - declare AArch64 compatibility
+
+pkgname=intellij-idea-community-edition
+pkgver=2024.3.5
+_build=243.26053.27
+_jrever=21
+_jdkver=21
+pkgrel=1
+epoch=4
+pkgdesc='IDE for Java, Groovy and other programming languages with advanced refactoring features'
+url='https://www.jetbrains.com/idea/'
+arch=('x86_64')
+license=('Apache-2.0')
+backup=('usr/share/idea/bin/idea64.vmoptions')
+depends=('giflib' "java-environment-openjdk=${_jrever}" 'python' 'sh' 'ttf-font' 'libdbusmenu-glib' 'fontconfig' 'hicolor-icon-theme')
+makedepends=('git')
+optdepends=(
+  'lldb: lldb frontend integration'
+)
+source=("git+https://github.com/JetBrains/intellij-community.git#tag=idea/${_build}"
+        idea-android::"git+https://github.com/JetBrains/android.git#tag=idea/${_build}"
+        idea.desktop
+        idea.sh
+        enable-no-jdr.patch)
+noextract=('junit-3.8.1.jar')
+sha256sums=('5f735750c6b73a4f084b2380979f28f57f8c703339a59482173f8ec5112032f2'
+            'c5e830ac2e33598b96d3bde85f49e48663b5ff2452b9efafbe3e349d10141650'
+            '049c4326b6b784da0c698cf62262b591b20abb52e0dcf869f869c0c655f3ce93'
+            'c5787f6777fa292c6376f3fcddc89f1d0ae4b71f3284d9bfefcea0b0ab3d8ea9'
+            'b7858737346fb08423ee7fd177f9e59180d2173d988dd8622b84d58426fcb3a7')
+
+case $CARCH in
+  x86_64)
+    export JVM_ARCH=x64
+    ;;
+  aarch64)
+    export JVM_ARCH=aarch64
+    ;;
+esac
+
+
+prepare() {
+  cd intellij-community
+
+  # build system doesn't like symlinks
+  mv "${srcdir}"/idea-android android
+
+  patch -Np1 < "${srcdir}/enable-no-jdr.patch"
+}
+
+build() {
+  cd intellij-community
+  
+  export JAVA_HOME="/usr/lib/jvm/java-${_jdkver}-openjdk"
+  export PATH="/usr/lib/jvm/java-${_jdkver}-openjdk/bin:$PATH"
+  export MAVEN_REPOSITORY=${srcdir}/.m2/repository
+
+  ./installers.cmd -Dintellij.build.use.compiled.classes=false -Dintellij.build.target.os=linux -Dintellij.build.target.arch="${JVM_ARCH}" -Dbuild.number="${_build}"
+
+  case $JVM_ARCH in
+    x64)
+      tar -xf out/idea-ce/artifacts/ideaIC-${_build}-no-jbr.tar.gz -C "${srcdir}"
+      ;;
+    aarch64)
+      tar -xf out/idea-ce/artifacts/ideaIC-${_build}-no-jbr-aarch64.tar.gz -C "${srcdir}"
+      ;;
+  esac
+}
+
+package() {
+  cd idea-IC-${_build}
+
+  install -dm 755 "${pkgdir}"/usr/share/{licenses,pixmaps,idea,icons/hicolor/scalable/apps}
+  cp -dr --no-preserve='ownership' bin lib plugins "${pkgdir}"/usr/share/idea/
+  cp -dr --no-preserve='ownership' license "${pkgdir}"/usr/share/licenses/idea
+  ln -s /usr/share/idea/bin/idea.png "${pkgdir}"/usr/share/pixmaps/
+  ln -s /usr/share/idea/bin/idea.svg "${pkgdir}"/usr/share/icons/hicolor/scalable/apps/
+  install -Dm 644 ../idea.desktop -t "${pkgdir}"/usr/share/applications/
+  install -Dm 755 ../idea.sh "${pkgdir}"/usr/bin/idea
+  install -Dm 644 build.txt -t "${pkgdir}"/usr/share/idea
+  install -Dm 644 product-info.json -t "${pkgdir}"/usr/share/idea
+}
+
+# vim: ts=2 sw=2 et:
