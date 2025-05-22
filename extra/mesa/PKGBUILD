@@ -17,8 +17,7 @@ highmem=1
 pkgbase=mesa
 pkgname=(
   mesa
-  opencl-clover-mesa
-  opencl-rusticl-mesa
+  opencl-mesa
   vulkan-dzn
   vulkan-gfxstream
   vulkan-nouveau
@@ -31,7 +30,7 @@ pkgname=(
   vulkan-freedreno
   mesa-docs
 )
-pkgver=25.0.5
+pkgver=25.1.1
 pkgrel=1
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
@@ -105,7 +104,6 @@ options=(
 )
 source=(
   "https://archive.mesa3d.org/mesa-$pkgver.tar.xz"{,.sig}
-  0001-docs-Fix-HTML-build-with-Sphinx-8.2.patch
 )
 validpgpkeys=(
   946D09B5E4C9845E63075FF1D961C596A7203456 # Andres Gomez <tanty@igalia.com>
@@ -123,10 +121,10 @@ declare -A _crates=(
    indexmap        2.2.6
    once_cell       1.8.0
    paste           1.0.14
-   pest            2.7.11
-   pest_derive     2.7.11
-   pest_generator  2.7.11
-   pest_meta       2.7.11
+   pest            2.8.0
+   pest_derive     2.8.0
+   pest_generator  2.8.0
+   pest_meta       2.8.0
    proc-macro2     1.0.86
    quote           1.0.33
    roxmltree       0.20.0
@@ -142,50 +140,45 @@ for _crate in "${!_crates[@]}"; do
   )
 done
 
-b2sums=('f17f8c2a733fd3c37f346b9304241dc1d13e01df9c8c723b73b10279dd3c2ebed062ec1f15cdbc8b9936bae840a087b23ac38cae7d8982228d582d468ab8c9c9'
+b2sums=('73618405dee247f7e3141f817ab66e5bbb6256d116cc1bb3eb86ed8c9511194891d3e68b3d7d36cdc3a68fab25a231da58e3bba2da7914e8c7d55ea861d50952'
         'SKIP'
-        'cd708e65f7d46cfda58017b11968fe8142402807ba93a7972213d2bef9fca7c29d3fc048731cb551f2fd0dfc82411bd78f023e1a5a370184113a5d04fdc23865'
         'a6d47c903be6094423d89b8ec3ca899d0a84df6dbd6e76632bb6c9b9f40ad9c216f8fa400310753d392f85072756b43ac3892e0a2c4d55f87ab6463002554823'
-        '9c34f1ab14ad5ae124882513e0f14b1d731d06a43203bdc37fa3b202dd3ce93dbe8ebb554d01bab475689fe6ffd3ec0cbc0d5365c9b984cb83fb34ea3e9e732e'
+        '9a73962e1e38b84131ab2350b69a1f5d611c549533eec73e898c394a9b9442f357bb5d5f59e1be12270dd29bdf237dc2d21786c0c2210736e224ef5d48300dcf'
         'fac5cf6339dc3c0a40b100035a5c874cc7b2efeafeb31c51488d25156e392dc9db86a497e76eead351d2126f69d060422faa9c55d73407a0de9f5be18d234123'
         'afa9268513caa93fb141e69d27e7d65e72b9232b57d91e499f36ea4ec89d65bc6c8cbb37753ed59d149be5a2d349028b1fb0414c6223914366d6f3f31619855f'
         '4b89e07f23af8328dbb34fe2b3f1b202f1e6a3885a6269740a23359b41bb4099ac2484565d3b2b0936261689ca525785ac620c766997234fd8d0f409e80e5ea3'
-        'e81ed8b60492da9612d2208c6cfa712ebf8c6ed7993642bfc4fadeaba10a0bc16700bce012d34d955104041ed8bbf659d16d9b86eab52342875d4c6148e7f60d'
+        '56322cafd4f761aa6192d4906ec7884f50f3fc20f0714381d5bba2e8355c03380aa65ea9e68188f75d00cd9014037e2eaac026113c5a57974a33ac46ed1b431c'
         '4cede03c08758ccd6bf53a0d0057d7542dfdd0c93d342e89f3b90460be85518a9fd24958d8b1da2b5a09b5ddbee8a4263982194158e171c2bba3e394d88d6dac'
         '77c4b166f1200e1ee2ab94a5014acd334c1fe4b7d72851d73768d491c56c6779a0882a304c1f30c88732a6168351f0f786b10516ae537cff993892a749175848'
         '9605ca407af248c71e0d2bc24d213aa6ff08a14eb548b85de16de7e172a617cdf12c2e4c686f6dd1c80455448a313f6e7d760885f189ae726934efbe06fb5603'
         '35e8548611c51ee75f4d04926149e5e54870d7073d9b635d550a6fa0f85891f57f326bdbcff3dd8618cf40f8e08cf903ef87d9c034d5921d8b91e1db842cdd7c'
-        '23bb1f3453d5d839dba7b3292806eb2d327ccafb1b1472fd970262a44c0abbabfbf3316ca16dd5526177bcb67a701cf79fa86b68fd1e57a3d875cb4b7ff89ad9'
+        '9b92fc5f3a3448d023e68e75ebcf71f97b2cd44b0fcb6ebb9fe38243f60cda48bb00cc1e67a779f2e42f56310ef8d7b37d94afe920524263e69c65754cb7cb3e'
         '302d78069d9df05e78b53f0488a9e4eb98fa2bc1e21893dc8a0acf2234347ba7c4df4b9d6b380ae77d8ffb1074b9c790460fe2dae47318aa1c4fe4208244540a'
-        'dd65c69d8d0ff343d36e31e6a4f4e11aeb01b1fd23d0db06d90f506ec2f2bb2c50422f6a73b48780e16e07c8d0addb374dd09cfabaf6230d5b2ba409dd3fa6cd'
+        '849e0ec8b86f0622d199eea1e7f03987d93f6231fae53b5dbfd90ae7d4b6a8d9e8cef5856c3714ce1f3f561f1e80dd8ed121e7ab45cecdf722f21c3e5db540c9'
         '7681b1a7497b5711e663773c1a7e076f333c06c10d3f289079a781c36f050c1620cc279742ea8e5b15ec48f3d6038a6079bbda7fee3ae8e1128bd916d53ed43a'
         '8bc6f68ed286bea617a2cfaf3949bb699d3a0466faeca735314a51596ce950e4ee57eda88154bd562c1728cfaff4cdb5bc1ba701b9d47a9c50d4c4f011bee975')
 
 # https://docs.mesa3d.org/relnotes.html
-sha256sums=('c0d245dea0aa4b49f74b3d474b16542e4a8799791cd33d676c69f650ad4378d0'
+sha256sums=('cf942a18b7b9e9b88524dcbf0b31fed3cde18e6d52b3375b0ab6587a14415bce'
             'SKIP'
-            '279a54c7c531fa89a491b38f4467530c44d2f8d4e84e903ef5e460e05d283532'
             'ed646292ffc8188ef8ea4d1e0e0150fb15a5c2e12ad9b8fc191ae7a8a7f3c4b9'
-            'a941429fea7e08bedec25e4f6785b6ffaacc6b755da98df5ef3e7dcf4a124c4f'
+            '7f9f832470494906d1fca5329f8ab5791cc60beb230c74815dff541cbd2b5ca0'
             '168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26'
             '7dfda62a12f55daeae5015f81b0baea145391cb4520f86c248fc615d72640d12'
             '5e719e8df665df0d1c8fbfd238015744736151d4445ec0836b8e628aae103b77'
-            '2a548d2beca6773b1c244554d36fcf8548a8a58e74156968211567250e48e49a'
+            'd725d9cfd79e87dccc9341a2ef39d1b6f6353d68c4b33c177febbe1a402c97c5'
             '3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b'
             '5267fca4496028628a95160fc423a33e8b2e6af8a5302579e322e4b520293cae'
             '6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97'
             'de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c'
-            'cd53dff83f26735fdc1ca837098ccf133605d794cdae66acfc2bfac3ec809d95'
+            '198db74531d58c70a361c42201efde7e2591e976d518caf7662a47dc5720e7b6'
             '5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5'
-            '3c93a82e8d145725dcbaf44e5ea887c8a869efdcc28706df2d08c69e17077183'
+            'db7d01726be8ab66ab32f9df467ae8b1148906685bbe75c82d1e65d7f5b3f841'
             '692fcb63b64b1758029e0a96ee63e049ce8c5948587f2f7208df04625e5f6b56'
             '901fa70d88b9d6c98022e23b4136f9f3e54e4662c3bc1bd1d84a42a9a0f0c1e9')
 
 prepare() {
   cd mesa-$pkgver
-
-  # Fix build with Sphinx 8.2
-  patch -Np1 -i ../0001-docs-Fix-HTML-build-with-Sphinx-8.2.patch
 
   # Include package release in version string so Chromium invalidates
   # its GPU cache; otherwise it can cause pages to render incorrectly.
@@ -209,15 +202,12 @@ build() {
     -D b_ndebug=true
     -D gallium-drivers=r300,r600,radeonsi,freedreno,nouveau,llvmpipe,softpipe,virgl,zink,d3d12${GALLIUM}
     -D gallium-extra-hud=true
-    -D gallium-nine=true
-    -D gallium-opencl=icd
     -D gallium-rusticl=true
     -D gallium-xa=disabled
     -D gles1=disabled
     -D html-docs=enabled
     -D libunwind=disabled
     -D microsoft-clc=disabled
-    -D osmesa=true
     -D valgrind=enabled
     -D video-codecs=all
     -D vulkan-drivers=amd,gfxstream,swrast,broadcom,panfrost,virtio,microsoft-experimental,freedreno,nouveau
@@ -292,12 +282,8 @@ package_mesa() {
 
     cd "$pkgdir"
 
-    _pick clover $libdir/gallium-pipe
-    _pick clover $libdir/libMesaOpenCL*
-    _pick clover etc/OpenCL/vendors/mesa.icd
-
-    _pick clrust $libdir/libRusticlOpenCL*
-    _pick clrust etc/OpenCL/vendors/rusticl.icd
+    _pick opencl $libdir/libRusticlOpenCL*
+    _pick opencl etc/OpenCL/vendors/rusticl.icd
 
     _pick vkdzn $icddir/dzn_icd.*.json
     _pick vkdzn $libdir/libvulkan_dzn.so
@@ -342,34 +328,8 @@ package_mesa() {
   install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
-package_opencl-clover-mesa() {
-  pkgdesc="Open-source OpenCL drivers - Clover variant"
-  depends=(
-    clang
-    expat
-    gcc-libs
-    glibc
-    libdrm
-    libelf
-    llvm-libs
-    spirv-tools
-    zlib
-    zstd
-
-    libclc # For /usr/share/clc/
-  )
-  optdepends=("opencl-headers: headers necessary for OpenCL development")
-  provides=(opencl-driver)
-  replaces=("opencl-mesa<=23.1.4-1")
-  conflicts=(opencl-mesa)
-
-  mv clover/* "$pkgdir"
-
-  install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
-}
-
-package_opencl-rusticl-mesa() {
-  pkgdesc="Open-source OpenCL drivers - RustICL variant"
+package_opencl-mesa() {
+  pkgdesc="Open-source OpenCL drivers"
   depends=(
     clang
     expat
@@ -387,10 +347,16 @@ package_opencl-rusticl-mesa() {
   )
   optdepends=("opencl-headers: headers necessary for OpenCL development")
   provides=(opencl-driver)
-  replaces=("opencl-mesa<=23.1.4-1")
-  conflicts=(opencl-mesa)
+  replaces=(
+    "opencl-clover-mesa<=1:25.0.5-1"
+    "opencl-rusticl-mesa<=1:25.0.5-1"
+  )
+  conflicts=(
+    opencl-clover-mesa
+    opencl-rusticl-mesa
+  )
 
-  mv clrust/* "$pkgdir"
+  mv opencl/* "$pkgdir"
 
   install -Dm644 mesa-$pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
