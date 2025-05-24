@@ -1,40 +1,60 @@
---- cups-2.4.0/scheduler/cups-exec.c	2021-11-29 16:19:34.235186064 +0100
-+++ cups-2.4.0/scheduler/cups-exec.c.new	2021-11-29 16:25:30.764049649 +0100
-@@ -134,9 +134,15 @@ main(int  argc,				/* I - Number of command-line args */
+--- cups-2.4.12/scheduler/cups-exec.c	2025-05-16 15:26:32.965993145 +0200
++++ cups-2.4.12/scheduler/cups-exec.c.new	2025-05-16 16:09:20.507974911 +0200
+@@ -20,6 +20,7 @@
+ #include <cups/file.h>
+ #include <unistd.h>
+ #include <fcntl.h>
++#include <pwd.h>
+ #include <grp.h>
+ #include <sys/stat.h>
+ #ifdef HAVE_SANDBOX_H
+@@ -133,10 +134,22 @@
+ 
  #  if CUPS_SNAP
      if (setgroups(0, NULL))
++      exit(errno + 100);
  #  else
 -    if (setgroups(1, &gid))
--#  endif /* CUPS_SNAP */
-+#include <pwd.h>
-+#include <grp.h>
-+    struct passwd * pwd = getpwuid(uid);
-+    if(initgroups(pwd->pw_name,pwd->pw_gid))
++    struct passwd *pwd = getpwuid(uid);
++    if (!pwd)
 +    {
-+      fprintf(stderr, "DEBUG: initgroups failed\n");
-       exit(errno + 100);
++      fprintf(stderr, "WARNING: getpwuid failed to find user %lu; permissions of supplementary groups will not be applied\n", (unsigned long int)uid);
++      if (setgroups(1, &gid))
++        exit(errno + 100);
 +    }
-+#  endif /* CUPS_SNAP */
++    else if (initgroups(pwd->pw_name, pwd->pw_gid))
++    {
++      fprintf(stderr, "WARNING: initgroups failed; permissions of supplementary groups will not be applied\n");
++      if (setgroups(1, &gid))
++        exit(errno + 100);
++    }
+ #  endif /* CUPS_SNAP */
+-      exit(errno + 100);
  
      if (uid && setuid(uid))
        exit(errno + 100);
---- cups-2.4.0/scheduler/util.c	2021-11-29 15:27:31.000000000 +0100
-+++ cups-2.4.0/scheduler/util.c.new	2021-11-29 16:29:58.810719066 +0100
-@@ -296,7 +296,17 @@
+--- cups-2.4.12/scheduler/util.c	2025-05-16 15:26:32.965936994 +0200
++++ cups-2.4.12/scheduler/util.c.new	2025-05-16 16:04:22.758834894 +0200
+@@ -16,6 +16,8 @@
+ #include <unistd.h>
+ #include <sys/stat.h>
+ #include <fcntl.h>
++#include <pwd.h>
++#include <grp.h>
+ #ifdef __APPLE__
+ #  include <libgen.h>
+ extern char **environ;
+@@ -297,7 +299,14 @@
      */
  
      if (!getuid() && user)
--      setuid(user);			/* Run as restricted user */
 +    {
-+#include <pwd.h>
-+#include <grp.h>
-+      struct passwd * pwd = getpwuid(user);
-+      if(initgroups(pwd->pw_name,pwd->pw_gid))
++      struct passwd *pwd = getpwuid(user);
++      if (pwd)
 +      {
-+        fprintf(stderr, "DEBUG: initgroups failed\n");
-+        exit(errno + 100);
++        initgroups(pwd->pw_name, pwd->pw_gid);
 +      }
-+      setuid(user); /* Run as restricted user */
+       setuid(user);			/* Run as restricted user */
 +    }
  
      if ((fd = open("/dev/null", O_RDONLY)) > 0)
