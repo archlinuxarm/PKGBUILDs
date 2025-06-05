@@ -10,13 +10,15 @@
 
 pkgname=(libvirt libvirt-storage-gluster libvirt-storage-iscsi-direct)
 epoch=1
-pkgver=11.3.0
+pkgver=11.4.0
 pkgrel=1
 pkgdesc="API for controlling virtualization engines (openvz,kvm,qemu,virtualbox,xen,etc)"
 arch=('x86_64')
 url="https://libvirt.org/"
-license=('LGPL-2.1-or-later'
-         'GPL-3.0-or-later') # libvirt_parthelper links to libparted
+license=(
+  'LGPL-2.1-or-later'
+  'GPL-3.0-or-later' # libvirt_parthelper links to libparted
+) 
 depends=(
   acl
   audit
@@ -49,6 +51,7 @@ depends=(
 makedepends=(
   bash-completion
   dnsmasq
+  git
   glusterfs
   iproute2
   libiscsi
@@ -130,17 +133,12 @@ backup=(
   'etc/sasl2/libvirt.conf'
 )
 source=(
-  "https://libvirt.org/sources/$pkgname-$pkgver.tar.xz"{,.asc}
-  https://src.fedoraproject.org/rpms/libvirt/raw/rawhide/f/0001-Fix-mocking-of-virQEMUCapsProbeHVF-function.patch
+  "git+https://gitlab.com/libvirt/libvirt.git#tag=v${pkgver}"
 )
-sha256sums=('6bcb0c42c4580436fea262ced56f68a6afe20f7390b1bea2116718cc034a0283'
-            'SKIP'
-            '9de143406d862b948154ef719943e3db7e97059dd4da6449a15b3a0b1c9d1168')
-validpgpkeys=('453B65310595562855471199CA68BE8010084C9C') # Jiří Denemark <jdenemar@redhat.com>
+sha256sums=('df969b40a5196686098821979407c78a8d8b3611b80231c01a39e394e7cbcd1e')
 
 prepare() {
-  cd "$pkgname-$pkgver"
-  patch -Np1 < ../0001-Fix-mocking-of-virQEMUCapsProbeHVF-function.patch
+  cd ${pkgname}
   sed -i 's|/sysconfig/|/conf.d/|g' \
     src/remote/libvirtd.service.in \
     tools/{libvirt-guests.service,libvirt-guests.sh}.in \
@@ -153,7 +151,7 @@ prepare() {
 }
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd ${pkgname}
 
   arch-meson build \
     --libexecdir=lib/libvirt \
@@ -183,39 +181,45 @@ build() {
 }
 
 check() {
-  cd "$pkgname-$pkgver"
+  cd ${pkgname}
 
   meson test -C build --print-errorlogs
 }
 
 package_libvirt() {
-  provides=("libvirt=$pkgver" 'libvirt.so' 'libvirt-admin.so' 'libvirt-lxc.so' 'libvirt-qemu.so')
-  cd "$pkgname-$pkgver"
-  meson install -C build --destdir "$pkgdir"
+  provides=(
+    "libvirt=$pkgver"
+    libvirt.so
+    libvirt-admin.so
+    libvirt-lxc.so
+    libvirt-qemu.so
+  )
+  cd ${pkgname}
+  meson install -C build --destdir ${pkgdir}
 
-  mkdir -p "$pkgdir"/usr/lib/{sysusers,tmpfiles}.d
-  echo 'g libvirt - -' > "$pkgdir/usr/lib/sysusers.d/libvirt-qemu.conf"
-  echo 'u! libvirt-qemu /var/lib/libvirt "Libvirt QEMU user"' >> "$pkgdir/usr/lib/sysusers.d/libvirt.conf"
-  echo 'm libvirt-qemu kvm' >> "$pkgdir/usr/lib/sysusers.d/libvirt.conf"
-  echo 'z /var/lib/libvirt/qemu 0751' > "$pkgdir/usr/lib/tmpfiles.d/libvirt.conf"
+  mkdir -p "${pkgdir}"/usr/lib/{sysusers,tmpfiles}.d
+  echo 'g libvirt - -' > "${pkgdir}"/usr/lib/sysusers.d/libvirt-qemu.conf
+  echo 'u! libvirt-qemu /var/lib/libvirt "Libvirt QEMU user"' >> "${pkgdir}"/usr/lib/sysusers.d/libvirt.conf
+  echo 'm libvirt-qemu kvm' >> "${pkgdir}"/usr/lib/sysusers.d/libvirt.conf
+  echo 'z /var/lib/libvirt/qemu 0751' > "${pkgdir}"/usr/lib/tmpfiles.d/libvirt.conf
 
-  chmod 600 "$pkgdir"/etc/libvirt/nwfilter/*.xml \
-    "$pkgdir/etc/libvirt/qemu/networks/default.xml"
-  chmod 700 "$pkgdir"/etc/libvirt/secrets
-  chmod 711 "$pkgdir"/var/lib/libvirt/swtpm
+  chmod 600 "${pkgdir}"/etc/libvirt/nwfilter/*.xml \
+    "${pkgdir}"/etc/libvirt/qemu/networks/default.xml
+  chmod 700 "${pkgdir}"/etc/libvirt/secrets
+  chmod 711 "${pkgdir}"/var/lib/libvirt/swtpm
 
   rm -rf \
-    "$pkgdir/run" \
-    "$pkgdir/var/lib/libvirt/qemu" \
-    "$pkgdir/var/cache/libvirt/qemu" \
-    "$pkgdir/etc/logrotate.d/libvirtd.libxl"
+    "${pkgdir}"/run \
+    "${pkgdir}"/var/lib/libvirt/qemu \
+    "${pkgdir}"/var/cache/libvirt/qemu \
+    "${pkgdir}"/etc/logrotate.d/libvirtd.libxl
 
-  rm -f "$pkgdir/etc/libvirt/qemu/networks/autostart/default.xml"
+  rm -f "${pkgdir}"/etc/libvirt/qemu/networks/autostart/default.xml
 
   # move split modules
-  mv "$pkgdir"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_gluster.so "$pkgdir/../"
-  mv "$pkgdir/usr/lib/libvirt/storage-backend/libvirt_storage_backend_iscsi-direct.so" "$pkgdir/../"
-  mv "$pkgdir/usr/lib/libvirt/storage-file/libvirt_storage_file_gluster.so" "$pkgdir/../"
+  mv "${pkgdir}"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_gluster.so "${pkgdir}"/../
+  mv "${pkgdir}"/usr/lib/libvirt/storage-backend/libvirt_storage_backend_iscsi-direct.so "${pkgdir}"/../
+  mv "${pkgdir}"/usr/lib/libvirt/storage-file/libvirt_storage_file_gluster.so "${pkgdir}"/../
 }
 
 package_libvirt-storage-gluster() {
@@ -230,8 +234,8 @@ package_libvirt-storage-gluster() {
   optdepends=()
   backup=()
 
-  install -Dv -t "$pkgdir/usr/lib/libvirt/storage-backend" "$pkgdir/../libvirt_storage_backend_gluster.so"
-  install -Dv -t "$pkgdir/usr/lib/libvirt/storage-file" "$pkgdir/../libvirt_storage_file_gluster.so"
+  install -Dv -t "${pkgdir}"/usr/lib/libvirt/storage-backend "${pkgdir}"/../libvirt_storage_backend_gluster.so
+  install -Dv -t "${pkgdir}"/usr/lib/libvirt/storage-file "${pkgdir}"/../libvirt_storage_file_gluster.so
 }
 
 package_libvirt-storage-iscsi-direct() {
@@ -246,5 +250,5 @@ package_libvirt-storage-iscsi-direct() {
   optdepends=()
   backup=()
 
-  install -Dv -t "$pkgdir/usr/lib/libvirt/storage-backend" "$pkgdir/../libvirt_storage_backend_iscsi-direct.so"
+  install -Dv -t "${pkgdir}"/usr/lib/libvirt/storage-backend "${pkgdir}"/../libvirt_storage_backend_iscsi-direct.so
 }
