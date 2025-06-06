@@ -5,10 +5,9 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - add -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 to v7 CPPFLAGS
 
-pkgbase=gpgme
-pkgname=(gpgme qgpgme-qt6 python-gpgme)
-pkgver=1.24.3
-pkgrel=2
+pkgname=gpgme
+pkgver=2.0.0
+pkgrel=1
 pkgdesc='C wrapper library for GnuPG'
 arch=('x86_64')
 url='https://www.gnupg.org/related_software/gpgme/'
@@ -16,39 +15,31 @@ license=(
   GPL-2.0-or-later
   LGPL-2.0-or-later
   LGPL-2.1-or-later
-)
-makedepends=(
-  'git'
-  'gnupg'
+  MIT)
+depends=(
+  'gcc-libs'
+  'glib2'
+  'glibc'
   'libassuan'
   'libgpg-error'
-  'python'
-  'python-build'
-  'python-installer'
-  'python-setuptools'
-  'python-wheel'
-  'qt6-base'
-  'swig'
-)
+  'gnupg>=2')
+makedepends=('git')
+provides=('libgpgme.so')
+options=('!emptydirs')
 validpgpkeys=('6DAA6E64A76D2840571B4902528897B826403ADA'  # Werner Koch (dist signing 2020)
               'AC8E115BF73E2D8D47FA9908E98E9B2D19C6C8BD') # Niibe Yutaka (GnuPG Release Key)
-source=("git+https://dev.gnupg.org/source/gpgme.git#tag=${pkgbase}-${pkgver}?signed"
-        '0025_debian_default_is_openpgp.diff')
-sha256sums=('630d7301a614bf22916cecdb78bbb34ea1dd724071a9ea9aee67aab06ba3dea1'
-            'f8bdaba4732347067ce291ca2acd6096e7a02c162a760be3515e0c4cdac60d6f')
+source=("git+https://dev.gnupg.org/source/gpgme.git#tag=${pkgname}-${pkgver}?signed")
+sha256sums=('cb4574411c7145d7b91d9b7bacff11e94c4994713a6ff5de908de9ebc5c30ff9')
 
 prepare() {
-  cd ${pkgbase}
-
-  # Adapt testsuite to changed gnupg defaults in Debian
-  patch -Np1 < ../0025_debian_default_is_openpgp.diff
+  cd ${pkgname}
 
   sed -i 's/-unknown//' autogen.sh
   autoreconf -fi
 }
 
 build() {
-  cd ${pkgbase}
+  cd ${pkgname}
 
   [[ $CARCH == "armv7h" ]] && CPPFLAGS+=' -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64'
   ./configure \
@@ -60,17 +51,10 @@ build() {
   # prevent excessive overlinking due to libtool
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
-
-  (
-    # use a PEP517 workflow to get a reproducible Python package
-    # NOTE: top_builddir is required so that the build takes place against local gpgme, not system gpgme
-    cd lang/python/
-    top_builddir="$srcdir/$pkgbase" python -m build --wheel --no-isolation
-  )
 }
 
 check() {
-  cd ${pkgbase}
+  cd ${pkgname}
 
   # this test fails with gnupg (FS#66572)
   sed -i 's#"t-keylist-secret",##' tests/json/t-json.c
@@ -78,54 +62,10 @@ check() {
   make check
 }
 
-package_gpgme() {
-  depends=(
-    'gcc-libs'
-    'glib2'
-    'glibc'
-    'libassuan'
-    'libgpg-error'
-    'gnupg>=2'
-  )
-  options+=('!emptydirs')
-  provides=('libgpgme.so'
-            'libgpgmepp.so')
-  license+=(MIT)
-
-  cd ${pkgbase}
+package() {
+  cd ${pkgname}
 
   make DESTDIR="${pkgdir}" install
 
-  # split qgpgme
-  rm -r "${pkgdir}"/usr/lib/{cmake/QGpgmeQt6/,libqgpgmeqt6.*}
-  rm -r "${pkgdir}"/usr/lib/python*
-  rm -r "${pkgdir}"/usr/include/qgpgme-qt6/
   install -vDm 644 LICENSES "$pkgdir/usr/share/licenses/$pkgname/MIT.txt"
-}
-
-package_qgpgme-qt6() {
-  pkgdesc="Qt6 bindings for GPGme"
-  depends=(
-    'gcc-libs'
-    'glibc'
-    'gpgme'
-    'libgpg-error'
-    'qt6-base'
-  )
-
-  cd ${pkgbase}/lang/qt
-
-  make DESTDIR="${pkgdir}" install
-}
-
-package_python-gpgme() {
-  pkgdesc="Python bindings for GPGme"
-  depends=(
-    'glibc'
-    'gpgme'
-    'python'
-  )
-
-  cd ${pkgbase}/lang/python
-  python -m installer --destdir="$pkgdir" dist/*.whl
 }
