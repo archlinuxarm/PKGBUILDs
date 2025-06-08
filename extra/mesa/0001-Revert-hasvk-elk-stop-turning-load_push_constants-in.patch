@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lionel Landwerlin <lionel.g.landwerlin@intel.com>
+Date: Fri, 6 Jun 2025 20:16:38 +0300
+Subject: [PATCH] Revert "hasvk/elk: stop turning load_push_constants into
+ load_uniform"
+
+This reverts commit b036d2ded2de32e81730ec8ce37c803bad112efa.
+
+Closes: https://gitlab.freedesktop.org/mesa/mesa/-/issues/13319
+---
+ src/intel/compiler/elk/elk_fs_nir.cpp                  | 4 ++--
+ src/intel/vulkan_hasvk/anv_nir_apply_pipeline_layout.c | 6 +++---
+ src/intel/vulkan_hasvk/anv_nir_compute_push_layout.c   | 3 +--
+ 3 files changed, 6 insertions(+), 7 deletions(-)
+
+diff --git a/src/intel/compiler/elk/elk_fs_nir.cpp b/src/intel/compiler/elk/elk_fs_nir.cpp
+index 459e2d966b77..6b78d6cf9f8e 100644
+--- a/src/intel/compiler/elk/elk_fs_nir.cpp
++++ b/src/intel/compiler/elk/elk_fs_nir.cpp
+@@ -4969,8 +4969,7 @@ fs_nir_emit_intrinsic(nir_to_elk_state &ntb,
+       break;
+    }
+ 
+-   case nir_intrinsic_load_uniform:
+-   case nir_intrinsic_load_push_constant: {
++   case nir_intrinsic_load_uniform: {
+       /* Offsets are in bytes but they should always aligned to
+        * the type size
+        */
+@@ -7058,3 +7057,4 @@ nir_to_elk(elk_fs_visitor *s)
+ 
+    ralloc_free(ntb.mem_ctx);
+ }
++
+diff --git a/src/intel/vulkan_hasvk/anv_nir_apply_pipeline_layout.c b/src/intel/vulkan_hasvk/anv_nir_apply_pipeline_layout.c
+index 2bedf9017eda..1c613a9ebe77 100644
+--- a/src/intel/vulkan_hasvk/anv_nir_apply_pipeline_layout.c
++++ b/src/intel/vulkan_hasvk/anv_nir_apply_pipeline_layout.c
+@@ -463,9 +463,9 @@ build_buffer_addr_for_res_index(nir_builder *b,
+          nir_iadd(b, res.dyn_offset_base, res.array_index);
+ 
+       nir_def *dyn_load =
+-         nir_load_uniform(b, 1, 32, nir_imul_imm(b, dyn_offset_idx, 4),
+-                          .base = offsetof(struct anv_push_constants, dynamic_offsets),
+-                          .range = MAX_DYNAMIC_BUFFERS * 4);
++         nir_load_push_constant(b, 1, 32, nir_imul_imm(b, dyn_offset_idx, 4),
++                                .base = offsetof(struct anv_push_constants, dynamic_offsets),
++                                .range = MAX_DYNAMIC_BUFFERS * 4);
+ 
+       nir_def *dynamic_offset =
+          nir_bcsel(b, nir_ieq_imm(b, res.dyn_offset_base, 0xff),
+diff --git a/src/intel/vulkan_hasvk/anv_nir_compute_push_layout.c b/src/intel/vulkan_hasvk/anv_nir_compute_push_layout.c
+index ed314af8b98d..8a3f83f2c263 100644
+--- a/src/intel/vulkan_hasvk/anv_nir_compute_push_layout.c
++++ b/src/intel/vulkan_hasvk/anv_nir_compute_push_layout.c
+@@ -55,7 +55,6 @@ anv_nir_compute_push_layout(nir_shader *nir,
+                   has_const_ubo = true;
+                break;
+ 
+-            case nir_intrinsic_load_uniform:
+             case nir_intrinsic_load_push_constant: {
+                unsigned base = nir_intrinsic_base(intrin);
+                unsigned range = nir_intrinsic_range(intrin);
+@@ -132,15 +131,15 @@ anv_nir_compute_push_layout(nir_shader *nir,
+ 
+                nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
+                switch (intrin->intrinsic) {
+-               case nir_intrinsic_load_uniform:
+                case nir_intrinsic_load_push_constant: {
+                   /* With bindless shaders we load uniforms with SEND
+                    * messages. All the push constants are located after the
+                    * RT_DISPATCH_GLOBALS. We just need to add the offset to
+                    * the address right after RT_DISPATCH_GLOBALS (see
+                    * elk_nir_lower_rt_intrinsics.c).
+                    */
+                   unsigned base_offset = push_start;
++                  intrin->intrinsic = nir_intrinsic_load_uniform;
+                   nir_intrinsic_set_base(intrin,
+                                          nir_intrinsic_base(intrin) -
+                                          base_offset);
