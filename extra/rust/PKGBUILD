@@ -21,8 +21,8 @@ pkgname=(
   rust-src
 )
 epoch=1
-pkgver=1.87.0
-pkgrel=2
+pkgver=1.88.0
+pkgrel=1
 pkgdesc="Systems programming language focused on safety, speed and concurrency"
 url=https://www.rust-lang.org/
 arch=(x86_64)
@@ -60,17 +60,24 @@ checkdepends=(
 )
 source=(
   "https://static.rust-lang.org/dist/rustc-$pkgver-src.tar.gz"{,.asc}
+
+  # Patch bootstrap so that rust-analyzer-proc-macro-srv
+  # is in /usr/lib instead of /usr/libexec
   0001-bootstrap-Change-libexec-dir.patch
+
+  # Put bash completions where they belong
   0002-bootstrap-Change-bash-completion-dir.patch
-  0003-bootstrap-Use-lld-mode-only-for-host-linked-targets.patch
-  0004-compiler-Change-LLVM-targets.patch
-  0005-compiler-Use-wasm-ld-for-wasm-targets.patch
+
+  # Use our *-pc-linux-gnu targets, making LTO with clang simpler
+  0003-compiler-Change-LLVM-targets.patch
+
+  # Use our wasm-ld
+  0004-compiler-Use-wasm-ld-for-wasm-targets.patch
 )
-b2sums=('cb104202691697ae263dc688067420dbe50023aef56dd7d4de2e662c95f17ee888e3ff1a3513b268e05243b90e51e73ba8fe772a97dba0c6119910e99e805bbe'
+b2sums=('5c672e9cab0c6dd3229efdd63e2d81a728e488c72870db9be306f0fea9078005ca3af74fb1070b19f9610e83b166df5ef4e642340647964ce622edea38b35d61'
         'SKIP'
-        '743bf583cf40ec856b7d89953af53db9ef9e7047b936a60e88e626bb7b389446bc5ed7b8b1d02001131ec728455a77ed78d6eeb64e61c370de81c2fe488836cc'
-        'f39eef3c8dce60f2ecdac5ac169cbe749c8c353241a1c48cf4815f1da37be174007d5efc98574b4865dcaee886b618139d54fc274be92cc8063a9c48f48b985b'
-        '188c7065d8a623396d7ed93c1f2a4188fd46ede9f93e9bd8e933648fc3db0924b68ec78d2f4b29529bbdcc5d809f6711438535e70d153e0131f10273109e162b'
+        'e110a262a049033f3664fc340281dfe39df918bf371bf610e4ceb4d6f6b7398759db4e3989f429e306f369c06342f9fcf587e7456a835dd33bcf39fc354dd27d'
+        '85826aac6b5ee904cd456d9b2c07ce0fc7d0f49e53a2ef7e8ea94c088a158493e7f8fa409c310bcdd967aa23f96d1dd0876999833182fa987d7d37dba40d7cee'
         '7c919047f50325be6ad5686094c97affe2148f99c5b41748e8e0187674e3b2c0eed10cd3798c866fbd2f65889636f88a439bad0892c093f6bece3f1263c89c30'
         '2317343e6b986d1ec1fb6d035fb6d8933245704b5be1b3e4a032ad14300d8a338087c52e53a6dff4ceda52232ce7f21dd8ad536c9d4da04faee6a9b79a9670b6')
 validpgpkeys=(
@@ -83,28 +90,22 @@ COMPRESSZST+=(--long)
 prepare() {
   cd rustc-$pkgver-src
 
-  # Patch bootstrap so that rust-analyzer-proc-macro-srv
-  # is in /usr/lib instead of /usr/libexec
-  patch -Np1 -i ../0001-bootstrap-Change-libexec-dir.patch
-
-  # Put bash completions where they belong
-  patch -Np1 -i ../0002-bootstrap-Change-bash-completion-dir.patch
-
-  # Unbreak wasm targets
-  patch -Np1 -i ../0003-bootstrap-Use-lld-mode-only-for-host-linked-targets.patch
-
-  # Use our *-pc-linux-gnu targets, making LTO with clang simpler
-  patch -Np1 -i ../0004-compiler-Change-LLVM-targets.patch
-
-  # Use our wasm-ld
-  patch -Np1 -i ../0005-compiler-Use-wasm-ld-for-wasm-targets.patch
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    src="${src%.zst}"
+    [[ $src = *.patch ]] || continue
+    echo "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
 
   cat >bootstrap.toml <<END
 # see src/bootstrap/defaults/
 profile = "dist"
 
 # see src/bootstrap/src/utils/change_tracker.rs
-change-id = 138986
+change-id = 140732
 
 [llvm]
 download-ci-llvm = false
@@ -136,6 +137,7 @@ docs = false
 prefix = "/usr"
 
 [rust]
+codegen-units = 1
 codegen-units-std = 1
 debuginfo-level = 0
 debuginfo-level-std = 0
