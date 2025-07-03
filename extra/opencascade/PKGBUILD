@@ -1,0 +1,94 @@
+# Maintainer: George Rawlinson <grawlinson@archlinux.org>
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
+# Contributor: Kyle Keen <keenerd@gmail.com>
+# Contributor: Gabriel Souza Franco <Z2FicmllbGZyYW5jb3NvdXphQGdtYWlsLmNvbQ==>
+# Contributor: Florian Pritz <bluewind@xinu.at>
+# Contributor: Giuseppe Borzi <gborzi@ieee.org>
+# Contributor: Brice Méalier <mealier_brice@yahoo.fr>
+# Contributor: Michele Mocciola <mickele>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - add makedepend on openmpi
+
+pkgname=opencascade
+pkgver=7.9.1
+pkgrel=1
+epoch=1
+pkgdesc='SDK intended for development of applications dealing with 3D CAD data'
+arch=(x86_64)
+url='https://www.opencascade.org'
+license=(LGPL-2.1-or-later LicenseRef-LGPL-exception)
+depends=(
+  freetype2
+  fontconfig
+  gcc-libs
+  glibc
+  libglvnd
+  tcl
+  tk
+  vtk
+)
+makedepends=(
+  git
+  cmake
+  eigen
+  nlohmann-json
+  openmpi
+  rapidjson
+)
+source=(
+  "$pkgname::git+https://git.dev.opencascade.org/repos/occt.git#tag=V${pkgver//./_}"
+  'opencascade.sh'
+)
+sha512sums=('63c1e365e11321c4d5a0db2e9d892a4463cdfb1f4ff924fc370a7034e3f3df6c7582884dbef5d85ab04dfd8c6270fdff909cb1026dda87c0a8b1c093ef7eff95'
+            'a7516028e55fd303dc1cfb61b75c9cb209d431d854b4d1c58f9c19df8ecee9d79da5c8745676c68a2de0980652de4c4d1c5a927c25db1e5146fb1f1f43c5906b')
+b2sums=('eba203155452522d86c6b89ac8485be89e7d422111b7f20cc633702fbd6ecd3a1ce0e6592f488d878ed88caea31465ad1d3f9be0da9903fa5728989fffb6dffd'
+        'da9db038ed2348d2d7736505eda2f40fe52c836bcedb74d9f369cc53f7d40a330bd87d6aedd773863745cd46e4dbe5876acda2d2d60177f00d5db9cae4f1f102')
+
+pkgver() {
+  cd "$pkgname"
+  git describe --tags | sed -e "s/^V//" -e "s/_/./g" -e "s/p/./"
+}
+
+build() {
+  # TODO: Maybe remove VTK support as VTK now also depends on opencascade which
+  # gives us a circular dependency.
+  local cmake_options=(
+    -B build
+    -S "$pkgname"
+    -W no-dev
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D BUILD_RELEASE_DISABLE_EXCEPTIONS=OFF
+    -D USE_FFMPEG=OFF
+    -D USE_VTK=ON
+    -D USE_RAPIDJSON=ON
+    -D USE_TBB=OFF
+    -D USE_FREEIMAGE=OFF
+    -D 3RDPARTY_VTK_INCLUDE_DIR=/usr/include/vtk
+  )
+  cmake "${cmake_options[@]}"
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+
+  # environment variables (adapted from adm/templates/env.sh)
+  install -vDm644 -t "$pkgdir/etc/profile.d" opencascade.sh
+
+  # remove unnecessary shell scripts
+  rm -v "$pkgdir/usr/bin/"*.sh
+
+  cd "$pkgname"
+
+  # licenses
+  install -vDm755 -t "$pkgdir/usr/share/licenses/$pkgname" \
+    LICENSE_LGPL_21.txt OCCT_LGPL_EXCEPTION.txt
+
+  # what the *hell* is this crap?
+  cd "$pkgdir/usr/lib/cmake/opencascade"
+  sed -e 's/\\\${OCCT_INSTALL_BIN_LETTER}//' -i *.cmake
+}
+
+# vim:set ts=2 sw=2 et:
