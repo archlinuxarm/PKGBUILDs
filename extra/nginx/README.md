@@ -38,7 +38,7 @@ compatibility, the `--with-compat` option should always be used.
 
 Taking the incompatibility into account, dynamic module packages should depend
 on the exact nginx version used during compilation to avoid breakage after a
-systen upgrade in case a rebuild has been missed. To achieve this, the dynamic
+system upgrade in case a rebuild has been missed. To achieve this, the dynamic
 module packages should `makedepends` on `nginx` as well as in their respective
 `package()` function add a `depends` on the precise `nginx` version:
 
