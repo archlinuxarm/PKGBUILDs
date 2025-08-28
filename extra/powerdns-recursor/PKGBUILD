@@ -8,7 +8,7 @@
 #  - remove makedepend on pandoc
 
 pkgname=powerdns-recursor
-pkgver=5.2.5
+pkgver=5.3.0
 pkgrel=1
 pkgdesc='Resolving DNS server'
 url='https://www.powerdns.com/'
@@ -16,47 +16,50 @@ arch=('x86_64')
 license=('GPL-2.0-only')
 depends=('gcc-libs' 'boost-libs' 'libcap' 'libcurl.so' 'libsodium' 'systemd-libs' 'luajit' 'openssl'
          'libboost_context.so' 'fstrm' 'net-snmp')
-makedepends=('boost' 'ragel' 'rust' 'systemd')
+makedepends=('boost' 'meson' 'python' 'python-yaml' 'ragel' 'rust' 'systemd')
 options=(!lto)
 provides=('pdns-recursor')
 conflicts=('pdns-recursor')
 backup=('etc/powerdns/recursor.conf')
-source=(https://downloads.powerdns.com/releases/pdns-recursor-${pkgver}.tar.bz2{,.asc}
+source=(https://downloads.powerdns.com/releases/pdns-recursor-${pkgver}.tar.xz{,.asc}
         sysusers.conf)
-sha512sums=('2b94de2fd1fe8a52761f129af360d4857fdbc02b31667f8690393a016516e4f46dfb013895b416a9152aabf8af103ad3b83b3a8601dc75bce5f24141be1e8b6b'
+sha512sums=('014799c024dafc98f09c987661b5e6c547074245a9fb60bc55448ea1f7c4e52547280ef80ccda4804e8e7eaba6c72801c9e7f3007219195edc1aad53056c10ce'
             'SKIP'
             '7aada0f186bc1cd6af9a4af598511e7f517f0c103973397d260796c8e83c789d720990579d6ccba53e4aa4a8a6c5b2107f4d32d09ce9a72118ae5030b03bb6ab')
 validpgpkeys=('FBAE0323821C7706A5CA151BDCF513FA7EED19F3'  # Peter van Dijk <peter.van.dijk@powerdns.com>
               '16E12866B7738C73976A57436FFC33439B0D04DF') # Winkels, Erik <erik.winkels@open-xchange.com>
 
-prepare() {
-  cd pdns-recursor-${pkgver}
-  autoreconf -i
+build() {
+  meson setup "pdns-recursor-${pkgver}" build \
+    --prefix        /usr \
+    --libexecdir    lib \
+    --sbindir       bin \
+    --sysconfdir    /etc/powerdns \
+    --auto-features enabled \
+    --wrap-mode     nodownload \
+    -Ddebug=true \
+    -Dhardening-fortify-source=disabled \
+    -Doptimization=2 \
+    -Db_lto=false \
+    -Db_pie=true \
+    -Dauto-var-init=zero \
+    -Ddns-over-tls=enabled \
+    -Dreproducible=true \
+    -Dsigners-libsodium=enabled \
+    -Dsnmp=enabled \
+    -Dsystemd-service=enabled \
+    -Dunit-tests=true \
+    -Dsigners-libcrypto-path=/usr # workaround for https://github.com/PowerDNS/pdns/issues/14084
+  meson compile -C build
 }
 
-build() {
-  cd pdns-recursor-${pkgver}
-  LIBS=$LIBS ./configure \
-    --prefix=/usr \
-    --sbindir=/usr/bin \
-    --sysconfdir=/etc/powerdns \
-    --disable-silent-rules \
-    --enable-reproducible \
-    --enable-systemd \
-    --enable-dns-over-tls \
-    --with-libsodium \
-    --with-lua=luajit \
-    --with-net-snmp \
-    --enable-auto-var-init=zero \
-    --with-service-user=pdns-recursor \
-    --with-service-group=pdns-recursor \
-    --with-libcrypto=/usr # workaround for https://github.com/PowerDNS/pdns/issues/14084
-  make
+check() {
+  meson test -C build
 }
 
 package() {
-  cd pdns-recursor-${pkgver}
-  make DESTDIR="${pkgdir}" install
+  meson install -C build --destdir "$pkgdir"
+
   mv "${pkgdir}/etc/powerdns/recursor.yml-dist" "${pkgdir}/etc/powerdns/recursor.conf"
   install -Dm 644 "${srcdir}/sysusers.conf" "${pkgdir}/usr/lib/sysusers.d/powerdns-recursor.conf"
 }
