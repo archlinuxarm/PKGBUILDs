@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2025 Arch Linux
+# SPDX-License-Identifier: 0BSD
 #
 # Parameters to be passed to distccd
 #
