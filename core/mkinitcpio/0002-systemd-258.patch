@@ -1,0 +1,131 @@
+From 7811501e2a71bf18a24605506c042737dac321ad Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Sat, 3 May 2025 19:14:00 +0200
+Subject: [mkinitcpio] [PATCH 1/4] install/systemd: add 90-image-dissect.rules
+
+Bits covering /dev/gpt-auto-root and /dev/disk/by-designator/
+symlinks (which are required by gpt-auto) got split out from
+99-systemd.rules in
+https://github.com/systemd/systemd/pull/36967
+---
+ install/systemd | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/install/systemd b/install/systemd
+index 4e3e5a2..e53fa28 100644
+--- a/install/systemd
++++ b/install/systemd
+@@ -85,6 +85,7 @@ build() {
+         60-persistent-storage.rules \
+         64-btrfs.rules \
+         80-drivers.rules \
++        90-image-dissect.rules \
+         99-systemd.rules
+ 
+     # systemd units
+From 7f0f8a317cbae5fc5c6e90f14ad2295f0963cf35 Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Sat, 3 May 2025 19:19:23 +0200
+Subject: [mkinitcpio] [PATCH 2/4] install/systemd: add debug-generator and
+ breakpoint units
+
+For the newly-introduced systemd.break= functionality:
+https://github.com/systemd/systemd/pull/35410
+---
+ install/systemd | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/install/systemd b/install/systemd
+index e53fa28..4dd3a2a 100644
+--- a/install/systemd
++++ b/install/systemd
+@@ -77,7 +77,8 @@ build() {
+         /usr/lib/systemd/systemd-sulogin-shell \
+         /usr/lib/systemd/system-generators/systemd-fstab-generator \
+         /usr/lib/systemd/system-generators/systemd-gpt-auto-generator \
+-        /usr/lib/systemd/system-generators/systemd-hibernate-resume-generator
++        /usr/lib/systemd/system-generators/systemd-hibernate-resume-generator \
++        /usr/lib/systemd/system-generators/systemd-debug-generator
+ 
+     # udev rules
+     map add_udev_rule "$rules" \
+@@ -124,7 +125,11 @@ build() {
+         systemd-udev-trigger.service \
+         timers.target \
+         rescue.target \
+-        emergency.target
++        emergency.target \
++        breakpoint-pre-basic.service \
++        breakpoint-pre-udev.service \
++        breakpoint-pre-mount.service \
++        breakpoint-pre-switch-root.service
+ 
+     # add libraries dlopen()ed (hard and optional dependencies):
+     #  tss2-*   -> tpm2-util
+From 231c07facb8d07751d40e94a88b2e51d81f44654 Mon Sep 17 00:00:00 2001
+From: cvlc12 <cvlc12@outlook.fr>
+Date: Mon, 15 Jul 2024 14:40:47 +0200
+Subject: [mkinitcpio] [PATCH 3/4] Add tmpfiles.d/systemd.conf and
+ systemd-tmpfiles-setup.service to systemd-based initramfs.
+
+---
+ install/systemd | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/install/systemd b/install/systemd
+index 98f78b5..abc0f83 100644
+--- a/install/systemd
++++ b/install/systemd
+@@ -115,6 +115,7 @@ build() {
+         systemd-journald.service \
+         systemd-modules-load.service \
+         systemd-pcrphase-initrd.service \
++        systemd-tmpfiles-setup.service \
+         systemd-tmpfiles-setup-dev.service \
+         systemd-udevd-control.socket \
+         systemd-udevd-kernel.socket \
+@@ -149,7 +150,7 @@ build() {
+ 
+     printf 'root:x:0:0:root:/root:/bin/sh\n' | add_file - '/etc/passwd' 0644
+     printf 'root:*:::::::\n' | add_file - '/etc/shadow' 0400
+-    getent group root audio disk input kmem kvm lp optical render sgx storage tty uucp video | awk -F: ' { print $1 ":x:" $3 ":" }' | add_file - '/etc/group' 0644
++    getent group root audio disk input kmem kvm lp optical render sgx storage tty systemd-journal utmp uucp video | awk -F: ' { print $1 ":x:" $3 ":" }' | add_file - '/etc/group' 0644
+ 
+     add_dir "/etc/modules-load.d"
+     (
+@@ -161,6 +162,9 @@ build() {
+     )
+ 
+     [[ -f /etc/fstab.initramfs ]] && add_file "/etc/fstab.initramfs" "/etc/fstab"
++
++    # Add default systemd tmpfile
++    add_file "/usr/lib/tmpfiles.d/systemd.conf"
+ }
+ 
+ help() {
+From 17b3afe572ec5b437d20ec58571f50e444a0b8a7 Mon Sep 17 00:00:00 2001
+From: Felix Pehla <29adc1fd92@gmail.com>
+Date: Fri, 1 Aug 2025 18:36:39 +0200
+Subject: [mkinitcpio] [PATCH 4/4] install/systemd: add group 'clock' to
+ /etc/group
+
+Systemd commit af96ccf added the 'clock' group for managing clocks without
+root privileges and gave it ownership of the rtc and ptp subsystems. Add it
+to the initramfs so systemd-udevd doesn't complain about unknown groups.
+---
+ install/systemd | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/install/systemd b/install/systemd
+index 4e3e5a2..8ffa263 100644
+--- a/install/systemd
++++ b/install/systemd
+@@ -150,7 +150,7 @@ build() {
+ 
+     printf 'root:x:0:0:root:/root:/bin/sh\n' | add_file - '/etc/passwd' 0644
+     printf 'root:*:::::::\n' | add_file - '/etc/shadow' 0400
+-    getent group root audio disk input kmem kvm lp optical render sgx storage tty systemd-journal utmp uucp video | awk -F: ' { print $1 ":x:" $3 ":" }' | add_file - '/etc/group' 0644
++    getent group root audio clock disk input kmem kvm lp optical render sgx storage systemd-journal tty utmp uucp video | awk -F: ' { print $1 ":x:" $3 ":" }' | add_file - '/etc/group' 0644
+ 
+     add_dir "/etc/modules-load.d"
+     (
