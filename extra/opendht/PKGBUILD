@@ -4,50 +4,56 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - set -DOPENDHT_LTO=OFF
 #  - move cppunit to makedepends from checkdepends
-#  - removed makedepends on gcc14
 
 pkgname=opendht
 epoch=1
-pkgver=3.5.1
-pkgrel=3
+pkgver=3.5.4
+pkgrel=1
 pkgdesc="C++17 Distributed Hash Table (DHT) implementation"
 arch=(x86_64)
 url="https://github.com/savoirfairelinux/opendht"
 license=(GPL3)
 depends=(glibc gnutls nettle readline argon2 jsoncpp libjsoncpp.so fmt openssl llhttp)
-makedepends=(git cmake msgpack-cxx restinio asio cython python-setuptools cppunit)
+makedepends=(git cmake msgpack-cxx restinio asio cython python-build python-installer python-setuptools cppunit)
 optdepends=('python: to use the Python bindings'
             'msgpack-cxx: linking against opendht')
 source=(git+${url}#tag=v$pkgver)
-sha256sums=('fd1c6349b61e4d95ba7904d8c41603a516c5f631b6dbf527166217b73a494cb3')
+sha256sums=('b4c7b18d81cddd9c70a40d80c7ebd898da3454bc3e1643d7dd6051eda7829650')
 
 prepare() {
   cd $pkgname
-  git cherry-pick -n daf2f8edafc82e031deedbf8e0ed3e66a551fb60 # Fix build of jami-daemon
+  git cherry-pick -n d12f9271b8f8aafc87387729e03fc445a03c5ea7 # Fix segfault when built with GCC 15
 }
 
 build() {
-  cmake -B build -S ${pkgname} \
+  cd $pkgname
+# Python install is broken for out of source builds
+  cmake . \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DOPENDHT_DOCUMENTATION=OFF \
     -DOPENDHT_TESTS=ON \
     -DOPENDHT_SYSTEMD=ON \
     -DOPENDHT_SYSTEMD_UNIT_FILE_LOCATION=/usr/lib/systemd/system/ \
     -DOPENDHT_INDEX=ON \
-    -DOPENDHT_PYTHON=ON \
     -DOPENDHT_HTTP=ON \
+    -DOPENDHT_PYTHON=ON \
     -DOPENDHT_PROXY_SERVER=ON \
     -DOPENDHT_PROXY_CLIENT=ON \
     -DOPENDHT_PUSH_NOTIFICATIONS=ON \
     -DOPENDHT_LTO=OFF
-  make -C build
+  make
+  cd python
+  python -m build --wheel --no-isolation
 }
 
 check() {
   # https://github.com/savoirfairelinux/opendht/issues/568
-  make -C build test || echo "Tests failed"
+  make -C $pkgname test || echo "Tests failed"
 }
 
 package() {
-  make -C build DESTDIR="${pkgdir}" install
+  cd $pkgname
+  make DESTDIR="${pkgdir}" install
+  cd python
+  python -m installer --destdir="$pkgdir" dist/*.whl
 }
