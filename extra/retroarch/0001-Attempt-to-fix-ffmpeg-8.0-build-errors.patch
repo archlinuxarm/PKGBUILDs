@@ -1,0 +1,100 @@
+From 580e9a91d2f00af7260a2317502ab7bc84e64444 Mon Sep 17 00:00:00 2001
+From: libretroadmin <reallibretroretroarch@gmail.com>
+Date: Fri, 12 Sep 2025 01:44:51 +0200
+Subject: [PATCH] Attempt to fix ffmpeg 8.0 build errors
+
+---
+ cores/libretro-ffmpeg/ffmpeg_core.c | 14 ++++++++++++++
+ record/drivers/record_ffmpeg.c      | 17 +++++++++++++++++
+ 2 files changed, 31 insertions(+)
+
+diff --git a/cores/libretro-ffmpeg/ffmpeg_core.c b/cores/libretro-ffmpeg/ffmpeg_core.c
+index 374d0a7072..492123bf86 100644
+--- a/cores/libretro-ffmpeg/ffmpeg_core.c
++++ b/cores/libretro-ffmpeg/ffmpeg_core.c
+@@ -99,6 +99,9 @@ static tpool_t *tpool;
+ 
+ #define FFMPEG3 ((LIBAVUTIL_VERSION_INT < (56, 6, 100)) || \
+       (LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 10, 100)))
++#ifndef FFMPEG8
++#define FFMPEG8 (LIBAVCODEC_VERSION_MAJOR >= 62)
++#endif
+ 
+ #if ENABLE_HW_ACCEL
+ static enum AVHWDeviceType hw_decoder;
+@@ -2088,17 +2091,28 @@ void CORE_PREFIX(retro_unload_game)(void)
+ 
+    for (i = 0; i < MAX_STREAMS; i++)
+    {
++#if FFMPEG8
++      if (sctx[i])
++         avcodec_free_context(&sctx[i]);
++      if (actx[i])
++         avcodec_free_context(&actx[i]);
++#else
+       if (sctx[i])
+          avcodec_close(sctx[i]);
+       if (actx[i])
+          avcodec_close(actx[i]);
++#endif
+       sctx[i] = NULL;
+       actx[i] = NULL;
+    }
+ 
+    if (vctx)
+    {
++#if FFMPEG8
++      avcodec_free_context(&vctx);
++#else
+       avcodec_close(vctx);
++#endif
+       vctx = NULL;
+    }
+ 
+diff --git a/record/drivers/record_ffmpeg.c b/record/drivers/record_ffmpeg.c
+index a7fb9894ce..f9ab99b784 100644
+--- a/record/drivers/record_ffmpeg.c
++++ b/record/drivers/record_ffmpeg.c
+@@ -72,6 +72,15 @@ extern "C" {
+ #ifndef FFMPEG3
+ #define FFMPEG3 (LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 10, 100))
+ #endif
++
++#ifndef FFMPEG8
++#define FFMPEG8 (LIBAVCODEC_VERSION_MAJOR >= 62)
++#endif
++
++#ifndef AV_INPUT_BUFFER_MIN_SIZE
++#define AV_INPUT_BUFFER_MIN_SIZE 16384
++#endif
++
+ #define HAVE_CH_LAYOUT (LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 28, 100))
+ 
+ struct ff_video_info
+@@ -951,7 +960,11 @@ static void ffmpeg_free(void *data)
+ 
+    if (handle->audio.codec)
+    {
++#if FFMPEG8
++      avcodec_free_context(&handle->audio.codec);
++#else
+       avcodec_close(handle->audio.codec);
++#endif
+       av_free(handle->audio.codec);
+    }
+ 
+@@ -959,7 +972,11 @@ static void ffmpeg_free(void *data)
+ 
+    if (handle->video.codec)
+    {
++#if FFMPEG8
++      avcodec_free_context(&handle->video.codec);
++#else
+       avcodec_close(handle->video.codec);
++#endif
+       av_free(handle->video.codec);
+    }
+ 
+-- 
+2.51.0
+
