@@ -1,0 +1,469 @@
+From a07bd518ad7f291d989622c6d9b7c6e6549c188e Mon Sep 17 00:00:00 2001
+From: "H.J. Lu" <hjl.tools@gmail.com>
+Date: Sun, 3 Aug 2025 10:28:40 -0700
+Subject: [PATCH] strip: Don't treat fat IR objects as plugin object
+
+Fat IR objects contains both regular sections and IR sections.  After
+
+commit 717a38e9a02109fcbcb18bb2ec3aa251e2ad0a0d
+Author: H.J. Lu <hjl.tools@gmail.com>
+Date:   Sun May 4 05:12:46 2025 +0800
+
+    strip: Add GCC LTO IR support
+
+"strip --strip-debug" no longer strips debug sections in fat IR objects
+since fat IR objects are recognized as plugin object and copied as unknown
+objects.  Add a is_strip_input field to bfd to indicate called from strip.
+Update bfd_check_format_matches not to treat archive member nor standalone
+fat IR object as IR object so that strip can remove debug and IR sections
+in fat IR object.  For archive member, it is copied as an unknown object
+if the plugin target is in use or it is a slim IR object.  For standalone
+fat IR object, it is copied as non-IR object.
+
+bfd/
+
+	PR binutils/33246
+	* archive.c: Include "plugin-api.h" and "plugin.h" if plugin is
+	enabled.
+	(_bfd_compute_and_write_armap): Don't complain plugin is needed
+	when the plugin target is in use.
+	* bfd-in2.h: Regenerated.
+	* bfd.c (bfd): Add is_strip_input.
+	* format.c (bfd_set_lto_type): If there is .llvm.lto section,
+	set LTO type to lto_fat_ir_object.
+	(bfd_check_format_matches): Don't set LTO type when setting
+	format.  When called from strip, don't treat archive member nor
+	standalone fat IR object as an IR object.
+	* plugin.c (bfd_plugin_get_symbols_in_object_only): Copy LTO
+	type derived from input sections.
+
+nm/
+
+	PR binutils/33246
+	* nm.c (filter_symbols): Don't complain plugin is needed when
+	the plugin target is in use.
+	(display_rel_file): Likewise.
+	* objcopy.c (copy_archive): Set the BFD is_strip_input field of
+	archive member to 1 to indicate called from strip.  Also copy
+	slim IR archive member as unknown object.
+	(copy_file): Set the BFD is_strip_input field of input bfd to
+	1 to indicate called from strip.
+	(strip_main): Keep .gnu.debuglto_* sections unless all GCC LTO
+	sections will be removed.
+
+ld/
+
+	PR binutils/33246
+	* testsuite/ld-plugin/lto-binutils.exp (run_pr33246_test): New.
+	Run binutils/33246 tests with GCC and Clang.
+	* testsuite/ld-plugin/pr33246.c: New file.
+
+Signed-off-by: H.J. Lu <hjl.tools@gmail.com>
+---
+ bfd/archive.c                           |  10 ++
+ bfd/bfd-in2.h                           |   3 +
+ bfd/bfd.c                               |   3 +
+ bfd/format.c                            |  25 +++-
+ bfd/plugin.c                            |   3 +
+ binutils/nm.c                           |   9 +-
+ binutils/objcopy.c                      |  13 +-
+ ld/testsuite/ld-plugin/lto-binutils.exp | 175 ++++++++++++++++++++++++
+ ld/testsuite/ld-plugin/pr33246.c        |   4 +
+ 9 files changed, 238 insertions(+), 7 deletions(-)
+ create mode 100644 ld/testsuite/ld-plugin/pr33246.c
+
+diff --git a/bfd/archive.c b/bfd/archive.c
+index c61d4b12658..697b2ed23f2 100644
+--- a/bfd/archive.c
++++ b/bfd/archive.c
+@@ -141,6 +141,10 @@ SUBSECTION
+ #include "hashtab.h"
+ #include "filenames.h"
+ #include "bfdlink.h"
++#if BFD_SUPPORTS_PLUGINS
++#include "plugin-api.h"
++#include "plugin.h"
++#endif
+ 
+ #ifndef errno
+ extern int errno;
+@@ -2343,6 +2347,9 @@ _bfd_compute_and_write_armap (bfd *arch, unsigned int elength)
+ 	  long src_count;
+ 
+ 	  if (bfd_get_lto_type (current) == lto_slim_ir_object
++#if BFD_SUPPORTS_PLUGINS
++	      && !bfd_plugin_target_p (current->xvec)
++#endif
+ 	      && report_plugin_err)
+ 	    {
+ 	      report_plugin_err = false;
+@@ -2400,6 +2407,9 @@ _bfd_compute_and_write_armap (bfd *arch, unsigned int elength)
+ 
+ 		      if (bfd_lto_slim_symbol_p (current,
+ 						 syms[src_count]->name)
++#if BFD_SUPPORTS_PLUGINS
++			  && !bfd_plugin_target_p (current->xvec)
++#endif
+ 			  && report_plugin_err)
+ 			{
+ 			  report_plugin_err = false;
+diff --git a/bfd/bfd-in2.h b/bfd/bfd-in2.h
+index 2ff3e930bfa..bcff44a0f44 100644
+--- a/bfd/bfd-in2.h
++++ b/bfd/bfd-in2.h
+@@ -2131,6 +2131,9 @@ struct bfd
+   /* Set if this is the linker input BFD.  */
+   unsigned int is_linker_input : 1;
+ 
++  /* Set if this is the strip input BFD.  */
++  unsigned int is_strip_input : 1;
++
+   /* If this is an input for a compiler plug-in library.  */
+   ENUM_BITFIELD (bfd_plugin_format) plugin_format : 2;
+ 
+diff --git a/bfd/bfd.c b/bfd/bfd.c
+index 858ab5ce017..4aded6809bb 100644
+--- a/bfd/bfd.c
++++ b/bfd/bfd.c
+@@ -296,6 +296,9 @@ CODE_FRAGMENT
+ .  {* Set if this is the linker input BFD.  *}
+ .  unsigned int is_linker_input : 1;
+ .
++.  {* Set if this is the strip input BFD.  *}
++.  unsigned int is_strip_input : 1;
++.
+ .  {* If this is an input for a compiler plug-in library.  *}
+ .  ENUM_BITFIELD (bfd_plugin_format) plugin_format : 2;
+ .
+diff --git a/bfd/format.c b/bfd/format.c
+index f3a0774af08..246838c7ab5 100644
+--- a/bfd/format.c
++++ b/bfd/format.c
+@@ -413,6 +413,11 @@ bfd_set_lto_type (bfd *abfd ATTRIBUTE_UNUSED)
+ 	    abfd->object_only_section = sec;
+ 	    break;
+ 	  }
++	else if (strcmp (sec->name, ".llvm.lto") == 0)
++	  {
++	    type = lto_fat_ir_object;
++	    break;
++	  }
+ 	else if (lsection.major_version == 0
+ 		 && startswith (sec->name, ".gnu.lto_.lto.")
+ 		 && bfd_get_section_contents (abfd, sec, &lsection, 0,
+@@ -481,10 +486,7 @@ bfd_check_format_matches_lto (bfd *abfd, bfd_format format,
+     }
+ 
+   if (abfd->format != bfd_unknown)
+-    {
+-      bfd_set_lto_type (abfd);
+-      return abfd->format == format;
+-    }
++    return abfd->format == format;
+ 
+   if (matching != NULL || *bfd_associated_vector != NULL)
+     {
+@@ -537,7 +539,20 @@ bfd_check_format_matches_lto (bfd *abfd, bfd_format format,
+ 
+       cleanup = BFD_SEND_FMT (abfd, _bfd_check_format, (abfd));
+ 
+-      if (cleanup)
++      /* When called from strip, don't treat archive member nor
++	 standalone fat IR object as an IR object.  For archive
++	 member, it will be copied as an unknown object if the
++	 plugin target is in use or it is a slim IR object.  For
++	 standalone fat IR object, it will be copied as non-IR
++	 object.  */
++      if (cleanup
++#if BFD_SUPPORTS_PLUGINS
++	  && (!abfd->is_strip_input
++	      || !bfd_plugin_target_p (abfd->xvec)
++	      || (abfd->lto_type != lto_fat_ir_object
++		  && abfd->my_archive == NULL))
++#endif
++	  )
+ 	goto ok_ret;
+ 
+       /* For a long time the code has dropped through to check all
+diff --git a/bfd/plugin.c b/bfd/plugin.c
+index 1c72b748a8f..6dd22d75137 100644
+--- a/bfd/plugin.c
++++ b/bfd/plugin.c
+@@ -203,6 +203,9 @@ bfd_plugin_get_symbols_in_object_only (bfd *abfd)
+ 	  bfd_close (nbfd);
+ 	  return;
+ 	}
++
++      /* Copy LTO type derived from input sections.  */
++      abfd->lto_type = nbfd->lto_type;
+     }
+   else
+     {
+diff --git a/binutils/nm.c b/binutils/nm.c
+index a5d56311dde..d44083dcc94 100644
+--- a/binutils/nm.c
++++ b/binutils/nm.c
+@@ -802,6 +802,9 @@ filter_symbols (bfd *abfd, bool is_dynamic, void *minisyms,
+ 	continue;
+ 
+       if (bfd_lto_slim_symbol_p (abfd, sym->name)
++#if BFD_SUPPORTS_PLUGINS
++	  && !bfd_plugin_target_p (abfd->xvec)
++#endif
+ 	  && report_plugin_err)
+ 	{
+ 	  report_plugin_err = false;
+@@ -1484,7 +1487,11 @@ display_rel_file (bfd *abfd, bfd *archive_bfd)
+ 
+   /* lto_type is set to lto_non_ir_object when a bfd is loaded with a
+      compiler LTO plugin.  */
+-  if (bfd_get_lto_type (abfd) == lto_slim_ir_object)
++  if (bfd_get_lto_type (abfd) == lto_slim_ir_object
++#if BFD_SUPPORTS_PLUGINS
++      && !bfd_plugin_target_p (abfd->xvec)
++#endif
++     )
+     {
+       report_plugin_err = false;
+       non_fatal (_("%s: plugin needed to handle lto object"),
+diff --git a/binutils/objcopy.c b/binutils/objcopy.c
+index 905ce917708..85ae0edefe9 100644
+--- a/binutils/objcopy.c
++++ b/binutils/objcopy.c
+@@ -3685,6 +3685,8 @@ copy_archive (bfd *ibfd, bfd *obfd, const char *output_target,
+       bool ok_object;
+       const char *element_name;
+ 
++      this_element->is_strip_input = 1;
++
+       element_name = bfd_get_filename (this_element);
+       /* PR binutils/17533: Do not allow directory traversal
+ 	 outside of the current directory tree by archive members.  */
+@@ -3766,7 +3768,9 @@ copy_archive (bfd *ibfd, bfd *obfd, const char *output_target,
+ 
+ #if BFD_SUPPORTS_PLUGINS
+       /* Copy LTO IR file as unknown object.  */
+-      if (bfd_plugin_target_p (this_element->xvec))
++      if ((!lto_sections_removed
++	   && this_element->lto_type == lto_slim_ir_object)
++	  || bfd_plugin_target_p (this_element->xvec))
+ 	ok_object = false;
+       else
+ #endif
+@@ -3941,6 +3945,8 @@ copy_file (const char *input_filename, const char *output_filename, int ofd,
+       break;
+     }
+ 
++  ibfd->is_strip_input = 1;
++
+   if (bfd_check_format (ibfd, bfd_archive))
+     {
+       bool force_output_target;
+@@ -5059,6 +5065,11 @@ strip_main (int argc, char *argv[])
+ 					       SECTION_CONTEXT_REMOVE)
+ 			  || !!find_section_list (".llvm.lto", false,
+ 					       SECTION_CONTEXT_REMOVE));
++  /* NB: Must keep .gnu.debuglto_* sections unless all GCC LTO sections
++     will be removed to avoid undefined references to symbols in GCC LTO
++     debug sections.  */
++  if (!lto_sections_removed)
++    find_section_list (".gnu.debuglto_*", true, SECTION_CONTEXT_KEEP);
+ #endif
+ 
+   i = optind;
+diff --git a/ld/testsuite/ld-plugin/lto-binutils.exp b/ld/testsuite/ld-plugin/lto-binutils.exp
+index 5b4e0a10991..51332696d5b 100644
+--- a/ld/testsuite/ld-plugin/lto-binutils.exp
++++ b/ld/testsuite/ld-plugin/lto-binutils.exp
+@@ -356,3 +356,178 @@ run_cc_link_tests [list \
+ 	"tmpdir/libstrip-1b-fat-s.a" \
+     ] \
+ ]
++
++proc run_pr33246_test { llvm fat } {
++    global srcdir
++    global subdir
++    global plug_opt
++    global llvm_plug_opt
++    global ar
++    global CLANG_FOR_TARGET
++    global CC_FOR_TARGET
++    global NM
++    global READELF
++    global strip
++
++    set strip_flags "--strip-debug --enable-deterministic-archives"
++
++    set test pr33246
++    set testname "${test}${llvm}${fat} with $strip_flags"
++
++    if { "$llvm" == "-llvm" } {
++	# Skip native x32 and i?86 targets since system LLVMgold.so may
++	# not be compatible with native x32 and i?86 targets binutils.
++	if { [istarget "x86_64-*-linux*-gnux32"]
++	     || [istarget "i?86-*-*"]
++	     || ![info exists CLANG_FOR_TARGET]
++	     || [string match "" $llvm_plug_opt] } then {
++	    untested $testname
++	    return
++	}
++	set CC $CLANG_FOR_TARGET
++	set binutils_plug_opt "$llvm_plug_opt"
++    } else {
++	if { ![info exists CC_FOR_TARGET]
++	     || [string match "" $plug_opt] } then {
++	    untested $testname
++	    return
++	}
++	set CC $CC_FOR_TARGET
++	set binutils_plug_opt "$plug_opt"
++    }
++
++    append strip_flags " $binutils_plug_opt"
++
++    set src $srcdir/$subdir/${test}.c
++    set obj tmpdir/${test}${llvm}${fat}.o
++    set archive tmpdir/${test}${llvm}${fat}.a
++    set CFLAGS "-c -g -O2 -flto"
++    if { "$fat" == "-fat" } {
++	append CFLAGS " -ffat-lto-objects"
++    } else {
++	append CFLAGS " -fno-fat-lto-objects"
++    }
++
++    set cmd "$CC $CFLAGS -o $obj $src"
++    send_log "$cmd\n"
++    verbose "$cmd" 1
++    catch "exec $cmd" got
++    if ![string match "" $got] then {
++	send_log "$got\n"
++	verbose "$got" 1
++	fail "$testname ($obj)"
++	return
++    }
++
++    set cmd "$strip $strip_flags $obj -o ${obj}.strip"
++    send_log "$cmd\n"
++    verbose "$cmd" 1
++    catch "exec $cmd" got
++    if ![string match "" $got] then {
++	send_log "$got\n"
++	verbose "$got" 1
++	fail "$testname (strip $obj)"
++	return
++    }
++
++    set cmd "$NM $binutils_plug_opt ${obj}.strip"
++    send_log "$cmd\n"
++    verbose "$cmd" 1
++    catch "exec $cmd" got
++    if ![regexp "0+ T foo" $got] then {
++	send_log "$got\n"
++	verbose "$got" 1
++	fail "$testname (strip $obj)"
++	return
++    }
++
++    if { "$fat" == "-fat" } {
++	set cmd "$READELF -SW ${obj}.strip"
++	send_log "$cmd\n"
++	verbose "$cmd" 1
++	catch "exec $cmd" got
++	if [regexp " \.debug_" $got] then {
++	    send_log "$got\n"
++	    verbose "$got" 1
++	    fail "$testname (strip $obj)"
++	    return
++	}
++    } else {
++	set cmd "cmp $obj ${obj}.strip"
++	send_log "$cmd\n"
++	verbose "$cmd" 1
++	catch "exec $cmd" got
++	if ![string match "" $got] then {
++	    send_log "$got\n"
++	    verbose "$got" 1
++	    fail "$testname (strip $obj)"
++	    return
++	}
++    }
++
++    pass "$testname (strip $obj)"
++
++    set cmd "$ar $binutils_plug_opt -D -s -r -c $archive $obj"
++    send_log "$cmd\n"
++    verbose "$cmd" 1
++    catch "exec $cmd" got
++    if ![string match "" $got] then {
++	send_log "$got\n"
++	verbose "$got" 1
++	fail "$testname ($archive)"
++	return
++    }
++
++    set cmd "$strip $strip_flags $archive -o ${archive}.strip"
++    send_log "$cmd\n"
++    verbose "$cmd" 1
++    catch "exec $cmd" got
++    if ![string match "" $got] then {
++	send_log "$got\n"
++	verbose "$got" 1
++	fail "$testname (strip $archive)"
++	return
++    }
++
++    set cmd "$NM $binutils_plug_opt ${archive}.strip"
++    send_log "$cmd\n"
++    verbose "$cmd" 1
++    catch "exec $cmd" got
++    if ![regexp "0+ T foo" $got] then {
++	send_log "$got\n"
++	verbose "$got" 1
++	fail "$testname (strip $archive)"
++	return
++    }
++
++    if { "$fat" == "-fat" } {
++	set cmd "$READELF -SW ${archive}.strip"
++	send_log "$cmd\n"
++	verbose "$cmd" 1
++	catch "exec $cmd" got
++	if [regexp " \.debug_" $got] then {
++	    send_log "$got\n"
++	    verbose "$got" 1
++	    fail "$testname (strip $archive)"
++	    return
++	}
++    } else {
++	set cmd "cmp $archive ${archive}.strip"
++	send_log "$cmd\n"
++	verbose "$cmd" 1
++	catch "exec $cmd" got
++	if ![string match "" $got] then {
++	    send_log "$got\n"
++	    verbose "$got" 1
++	    fail "$testname (strip $archive)"
++	    return
++	}
++    }
++
++    pass "$testname (strip $archive)"
++}
++
++run_pr33246_test "" ""
++run_pr33246_test "" "-fat"
++run_pr33246_test "-llvm" ""
++run_pr33246_test "-llvm" "-fat"
+diff --git a/ld/testsuite/ld-plugin/pr33246.c b/ld/testsuite/ld-plugin/pr33246.c
+new file mode 100644
+index 00000000000..cd0130cacdf
+--- /dev/null
++++ b/ld/testsuite/ld-plugin/pr33246.c
+@@ -0,0 +1,4 @@
++void
++foo (void)
++{
++}
+-- 
+2.50.1
+

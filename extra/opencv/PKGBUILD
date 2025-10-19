@@ -6,16 +6,17 @@
 #  - remove -DCPU_BASELINE_{ENABLE,DISABLE} flags for SSE
 #  - remove cudnn makedepends
 #  - remove opencv-cuda package
+#  - remove python-opencv-cuda package
 
 pkgbase=opencv
 pkgname=(opencv
          opencv-samples
          python-opencv)
-pkgver=4.8.1
-pkgrel=1
+pkgver=4.12.0
+pkgrel=11
 pkgdesc='Open Source Computer Vision Library'
 arch=(x86_64)
-license=(BSD)
+license=(Apache-2.0)
 url='https://opencv.org/'
 depends=(abseil-cpp
          cblas
@@ -37,6 +38,7 @@ depends=(abseil-cpp
          libwebp
          openexr
          openjpeg2
+         verdict
          protobuf
          tbb
          zlib)
@@ -44,6 +46,7 @@ makedepends=(ant
              cmake
              eigen
              fmt
+             git
              glew
              hdf5
              java-environment
@@ -63,61 +66,85 @@ optdepends=('opencv-samples: samples'
             'hdf5: for the HDF5 module'
             'opencl-icd-loader: For coding with OpenCL'
             'java-runtime: Java interface')
-source=(https://github.com/opencv/opencv/archive/$pkgver/$pkgname-$pkgver.tar.gz
-        https://github.com/opencv/opencv_contrib/archive/$pkgver/opencv_contrib-$pkgver.tar.gz
+source=(git+https://github.com/opencv/opencv#tag=$pkgver
+        git+https://github.com/opencv/opencv_contrib#tag=$pkgver
         vtk9.patch
-        cuda-12.2.patch)
-sha256sums=('62f650467a60a38794d681ae7e66e3e8cfba38f445e0bf87867e2f2cdc8be9d5'
-            '0c082a0b29b3118f2a0a1856b403bb098643af7b994a0080f402a12159a99c6e'
+        fix-cuda-flags.patch)
+sha256sums=('84e35af82626500e922560ea7d04aeea1dfc86e0dc53445fe748325c76e511f8'
+            '97f1ee43d9177b2da4bcc5cccbb962cf5a8a0cab04c2a304cebefda6b8b34595'
             'f35a2d4ea0d6212c7798659e59eda2cb0b5bc858360f7ce9c696c77d3029668e'
-            '2acacd8df0fab431aa2197304c4496f3e4d8a8de9305994a6474e4c66dc3a159')
+            '95472ecfc2693c606f0dd50be2f012b4d683b7b0a313f51484da4537ab8b2bfe')
+options=(!lto) # https://gitlab.archlinux.org/archlinux/packaging/packages/kdenlive/-/issues/8
 
 prepare() {
-  patch -d $pkgname-$pkgver -p1 < vtk9.patch # Don't require all vtk optdepends
-  patch -d $pkgname-$pkgver -p1 < cuda-12.2.patch # Fix build with CUDA 12.2
+  pushd opencv
+  git cherry-pick -n cb8030809e0278d02fa335cc1f5ec7c3c17548e0 # Fix configuring with CMake version 4
+
+  # Support CUDA 13
+  git cherry-pick -n df23b593c52e0e18095a3d2e772fe13083e2ebe7 \
+                     42f89347005dcd14a671d30a52a046e45303833b \
+                     3278820f5df20a6d4170b7374a9b396250e36641
+
+  # Support Eigen 5
+  git cherry-pick -n 353b4ddf52db48ba85d2efaa33310afa0eb73a72
+
+  # Support FFmpeg 8
+  git cherry-pick -n 90c444abd387ffa70b2e72a34922903a2f0f4f5a
+
+  patch -p1 < ../vtk9.patch # Don't require all vtk optdepends
+  # https://github.com/opencv/opencv/issues/27223
+  # https://bugreports.qt.io/browse/QTBUG-134774
+  sed -i 's/add_definitions(${Qt${QT_VERSION_MAJOR}${dt_dep}_DEFINITIONS})/link_libraries(${Qt${QT_VERSION_MAJOR}${dt_dep}})/' modules/highgui/CMakeLists.txt
+  # OpenCV passes all CXXFLAGS to nvcc through -Xcompiler, which does not work for '-Wp,something' flags
+  # We remove the -Xcompiler and pass our CXXFLAGS through cmake's CUDAFLAGS
+  patch -p1 < ../fix-cuda-flags.patch
+  popd
+
+  pushd opencv_contrib
+  # Support CUDA 13
+  git cherry-pick -n 9a9b173cd178e7c07a98896a009c2a2021a6b247
 }
 
 build() {
   export JAVA_HOME="/usr/lib/jvm/default"
-  # cmake's FindLAPACK doesn't add cblas to LAPACK_LIBRARIES, so we need to specify them manually
-  _opts="-DWITH_OPENCL=ON \
-         -DWITH_OPENGL=ON \
-         -DOpenGL_GL_PREFERENCE=LEGACY \
-         -DCMAKE_CXX_STANDARD=17 \
-         -DWITH_TBB=ON \
-         -DWITH_VULKAN=ON \
-         -DWITH_QT=ON \
-         -DBUILD_WITH_DEBUG_INFO=OFF \
-         -DBUILD_TESTS=OFF \
-         -DBUILD_PERF_TESTS=OFF \
-         -DBUILD_EXAMPLES=ON \
-         -DBUILD_PROTOBUF=OFF \
-         -DPROTOBUF_UPDATE_FILES=ON \
-         -DINSTALL_C_EXAMPLES=ON \
-         -DINSTALL_PYTHON_EXAMPLES=ON \
-         -DCMAKE_INSTALL_PREFIX=/usr \
-         -DOPENCV_EXTRA_MODULES_PATH=$srcdir/opencv_contrib-$pkgver/modules \
-         -DOPENCV_SKIP_PYTHON_LOADER=ON \
-         -DLAPACK_LIBRARIES=/usr/lib/liblapack.so;/usr/lib/libblas.so;/usr/lib/libcblas.so \
-         -DLAPACK_CBLAS_H=/usr/include/cblas.h \
-         -DLAPACK_LAPACKE_H=/usr/include/lapacke.h \
-         -DOPENCV_GENERATE_PKGCONFIG=ON \
-         -DOPENCV_ENABLE_NONFREE=ON \
-         -DOPENCV_JNI_INSTALL_PATH=lib \
-         -DOPENCV_GENERATE_SETUPVARS=OFF \
-         -DEIGEN_INCLUDE_PATH=/usr/include/eigen3 \
-         -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
-         -Dprotobuf_MODULE_COMPATIBLE=ON"
- 
-  cmake -B build -S $pkgname-$pkgver $_opts
+  local cmake_options=(
+    -DWITH_OPENCL=ON
+    -DWITH_OPENGL=ON
+    -DOpenGL_GL_PREFERENCE=LEGACY
+    -DCMAKE_CXX_STANDARD=17
+    -DWITH_TBB=ON
+    -DWITH_VULKAN=ON
+    -DWITH_QT=ON
+    -DBUILD_TESTS=OFF
+    -DBUILD_PERF_TESTS=OFF
+    -DBUILD_EXAMPLES=ON
+    -DBUILD_PROTOBUF=OFF
+    -DPROTOBUF_UPDATE_FILES=ON
+    -DINSTALL_C_EXAMPLES=ON
+    -DINSTALL_PYTHON_EXAMPLES=ON
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DOPENCV_EXTRA_MODULES_PATH="$srcdir"/opencv_contrib/modules
+    -DOPENCV_SKIP_PYTHON_LOADER=ON
+    # cmake's FindLAPACK doesn't add cblas to LAPACK_LIBRARIES, so we need to specify them manually
+    -DLAPACK_LIBRARIES="/usr/lib/liblapack.so;/usr/lib/libblas.so;/usr/lib/libcblas.so"
+    -DLAPACK_CBLAS_H=/usr/include/cblas.h
+    -DLAPACK_LAPACKE_H=/usr/include/lapacke.h
+    -DOPENCV_GENERATE_PKGCONFIG=ON
+    -DOPENCV_ENABLE_NONFREE=ON
+    -DOPENCV_JNI_INSTALL_PATH=lib
+    -DOPENCV_GENERATE_SETUPVARS=OFF
+    -DEIGEN_INCLUDE_PATH=/usr/include/eigen3
+    -Dprotobuf_MODULE_COMPATIBLE=ON
+    -DHDF5_NO_FIND_PACKAGE_CONFIG_FILE=ON
+  )
+
+  cmake -B build -S $pkgname "${cmake_options[@]}" \
+    -DBUILD_WITH_DEBUG_INFO=OFF
   cmake --build build
 }
 
 package_opencv() {
   DESTDIR="$pkgdir" cmake --install build
-
-  # install license file
-  install -Dm644 $pkgbase-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 
   # separate samples package
   mv "$pkgdir"/usr/share/opencv4/samples "$srcdir"
@@ -137,9 +164,6 @@ package_opencv-samples() {
 
   mkdir -p "$pkgdir"/usr/share/opencv4
   mv samples "$pkgdir"/usr/share/opencv4
-
-  # install license file
-  install -Dm644 $pkgbase-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }
 
 package_python-opencv() {
@@ -157,7 +181,4 @@ package_python-opencv() {
   unset optdepends
 
   DESTDIR="$pkgdir" cmake --install build/modules/python3
-
-  # install license file
-  install -Dm644 $pkgbase-$pkgver/LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
 }

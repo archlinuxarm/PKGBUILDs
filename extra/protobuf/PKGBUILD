@@ -1,0 +1,162 @@
+# Maintainer: Lukas Fleischer <lfleischer@archlinux.org>
+# Maintainer: Christian Heusel <gromit@archlinux.org>
+# Contributor: David Runge <dvzrv@archlinux.org>
+# Contributor: Aleksey Filippov <sarum9in@gmail.com>
+# Contributor: Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Sven-Hendrik Haase <svenstaro@archlinux.org>
+# Contributor: Thomas S Hatch <thatch45@gmail.com>
+# Contributor: Geoffroy Carrier <geoffroy@archlinux.org>
+# Contributor: Daniel J Griffiths <ghost1227@archlinux.us>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove makedpends on bazel
+#  - remove python package
+# ALARM: BrainDamage <braindamage@archlinux.org>
+#  - re-enable python package
+#  - split off python-protobuf to its own PKGBUILD file
+
+pkgbase='protobuf'
+pkgname=('protobuf' 'ruby-google-protobuf')
+pkgver=32.1
+pkgrel=1
+# Note: python-protobuf needs to be updated alongside this package to the same version
+pkgdesc="Protocol Buffers - Google's data interchange format"
+arch=('x86_64')
+url='https://developers.google.com/protocol-buffers/'
+license=('BSD-3-Clause')
+depends=(
+  'gcc-libs'
+  'glibc'
+  'zlib'
+  'abseil-cpp'
+)
+makedepends=(
+  'cmake'
+  'git'
+  'gtest'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+  'ruby'
+  'ruby-erb'
+  'ruby-ffi-compiler'
+  'ruby-rake'
+  'ruby-rake-compiler'
+)
+checkdepends=(
+  python-pytest
+  python-numpy
+)
+source=(
+  git+https://github.com/protocolbuffers/protobuf.git#tag=v$pkgver
+  protobuf-fix-build-type-none.patch
+)
+sha512sums=('fc81fd22415e12bf78825b66e11ff4e327c7b89bcea4d9a140da61f50a94a4f9dba25aac9519ec084646aaecea556f391133a52cb141d944df1c92a46533f141'
+            '18bc71031bbcbc3810a9985fa670465040f06a6c104ab8079b56bdfc499bb6cec40805a0cefd455031142490a576dc60aa8000523877ac0353b93558e9beabbd')
+
+options=(!lto)
+
+_gemname=google-protobuf
+
+prepare() {
+  cd "$pkgname"
+  #bazel --version
+
+  patch -p1 < ../protobuf-fix-build-type-none.patch # Fix cmake config compatibility mode
+}
+
+build() {
+  local cmake_options=(
+    -B build
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_C_FLAGS="$CFLAGS -ffat-lto-objects"
+    -D CMAKE_CXX_FLAGS="$CXXFLAGS -ffat-lto-objects"
+    -D protobuf_BUILD_SHARED_LIBS=ON
+    -D protobuf_USE_EXTERNAL_GTEST=ON
+    -D protobuf_ABSL_PROVIDER=package
+    -S "$pkgbase"
+    -W no-dev
+  )
+
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
+
+  cd $pkgbase/ruby
+  local _gemdir="$(gem env gemdir)"
+  local _gemver=4.$pkgver
+
+  PROTOC="$srcdir"/build/protoc \
+    rake
+  rake gem
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --no-user-install \
+    --install-dir "tmp_install${_gemdir}" \
+    --bindir "tmp_install/usr/bin" \
+    "pkg/${_gemname}-${_gemver}.gem"
+
+  install -D lib/google/protobuf_c.so \
+    "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/lib/google/$(ruby -e 'require "rbconfig"; puts RbConfig::CONFIG["RUBY_API_VERSION"]')/protobuf_c.so
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install${_gemdir}/cache/" \
+    "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}/vendor/" \
+    "tmp_install${_gemdir}/doc/${_gemname}-${_gemver}/ri/ext/"
+
+  find "tmp_install${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  ctest --test-dir build
+}
+
+package_protobuf() {
+  replaces=('protobuf-cpp')
+  provides=('libprotoc.so' 'libprotobuf.so' 'libprotobuf-lite.so')
+
+  DESTDIR="$pkgdir" cmake --install build
+
+  cd $pkgbase
+  install -vDm 644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+  install -vDm 644 editors/protobuf-mode.el \
+    -t "$pkgdir/usr/share/emacs/site-lisp/"
+  install -vDm 644 editors/proto.vim \
+    -t "${pkgdir}/usr/share/vim/vimfiles/syntax"
+}
+
+package_ruby-google-protobuf() {
+  pkgdesc='Ruby bindings for Google Protocol Buffers'
+  depends=(
+    'ruby'
+    'ruby-bigdecimal'
+    'ruby-rake'
+  )
+
+  cp -a $pkgbase/ruby/tmp_install/* "$pkgdir"
+
+  install -vDm 644 $pkgbase/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -Dm 0644 $pkgbase/ruby/*.md -t "$pkgdir/usr/share/doc/${pkgname}"
+}

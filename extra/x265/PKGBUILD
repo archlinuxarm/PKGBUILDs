@@ -3,17 +3,20 @@
 # Contributor: kfgz <kfgz@interia.pl>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - patch to attempt fixing ARM hackery by bandwagoning developers
 #  - don't build 12- and 10-bit variants
+#  - cherry-pick commit to fix ARMv7 build
 
 pkgname=x265
-pkgver=3.5
-pkgrel=3
+pkgver=4.1
+pkgrel=1
 pkgdesc='Open Source H265/HEVC video encoder'
 arch=(x86_64)
 url=https://bitbucket.org/multicoreware/x265_git
-license=(GPL)
-depends=(gcc-libs)
+license=(GPL-2.0-or-later)
+depends=(
+  gcc-libs
+  glibc
+)
 makedepends=(
   cmake
   git
@@ -21,11 +24,13 @@ makedepends=(
   ninja
 )
 provides=(libx265.so)
-_tag=f0c1022b6be121a753ff02853fbe33da71988656
-source=(git+https://bitbucket.org/multicoreware/x265_git#tag=${_tag}
-        0001-arm-fixes.patch)
-sha256sums=('SKIP'
-            '9a527deb44ed5be459519d1e6721020bcbcbe74e73896b59e6df3a62888f152c')
+_tag=f21b135c3414ade4e22305d008bf07d23d0595fb
+source=(
+  "git+https://bitbucket.org/multicoreware/x265_git#tag=${_tag}"
+  0001-Fix-build-with-GCC-15.patch
+)
+b2sums=('26be1f78e43a93ddbec87003d26e302b0759913bd500c571a5bbdd73d62d787b81529729988743a146b955983483d1067e9934f61d915b3b6854ac6aae459191'
+        'af2ee0460c0c2f6f36e4f124a9ac16610e3884001262a6f08043fa1de4a85e2b5fd4fb12c64b8c94cfb59c3031bb7a1324e307fa2049e3378e2add9a58f5bd9e')
 
 pkgver() {
   cd x265_git
@@ -35,18 +40,43 @@ pkgver() {
 
 prepare() {
   cd x265_git
-  git apply ../0001-arm-fixes.patch
+
+  # Fix build with CMake 4.0
+  git cherry-pick -n b354c009a60bcd6d7fc04014e200a1ee9c45c167 \
+                     51ae8e922bcc4586ad4710812072289af91492a8 \
+                     78e5ac35c13c5cbccc5933083edceb0d3eaeaa21
+
+  # Fix build with GCC 15
+  git apply -3 ../0001-Fix-build-with-GCC-15.patch
+
+  # Fix ARMv7 build
+  git cherry-pick -n ddb1933598736394b646cb0f78da4a4201ffc656
 }
 
 build() {
-  cmake -S x265_git/source -B build -G Ninja \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DENABLE_SHARED=TRUE
-  ninja -C build
+  local common_options=(
+    -S x265_git/source
+    -G Ninja
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D ENABLE_HDR10_PLUS=TRUE
+    -W no-dev
+  ) hdr_options=(
+    "${common_options[@]}"
+    -D ENABLE_CLI=FALSE
+    -D ENABLE_SHARED=FALSE
+    -D EXPORT_C_API=FALSE
+    -D HIGH_BIT_DEPTH=TRUE
+  ) final_options=(
+    "${common_options[@]}"
+    -D ENABLE_SHARED=TRUE
+  )
+
+  cmake -B build "${final_options[@]}"
+  cmake --build build
 }
 
 package() {
-  DESTDIR="${pkgdir}" ninja -C build install
+  DESTDIR="${pkgdir}" cmake --install build
 }
 
 # vim: ts=2 sw=2 et:

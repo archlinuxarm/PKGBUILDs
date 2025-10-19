@@ -1,59 +1,52 @@
-# Maintainer: graysky <graysky@archlinux.us>
+# Maintainer: graysky <therealgraysky AT proton DOT me>
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
 # Maintainer: Oleg Rakhmanov <oleg@archlinuxarm.org>
 # Maintainer: Dave Higham <pepedog@archlinuxarm.org>
 # Contributer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 
 pkgbase=linux-rpi
-_commit=fad58933544bb2a7b7db92847c25c79a83171fa6
+_commit=f02b0965a951f2ae1f66718126480f1ca7f43693
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
 _regen=
-pkgver=6.1.54
+pkgver=6.12.52
 pkgrel=1
 pkgdesc='Linux'
-url="http://www.kernel.org/"
+url="https://github.com/raspberrypi/linux"
 arch=(armv7h aarch64)
-license=(GPL2)
+license=(GPL-2.0-only)
 makedepends=(
   bc
   kmod
   inetutils
 )
 options=('!strip')
-source_armv7h=('config' 'config.txt')
-source_aarch64=('config8' 'config8.txt')
+source_armv7h=('config')
+source_aarch64=('config8')
 source=("linux-$pkgver-${_commit:0:10}.tar.gz::https://github.com/raspberrypi/linux/archive/${_commit}.tar.gz"
         cmdline.txt
+        config.txt
+        config8.txt
         0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
         linux.preset
-        60-linux.hook
-        90-linux.hook
         archarm.diffconfig
 )
-md5sums=('42bcec0ed92931806cc4242d45df6f8b'
+md5sums=('83c6f9b3afc14015e3a29a862d176b99'
          '3bab7426d8c8818dda8353da3892a41f'
-         'f66a7ea3feb708d398ef57e4da4815e9'
-         '86d4a35722b5410e3b29fc92dae15d4b'
-         '0a5f16bfec6ad982a2f6782724cca8ba'
-         '441ec084c47cddc53e592fb0cbce4edf'
-         'c8f84694321e249492c80149833671d7')
-md5sums_armv7h=('5d2c77b812e3e6d2094537458aa1461b'
-                'a99311daa39248cfc9b6541a0a0a5f09')
-md5sums_aarch64=('e9d6af7b15b798c32e01381146936556'
-                 '7e4403dea857e40005bf76beda9927ff')
+         '8ab870072bbf6352534ef47833465e39'
+         '44f69a0637b34eb772980614f9246d01'
+         'a157c5bfc0f03d0728c92bd953b06265'
+         '8b93b6ca167f70c60277f352f7b78024'
+         '4d7ab0ab2625470ebb916176b5d9cf02')
+md5sums_armv7h=('923297f68d97553ab5567e89cb5125fa')
+md5sums_aarch64=('562601930b3509bf768e8512416e916e')
 
 # setup vars
 if [[ $CARCH == "armv7h" ]]; then
-  _kernel=kernel7.img KARCH=arm _image=zImage _config=config _bconfig=config.txt
+  _kernel=kernel7.img KARCH=arm _image=zImage _config=config _boot=config.txt
 elif [[ $CARCH == "aarch64" ]]; then
-  _kernel=kernel8.img KARCH=arm64 _image=Image _config=config8 _bconfig=config8.txt
+  _kernel=kernel8.img KARCH=arm64 _image=Image _config=config8 _boot=config8.txt
 fi
-
-_make() {
-  test -s version
-  make KERNELRELEASE="$(<version)" "$@"
-}
 
 prepare() {
   cd "${srcdir}/${_srcname}"
@@ -70,26 +63,28 @@ prepare() {
     echo "Applying custom shit to bcm2711_defconfig"
     make bcm2711_defconfig
     cat ../archarm.diffconfig >> .config
-    make oldconfig
+    make olddefconfig
     if [[ $CARCH == "armv7h" ]]; then
       # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16373
       scripts/config --enable CONFIG_BCM2835_THERMAL
-      # workaround OOM killer issue
-      # https://github.com/raspberrypi/linux/issues/5395
+
+      # re-enable LRU_GEN by default as the intial observation that it was to blame
+      # for triggering OOM was likely a false positive, see:
+      # https://github.com/raspberrypi/linux/issues/5395#issuecomment-1854410361
       # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16377
-      scripts/config --disable CONFIG_LRU_GEN_ENABLED
+      scripts/config --enable CONFIG_LRU_GEN_ENABLED
     fi
-    sed '/^CONFIG_LOCALVERSION=/s,.*$,CONFIG_LOCALVERSION="-ARCH",' .config >$startdir/newconfig.$_config
+    # bcm2711_defconfig inserts either -v7l or -v8 for CONFIG_LOCALVERSION= so set this to null
+    sed '/^CONFIG_LOCALVERSION=/s,.*$,CONFIG_LOCALVERSION="",' .config >$startdir/newconfig.$_config
     echo "verify that newconfig.$_config is fit for purpose then redefine $_config"
     exit
   else
-    make bcm2711_defconfig
-    make -s kernelrelease | sed 's/rpi-.*$/rpi-ARCH/' > version
-    make mrproper
     echo "Setting config..."
     cp ../"$_config" .config
-    _make olddefconfig
+    make olddefconfig
     diff -u ../"$_config" .config || :
+
+    make -s kernelrelease > version
     echo "Prepared $pkgbase version $(<version)"
   fi
 }
@@ -97,32 +92,31 @@ prepare() {
 build() {
   cd "${srcdir}/${_srcname}"
 
-  _make "$_image" modules dtbs
+  make "$_image" modules dtbs
 }
 
 _package() {
-  pkgdesc="RPi Foundation patched Linux kernel and modules"
+  pkgdesc="Linux kernel and modules (RPi Foundation fork)"
   depends=(
     coreutils
     firmware-raspberrypi
     kmod
-    linux-firmware
     'mkinitcpio>=0.7'
+    raspberrypi-bootloader
   )
   optdepends=(
+    'linux-firmware: firmware images needed for some devices'
     'wireless-regdb: to set the correct wireless channels of your country'
   )
   provides=(
     linux="${pkgver}"
+    KSMBD-MODULE
     WIREGUARD-MODULE
   )
   conflicts=(
     linux
+    linux-rpi-16k
     uboot-raspberrypi
-  )
-  replaces=(
-    linux-raspberrypi-latest
-    linux-raspberrypi4
   )
   install=${pkgname}.install
   backup=(
@@ -137,11 +131,11 @@ _package() {
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
 
   echo "Installing modules..."
-  _make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
     DEPMOD=/doesnt/exist modules_install  # Suppress depmod
 
-  # remove build and source links
-  rm "$modulesdir"/{source,build}
+  # remove build link
+  rm -f "$modulesdir"/build
 
   echo "Installing Arch ARM specific stuff..."
   mkdir -p "${pkgdir}"/boot
@@ -156,7 +150,7 @@ _package() {
 
   cp arch/$KARCH/boot/$_image "${pkgdir}/boot/$_kernel"
   cp arch/$KARCH/boot/dts/overlays/README "${pkgdir}/boot/overlays"
-  install -m644 ../$_bconfig "${pkgdir}/boot/config.txt"
+  install -m644 ../"$_boot" "${pkgdir}/boot/config.txt"
   install -m644 ../cmdline.txt "${pkgdir}/boot"
 
   # sed expression for following substitutions
@@ -169,18 +163,15 @@ _package() {
   sed "${_subst}" ../linux.preset |
     install -Dm644 /dev/stdin "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
 
-  # install pacman hooks
-  sed "${_subst}" ../60-linux.hook |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/60-${pkgbase}.hook"
-  sed "${_subst}" ../90-linux.hook |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
+  # rather than use another hook (90-linux.hook) rely on mkinitcpio's 90-mkinitcpio-install.hook
+  # which avoids a double run of mkinitcpio that can occur
+  touch "${pkgdir}/usr/lib/modules/$(<version)/vmlinuz"
 }
 
 _package-headers() {
-  pkgdesc="RPi Foundation header and scripts for building modules for Linux kernel"
+  pkgdesc="Headers and scripts for building modules for Linux kernel"
   provides=("linux-headers=${pkgver}")
-  conflicts=('linux-headers')
-  replaces=('linux-raspberrypi-latest-headers' 'linux-raspberrypi4-headers')
+  conflicts=('linux-headers' 'linux-rpi-16k-headers')
 
   cd ${_srcname}
   local builddir="$pkgdir/usr/lib/modules/$(<version)/build"
@@ -257,7 +248,7 @@ _package-headers() {
       application/x-pie-executable\;*) # Relocatable binaries
         strip -v $STRIP_SHARED "$file" ;;
     esac
-  done < <(find "$builddir" -type f -perm -u+x)
+  done < <(find "$builddir" -type f -perm -u+x -print0)
 
   echo "Adding symlink..."
   mkdir -p "$pkgdir/usr/src"
@@ -270,3 +261,5 @@ for _p in ${pkgname[@]}; do
     _package${_p#${pkgbase}}
   }"
 done
+
+# vim:set ts=8 sts=2 sw=2 et:

@@ -1,0 +1,229 @@
+# Maintainer: Massimiliano Torromeo <massimiliano.torromeo@gmail.com>
+# Maintainer: Christian Heusel <gromit@archlinux.org>
+# Contributor: Aleksey Filippov <sarum9in@gmail.com>
+# Contributor: Victor Aurélio Santos <victoraur.santos@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove -msse2 from CMakeLists for 32bit
+
+pkgbase='grpc'
+pkgname=('grpc' 'python-grpcio' 'python-grpcio-tools' 'php-grpc' 'php-legacy-grpc' 'grpc-cli')
+pkgver=1.75.1
+_gtestver=2dd1c131950043a8ad5ab0d2dda0e0970596586a
+pkgrel=1
+pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
+arch=('x86_64')
+url='https://grpc.io'
+license=('Apache-2.0')
+makedepends=(
+  'abseil-cpp'
+  'benchmark'
+  'c-ares'
+  'chrpath'
+  'cmake'
+  'cython'
+  'ninja'
+  'openssl'
+  'php'
+  'php-legacy'
+  'protobuf'
+  'python-build'
+  'python-installer'
+  'python-setuptools'
+  'python-wheel'
+  're2'
+  're2c'
+)
+source=("https://github.com/grpc/grpc/archive/v$pkgver/$pkgbase-$pkgver.tar.gz"
+        "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz")
+sha256sums=('486d5e32b3627926476a9a472f9792e4d7fe4e89c962473f1296183f76c6b032'
+            '31bf78bd91b96dd5e24fab3bb1d7f3f7453ccbaceec9afb86d6e4816a15ab109')
+
+prepare() {
+  cd "$srcdir/$pkgbase-$pkgver"
+
+  ln -sf "$srcdir/googletest-$_gtestver/"{googlemock,googletest} \
+    third_party/googletest
+
+  # CMake only downloads third party depends when folder does not exist
+  rmdir third_party/{envoy-api,xds,googleapis,protoc-gen-validate}
+
+  cp -a src/php{,-legacy}
+
+  # use system protobuf for grpcio_tools
+  sed -r -i \
+      -e '/^CC_FILES=\[/,/\]/{/^CC_FILES=\[/n;/\]/!d;}' \
+      -e '/^CC_INCLUDES=\[/,/\]/{/^CC_INCLUDES=\[/n;/\]/!d;}' \
+      -e "s@^(PROTO_INCLUDE=')[^']+'@\1/usr/include'@" \
+      -e '/^PROTOBUF_SUBMODULE_VERSION=/d' \
+      tools/distrib/python/grpcio_tools/protoc_lib_deps.py
+  ln -s ../../../.. tools/distrib/python/grpcio_tools/grpc_root
+
+
+  sed -i '/msse2/d' CMakeLists.txt
+}
+
+build() {
+  cd "$srcdir/$pkgbase-$pkgver"
+  cmake -Bbuild \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_CXX_FLAGS="${CXXFLAGS} -DNDEBUG -Wno-attributes -Wno-deprecated-declarations -Wno-return-type -Wno-non-virtual-dtor" \
+    -DgRPC_INSTALL=ON \
+    -DBUILD_SHARED_LIBS=ON \
+    -DCMAKE_CXX_STANDARD=17 \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DgRPC_BUILD_TESTS=ON \
+    -DgRPC_BUILD_CODEGEN=ON \
+    -DgRPC_ZLIB_PROVIDER='package' \
+    -DgRPC_CARES_PROVIDER='package' \
+    -DgRPC_RE2_PROVIDER='package' \
+    -DgRPC_SSL_PROVIDER='package' \
+    -DgRPC_PROTOBUF_PROVIDER='package' \
+    -DgRPC_BENCHMARK_PROVIDER:STRING='package' \
+    -DgRPC_ABSL_PROVIDER:STRING='package' \
+    -DgRPC_USE_PROTO_LITE=OFF \
+    -DgRPC_USE_SYSTEMD=ON \
+    -DgRPC_BUILD_GRPC_CPP_PLUGIN=ON \
+    -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=ON \
+    -DgRPC_BUILD_GRPC_NODE_PLUGIN=ON \
+    -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=ON \
+    -DgRPC_BUILD_GRPC_PHP_PLUGIN=ON \
+    -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=ON \
+    -DgRPC_BUILD_GRPC_RUBY_PLUGIN=ON \
+    -GNinja
+
+  cd build
+  cmake --build .
+  export LDFLAGS="$LDFLAGS -L$PWD"
+
+  # PHP
+  cd "$srcdir/$pkgbase-$pkgver/src/php/ext/$pkgbase"
+  phpize
+  ./configure --enable-grpc="$srcdir/$pkgbase-$pkgver"
+  make
+
+  # PHP Legacy
+  cd "$srcdir/$pkgbase-$pkgver/src/php-legacy/ext/$pkgbase"
+  phpize-legacy
+  ./configure --enable-grpc="$srcdir/$pkgbase-$pkgver"
+  make
+
+  # Python
+  export GRPC_PYTHON_LDFLAGS="$(pkg-config --libs protobuf)"
+  export GRPC_PYTHON_BUILD_WITH_CYTHON=1
+  export GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
+  export GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
+  export GRPC_PYTHON_BUILD_SYSTEM_CARES=1
+  export GRPC_PYTHON_BUILD_SYSTEM_RE2=1
+  export GRPC_PYTHON_BUILD_SYSTEM_ABSL=1
+  export GRPC_PYTHON_BUILD_WITH_SYSTEMD=1
+  export GRPC_BUILD_WITH_BORING_SSL_ASM=0
+
+  cd "$srcdir/$pkgbase-$pkgver"
+  GRPC_PYTHON_CFLAGS="-fvisibility=hidden -fno-wrapv -fno-exceptions $(pkg-config --cflags protobuf) -std=c++17" \
+  python -m build --wheel --no-isolation
+
+  # grpcio-tools
+  cd tools/distrib/python/grpcio_tools
+  GRPC_PYTHON_CFLAGS="-fno-wrapv -frtti $(pkg-config --cflags protobuf)" \
+  GRPC_PYTHON_LDFLAGS="$(pkg-config --libs protobuf) -lprotoc" \
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$srcdir/$pkgbase-$pkgver"
+  local _pyver=$(python -c "import sys; print('{0}{1}'.format(*sys.version_info[:2]))")
+  PYTHONPATH="pyb/lib.linux-$CARCH-cpython-$_pyver" python -c 'import grpc'
+}
+
+package_grpc() {
+  depends=('glibc' 'gcc-libs' 'zlib' 'systemd-libs' 'c-ares' 'protobuf' 'openssl' 're2' 'abseil-cpp')
+  provides=(
+    'libupb.so'
+    'libgrpcpp_channelz.so'
+    'libgrpc_unsecure.so'
+    'libgrpc_plugin_support.so'
+    'libgrpc.so'
+    'libgrpc++_unsecure.so'
+    'libgrpc++_reflection.so'
+    'libgrpc++_error_details.so'
+    'libgrpc++_alts.so'
+    'libgrpc++.so'
+    'libgpr.so'
+    'libaddress_sorting.so'
+  )
+
+  cd "$srcdir/$pkgbase-$pkgver/build"
+  DESTDIR="$pkgdir" cmake --install .
+  install -Dm644 ../LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+package_python-grpcio() {
+  pkgdesc='Python language bindings for grpc, remote procedure call (RPC) framework'
+  depends=('glibc' 'gcc-libs' 'zlib' 'openssl' 'c-ares' 'python' 're2' 'abseil-cpp' 'python-grpcio-tools')
+
+  cd "$srcdir/$pkgbase-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+package_python-grpcio-tools() {
+  pkgdesc='Python protobuf generator for GRPC'
+  depends=('glibc' 'gcc-libs' 'protobuf' 'python' 'python-setuptools' 'python-protobuf')
+
+  cd "$srcdir/$pkgbase-$pkgver"
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+  cd tools/distrib/python/grpcio_tools
+  python -m installer --destdir="$pkgdir" dist/*.whl
+}
+
+package_php-grpc() {
+  pkgdesc='gRPC module for PHP'
+  depends=('glibc' 'gcc-libs' 'grpc' 'php')
+  backup=('etc/php/conf.d/grpc.ini')
+
+  # Install PHP extension.
+  cd "$srcdir/$pkgbase-$pkgver/src/php/ext/$pkgbase"
+  make install "INSTALL_ROOT=$pkgdir"
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+  # Remove RPATH
+  chrpath -d "$pkgdir/usr/lib/php/modules/grpc.so"
+
+  echo ';extension=grpc.so' >grpc.ini
+  install -Dm644 grpc.ini "$pkgdir/etc/php/conf.d/grpc.ini"
+}
+
+package_php-legacy-grpc() {
+  pkgdesc='gRPC module for PHP Legacy'
+  depends=('glibc' 'gcc-libs' 'grpc' 'php-legacy')
+  backup=('etc/php-legacy/conf.d/grpc.ini')
+
+  # Install PHP extension.
+  cd "$srcdir/$pkgbase-$pkgver/src/php-legacy/ext/$pkgbase"
+  make install "INSTALL_ROOT=$pkgdir"
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+  # Remove RPATH
+  chrpath -d "$pkgdir/usr/lib/php-legacy/modules/grpc.so"
+
+  echo ';extension=grpc.so' >grpc.ini
+  install -Dm644 grpc.ini "$pkgdir/etc/php-legacy/conf.d/grpc.ini"
+}
+
+package_grpc-cli() {
+  pkgdesc='gRPC protocol buffers cli'
+  depends=('glibc' 'gcc-libs' 'grpc' 'protobuf' 'abseil-cpp')
+
+  cd "$srcdir/$pkgbase-$pkgver"
+  install -dm0755 "$pkgdir/usr/lib"
+
+  # Remove RPATH
+  chrpath -d build/grpc_cli build/libgrpc++_test_config.so*
+
+  cp -a build/libgrpc++_test_config.so* "$pkgdir/usr/lib/"
+  install -Dm0755 build/grpc_cli "$pkgdir/usr/bin/grpc_cli"
+  install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+
+}

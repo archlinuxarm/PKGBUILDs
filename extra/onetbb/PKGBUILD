@@ -1,0 +1,68 @@
+# Maintainer : Daniel Bermond <dbermond@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
+# Contributor: Caleb Maclennan <caleb@alerque.com>
+# Contributor: Stéphane Gaudreault <stephane@archlinux.org>
+# Contributor: Thomas Dziedzic < gostrc at gmail >
+# Contributor: Denis Martinez <deuns.martinez AT gmail.com>
+# Contributor: Bogdan Burlacu <bogdan.burlacu AT pm.me>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - patch to fix build on v7
+
+pkgname=onetbb
+pkgver=2022.2.0
+pkgrel=1
+pkgdesc='oneAPI Threading Building Blocks - a high level abstract threading library'
+arch=('x86_64')
+url='https://uxlfoundation.github.io/oneTBB/'
+license=('Apache-2.0')
+depends=(
+    'gcc-libs'
+    'glibc'
+    'hwloc')
+optdepends=(
+    'python: for Python module')
+makedepends=(
+    'cmake'
+    'python'
+    'python-setuptools'
+    'swig')
+conflicts=('intel-tbb' 'tbb')
+provides=("intel-tbb=${pkgver}" "tbb=${pkgver}")
+replaces=('intel-tbb' 'tbb')
+source=("https://github.com/uxlfoundation/oneTBB/archive/v${pkgver}/${pkgname}-${pkgver}.tar.gz"
+        '010-onetbb-fix-linkage-of-test-malloc-pure-c.patch'
+        'arm.patch')
+sha512sums=('d87c67514ca17c9769910194a8fac912e183952ad5c408dbceb48edc8aef13375df3d4c9120a7366206c8ab72699ed953df65c11c261e19d8e9d273c73d073f3'
+            'e94bcdfb6fd6d9d4ee9a16f4dc21c57bd24d78143899239afcf708aea0c8daf94a34490ccea1e9b2308036bdeb143eea2d3d8d02274f0806e47d83a7e9696ba5'
+            '7b94fd48e8cc494f4888f6fce039210455db1462df71a4d8083a784ca116a57fa9908d6cb77078cae8fceafebd3958a66f37388480b7eee67ad7d06fc4e18cdf')
+
+prepare() {
+    # https://github.com/uxlfoundation/oneTBB/issues/1735
+    # https://gitlab.archlinux.org/archlinux/packaging/packages/onetbb/-/merge_requests/2
+    patch -d "oneTBB-${pkgver}" -Np1 -i "${srcdir}/010-onetbb-fix-linkage-of-test-malloc-pure-c.patch"
+    patch -d "oneTBB-${pkgver}" -Np1 -i "${srcdir}/arm.patch"
+}
+
+build() {
+    cmake -B build -S "oneTBB-${pkgver}" \
+        -G 'Unix Makefiles' \
+        -DCMAKE_BUILD_TYPE:STRING='None' \
+        -DCMAKE_INSTALL_PREFIX:PATH='/usr' \
+        -DTBB_STRICT:BOOL='OFF' \
+        -DTBB4PY_BUILD:BOOL='ON' \
+        -Wno-dev
+    cmake --build build
+}
+
+check() {
+    ctest --test-dir build --output-on-failure -E test_partitioner # hangs on build server
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+    rm -r "${pkgdir}/usr/lib"/python*
+    
+    cd "oneTBB-${pkgver}/python"
+    TBBROOT="${pkgdir}/usr" python setup.py install --root="$pkgdir"
+}

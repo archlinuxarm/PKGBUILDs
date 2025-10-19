@@ -4,43 +4,47 @@
 # Contributor: William Rea <sillywilly@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - remove makedepend, optdepend on arrow
-#  - set -DGDAL_USE_ARROW=OFF, -DGDAL_USE_PARQUET=OFF
 #  - disable LTO: -DENABLE_IPO=OFF
+#  - disable neon on v7 - FTBFS
 
 pkgbase=gdal
 pkgname=(gdal python-gdal)
-pkgver=3.7.2
+pkgver=3.11.4
 pkgrel=1
 pkgdesc="A translator library for raster and vector geospatial data formats"
 arch=(x86_64)
 url="https://gdal.org/"
 license=(custom)
 makedepends=(cmake opencl-headers python-setuptools python-numpy
-             proj blosc cfitsio curl crypto++ libdeflate expat libfreexl
+             proj arrow blosc cfitsio curl crypto++ libdeflate expat libfreexl
              libgeotiff geos giflib libheif hdf5 libjpeg-turbo json-c libjxl xz
              libxml2 lz4 mariadb-libs netcdf unixodbc ocl-icd openexr openjpeg2
-             openssl pcre2 libpng podofo-0.9 poppler postgresql-libs qhull
-             libspatialite sqlite swig libtiff libwebp xerces-c zlib zstd)
+             openssl pcre2 libpng podofo poppler postgresql-libs qhull
+             libspatialite sqlite swig libtiff libwebp xerces-c zlib zstd libaec muparser)
 # armadillo basisu brunsli lerc libkml qb3 rasterlite2 sfcgal tiledb
 # ogdi
 changelog=$pkgbase.changelog
-source=(https://download.osgeo.org/${pkgbase}/${pkgver}/${pkgbase}-${pkgver}.tar.xz)
-b2sums=('29a96e34f4ffe661fc2af786b9a229be779ed5e91e4c580834f6624f4173ede8adf22c27b2830c446736c0ff37501441ab2afea9f780dad4588636b03deb1f71')
+source=(https://download.osgeo.org/${pkgbase}/${pkgver}/${pkgbase}-${pkgver}.tar.xz
+        fix-build-with-poppler-25.10.0.patch)
+b2sums=('a6c18830aafc1e6d0d9d702d56b4b65156fa646b3d39615dd09ca753268a6c38c561c7267e4d454dc6343ec8508092f9c82544f60637edb8e66a6d05b6464385'
+        '6b828037a6d117193ad4ccbc5f3148e31d2236a2ad715dba4f47f8a60d011627410659c067e87787272d072a21c3e4517c218bf7987a5463f8fcff1d89121994')
 
 prepare() {
-# Fix build with podofo-0.9
-  sed -e 's|podofo.h|podofo/podofo.h|' -i $pkgbase-$pkgver/frmts/pdf/pdfsdk_headers.h
+  cd $pkgbase-$pkgver
+
+  # Fix build with poppler 25.10.0
+  # Patch taken from https://gitweb.gentoo.org/repo/gentoo.git/tree/sci-libs/gdal/files/gdal-3.11.4-poppler-25.10.patch
+  patch -Np1 -i "$srcdir/fix-build-with-poppler-25.10.0.patch"
 }
 
 build() {
   cmake -B build -S $pkgbase-$pkgver \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_CXX_STANDARD=17 \
+    -DCMAKE_CXX_STANDARD=20 \
     -DENABLE_IPO=OFF \
     -DBUILD_PYTHON_BINDINGS=ON \
     -DGDAL_ENABLE_PLUGINS=ON \
-    -DGDAL_USE_ARROW=OFF \
+    -DGDAL_USE_ARROW=ON \
     -DGDAL_USE_BLOSC=ON \
     -DGDAL_USE_CFITSIO=ON \
     -DGDAL_USE_CURL=ON \
@@ -67,7 +71,7 @@ build() {
     -DGDAL_USE_OPENEXR=ON \
     -DGDAL_USE_OPENJPEG=ON \
     -DGDAL_USE_OPENSSL=ON \
-    -DGDAL_USE_PARQUET=OFF \
+    -DGDAL_USE_PARQUET=ON \
     -DGDAL_USE_PCRE2=ON \
     -DGDAL_USE_PNG=ON \
     -DGDAL_USE_POPPLER=ON \
@@ -80,16 +84,16 @@ build() {
     -DGDAL_USE_XERCESC=ON \
     -DGDAL_USE_ZLIB=ON \
     -DGDAL_USE_ZSTD=ON \
-    -DPODOFO_INCLUDE_DIR=/usr/include/podofo-0.9 \
-    -DPODOFO_LIBRARY=/usr/lib/podofo-0.9/libpodofo.so
+    -DGDAL_ENABLE_ARM_NEON_OPTIMIZATIONS=$([[ $CARCH == aarch64 ]] && echo ON || echo OFF)
   make -C build
 }
 
 package_gdal () {
   depends=(proj blosc crypto++ curl libdeflate expat libfreexl geos libgeotiff
            giflib libjpeg-turbo json-c xz libxml2 lz4 unixodbc ocl-icd openssl
-           pcre2 libpng qhull libspatialite sqlite libtiff xerces-c zlib zstd)
-  optdepends=('cfitsio: FITS support'
+           pcre2 libpng qhull libspatialite sqlite libtiff xerces-c zlib zstd libaec muparser libarchive)
+  optdepends=('arrow: Arrow/Parquet support'
+              'cfitsio: FITS support'
               'hdf5: HDF5 support'
               'libheif: HEIF support'
               'libjxl: JPEG XL support'
@@ -97,7 +101,7 @@ package_gdal () {
               'netcdf: netCDF support'
               'openexr: EXR support'
               'openjpeg2: JP2 support'
-              'podofo-0.9: PDF support'
+              'podofo: PDF support'
               'poppler: PDF support'
               'postgresql-libs: PostgreSQL support'
               'libwebp: WebP support')

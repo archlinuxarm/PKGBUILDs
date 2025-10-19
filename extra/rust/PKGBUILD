@@ -6,6 +6,7 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - remove lib32, musl, and wasm packages and related bits
+#  - remove wasm-component-ld from makedepends
 #  - add a link to g++ to compensate for broken cross-compiler decisions
 #  - build v6/v7 with -j2 - RAM constraints
 #  - set llvm-config in config.toml for ARM architectures
@@ -19,33 +20,33 @@ pkgname=(
   rust
   rust-src
 )
+pkgver=1.90.0
+pkgrel=3
 epoch=1
-pkgver=1.72.1
-pkgrel=1
 pkgdesc="Systems programming language focused on safety, speed and concurrency"
 url=https://www.rust-lang.org/
 arch=(x86_64)
-license=(
-  Apache
-  MIT
-)
+license=("Apache-2.0 OR MIT")
 options=(
-  !debug
   !emptydirs
   !lto
-  !strip
 )
 depends=(
+  bash
   curl
   gcc
   gcc-libs
+  glibc
   libssh2
+  lld
   llvm-libs
+  openssl
+  zlib
 )
 makedepends=(
+  clang
   cmake
   libffi
-  lld
   llvm
   musl
   ninja
@@ -59,48 +60,74 @@ checkdepends=(
 )
 source=(
   "https://static.rust-lang.org/dist/rustc-$pkgver-src.tar.gz"{,.asc}
-  0001-cargo-Change-libexec-dir.patch
+
+  # Patch bootstrap so that rust-analyzer-proc-macro-srv
+  # is in /usr/lib instead of /usr/libexec
   0001-bootstrap-Change-libexec-dir.patch
+
+  # Put bash completions where they belong
   0002-bootstrap-Change-bash-completion-dir.patch
+
+  # Use our *-pc-linux-gnu targets, making LTO with clang simpler
   0003-compiler-Change-LLVM-targets.patch
-  0004-compiler-Use-wasm-ld-for-wasm-targets.patch
+
+  # Use our ld.lld
+  0004-compiler-Use-ld.lld-by-default.patch
+
+  # Prefer "lib" over "lib64"
+  0006-compiler-Swap-primary-and-secondary-lib-dirs.patch
+
+  # Fix build with system rustc
+  # https://github.com/rust-lang/rust/issues/143735
+  0007-bootstrap-Workaround-for-system-stage0.patch
+
+  # Fix build with system rustc 1.90.0
+  # https://github.com/rust-lang/rust/issues/143765
+  0008-bootstrap-Workaround-for-1.90.0-stage0.patch
 )
-b2sums=('83d23b1d02679245a52fa8bdc35d7ff9bda1f187ab58630e3872fbba5d0a275d55e4074c0cf1366988fbfb201ff9ea4476a882ee218caa72e1043c67aa1d8231'
+b2sums=('7bb22f814f1ccf08bd8c57a0c81d94b5a5850b8e20c563f1da7b1a37bb390b5ed82ff448dfc7738e1990653c798f6edaacc410483b95007691e717d55a6b10de'
         'SKIP'
-        'c4bf40d48fd7ccb02c73fc02d5d968cfda80d1fd85c1ade4781d174bb4cb165b52998af4bf9495f2c04b0a25b147c13a5f3de4281d621353c9e799a67297a3fe'
-        '0b079767043116d1e2c30ce66e82972266bc46a70b54884c0d41786c7f4271fdacb04611d34d4106a394db9df4b384b0138fa4f52c3076bfb3932d410f668b15'
-        'f165abb36f03bb1ddcdca8e674244e51c7ce3a6b83e59b44d520e16e3735952cdd1c6da9edca51a755b343323f6f37c7ea7093708212300974e41560d15ee6ef'
-        '5faa0c65de5186dd225afcb58d0d0b2fddf2f2a7008f7a7d84bf14e78a23dbf08ae04c016d3c8241359ec9eb286f5186a7ae84ce03446f37e56fc2667fa1c114'
-        'e0acea294146ae14ec18ac1f99cb9113dfe0dbe87cfd557fb093b56fc15cf036ac076af905fbe358a11a913d2fc845619c5fd8e18ac97127c232127a28666117')
+        '0d1dc9024d53f669ceeb5fb61879527663c99ef3d7bd9bcb1e24dc8de15605dfc4820be23e7114c810f91eeb9d0d9e2107d507584af78a3ef2ea48e28f9d16b9'
+        '81d39b0ceadfccdfea647eafbfd13beefabcf95bf476e2bfbd3cfcc16a5c4f33fef9cb946da2324f03fc2c44636101fb2b3010cb3527185f64041bc99c665f06'
+        '248747c078b930f700a0685638663d1337b289e6a46d7feca8f017dfb316c22574656bf84888f7ae7e2aab68f59190eca61bf17a780753823ffc4fbc91ff785d'
+        '645f42c6c831c5000b1b174b9d1693e99d12e55f166d5a3d6f8843801e7f10c3079be035bfb5b04f7d51400157a5cbb63874b6728148f2cb7e75f7868a77b818'
+        '8be938ad0016244e86707396ee147fdff7a7ee4d2a776607ff316a9264512faba99d03a7a6b5ba48744c3ae93b09a2eaede567554142a30570346e177131099f'
+        '04a5a67ee8d2a41d81d663b0d81e63495ea4c3455d8dce97c94f2722749be0c2342c715da44f22b1c8fcd04890d980cb865f0e6980f2b8dae886848b4e870e27'
+        '440465da4823dc58e67e2f608872dfeb52727673d8435280bbe79f4a32213c7dacf8761da1eef1f65eec3778a9f07f01d67a2134838ff68c73dfe639a7d5e7da')
 validpgpkeys=(
   108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
 )
 
+# Make sure the duplication in rust-wasm is found
+COMPRESSZST+=(--long)
+
 prepare() {
   cd rustc-$pkgver-src
 
-  # Patch bootstrap and cargo so credential helpers
-  # are in /usr/lib instead of /usr/libexec
-  patch -d src/tools/cargo -Np1 < ../0001-cargo-Change-libexec-dir.patch
-  patch -Np1 -i ../0001-bootstrap-Change-libexec-dir.patch
+  local src
+  for src in "${source[@]}"; do
+    src="${src%%::*}"
+    src="${src##*/}"
+    src="${src%.zst}"
+    [[ $src = *.patch ]] || continue
+    echo "Applying patch $src..."
+    patch -Np1 < "../$src"
+  done
 
-  # Put bash completions where they belong
-  patch -Np1 -i ../0002-bootstrap-Change-bash-completion-dir.patch
+  cat >bootstrap.toml <<END
+# see src/bootstrap/defaults/
+profile = "dist"
 
-  # Use our *-pc-linux-gnu targets, making LTO with clang simpler
-  patch -Np1 -i ../0003-compiler-Change-LLVM-targets.patch
+# see src/bootstrap/src/utils/change_tracker.rs
+change-id = 144675
 
-  # Use our wasm-ld
-  patch -Np1 -i ../0004-compiler-Use-wasm-ld-for-wasm-targets.patch
-
-  cat >config.toml <<END
-profile = "user"
-changelog-seen = 2
 
 [llvm]
+download-ci-llvm = false
 link-shared = true
 
 [build]
+description = "Arch Linux $pkgbase $epoch:$pkgver-$pkgrel"
 cargo = "/usr/bin/cargo"
 rustc = "/usr/bin/rustc"
 rustfmt = "/usr/bin/rustfmt"
@@ -114,7 +141,6 @@ tools = [
   "rust-analyzer-proc-macro-srv",
   "analysis",
   "src",
-  "rust-demangler",
 ]
 sanitizers = false
 profiler = true
@@ -126,25 +152,22 @@ docs = false
 prefix = "/usr"
 
 [rust]
+codegen-units = 1
+codegen-units-std = 1
+debuginfo-level = 0
 debuginfo-level-std = 0
 channel = "stable"
-description = "Arch Linux $pkgbase $epoch:$pkgver-$pkgrel"
 rpath = false
-backtrace-on-ice = true
-remap-debuginfo = true
-jemalloc = true
-
-# LLVM crashes when passing an object through ThinLTO twice.  This is triggered
-# when using rust code in cross-language LTO if libstd was built using ThinLTO.
-# http://blog.llvm.org/2019/09/closing-gap-cross-language-lto-between.html
-# https://github.com/rust-lang/rust/issues/54872
-codegen-units-std = 1
-
-# musl target produces warnings
+lld = false
+use-lld = "external"
+llvm-bitcode-linker = false
 deny-warnings = false
+backtrace-on-ice = true
+jemalloc = true
 
 [dist]
 compression-formats = ["gz"]
+compression-profile = "fast"
 
 [target.x86_64-unknown-linux-gnu]
 cc = "/usr/bin/gcc"
@@ -194,7 +217,7 @@ END
 _pick() {
   local p="$1" f d; shift
   for f; do
-    d="$srcdir/$p/$f"
+    d="$srcdir/$p/${f#$pkgdir/}"
     mkdir -p "$(dirname "$d")"
     mv "$f" "$d"
     rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
@@ -206,24 +229,33 @@ build() {
 
   [[ $CARCH == "aarch64" ]] && export JEMALLOC_SYS_WITH_LG_PAGE=16
   export RUST_BACKTRACE=1
+  unset CFLAGS CXXFLAGS LDFLAGS
 
   DESTDIR="$srcdir/dest-rust" python ./x.py install -j "$(nproc)"
 
   cd ../dest-rust
 
   # delete unnecessary files, e.g. files only used for the uninstall script
-  rm usr/bin/*.old
-  rm usr/lib/rustlib/{components,install.log,rust-installer-version,uninstall.sh}
-  rm usr/lib/rustlib/manifest-*
+  rm -v usr/lib/rustlib/{components,install.log,rust-installer-version,uninstall.sh}
+  rm -v usr/lib/rustlib/manifest-*
+
+  # licenses for main rust package
+  local ldir="usr/share/licenses/rust" f d
+  mkdir -p "$ldir"
+  for f in usr/share/doc/*/{COPYRIGHT,LICENSE}*; do
+    d="$(dirname "$f")"
+    case $f in
+      */LICENSE-APACHE) rm -v "$f" ;;
+      *) mv -v "$f" "$ldir/${f##*/}.${d##*/}" ;;
+    esac
+    rmdir -p --ignore-fail-on-non-empty "$d"
+  done
 
   # rustbuild always installs copies of the shared libraries to /usr/lib,
   # overwrite them with symlinks to the per-architecture versions
-  #mkdir -p usr/lib32
-  #ln -srft usr/lib   usr/lib/rustlib/x86_64-unknown-linux-gnu/lib/*.so
-  #ln -srft usr/lib32 usr/lib/rustlib/i686-unknown-linux-gnu/lib/*.so
-
-  mkdir -p usr/share/licenses/rust
-  mv -t usr/share/licenses/rust usr/share/doc/rust/{COPYRIGHT,LICENSE*}
+  #mkdir -pv usr/lib32
+  #ln -srvft usr/lib   usr/lib/rustlib/x86_64-unknown-linux-gnu/lib/*.so
+  #ln -srvft usr/lib32 usr/lib/rustlib/i686-unknown-linux-gnu/lib/*.so
 
   #_pick dest-i686 usr/lib/rustlib/i686-unknown-linux-gnu usr/lib32
   #_pick dest-musl usr/lib/rustlib/x86_64-unknown-linux-musl
@@ -261,8 +293,8 @@ package_rust-src() {
 
   cp -a dest-src/* "$pkgdir"
 
-  mkdir -p "$pkgdir/usr/share/licenses"
-  ln -s rust "$pkgdir/usr/share/licenses/$pkgname"
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 \
+    rustc-$pkgver-src/{COPYRIGHT,LICENSE-MIT}
 }
 
 # vim:set ts=2 sw=2 et:

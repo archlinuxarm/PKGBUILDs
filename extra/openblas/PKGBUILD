@@ -8,17 +8,17 @@
 pkgbase=openblas
 pkgname=(openblas openblas64 blas-openblas blas64-openblas)
 _pkgname=OpenBLAS
-pkgver=0.3.24
-pkgrel=2
-_blasver=3.11.0
+pkgver=0.3.30
+pkgrel=1
+_blasver=3.12.0
 pkgdesc="An optimized BLAS library based on GotoBLAS2 1.13 BSD"
 arch=('x86_64')
 url="https://www.openblas.net/"
 license=('BSD')
 depends=('gcc-libs')
-makedepends=('cmake' 'perl' 'gcc-fortran')
-source=(${_pkgname}-v${pkgver}.tar.gz::https://github.com/xianyi/OpenBLAS/archive/v${pkgver}.tar.gz)
-sha512sums=('fe66e3a258ca1720764ed243f6d61017d6ef14bd33b76f20b19b34754096ec2be9fbeb1a78743f38ee71381746d6af9a1c16a8f3982e423afec422fcb50852d0')
+makedepends=('git' 'cmake' 'perl' 'gcc-fortran')
+source=(git+https://github.com/xianyi/OpenBLAS#tag=v$pkgver)
+sha512sums=('7dd5fe4a9f4e0d5554cab294ef8c5ce6e0acfe6d6c1786b0a018c5d736264203bac36632e900c01fab427a607725b8924aba30b13086f7403f34c410bf483a28')
 
 build() {
   [[ $CARCH == "aarch64" ]] && CORE="ARMV8" && DYN="OFF"
@@ -27,26 +27,29 @@ build() {
   # Setting FC manually to avoid picking up f95 and breaking the cmake build
   # https://github.com/xianyi/OpenBLAS/issues/4072#issuecomment-1576388332
 
-  FC=gfortran cmake -B build -S $_pkgname-$pkgver \
+  # Setting ASM flags for CET support.  Setting FFLAGS for CET support.
+  # Remove ` -Wformat -Werror=format-security` not supported by gcc-fortran.
+
+  ASMFLAGS=$CFLAGS FFLAGS=${CFLAGS/ -Wformat -Werror=format-security/} FC=gfortran cmake -B build -S $_pkgname \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DBUILD_SHARED_LIBS=ON \
     -DBUILD_TESTING=OFF \
     -DNO_AFFINITY=ON \
     -DUSE_OPENMP=1 \
     -DNO_WARMUP=1 \
-    -DCORE=$CORE \
+    -DTARGET=$CORE \
     -DNUM_THREADS=64 \
     -DDYNAMIC_ARCH=$DYN
   cmake --build build
 
-  FC=gfortran cmake -B build64 -S $_pkgname-$pkgver \
+  ASMFLAGS=$CFLAGS FFLAGS=${CFLAGS/ -Wformat -Werror=format-security/} FC=gfortran cmake -B build64 -S $_pkgname \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DBUILD_SHARED_LIBS=ON \
     -DBUILD_TESTING=OFF \
     -DNO_AFFINITY=ON \
     -DUSE_OPENMP=1 \
     -DNO_WARMUP=1 \
-    -DCORE=$CORE \
+    -DTARGET=$CORE \
     -DNUM_THREADS=64 \
     -DDYNAMIC_ARCH=$DYN \
     -DINTERFACE64=1
@@ -63,13 +66,13 @@ check() {
 
 package_openblas() {
   DESTDIR="$pkgdir" cmake --install build
-  install -Dm644 $_pkgname-$pkgver/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm644 $_pkgname/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
 package_openblas64() {
   pkgdesc+=" (64-bit integers)"
   DESTDIR="$pkgdir" cmake --install build64
-  install -Dm644 $_pkgname-$pkgver/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  install -Dm644 $_pkgname/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
  
   cd "$pkgdir"/usr/lib/
   ln -s libopenblas_64.so.${pkgver%.*} libopenblas64_.so # Needed by julia

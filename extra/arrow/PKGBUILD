@@ -1,0 +1,133 @@
+# Maintainer: Bruno Pagani <archange@archlinux.org>
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
+# Contributor: Guillaume Horel <guillaume.horel@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove depends on awe packages, set -DARROW_S3=OFF
+
+pkgname=arrow
+pkgver=21.0.0
+pkgrel=7
+# parquet-testing and arrow-testing projects have no releases, commits may need to be updated on pkgver bumps
+_parquet_testing_commit=4cf674fc589309ba8651ad676f3fb557582d9cab
+_arrow_testing_commit=fbf6b703dc93d17d75fa3664c5aa2c7873ebaf06
+pkgdesc="Columnar in-memory analytics layer for big data."
+arch=(x86_64)
+url="https://arrow.apache.org"
+license=(Apache-2.0)
+depends=(
+  abseil-cpp
+  apache-orc
+  brotli
+  bzip2
+  gcc-libs
+  glibc
+  google-glog
+  grpc
+  libutf8proc
+  lz4
+  openssl
+  protobuf
+  re2
+  snappy
+  thrift
+  zlib
+  zstd
+)
+makedepends=(
+  boost
+  cmake
+  flatbuffers
+  git
+  gmock
+  ninja
+  rapidjson
+  xsimd
+)
+checkdepends=(
+  minio
+  python
+)
+provides=(parquet-cpp)
+conflicts=(parquet-cpp)
+source=(
+  https://archive.apache.org/dist/$pkgname/$pkgname-$pkgver/apache-$pkgname-$pkgver.tar.gz{,.asc}
+  git+https://github.com/apache/parquet-testing.git#commit=$_parquet_testing_commit
+  git+https://github.com/apache/arrow-testing.git#commit=$_arrow_testing_commit
+)
+sha512sums=('89da6de7eb2513c797d6671e1addf40b8b156215b481cf2511fa69faa16547c52d8220727626eeda499e4384d276e03880cd920aaab41c3d15106743d51a90a6'
+            'SKIP'
+            'fa20be39a69081d8c59add20a26cac4f201decda216c0e358f3bb72134e0015098596467d80dda2ba27bbf9e1a0c9b4a21a16aaaa0b6064821d1f4aaa4b93b1b'
+            '444838ecf5f0ec22fb748632e16b67f29d7730050bc91c54a97455150caa77abe1006d8aa11536c15cc6b939d009f978262213dc3ae14c96d1983934e262dc1b')
+validpgpkeys=(265F80AB84FE03127E14F01125BCCA5220D84079  # Krisztian Szucs (apache) <szucs.krisztian@gmail.com>
+              08D3564B7C6A9CAFBFF6A66791D18FCF079F8007  # Kouhei Sutou <kou@cozmixng.org>
+              AF6AADA4C9835B75973FF5DA275C532289DD0F4A  # Raúl Cumplido Domínguez (CODE SIGNING KEY) <raulcd@apache.org>
+              A2AC7132B5DA7C273A7A147665F4A8CA9769ECD7) # Apache Arrow Automated Release Signing <private@arrow.apache.org>
+
+prepare() {
+  cd apache-$pkgname-$pkgver
+  # Patch out unused AWS-SDK component https://github.com/apache/arrow/pull/45191
+  sed -i 's|COMPONENTS config|COMPONENTS|' cpp/cmake_modules/FindAWSSDKAlt.cmake
+}
+
+build() {
+  # workaround for cmake 4.0 - arrow bundles several old dependencies https://github.com/apache/arrow/issues/45985
+  # (note that ExternalProject does not propagate this as a CMake variable so we need to export an environment variable)
+  export CMAKE_POLICY_VERSION_MINIMUM=3.5
+
+  # Arrow options are defined in https://github.com/apache/arrow/blob/main/cpp/cmake_modules/DefineOptions.cmake
+  # Documentation for building from source: https://arrow.apache.org/docs/developers/cpp/building.html
+  local cmake_options=(
+    -B build
+    -S apache-$pkgname-$pkgver/cpp
+    -G Ninja
+    -W no-dev
+    # one pyarrow test fails when the build type is none of 'debug', 'release', 'minsizerel', 'relwithdebinfo'
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    -DCMAKE_INSTALL_PREFIX="/usr"
+    -DCMAKE_INSTALL_LIBDIR="lib"
+    -DARROW_SIMD_LEVEL=NONE
+    -DARROW_RUNTIME_SIMD_LEVEL=MAX
+    -DARROW_DEPENDENCY_SOURCE=SYSTEM
+    -DARROW_BUILD_STATIC=OFF
+    -DARROW_BUILD_TESTS=ON
+    -DARROW_BUILD_UTILITIES=ON
+    -DARROW_COMPUTE=ON
+    -DARROW_CSV=ON
+    -DARROW_FILESYSTEM=ON
+    -DARROW_FLIGHT=ON
+    -DARROW_FLIGHT_SQL=ON
+    -DARROW_GANDIVA=OFF  # depends on LLVMAlt
+    -DARROW_HDFS=ON
+    -DARROW_IPC=ON
+    -DARROW_JEMALLOC=ON
+    -DARROW_JSON=ON
+    -DARROW_ORC=ON
+    -DARROW_PARQUET=ON
+    -DARROW_S3=OFF
+    -DARROW_SUBSTRAIT=ON
+    -DARROW_TENSORFLOW=ON
+    -DARROW_USE_GLOG=ON
+    -DARROW_WITH_BROTLI=ON
+    -DARROW_WITH_BZ2=ON
+    -DARROW_WITH_LZ4=ON
+    -DARROW_WITH_SNAPPY=ON
+    -DARROW_WITH_ZLIB=ON
+    -DARROW_WITH_ZSTD=ON
+    -DPARQUET_REQUIRE_ENCRYPTION=ON
+  )
+  cmake "${cmake_options[@]}"
+  cmake --build build
+}
+
+check() {
+  PARQUET_TEST_DATA="$srcdir"/parquet-testing/data \
+  ARROW_TEST_DATA="$srcdir"/arrow-testing/data \
+  ctest --test-dir build --output-on-failure
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  # remove testing libraries
+  find "$pkgdir"/usr/lib/ -name '*testing*' -delete
+}

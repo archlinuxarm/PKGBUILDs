@@ -8,31 +8,62 @@ pkgname=(
   wpewebkit
   wpewebkit-docs
 )
-pkgver=2.42.0
+pkgver=2.50.1
 pkgrel=1
 pkgdesc="Embeddable web content engine"
 url="https://wpewebkit.org"
 arch=(x86_64)
-license=(custom)
+license=(
+  # :sort ui /\v^\s*['"]?/
+  'AFL-2.0 OR GPL-2.0-or-later'
+  Apache-2.0
+  'Apache-2.0 WITH LLVM-exception'
+  BSD-2-Clause
+  BSD-2-Clause-Views
+  BSD-3-Clause
+  BSD-Source-Code
+  BSL-1.0
+  bzip2-1.0.6
+  GPL-2.0-only
+  'GPL-3.0-only WITH Autoconf-exception-3.0'
+  'GPL-3.0-or-later WITH Bison-exception-2.2'
+  ICU
+  ISC
+  LGPL-2.1-only
+  LGPL-2.1-or-later
+  MIT
+  MPL-1.1
+  MPL-2.0
+  NCSA
+  'NCSA OR MIT'
+  OFL-1.1
+  SunPro
+  Unicode-TOU
+)
 depends=(
   at-spi2-core
   atk
   bubblewrap
   cairo
+  expat
   fontconfig
   freetype2
+  gcc-libs
   glib2
+  glibc
   gst-plugins-bad-libs
   gst-plugins-base-libs
   gstreamer
   harfbuzz
   harfbuzz-icu
   icu
+  lcms2
   libavif
   libdrm
   libepoxy
   libgcrypt
-  libjpeg
+  libinput
+  libjpeg-turbo
   libjxl
   libpng
   libseccomp
@@ -47,6 +78,7 @@ depends=(
   mesa
   openjpeg2
   sqlite
+  ttf-font
   wayland
   woff2
   wpebackend-fdo
@@ -57,6 +89,7 @@ makedepends=(
   clang
   cmake
   gi-docgen
+  glib2-devel
   gobject-introspection
   gperf
   gst-plugins-bad
@@ -64,6 +97,7 @@ makedepends=(
   ninja
   python
   ruby
+  ruby-stdlib
   systemd
   unifdef
   wayland-protocols
@@ -71,13 +105,14 @@ makedepends=(
 source=(
   $url/releases/wpewebkit-$pkgver.tar.xz{,.asc}
 )
-sha256sums=('acda4be341c6021e092b36612c88d596dae4dd7f41e6ac47425d645dffdfe5ed'
+sha256sums=('305437a4ba869e4106c1d4a8cb2a7be3f43b75d9d026e9b97c6f6debc04a673b'
             'SKIP')
-b2sums=('0958b38ac1095f9ff1ab1d200295b12b21d209c6333ce757d30db8e72ab7a9d70d97d7dfad1af20b89dc35530b4911296e05f5d38cbea27e7220c5cf32d670f0'
+b2sums=('31e580f3e4e9c95a18da2edca80e4123c6ebacfffa0ceb78c78dee84b5e3dae25f3d09cb6aed002484c572fbe8003f757e294faab1e45a7c1d1990a87dfbcff9'
         'SKIP')
 validpgpkeys=(
-  'D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3'  # Carlos Garcia Campos <cgarcia@igalia.com>
-  '5AA3BC334FD7E3369E7C77B291C559DBE4C9123B'  # Adrián Pérez de Castro <aperez@igalia.com>
+  # https://wpewebkit.org/release/verify/
+  5AA3BC334FD7E3369E7C77B291C559DBE4C9123B # Adrián Pérez de Castro <aperez@igalia.com>
+  013A0127AC9C65B34FFA62526C1009B693975393 # Carlos Garcia Campos <cgarcia@igalia.com>
 )
 
 prepare() {
@@ -86,31 +121,31 @@ prepare() {
 
 build() {
   local cmake_options=(
-    -DPORT=WPE
-    -DCMAKE_BUILD_TYPE=Release
-    -DCMAKE_INSTALL_PREFIX=/usr
-    -DCMAKE_INSTALL_LIBDIR=lib
-    -DCMAKE_INSTALL_LIBEXECDIR=lib
-    -DCMAKE_SKIP_RPATH=ON
-    -DUSE_AVIF=ON
-    -DENABLE_WPE_1_1_API=ON
-    -DENABLE_DOCUMENTATION=ON
-    -DENABLE_MINIBROWSER=ON
+    -D CMAKE_BUILD_TYPE=Release
+    -D CMAKE_INSTALL_LIBDIR=lib
+    -D CMAKE_INSTALL_LIBEXECDIR=lib
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -D CMAKE_SKIP_RPATH=ON
+    -D ENABLE_DOCUMENTATION=ON
+    -D ENABLE_MINIBROWSER=ON
+    -D ENABLE_SPEECH_SYNTHESIS=OFF
+    -D PORT=WPE
+    -D USE_FLITE=OFF
+    -D USE_LIBBACKTRACE=OFF
   )
 
-  # GCC with LTO fails to link jsc
-  #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_size_validate':
-  #     <artificial>:(.text+0x49f0f): undefined reference to `ipint_extern_table_size'
-  #     /usr/bin/ld: /tmp/ccXxyWZV.ltrans0.ltrans.o: in function `ipint_table_fill_validate':
-  #     <artificial>:(.text+0x4a019): undefined reference to `ipint_extern_table_fill'
-  #     collect2: error: ld returned 1 exit status
+  # Upstream prefers Clang
+  # https://gitlab.archlinux.org/archlinux/packaging/packages/webkitgtk-6.0/-/issues/4
   #export CC=clang CXX=clang++
   #LDFLAGS+=" -fuse-ld=lld"
 
-  # Produce minimal debug info: 4.3 GB of debug data makes the
-  # build too slow and is too much to package for debuginfod
-  CFLAGS+=' -g1'
-  CXXFLAGS+=' -g1'
+  # Skia uses malloc_usable_size
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+
+  # JITted code crashes when CET is used
+  #CFLAGS+=' -fcf-protection=none'
+  #CXXFLAGS+=' -fcf-protection=none'
 
   [[ $CARCH == "armv7h" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/neon/vfpv3/'` && CXXFLAGS="$CFLAGS"
 
@@ -124,7 +159,7 @@ package_wpewebkit() {
     libwpe-1.0.so
   )
   provides+=(
-    libWPEWebKit-1.1.so
+    libWPEWebKit-2.0.so
   )
   optdepends=(
     'geoclue: Geolocation support'
@@ -136,7 +171,7 @@ package_wpewebkit() {
   DESTDIR="$pkgdir" cmake --install build
 
   mkdir -p doc/usr/share
-  mv {"$pkgdir",doc}/usr/share/gtk-doc
+  mv {"$pkgdir",doc}/usr/share/doc
 
   cd wpewebkit-$pkgver
   find Source -name 'COPYING*' -or -name 'LICENSE*' -print0 | sort -z |

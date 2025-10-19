@@ -1,56 +1,60 @@
-# AArch64 multi-platform
+# / AArch64 multi-platform
 # Maintainer: Kevin Mihelich <kevin@archlinuxarm.org>
+# Maintainer: graysky <therealgraysky AT proton DOT me>
 
 buildarch=8
 
 pkgbase=linux-aarch64
-_srcname=linux-6.2
+_srcname=linux-6.17
 _kernelname=${pkgbase#linux}
 _desc="AArch64 multi-platform"
-pkgver=6.2.10
+pkgver=6.17.3
 pkgrel=1
 arch=('aarch64')
 url="http://www.kernel.org/"
-license=('GPL2')
+license=('GPL-2.0-only')
 makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'uboot-tools' 'vboot-utils' 'dtc')
 options=('!strip')
-source=("http://www.kernel.org/pub/linux/kernel/v6.x/${_srcname}.tar.xz"
-        "http://www.kernel.org/pub/linux/kernel/v6.x/patch-${pkgver}.xz"
+source=("https://www.kernel.org/pub/linux/kernel/v6.x/${_srcname}.tar.xz"
+        "https://www.kernel.org/pub/linux/kernel/v6.x/patch-${pkgver}.xz"
         '0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch'
         '0002-arm64-dts-rockchip-disable-pwm0-on-rk3399-firefly.patch'
+        '0003-pps-Compatibility-hack-should-be-X86-specific.patch'
+        '0004-Revert-arm64-dts-rockchip-Move-rk3568-PCIe3-MSI-to-u.patch'
         'config'
         'generate_chromebook_its.sh'
         'kernel.keyblock'
         'kernel_data_key.vbprivk'
-        'linux.preset'
-        '60-linux.hook'
-        '90-linux.hook')
-md5sums=('787862593d7bf354cf1a5c37e21fc147'
-         'e0221ea0e6eeb147c29d2fd72e987ed5'
-         '7b08a199a97e3e2288e5c03d8e8ded2d'
-         'c9d4e392555b77034e24e9f87c5ff0b3'
-         'f1379ae267804a7820963dd0527f11a8'
+        'linux.preset')
+md5sums=('ac8cfd661ca56a142bb92f9d9e7754a0'
+         '66830be3d3dddab8b04a5e79062461b1'
+         '7862339da94da0b7958e61e2210760a7'
+         'c064a0a49f4ed7d487d482ca73c75178'
+         '416b7c6ef37cc0edb6cb67cf618360f5'
+         'e3252a71f1f38f69799b0af9ad11ab8a'
+         'e12c24e86e4ac5ae3dbcbf9028595a4c'
          '7c97cf141750ad810235b1ad06eb9f75'
          '61c5ff73c136ed07a7aadbf58db3d96a'
          '584777ae88bce2c5659960151b64c7d8'
-         '41cb5fef62715ead2dd109dbea8413d6'
-         '0a5f16bfec6ad982a2f6782724cca8ba'
-         '3dc88030a8f2f5a5f97266d99b149f77')
+         '33ba82001fca579d43172a6db25d6aca')
 
 prepare() {
   cd $_srcname
 
   echo "Setting version..."
-  scripts/setlocalversion --save-scmversion
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
   # add upstream patch
-  git apply --whitespace=nowarn ../patch-${pkgver}
+  if [[ -f ../patch-${pkgver} ]]; then
+    git apply --whitespace=nowarn ../patch-${pkgver}
+  fi
 
   # ALARM patches
   git apply ../0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch
   git apply ../0002-arm64-dts-rockchip-disable-pwm0-on-rk3399-firefly.patch
+  git apply ../0003-pps-Compatibility-hack-should-be-X86-specific.patch
+  git apply ../0004-Revert-arm64-dts-rockchip-Move-rk3568-PCIe3-MSI-to-u.patch
 
   cat "${srcdir}/config" > ./.config
 }
@@ -71,11 +75,11 @@ build() {
 
 _package() {
   pkgdesc="The Linux Kernel and modules - ${_desc}"
-  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio>=0.7')
-  optdepends=('wireless-regdb: to set the correct wireless channels of your country')
-  provides=("linux=${pkgver}" "WIREGUARD-MODULE")
+  depends=('coreutils' 'kmod' 'mkinitcpio>=0.7')
+  optdepends=('linux-firmware: firmware images needed for some devices'
+              'wireless-regdb: to set the correct wireless channels of your country')
+  provides=("linux=${pkgver}" "KSMBD-MODULE" "WIREGUARD-MODULE")
   conflicts=('linux')
-  backup=("etc/mkinitcpio.d/${pkgbase}.preset")
   install=${pkgname}.install
 
   cd $_srcname
@@ -87,10 +91,10 @@ _package() {
   make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
 
   echo "Installing modules..."
-  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
+  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 DEPMOD=/doesnt/exist modules_install
 
-  # remove build and source links
-  rm "$modulesdir"/{source,build}
+  # remove build link
+  rm "$modulesdir"/build
 
   # sed expression for following substitutions
   local _subst="
@@ -102,11 +106,10 @@ _package() {
   sed "${_subst}" ../linux.preset |
     install -Dm644 /dev/stdin "${pkgdir}/etc/mkinitcpio.d/${pkgbase}.preset"
 
-  # install pacman hooks
-  sed "${_subst}" ../60-linux.hook |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/60-${pkgbase}.hook"
-  sed "${_subst}" ../90-linux.hook |
-    install -Dm644 /dev/stdin "${pkgdir}/usr/share/libalpm/hooks/90-${pkgbase}.hook"
+  # rather than use another hook (90-linux.hook) rely on mkinitcpio's 90-mkinitcpio-install.hook
+  # which avoids a double run of mkinitcpio that can occur
+  install -d "${pkgdir}/usr/lib/initcpio/"
+  echo "dummy file to trigger mkinitcpio to run" > "${pkgdir}/usr/lib/initcpio/$(<version)"
 }
 
 _package-headers() {

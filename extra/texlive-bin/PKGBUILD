@@ -1,4 +1,5 @@
 # Maintainer: Antonio Rojas <arojas@archlinux.org>
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
 # Contributor: Rémy Oudompheng <remy@archlinux.org>
 # Contributor: francois <francois.archlinux.org>
 
@@ -9,23 +10,50 @@
 #  drop clisp and ffcall makedepends
 
 pkgname=(texlive-bin libsynctex)
-_rev=66984
-pkgver=2023.$_rev
-pkgrel=16
-license=(GPL)
+pkgver=2025.2
+pkgrel=2
+license=(GPL-2.0-or-later)
 arch=(x86_64)
-makedepends=(git cairo pixman graphite t1lib gd libsigsegv zziplib libpng libjpeg freetype2
-             icu harfbuzz-icu mpfr potrace libpaper perl libxcrypt subversion
-             glibc zlib bash libxaw fontconfig icu readline libxmu libxpm libunistring libxt
-             libx11 ncurses gcc-libs harfbuzz)
+makedepends=(bash
+             cairo
+             fontconfig
+             freetype2
+             gcc-libs
+             gd
+             git
+             glibc
+             gmp
+             graphite
+             harfbuzz
+             icu
+             libjpeg-turbo
+             libpaper
+             libpng
+             libsigsegv
+             libunistring
+             libx11
+             libxaw
+             libxcrypt
+             libxmu
+             libxpm
+             libxt
+             mpfr
+             ncurses
+             perl
+             pixman
+             potrace
+             readline
+             subversion
+             zlib
+             zziplib)
 url='https://tug.org/texlive/'
-_commit=871c7a2856d70e1a9703d1f72f0587b9995dba5f # tags/texlive-2023.0
+_commit=8115c4d97aa0e68da1f957a56bca780449d1be59
 source=(git+https://github.com/Tex-Live/texlive-source.git#commit=$_commit
         ptex-debug-print.patch
-        context-luatex-1.17.patch)
-sha256sums=('SKIP'
+        lua-root.patch)
+sha256sums=('842fc0a45cb4d363253eefcaae1f88be7b8446def80d78cce251dad32d3802ec'
             'aa838f09003c62c2efb5770a8de66f99b409df049fbd65098d80fd1957d06c50'
-            'a56838d19c3bd820781693b5a2e058e1a22378b37ea199bac426d97fcc420920')
+            'c2d6a8b14dd8197874c1d894e70df80ad076f28ee4d1cff81e3b7811d9264fb9')
 
 prepare() {
   cd texlive-source
@@ -37,8 +65,8 @@ prepare() {
   sed -i s/SELFAUTOPARENT/TEXMFROOT/ texk/tex4htk/t4ht.c
 # remove spurious ptex "guessed encoding" print
   patch -p1 -i ../ptex-debug-print.patch
-# update context to work with luatex 1.17
-  patch -p1 -i ../context-luatex-1.17.patch
+# Fix LUA_ROOT define
+  patch -p1 -i ../lua-root.patch
 }
 
 build() {
@@ -46,6 +74,8 @@ build() {
 
   mkdir -p build
   cd build
+  CFLAGS=${CFLAGS/FORTIFY_SOURCE=3/FORTIFY_SOURCE=2} # https://gitlab.archlinux.org/archlinux/packaging/packages/texlive-bin/-/issues/3 
+  CFLAGS+=" -Wno-incompatible-pointer-types" \
   ax_cv_c_float_words_bigendian=no \
   ../configure --prefix=/usr -C \
     --sysconfdir=/etc \
@@ -59,7 +89,6 @@ build() {
     --disable-dialog \
     --disable-psutils \
     --disable-t1utils \
-    --disable-bibtexu \
     --disable-dvisvgm \
     --disable-xz \
     --enable-shared \
@@ -96,6 +125,7 @@ build() {
 package_libsynctex() {
   pkgdesc='Library for synchronization between TeX files and resulting file'
   depends=(glibc zlib)
+  provides=(libsynctex.so)
 
   cd texlive-source/build
   make -C texk/web2c DESTDIR="$pkgdir" \
@@ -107,10 +137,41 @@ package_libsynctex() {
 
 package_texlive-bin() {
   pkgdesc='TeX Live binaries'
-  depends=(cairo pixman graphite t1lib gd poppler libsigsegv zziplib libpng libjpeg freetype2 libxcrypt
-           harfbuzz-icu mpfr potrace libpaper libsynctex glibc zlib bash libxaw fontconfig icu readline libxmu
-           libxpm libunistring libxt libx11 ncurses gcc-libs harfbuzz)
-  provides=(lcdf-typetools kpathsea)
+  depends=(bash
+           cairo
+           fontconfig
+           freetype2
+           gcc-libs
+           gd
+           glibc
+           gmp
+           graphite
+           harfbuzz
+           icu
+           libpaper
+           libpng
+           libsigsegv
+           libsynctex
+           libunistring
+           libx11
+           libxaw
+           libxcrypt
+           libxmu
+           libxpm
+           libxt
+           mpfr
+           ncurses
+           perl
+           pixman
+           potrace
+           readline
+           zlib
+           zziplib)
+  provides=(lcdf-typetools
+            libptexenc.so
+            libtexlua53.so
+            libtexluajit.so
+            kpathsea)
   optdepends=('psutils: to manipulate the output of dvips')
 
   cd texlive-source
@@ -121,12 +182,6 @@ package_texlive-bin() {
   make DESTDIR="$pkgdir" texmf="$pkgdir"/usr/share/texmf install
   LD_PRELOAD="$pkgdir"/usr/lib/libkpathsea.so.6 \
   make DESTDIR="$pkgdir" texlinks
-
-# install old ConTeXt stubs
-  cd "$srcdir"/texlive-source
-  for _stub in `ls texk/texlive/linked_scripts/context/stubs/unix`; do
-    install -m755 texk/texlive/linked_scripts/context/stubs/unix/$_stub "$pkgdir"/usr/bin/$_stub
-  done
 
 # remove stuff included in texlive-texmf
   rm -r "$pkgdir"/usr/share/texmf-dist

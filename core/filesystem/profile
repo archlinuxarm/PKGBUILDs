@@ -19,6 +19,7 @@ append_path '/usr/bin'
 # Force PATH to be environment
 export PATH
 
+# 
 # Load profiles from /etc/profile.d
 if test -d /etc/profile.d/; then
 	for profile in /etc/profile.d/*.sh; do
@@ -26,6 +27,12 @@ if test -d /etc/profile.d/; then
 	done
 	unset profile
 fi
+
+# unset GLOBSORT, before anything else is sourced
+# This variable will be part of bash => 5.3
+# The rationale is that the user should always be able 
+# to expect that the snippets be processed in a deterministic order.
+unset -v GLOBSORT
 
 # Unload our profile API functions
 unset -f append_path

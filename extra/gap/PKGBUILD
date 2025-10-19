@@ -7,24 +7,52 @@
 #  - strip -m32 flags
 
 pkgbase=gap
-pkgname=(gap gap-packages)
-pkgver=4.12.2
-pkgrel=3
+pkgname=(gap
+         gap-packages)
+pkgver=4.15.1
+pkgrel=1
 pkgdesc='Groups, Algorithms, Programming: a system for computational discrete algebra'
 arch=(x86_64)
 url='https://www.gap-system.org/'
-license=(GPL)
-source=(https://github.com/gap-system/gap/releases/download/v$pkgver/$pkgbase-$pkgver.tar.gz
-        package-infos-$pkgver.json.gz::https://github.com/gap-system/gap/releases/download/v$pkgver/package-infos.json.gz)
-sha256sums=('672308745eb78a222494ee8dd6786edd5bc331456fcc6456ac064bdb28d587a8'
-            '33f8e2233e9aa74217741467f0138a932a2dfee212c774eaad0e0ef6876868c2')
-makedepends=(libxaw givaro mpfi cddlib boost libsemigroups c-xsc zeromq fplll wget chrpath fmt eigen normaliz jq)
+license=(GPL-2.0-or-later)
+source=(git+https://github.com/gap-system/gap#tag=v$pkgver
+        https://github.com/gap-system/gap/releases/download/v$pkgver/packages-v$pkgver.tar.gz
+        https://www.math.rwth-aachen.de/homes/Thomas.Breuer/atlasrep/atlasrepdata.tar.gz
+        package-infos-$pkgver.json.gz::https://github.com/gap-system/gap/releases/download/v$pkgver/package-infos.json.gz
+        atlasrep-no-remote-access.patch)
+sha256sums=('1c4cf82fddc672a4d94c3834b8d4db606da637b9f566740f1818ccfde6333ab6'
+            'c62234ca31685145737e9e66e1dc20424cbd114dcef3e89a5839670561a2a2e6'
+            '9f82d01bb682f24406f07a701dc2cae40dcba672c6ca91e77613b9096d6b49eb'
+            'ca1346a1afb332dca59b445787bf106b8025bed61b76758ed661458f90285600'
+            '1ffbed921a6f289340a1e61179f7f88039fa6dcd0247ab6b9b9270192ff5d015')
+makedepends=(bliss
+             boost
+             c-xsc
+             cddlib
+             chrpath
+             eigen
+             fmt
+             fplll
+             git
+             givaro
+             jq
+             libsemigroups
+             libxaw
+             mpfi
+             normaliz
+             planarity
+             texlive-fontsrecommended
+             texlive-latexextra
+             wget
+             zeromq)
+noextract=(packages-v$pkgver.tar.gz)
 
 prepare() {
-  cd gap-$pkgver
+  cd gap
+  mkdir -p pkg
+  tar -xzf ../packages-v$pkgver.tar.gz -C pkg
+  autoreconf -fiv
 
-# Use system libsemigroups
-  sed -e 's|need_included_libsemigroups=yes|need_included_libsemigroups=no|' -i pkg/semigroups/configure
 # Use system normaliz
   rm pkg/normalizinterface/prerequisites.sh
 # Use system nauty
@@ -32,41 +60,42 @@ prepare() {
 # Fix https://bugs.archlinux.org/task/55174
   sed -e '/xgap/d' -i pkg/sonata/PackageInfo.g
   sed -e '/XGAP/d' -i pkg/cryst/PackageInfo.g
+# Disable remote access in atlasdep, we preinstall all data (Gentoo)
+  patch -d pkg/atlasrep -p1 < "$srcdir"/atlasrep-no-remote-access.patch
 # Strip -m32 flags
   sed -e '/-m32/d' -i bin/BuildPackages.sh
 }
 
 build() {
-  cd gap-$pkgver
+  cd gap
   ./configure --prefix=/usr --with-gmp=system
-
-  # https://bugzilla.gnome.org/show_bug.cgi?id=655517
-  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
-
   make
-
-  # Install libgap so we can link packages against it
-  mkdir -p tmp-install
-  make DESTDIR="$srcdir"/gap-$pkgver/tmp-install install-libgap
+  make doc
 
   cd pkg
-  export CXXFLAGS+=" -I/usr/include/eigen3" # Fix build of semigroups
-  export LDFLAGS+=" -L$srcdir/gap-$pkgver/tmp-install/usr/lib -lgap" # See https://trac.sagemath.org/ticket/27372
-  export LD_LIBRARY_PATH="$srcdir"/gap-$pkgver/tmp-install/usr/lib
-  ../bin/BuildPackages.sh --strict
+  export CFLAGS+=" -Wno-incompatible-pointer-types -std=gnu11" # Fix build with GCC 15
+  ../bin/BuildPackages.sh --strict \
+    --with-gaproot="$srcdir"/gap \
+    --add-package-config-Semigroups --with-external-libsemigroups \
+    --add-package-config-Digraphs "--with-external-planarity --with-external-bliss"
 }
 
 _standardpkgs=(gapdoc primgrp smallgrp transgrp atlasrep autpgrp alnuth crisp ctbllib factint fga irredsol laguna
                polenta polycyclic radiroot resclasses sophus tomlib utils autodoc)
 
 package_gap() {
-  depends=(gmp zlib)
+  depends=(glibc
+           gmp
+           perl
+           readline
+           sh
+           zlib)
   optdepends=('gap-packages: extra packages')
   conflicts=(gap-doc)
   provides=(gap-doc)
   replaces=(gap-doc)
-  cd gap-$pkgver
 
+  cd gap
   make DESTDIR="$pkgdir" install
 
   for _pkg in ${_standardpkgs[@]}; do
@@ -79,16 +108,38 @@ package_gap() {
     _prov="gap-$_pkg=${_ver/-/.}"
     provides+=($_prov)
   done
+
+# Install atlasrep data
+  for _dir in datagens dataword; do
+    rm -r "$pkgdir"/usr/share/gap/pkg/atlasrep/$_dir
+    mv "$srcdir"/atlasrep/$_dir "$pkgdir"/usr/share/gap/pkg/atlasrep
+  done
 }
 
 package_gap-packages() {
-  depends=(gap)
-  optdepends=('libxaw: xgap package' 'c-xsc: float package' 'mpfi: float package' 'nauty: grape package'
-              'libmpc: float package' 'fplll: float package' 'zeromq: ZeroMQ interface package' 'planarity: digraph package'
-              'curl: curl interface package' 'libsemigroups: semigroups package' 'cddlib: CddLib interface package'
-              'normaliz: NormalizInterface package' 'pari: alnuth package' 'singular: singular package' 'polymake: polymaking package')
-  pkgdesc="Extra packages for GAP"
-  cd gap-$pkgver
+  depends=(gap
+           gcc-libs
+           glibc
+           perl
+           sh)
+  optdepends=('bliss: digraph package'
+              'c-xsc: float package'
+              'cddlib: CddLib interface package'
+              'curl: curl interface package'
+              'fplll: float package'
+              'libmpc: float package'
+              'libsemigroups: semigroups package'
+              'libxaw: xgap package'
+              'mpfi: float package'
+              'nauty: grape package'
+              'normaliz: NormalizInterface package' 
+              'pari: alnuth package'
+              'planarity: digraph package'
+              'polymake: polymaking package'
+              'singular: singular package'
+              'zeromq: ZeroMQ interface package')
+  pkgdesc='Extra packages for GAP'
+  cd gap
 
   mkdir -p "$pkgdir"/usr/{bin,lib/gap}
   cp -r pkg "$pkgdir"/usr/lib/gap
@@ -108,9 +159,6 @@ package_gap-packages() {
 # fix RPATH
   find "$pkgdir"/usr/lib/gap/pkg/ -name '*.so' | xargs chrpath -d
 
-# remove bundled planarity
-  rm -fr "$pkgdir"/usr/lib/gap/pkg/digraphs/bin/lib/
-
 # use system nauty in grape package
   install -d "$pkgdir"/usr/lib/gap/pkg/grape/bin/x86_64-pc-linux-gnu-default64-kv8
   ln -s /usr/bin/dreadnaut "$pkgdir"/usr/lib/gap/pkg/grape/bin/x86_64-pc-linux-gnu-default64-kv8
@@ -123,6 +171,7 @@ package_gap-packages() {
   rm -r "$pkgdir"/usr/lib/gap/pkg/caratinterface/carat*
   rm -r "$pkgdir"/usr/lib/gap/pkg/kbmag/standalone
   rm -r "$pkgdir"/usr/lib/gap/pkg/log
+  rm -r "$pkgdir"/usr/lib/gap/pkg/*/gen
 
 # Add provides for bundled packages
   for _pkg in $(ls "$pkgdir"/usr/lib/gap/pkg); do

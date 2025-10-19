@@ -1,32 +1,95 @@
-# Maintainer: Anatol Pomozov
+# Maintainer: Bert Peters <bertptrs@archlinux.org>
+# Contributor: Anatol Pomozov
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - gem install with --disable-lto
+#  - generalize arch-dependent link line for libsass.so
 
-_gemname=sassc
-pkgname=ruby-$_gemname
+_name=sassc
+pkgname=ruby-$_name
 pkgver=2.4.0
-pkgrel=2
+pkgrel=7
 pkgdesc="Use libsass with Ruby!"
 arch=(x86_64)
 url='https://github.com/sass/sassc-ruby'
 license=(MIT)
-depends=(ruby ruby-ffi)
+depends=(ruby ruby-erb ruby-ffi)
+makedepends=(git)
 options=(!emptydirs)
-source=(https://rubygems.org/downloads/$_gemname-$pkgver.gem)
-noextract=($_gemname-$pkgver.gem)
-sha1sums=('3032f0c1662efc8aa04636e99a6bdefd15549fc8')
+source=(
+  $pkgname::git+$url#tag=v$pkgver
+  libsass::git+https://github.com/sass/libsass.git
+)
+sha256sums=('f2eb7ab00afba92187b899d130ddfabeaafafd839ecdf7b7129c443fc36d4247'
+            'SKIP')
+
+
+prepare() {
+  cd $pkgname
+
+  git submodule init
+
+  git config submodule."ext/libsass".url "${srcdir}/libsass"
+
+  git -c protocol.file.allow=always submodule update
+}
+
+build() {
+  cd $pkgname
+
+  local _gemdir="$(gem env gemdir)"
+
+  gem build "${_name}.gemspec"
+
+  gem install \
+    --local \
+    --verbose \
+    --ignore-dependencies \
+    --build-root "tmp_install" \
+    "${_name}-${pkgver}.gem"
+
+  # this gem looks in the wrong place for its library, move it to the right place
+  ln tmp_install/${_gemdir}/extensions/*-linux*/3.4.0/sassc-2.4.0/sassc/libsass.so \
+    "tmp_install/${_gemdir}/gems/sassc-2.4.0/lib/sassc/libsass.so"
+
+  # remove unrepreducible files
+  rm --force --recursive --verbose \
+    "tmp_install/${_gemdir}/cache/" \
+    "tmp_install/${_gemdir}/gems/${_name}-${pkgver}/vendor/" \
+    "tmp_install/${_gemdir}/doc/${_name}-${pkgver}/ri/ext/"
+
+  find "tmp_install/${_gemdir}/gems/" \
+    -type f \
+    \( \
+      -iname "*.o" -o \
+      -iname "*.c" -o \
+      -iname "*.time" -o \
+      -iname "gem.build_complete" -o \
+      -iname "Makefile" \
+    \) \
+    -delete
+
+  find "tmp_install/${_gemdir}/extensions/" \
+    -type f \
+    \( \
+      -iname "mkmf.log" -o \
+      -iname "gem_make.out" \
+    \) \
+    -delete
+}
+
+check() {
+  cd $pkgname
+
+  local _gemdir="$(gem env gemdir)"
+
+  # missing dependencies to run tests, test import instead
+  GEM_HOME="tmp_install/${_gemdir}" ruby -e 'require "sassc"; puts SassC::VERSION'
+}
 
 package() {
-  local _gemdir=$(gem env gemdir)
-  local _extdir=$(ruby -e'puts File.join(Gem.default_dir, "extensions", Gem::Platform.local.to_s, Gem.extension_api_version)')/$_gemname-$pkgver
-  gem install --ignore-dependencies --no-document --no-user-install -i "$pkgdir/$_gemdir" -n "$pkgdir"/usr/bin $_gemname-$pkgver.gem -- --disable-march-tune-native --disable-lto
-  rm "$pkgdir/$_gemdir/cache/$_gemname-$pkgver.gem"
-  install -D -m644 "$pkgdir/$_gemdir/gems/$_gemname-$pkgver/LICENSE.txt" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.txt"
+  cd $pkgname
 
-  ln -s "/$_extdir/sassc/libsass.so" "$pkgdir/$_gemdir/gems/$_gemname-$pkgver/lib/sassc/"
+  cp --archive --verbose tmp_install/* "${pkgdir}"
 
-  # remove junk
-  rm -r "$pkgdir/$_gemdir/gems/$_gemname-$pkgver/"{ext,test}
-  rm "$pkgdir/$_extdir"/gem_make.out
+  install --verbose -D --mode=0644 LICENSE.txt --target-directory "${pkgdir}/usr/share/licenses/${pkgname}"
 }

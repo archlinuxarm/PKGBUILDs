@@ -5,51 +5,41 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - add -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 to v7 CPPFLAGS
 
-pkgbase=gpgme
-pkgname=(gpgme qgpgme-qt5 qgpgme-qt6 python-gpgme)
-pkgver=1.22.0
+pkgname=gpgme
+pkgver=2.0.1
 pkgrel=1
-pkgdesc='A C wrapper library for GnuPG'
+pkgdesc='C wrapper library for GnuPG'
 arch=('x86_64')
 url='https://www.gnupg.org/related_software/gpgme/'
-license=('LGPL')
-makedepends=(
-  'gnupg'
+license=(
+  GPL-2.0-or-later
+  LGPL-2.0-or-later
+  LGPL-2.1-or-later
+  MIT)
+depends=(
+  'gcc-libs'
+  'glib2'
+  'glibc'
+  'libassuan'
   'libgpg-error'
-  'python'
-  'python-build'
-  'python-installer'
-  'python-setuptools'
-  'python-wheel'
-  'qt5-base'
-  'qt6-base'
-  'swig'
-)
+  'gnupg>=2')
+makedepends=('git')
+provides=('libgpgme.so')
+options=('!emptydirs')
 validpgpkeys=('6DAA6E64A76D2840571B4902528897B826403ADA'  # Werner Koch (dist signing 2020)
               'AC8E115BF73E2D8D47FA9908E98E9B2D19C6C8BD') # Niibe Yutaka (GnuPG Release Key)
-source=("https://www.gnupg.org/ftp/gcrypt/${pkgbase}/${pkgbase}-${pkgver}.tar.bz2"{,.sig}
-        '0001-qt-tests-Fix-build-in-source-directory.patch'
-        '0002-qt-tests-Fix-build-in-source-directory-part-2.patch')
-sha256sums=('9551e37081ad3bde81018a0d24f245c3f8206990549598fb31a97a68380a7b71'
-            'SKIP'
-            'a0d3d02c46e7053cfc887271fea7d38f64439b9f67b14eaacec3e602de5dccd4'
-            'eaeae9b9818dd94c08954bb5c3535f43a80583f9c97d5e7f8ca62a104deeebe9')
+source=("git+https://dev.gnupg.org/source/gpgme.git#tag=${pkgname}-${pkgver}?signed")
+sha256sums=('8d39a1eec4ccf3c05a68349800253c30c079c3468b36a7537920e4d441d5945c')
 
 prepare() {
-  cd ${pkgbase}-${pkgver}/
-
-  patch -Np1 < ../0001-qt-tests-Fix-build-in-source-directory.patch
-  patch -Np1 < ../0002-qt-tests-Fix-build-in-source-directory-part-2.patch
+  cd ${pkgname}
 
   sed -i 's/-unknown//' autogen.sh
   autoreconf -fi
-
-  # Building qt5 and qt6 bindings in the same source tree is not supported
-  cp -r ${srcdir}/${pkgbase}-${pkgver}{,-qt6}
 }
 
 build() {
-  cd ${pkgbase}-${pkgver}
+  cd ${pkgname}
 
   [[ $CARCH == "armv7h" ]] && CPPFLAGS+=' -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64'
   ./configure \
@@ -57,27 +47,14 @@ build() {
     --disable-fd-passing \
     --disable-static \
     --disable-gpgsm-test
-  make
 
-  (
-    # use a PEP517 workflow to get a reproducible Python package
-    # NOTE: top_builddir is required so that the build takes place against local gpgme, not system gpgme
-    cd lang/python/
-    top_builddir="$srcdir/$pkgbase-$pkgver" python -m build --wheel --no-isolation
-  )
-
-  cd ../${pkgbase}-${pkgver}-qt6
-  ./configure \
-    --prefix=/usr \
-    --disable-fd-passing \
-    --disable-static \
-    --disable-gpgsm-test \
-    --enable-languages=cpp,qt6
+  # prevent excessive overlinking due to libtool
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
   make
 }
 
 check() {
-  cd ${pkgbase}-${pkgver}
+  cd ${pkgname}
 
   # this test fails with gnupg (FS#66572)
   sed -i 's#"t-keylist-secret",##' tests/json/t-json.c
@@ -85,47 +62,10 @@ check() {
   make check
 }
 
-package_gpgme() {
-  depends=('libgpg-error' 'gnupg>=2')
-  options+=('!emptydirs')
-  provides=('libgpgme.so'
-            'libgpgmepp.so')
-
-  cd ${pkgbase}-${pkgver}
+package() {
+  cd ${pkgname}
 
   make DESTDIR="${pkgdir}" install
 
-  # split qgpgme
-  rm -r "${pkgdir}"/usr/lib/{cmake/QGpgme/,libqgpgme.*}
-  rm -r "${pkgdir}"/usr/lib/python*
-}
-
-package_qgpgme-qt5() {
-  pkgdesc="Qt5 bindings for GPGme"
-  depends=('gpgme' 'qt5-base')
-  provides=('qgpgme')
-  replaces=('qgpgme')
-
-  cd ${pkgbase}-${pkgver}/lang/qt
-
-  make DESTDIR="${pkgdir}" install
-  rm -r "${pkgdir}"/usr/include
-}
-
-package_qgpgme-qt6() {
-  pkgdesc="Qt6 bindings for GPGme"
-  depends=('gpgme' 'qt6-base')
-
-  cd ${pkgbase}-${pkgver}-qt6/lang/qt
-
-  make DESTDIR="${pkgdir}" install
-  rm -r "${pkgdir}"/usr/include
-}
-
-package_python-gpgme() {
-  pkgdesc="Python bindings for GPGme"
-  depends=('gpgme' 'python')
-
-  cd ${pkgbase}-${pkgver}/lang/python
-  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm 644 LICENSES "$pkgdir/usr/share/licenses/$pkgname/MIT.txt"
 }

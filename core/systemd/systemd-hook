@@ -1,6 +1,6 @@
 #!/bin/sh -e
 
-is_chrooted() {
+skip_chrooted() {
   if systemd-detect-virt --chroot; then
     echo >&2 "  Skipped: Running in chroot."
     exit 0
@@ -8,15 +8,17 @@ is_chrooted() {
 }
 
 systemd_live() {
-  is_chrooted
-  if [ ! -d /run/systemd/system ]; then
+  skip_chrooted
+
+  if ! systemd-notify --booted; then
     echo >&2 "  Skipped: Current root is not booted."
     exit 0
   fi
 }
 
 udevd_live() {
-  is_chrooted
+  systemd_live
+
   if [ ! -S /run/udev/control ]; then
     echo >&2 "  Skipped: Device manager is not running."
     exit 0
@@ -26,14 +28,27 @@ udevd_live() {
 op="$1"; shift
 
 case "$op" in
+  binfmt)
+    systemd_live
+    /usr/lib/systemd/systemd-binfmt
+    ;;
   catalog)
     /usr/bin/journalctl --update-catalog
+    ;;
+  daemon-reload-system)
+    systemd_live
+    /usr/bin/systemctl --system daemon-reload
+    ;;
+  daemon-reload-user)
+    systemd_live
+    /usr/bin/systemctl reload 'user@*.service'
     ;;
   hwdb)
     /usr/bin/systemd-hwdb --usr update
     ;;
-  update)
-    touch -c /usr
+  sysctl)
+    systemd_live
+    /usr/lib/systemd/systemd-sysctl
     ;;
   sysusers)
     /usr/bin/systemd-sysusers
@@ -41,10 +56,8 @@ case "$op" in
   tmpfiles)
     /usr/bin/systemd-tmpfiles --create
     ;;
-
-  daemon-reload)
-    systemd_live
-    /usr/bin/systemctl daemon-reload
+  update)
+    touch -c /usr
     ;;
   udev-reload)
     udevd_live
@@ -54,19 +67,23 @@ case "$op" in
       /usr/bin/udevadm settle
     fi
     ;;
-  binfmt)
+
+  # marked with 'systemctl set-property ... Markers=needs-restart'
+  restart-marked)
     systemd_live
-    /usr/lib/systemd/systemd-binfmt
-    ;;
-  sysctl)
-    systemd_live
-    /usr/lib/systemd/systemd-sysctl
+    /usr/bin/systemctl reload-or-restart --marked
     ;;
 
   # For use by other packages
   reload)
     systemd_live
     /usr/bin/systemctl try-reload-or-restart "$@"
+    ;;
+
+  # For use by other packages
+  restart)
+    systemd_live
+    /usr/bin/systemctl try-restart "$@"
     ;;
 
   *)

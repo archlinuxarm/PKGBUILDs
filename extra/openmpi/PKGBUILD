@@ -1,3 +1,4 @@
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Maintainer: David Runge <dvzrv@archlinux.org>
 # Contributor: Anatol Pomozov <anatol dot pomozov at gmail>
@@ -5,70 +6,82 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org
 #  - remove make/optdepend on cuda and configure option
+#  - remove make/optdepend on hip-runtime-amd and rocm configure option
+#  - remove makedepend on nvidia-utils
+#  - build for v8 only, 32-bit support dropped in version 5
 
-pkgname=openmpi
-pkgver=4.1.5
+buildarch=8
+
+pkgbase=openmpi
+pkgname=(
+  openmpi
+  openmpi-docs
+)
+pkgver=5.0.8
 pkgrel=5
 pkgdesc='High performance message passing library (MPI)'
 arch=(x86_64)
 url='https://www.open-mpi.org'
-license=('custom:OpenMPI')
-depends=(
+license=('BSD-3-Clause AND LicenseRef-MPICH')
+makedepends=(
+  gcc-fortran
   gcc-libs
   glibc
   hwloc
   libevent
+  libfabric
   libnl
   openpmix
-  openssh
+  prrte
+  valgrind
   zlib
 )
-makedepends=(
-  gcc-fortran
-  inetutils
-  valgrind
-)
-optdepends=(
-  'gcc-fortran: fortran support'
-  'perl: for aggregate_profile.pl and profile2mat.pl'
-)
-provides=(
-  libmca_common_monitoring.so
-  libmca_common_ompio.so
-  libmca_common_sm.so
-  libmpi.so
-  libmpi_cxx.so
-  libmpi_mpifh.so
-  libmpi_usempi_ignore_tkr.so
-  libmpi_usempif08.so
-  libompitrace.so
-  libopen-pal.so
-  libopen-rte.so
-)
 source=(
-  https://www.open-mpi.org/software/ompi/v${pkgver%.*}/downloads/$pkgname-$pkgver.tar.bz2
+  https://www.open-mpi.org/software/ompi/v${pkgver%.*}/downloads/$pkgbase-$pkgver.tar.bz2
 )
-sha256sums=('a640986bc257389dd379886fdae6264c8cfa56bc98b71ce3ae3dfbd8ce61dbe3')
-b2sums=('135a8373ed6173b7a94def18e3b964c6b6050c909382e0dbb1898a6d261ae428931358121ef6d325d303f4f510017a94970f7c66b280a5fc460365821f36dece')
+sha256sums=('53131e1a57e7270f645707f8b0b65ba56048f5b5ac3f68faabed3eb0d710e449')
+b2sums=('610df6519323c9d08feccdd3d5b9d8a36cbed8ade7e31ca340e31aa0e21f6fc3ab6534c16a1660d9af53594d6836ed54fdd910202f22175d8517dc5193e1cd9c')
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+prepare() {
+  cd $pkgbase-$pkgver
+  # workaround for https://github.com/open-mpi/ompi/issues/12257
+  sed -i 's|WRAPPER__FCFLAGS|WRAPPER_FCFLAGS|g' configure
+  sed -i 's|WRAPPER_EXTRA_FCFLAGS|WRAPPER_FCFLAGS|g' configure
+  sed -i 's|"-I/usr/include",||' opal/tools/wrappers/opal_wrapper.c
+}
 
 build() {
   local configure_options=(
     --prefix=/usr
     --enable-builtin-atomics
     --enable-memchecker
-    --enable-mpi-cxx
     --enable-mpi-fortran=all
     --enable-pretty-print-stacktrace
     --libdir=/usr/lib
-    --sysconfdir=/etc/$pkgname
+    --sysconfdir=/etc/$pkgbase
     --with-hwloc=external
     --with-libevent=external
     --with-pmix=external
+    --with-prrte=external
     --with-valgrind
   )
-  cd $pkgname-$pkgver
+  cd $pkgbase-$pkgver
 
-  # TODO: depend on prrte with openmpi >= 5
+  # set environment variables for reproducible build
+  # see https://github.com/open-mpi/ompi/blob/main/docs/release-notes/general.rst
+  export HOSTNAME=buildhost
+  export USER=builduser
+
   ./configure "${configure_options[@]}"
   # prevent excessive overlinking due to libtool
   sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
@@ -76,14 +89,48 @@ build() {
 }
 
 check() {
-  make check -C $pkgname-$pkgver
+  make check -C $pkgbase-$pkgver
 }
 
-package() {
-  depends+=(libpmix.so)
+package_openmpi() {
+  depends=(
+    gcc-libs
+    glibc
+    hwloc
+    libevent libevent_{core,pthreads}-2.1.so
+    libfabric
+    libnl
+    openpmix libpmix.so
+    prrte
+    zlib
+  )
+  optdepends=(
+    'gcc-fortran: fortran support'
+    'openssh: for execution on remote hosts via plm_ssh_agent'
+  )
+  provides=(
+    libmpi.so
+    libmpi_mpifh.so
+    libmpi_usempi_ignore_tkr.so
+    libmpi_usempif08.so
+    libopen-pal.so
+    liboshmem.so
+  )
+  backup=(etc/$pkgname/$pkgname-mca-params.conf)
 
-  make DESTDIR="$pkgdir" install -C $pkgname-$pkgver
-  install -Dm 644 $pkgname-$pkgver/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  make DESTDIR="$pkgdir" install -C $pkgbase-$pkgver
+  (
+    cd "$pkgdir"
+    _pick $pkgbase-docs usr/share/doc
+  )
+  install -Dm 644 $pkgbase-$pkgver/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
+
+package_openmpi-docs() {
+  pkgdesc+=" - documentation"
+
+  mv -v $pkgname/* "$pkgdir"
+  install -vDm 644 $pkgbase-$pkgver/LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
 }
 
 # vim: ts=2 sw=2 et:

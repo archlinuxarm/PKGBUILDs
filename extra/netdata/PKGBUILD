@@ -1,74 +1,87 @@
 # Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
 # Contributor: SanskritFritz (gmail)
 
-# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - disable LTO
-
 pkgname=netdata
-pkgver=1.42.4
-pkgrel=2
+pkgver=2.7.2
+pkgrel=1
 pkgdesc="Real-time performance monitoring, in the greatest possible detail, over the web"
 url="https://github.com/netdata/netdata"
 arch=('x86_64')
-license=('GPL')
+license=('GPL-3.0-or-later')
 backup=('etc/netdata/netdata.conf')
-depends=('libmnl' 'libnetfilter_acct' 'zlib' 'judy' 'libuv' 'json-c' 'libcap' 'lz4' 'openssl' 'which' 'snappy' 'protobuf'
-         'libwebsockets' 'mongo-c-driver' 'libyaml')
-makedepends=('cups')
-optdepends=('nodejs: for monitoring named and SNMP devices'
-            'lm_sensors: for monitoring hardware sensors'
-            'iproute2: for monitoring Linux QoS'
+depends=('libmnl' 'libnetfilter_acct' 'zlib' 'judy' 'libuv' 'json-c' 'libcap' 'lz4'
+         'openssl' 'which' 'snappy' 'protobuf' 'libwebsockets' 'mongo-c-driver'
+         'libyaml' 'cups' 'freeipmi')
+makedepends=('cups' 'go' 'cmake' 'ninja' 'git' 'rust')
+optdepends=('iproute2: for monitoring Linux QoS'
             'python: for most of the external plugins'
-            'python-psycopg2: for monitoring PostgreSQL databases'
-            'python-mysqlclient: for monitoring MySQL/MariaDB databases'
-            'python-requests: for monitoring elasticsearch'
-            'hddtemp: for monitoring hhd temperature'
-            'fping: for for fping module'
             'apcupsd: for monitoring APC UPS'
-            'cups: for CUPS plugin'
+            'lm_sensors: for go.d/sensors module'
+            'smartmontools: for go.d/smartctl module'
+            'nvme-cli: for go.d/nvme module'
             'iw: for monitoring Linux as access point')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/netdata/netdata/releases/download/v$pkgver/netdata-v$pkgver.tar.gz"
-        "$pkgname.sysusers"
-         protobuf-23.patch)
-sha512sums=('58bfb21658044b5c4ede4cb88e440b161f1548168b9012caeca18f5800ba17b742156dda97b4587ea705b3d31c6fe8f9fb32df76c482c1b62ed109066669ddcd'
-            'a910809a823ba58ca7bdaa72e8d68427b48f452c1fbb2343fa182ecb0a091a7640e73af24b8ba2fdd90e00aed8ef53b7fccd25cb8f04ca9b9fa6c8e52223ca66'
-            '5a759d6fe29f6ded679ebe61189a81639adf4397219cb0f1128a1490702ca4b1e250a70ed3bb548ca37c53992659f9c910e1ddc8b167bc6cf1f518630b960e05')
+        netdata.sysusers
+        netdata.tmpfiles)
+sha512sums=('91867ae301579dc1c4d65bdd027cba3acf1f19abd8969a8664da8510e6eb6bc5b84bf3560e853d31d5fb2f0c17ae0adf0c02d6be7f2f66ddffdd5df54836ef40'
+            '7331e050bd0900c16a5b25518ef4b9aa4a235791fc6e959c8aa2d8ea1a9a6c6e71208b73691aa50dd5039df4bf3fa86175cff9f580ce7bb4dab2b6f1930aea9d'
+            '9dcf6058d7e2b072ca6797c3e8fcb2cccc1f6670a9e58769922e078c95a9431370dc429cc34d8e642dbab10942221f1f730d570df7c40d651872931c070be832')
 
 prepare() {
   cd $pkgname-v$pkgver
-  patch -p1 -i ../protobuf-23.patch # Fix build with protobuf 23
-  # protobuf 23 requires c++17
-  sed -e 's|\# AX_CXX_COMPILE_STDCXX(17, noext, optional)|AX_CXX_COMPILE_STDCXX(17, noext, optional)|' -i configure.ac
+
+  sed -i "s/CMAKE_CXX_STANDARD 14/CMAKE_CXX_STANDARD 17/" CMakeLists.txt
+  sed -i "s|usr/sbin|usr/bin|g" CMakeLists.txt
+  sed -i "s|usr/libexec|usr/lib|g" CMakeLists.txt
+  sed -i "s|usr/libexec|usr/lib|g" CMakeLists.txt packaging/cmake/Modules/NetdataEBPFLegacy.cmake
 }
 
 build() {
-  cd "$pkgname-v$pkgver"
-
-  autoreconf -i
-  ./configure \
-      --prefix="/usr" \
-      --sbindir="/usr/bin" \
-      --sysconfdir="/etc" \
-      --libexecdir="/usr/lib" \
-      --localstatedir="/var" \
-      --with-zlib --with-math --with-user=netdata --disable-lto
-  make
+  cmake \
+    -B build \
+    -G Ninja \
+    -S "$pkgname-v$pkgver" \
+    -DCMAKE_BUILD_TYPE='None' \
+    -DCMAKE_INSTALL_PREFIX=/ \
+    -Wno-dev \
+    -DENABLE_PLUGIN_XENSTAT=OFF \
+    -DENABLE_PLUGIN_EBPF=OFF
+  cmake --build build
 }
 
 package() {
+  DESTDIR="$pkgdir" cmake --install build
+
   cd "$pkgname-v$pkgver"
 
-  make DESTDIR="$pkgdir" install
+  install -Dm644 "system/netdata.conf" "${pkgdir}/etc/netdata/netdata.conf"
+  install -Dm644 "${pkgdir}/usr/lib/netdata/system/systemd/netdata.service" \
+"${pkgdir}/usr/lib/systemd/system/netdata.service"
+  install -Dm644 "../netdata.sysusers" "${pkgdir}/usr/lib/sysusers.d/netdata.conf"
+  install -Dm644 "../netdata.tmpfiles" "${pkgdir}/usr/lib/tmpfiles.d/netdata.conf"
 
-  install -Dm644 system/netdata.conf "$pkgdir"/etc/netdata/netdata.conf
-  chown -R 0:134 "$pkgdir"/usr/share/netdata/web
+  chown -R "134:134" \
+  	"${pkgdir}/var/cache/netdata" \
+  	"${pkgdir}/var/lib/netdata" \
+  	"${pkgdir}/var/log/netdata"
+  chmod 0750 "${pkgdir}/var/cache/netdata" "${pkgdir}/var/lib/netdata"
 
-  install -Dm0644 "system/systemd/netdata.service.v235" "$pkgdir/usr/lib/systemd/system/netdata.service"
-  install -Dm0644 "system/logrotate/netdata" "$pkgdir/etc/logrotate.d/netdata"
-  install -Dm0644 "${srcdir}/${pkgname}.sysusers" "${pkgdir}/usr/lib/sysusers.d/${pkgname}.conf"
+  # Also check curl -Ss https://raw.githubusercontent.com/netdata/netdata/master/netdata.spec.in | grep "%caps"
+  chown -R "0:134" "${pkgdir}/usr/lib/netdata/plugins.d"
+  chmod 0750 "${pkgdir}/usr/lib/netdata/plugins.d/"*".sh"
+  chmod 4750 "${pkgdir}/usr/lib/netdata/plugins.d/"{cgroup-network,\
+local-listeners,network-viewer.plugin,ndsudo,freeipmi.plugin,nfacct.plugin,\
+otel-plugin}
+  setcap cap_dac_read_search,cap_net_admin,cap_net_raw+eip "${pkgdir}/usr/lib/netdata/plugins.d/go.d.plugin"
+  setcap cap_dac_read_search,cap_sys_ptrace+ep "${pkgdir}/usr/lib/netdata/plugins.d/apps.plugin"
+  setcap cap_dac_read_search+ep "${pkgdir}/usr/lib/netdata/plugins.d/slabinfo.plugin"
+  setcap cap_sys_admin+ep "${pkgdir}/usr/lib/netdata/plugins.d/perf.plugin"
+  setcap cap_dac_read_search+ep "${pkgdir}/usr/lib/netdata/plugins.d/debugfs.plugin"
+  setcap cap_dac_read_search+ep "${pkgdir}/usr/lib/netdata/plugins.d/systemd-journal.plugin"
+  setcap cap_sys_admin,cap_sys_ptrace,cap_dac_read_search+ep "${pkgdir}/usr/lib/netdata/plugins.d/network-viewer.plugin"
+  setcap cap_net_bind_service+eip "${pkgdir}/usr/lib/netdata/plugins.d/otel-plugin"
 
-  # https://github.com/netdata/netdata/tree/master/collectors/apps.plugin#permissions
-  setcap cap_dac_read_search,cap_sys_ptrace+ep "${pkgdir}"/usr/lib/netdata/plugins.d/apps.plugin
-  setcap cap_dac_read_search,cap_sys_ptrace+ep "${pkgdir}"/usr/lib/netdata/plugins.d/debugfs.plugin
-  setcap cap_dac_read_search,cap_sys_ptrace+ep "${pkgdir}"/usr/lib/netdata/plugins.d/perf.plugin
+  # Remove files for other initsystems
+  rm -rf "${pkgdir}/usr/lib/netdata/system"
+  rm -rf "${pkgdir}/var/run"
 }
