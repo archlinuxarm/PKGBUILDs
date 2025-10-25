@@ -1,0 +1,106 @@
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Dan McGee <dan@archlinux.org>
+
+pkgname=postgresql-old-upgrade
+pkgver=16.10
+_majorver=${pkgver%.*}
+pkgrel=2
+pkgdesc='PostgreSQL build for migrating between major versions with pg_upgrade'
+url='https://www.postgresql.org/'
+arch=('x86_64')
+license=('PostgreSQL')
+depends=(
+  "postgresql-libs>=${_majorver}"
+  'bash'
+  'gcc-libs'
+  'glibc'
+  'icu'
+  'krb5'
+  'libldap'
+  'libxml2'
+  'llvm-libs'
+  'lz4'
+  'openssl'
+  'pam'
+  'systemd-libs'
+  'zlib'
+  'zstd'
+)
+makedepends=(
+  'clang'
+  'llvm'
+  'perl'
+  'python'
+  'systemd'
+  'tcl'
+)
+source=(
+  https://ftp.postgresql.org/pub/source/v${pkgver}/postgresql-${pkgver}.tar.bz2
+  0001-jit-fix-build-with-LLVM-21.patch
+)
+md5sums=('96faafa6f2504827038f13c18781dc10'
+         'e3ef345d74705a1a5e40d82187758ff3')
+sha256sums=('de8485f4ce9c32e3ddfeef0b7c261eed1cecb54c9bcd170e437ff454cb292b42'
+            'fd8512247dbf629a7bf9f1d3c8c45afdddc36bef68e7bf3623ce8d542b0ef43d')
+b2sums=('0b07df6cdd92159ca464dec9fc3f86a806a0a5d9829937f1084e914cac55deff4c3f63b8d9ff1dcac01086b1c1d83ed726c00b007ccd57490bef15194181ddd7'
+        '43bbbc51fe386f28ef587c4f0f59eb46fcc181e61ba9cb2e5c67903ffe97e568e8b14acfc163a144565bd594f96687b2842aef4b520eae1fe12a43fc168f5279')
+
+# Upstream provides md5 and sha256
+
+prepare() {
+  cd postgresql-${pkgver}
+  patch -Np1 < ../0001-jit-fix-build-with-LLVM-21.patch
+}
+
+build() {
+  cd postgresql-${pkgver}
+  local configure_options=(
+    --prefix=/opt/pgsql-${_majorver}
+    --disable-rpath
+    --disable-nls
+    --disable-tap-tests
+    --enable-thread-safety
+    --with-gssapi
+    --with-icu
+    --with-ldap
+    --with-libxml
+    --without-libxslt
+    --with-llvm
+    --with-lz4
+    --with-openssl
+    --with-pam
+    --with-perl
+    --with-python
+    --without-readline
+    --with-system-tzdata=/usr/share/zoneinfo
+    --with-systemd
+    --with-tcl
+    --with-uuid=e2fs
+    --with-zstd
+  )
+
+  # Fix static libs
+  CFLAGS+=" -ffat-lto-objects"
+
+  ./configure "${configure_options[@]}"
+  make -C src all
+  make -C contrib all
+}
+
+package() {
+  optdepends=(
+    'perl: for PL/Perl support'
+    'python: for PL/Python 3 support'
+    'tcl: for PL/Tcl support'
+  )
+
+  cd postgresql-${pkgver}
+
+  # install
+  make -C src DESTDIR="${pkgdir}" install
+  make -C contrib DESTDIR="${pkgdir}" install
+
+  install -Dm 644 COPYRIGHT -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+# vim:set sw=2 sts=-1 et:
