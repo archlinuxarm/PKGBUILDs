@@ -1,58 +1,61 @@
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
 # Maintainer: Dan McGee <dan@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - patch to fix AArch64 FTBFS with LLVM 21
 
-pkgname=postgresql-old-upgrade
-pkgver=16.10
-_majorver=${pkgver%.*}
-pkgrel=2
-pkgdesc='PostgreSQL build for migrating between major versions with pg_upgrade'
-url='https://www.postgresql.org/'
-arch=('x86_64')
-license=('PostgreSQL')
+pkgbase=postgresql-old-upgrade
+pkgname=(
+  postgresql-old-upgrade
+)
+pkgver=17.6
+pkgrel=1
+pkgdesc="Older PostgreSQL for migrating major versions with pg_upgrade"
+url="https://www.postgresql.org/"
+arch=(x86_64)
+license=(PostgreSQL)
 depends=(
-  "postgresql-libs>=${_majorver}"
-  'bash'
-  'gcc-libs'
-  'glibc'
-  'icu'
-  'krb5'
-  'libldap'
-  'libxml2'
-  'llvm-libs'
-  'lz4'
-  'openssl'
-  'pam'
-  'systemd-libs'
-  'zlib'
-  'zstd'
+  gcc-libs
+  glibc
+  icu
+  krb5
+  libldap
+  libxml2
+  llvm-libs
+  lz4
+  openssl
+  pam
+  systemd-libs
+  util-linux-libs
+  zlib
+  zstd
 )
 makedepends=(
-  'clang'
-  'llvm'
-  'perl'
-  'python'
-  'systemd'
-  'tcl'
+  clang
+  llvm
+  perl
+  python
+  systemd
+  tcl
+  util-linux
 )
 source=(
   https://ftp.postgresql.org/pub/source/v${pkgver}/postgresql-${pkgver}.tar.bz2
   0001-jit-fix-build-with-LLVM-21.patch
   0002-llvm-21-aarch64.patch
 )
-md5sums=('96faafa6f2504827038f13c18781dc10'
-         'e3ef345d74705a1a5e40d82187758ff3'
-         '58fdb5a17290bde6f9d45c908ea00b38')
-sha256sums=('de8485f4ce9c32e3ddfeef0b7c261eed1cecb54c9bcd170e437ff454cb292b42'
-            'fd8512247dbf629a7bf9f1d3c8c45afdddc36bef68e7bf3623ce8d542b0ef43d'
-            'b19e69d83736b3e0144d422df59f34505ce60ebb0e6bc429985e7fb11a40d67c')
-b2sums=('0b07df6cdd92159ca464dec9fc3f86a806a0a5d9829937f1084e914cac55deff4c3f63b8d9ff1dcac01086b1c1d83ed726c00b007ccd57490bef15194181ddd7'
-        '43bbbc51fe386f28ef587c4f0f59eb46fcc181e61ba9cb2e5c67903ffe97e568e8b14acfc163a144565bd594f96687b2842aef4b520eae1fe12a43fc168f5279'
+b2sums=('9287eab85e17a65333d970bf7d4d254e25295615b4787072ff2a6c705cb66b7775dbe3a0c6b6fa3e2ab37c3278d204ccfdd3e587226d4c1d6363868569149216'
+        '392403ece1c5886d6e0d7062091dc71ec1cb085d1da2e0d4b91638c875c5d84ce2b2e4faca05ee336f57a9482e81aeccf882c9ced8dd56091095f5f612d86e03'
         'd730f79f14ec6c0e4b3b8cbe7b885643de4830c6ce19c20d5e349e4009cf81b017168324595a4d72841f07da2fc8bbbcd2c3d310163f8e76358203d90f34ce99')
 
-# Upstream provides md5 and sha256
+# PostgreSQL releases are unsigned and only provide these sums
+md5sums=('e72b7e5dc22d44d56b113ed1f74e4084'
+         '0d34dd948e5b031d9ae4312a1eb10bd6'
+         '58fdb5a17290bde6f9d45c908ea00b38')
+sha256sums=('e0630a3600aea27511715563259ec2111cd5f4353a4b040e0be827f94cd7a8b0'
+            'ee6a8220d846c3064ca93dbdc656a0ffbcfad8736333fae17b40e5e65d4ed558'
+            'b19e69d83736b3e0144d422df59f34505ce60ebb0e6bc429985e7fb11a40d67c')
 
 prepare() {
   cd postgresql-${pkgver}
@@ -61,13 +64,11 @@ prepare() {
 }
 
 build() {
-  cd postgresql-${pkgver}
   local configure_options=(
-    --prefix=/opt/pgsql-${_majorver}
+    --prefix=/opt/pgsql-${pkgver%%.*}
     --disable-rpath
     --disable-nls
     --disable-tap-tests
-    --enable-thread-safety
     --with-gssapi
     --with-icu
     --with-ldap
@@ -87,28 +88,27 @@ build() {
     --with-zstd
   )
 
-  # Fix static libs
+  # use fat LTO objects for static libraries
   CFLAGS+=" -ffat-lto-objects"
+  CXXFLAGS+=" -ffat-lto-objects"
 
-  ./configure "${configure_options[@]}"
-  make -C src all
-  make -C contrib all
+  mkdir -p build; cd build
+  ../postgresql-${pkgver}/configure "${configure_options[@]}"
+  make world-bin
 }
 
-package() {
+package_postgresql-old-upgrade() {
+  depends+=("postgresql-libs>=${pkgver}")
   optdepends=(
     'perl: for PL/Perl support'
     'python: for PL/Python 3 support'
     'tcl: for PL/Tcl support'
   )
 
-  cd postgresql-${pkgver}
+  make -C build DESTDIR="${pkgdir}" install-world-bin
 
-  # install
-  make -C src DESTDIR="${pkgdir}" install
-  make -C contrib DESTDIR="${pkgdir}" install
 
-  install -Dm 644 COPYRIGHT -t "${pkgdir}/usr/share/licenses/${pkgname}"
+  install -Dm644 postgresql-${pkgver}/COPYRIGHT -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
 # vim:set sw=2 sts=-1 et:
