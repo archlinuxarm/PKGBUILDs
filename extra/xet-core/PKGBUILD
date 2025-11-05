@@ -1,0 +1,71 @@
+# Maintainer: Jakub Klinkovský <lahwaacz at archlinux dot org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - build aarch64 with crypto extension
+
+pkgbase=xet-core
+pkgname=(python-hf-xet)
+pkgver=1.2.0
+pkgrel=1
+pkgdesc="xet client tech, used in Huggingface Hub"
+arch=(x86_64)
+url=https://github.com/huggingface/xet-core
+license=(Apache-2.0)
+makedepends=(
+  cargo
+  maturin
+  python-installer
+  openssl
+)
+source=($pkgbase-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz)
+b2sums=('f54088890975e906ef63b5c54ff08d0f4fbbc67b8d5dd10360b97b5b20137553ccd5b8559d059fc19d193200c6f97d4a5d6ceabc8a28e4eddf5d7ce5018fc484')
+
+prepare() {
+  cd $pkgbase-$pkgver
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  # fix building with LTO
+  CFLAGS+=' -ffat-lto-objects'
+
+  # build aarch64 with crypto extension
+  [[ $CARCH == "aarch64" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/-march=armv8-a/-march=armv8-a+crypto/'` && CXXFLAGS="$CFLAGS"
+
+  # always use system openssl https://docs.rs/openssl/latest/openssl/
+  export OPENSSL_NO_VENDOR=1
+
+  cd $pkgbase-$pkgver
+  # there don't seem to be any useful tools for users...
+  #cargo build --frozen --release
+
+  # build Python bindings
+  cd hf_xet
+  local maturin_options=(
+    --locked
+    --release
+    --target "$(rustc -vV | sed -n 's/host: //p')"
+    --strip
+    # wheel compatibility tag - native linux ensures we don't bundle openssl libs
+    # https://github.com/PyO3/maturin/issues/2038
+    --compatibility linux
+    # use native-tls instead of native-tls-vendored
+    --features native-tls
+  )
+  maturin build "${maturin_options[@]}"
+}
+
+package_python-hf-xet() {
+  depends=(
+    gcc-libs
+    glibc
+    openssl libssl.so libcrypto.so
+    python
+  )
+
+  cd $pkgbase-$pkgver
+  install -vDm 644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+
+  cd hf_xet
+  python -m installer --destdir "$pkgdir" target/wheels/*.whl
+}
