@@ -3,6 +3,10 @@
 if [ -z "$IDEA_JDK" ] ; then
   IDEA_JDK="/usr/lib/jvm/java-21-openjdk/"
 fi
+# use JBR if exists
+if [ -d "/usr/share/idea/jbr/" ] ; then
+  IDEA_JDK="/usr/share/idea/jbr/"
+fi
 # open-jfx location that should match the JDK version
 if [ -z "$IDEA_JFX" ] ; then
   IDEA_JFX="/usr/lib/jvm/java-21-openjfx/"
