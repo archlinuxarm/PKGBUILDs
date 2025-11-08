@@ -1,0 +1,83 @@
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archilnuxarm.org>
+#  - only enable neon on AArch64
+
+pkgbase=graphene
+pkgname=(
+  graphene
+  graphene-docs
+)
+pkgver=1.10.8
+pkgrel=2.1
+pkgdesc="Thin layer of graphic data types"
+url="https://ebassi.github.io/graphene/"
+arch=(x86_64)
+license=(MIT)
+depends=(
+  glib2
+  glibc
+)
+makedepends=(
+  git
+  gobject-introspection
+  gtk-doc
+  meson
+)
+checkdepends=(
+  python-gobject
+  python-tappy
+)
+source=(
+  "git+https://github.com/ebassi/graphene#tag=$pkgver"
+  "git+https://github.com/ebassi/mutest"
+)
+b2sums=('386f8b82979459807828a392d5071ece645c9e06699a706b0cc2a582df74388f78f8f8152d02004f2e3e093be9a10b0e72cad04687cf650e06deead6f4929c4a'
+        'SKIP')
+
+prepare() {
+  cd graphene
+
+  # Don't install tests
+  git cherry-pick -n f89522ca60a76512b8b85c7b8e4d16b94849f22f
+
+  git submodule init
+  git submodule set-url subprojects/mutest "$srcdir/mutest"
+  git -c protocol.file.allow=always -c protocol.allow=never submodule update
+}
+
+build() {
+  local meson_options=(
+    -D gtk_doc=true
+    -D installed_tests=false
+    -D arm_neon=$([[ $CARCH == aarch64 ]] && echo true || echo false)
+  )
+
+  arch-meson graphene build "${meson_options[@]}"
+  meson compile -C build
+}
+
+check() {
+  meson test -C build --print-errorlogs
+}
+
+package_graphene() {
+  provides=(libgraphene-1.0.so)
+
+  meson install -C build --destdir "$pkgdir"
+
+  mkdir -p doc/usr/share
+  mv {"$pkgdir",doc}/usr/share/gtk-doc
+
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 graphene/LICENSE.txt
+}
+
+package_graphene-docs() {
+  pkgdesc+=" (documentation)"
+  depends=()
+
+  mv doc/* "$pkgdir"
+  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 graphene/LICENSE.txt
+}
+
+# vim:set sw=2 et:
