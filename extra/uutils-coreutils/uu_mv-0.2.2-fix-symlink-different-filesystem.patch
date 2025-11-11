@@ -1,0 +1,110 @@
+From ef80a6d3701651cfadee4df675f15e9a05af6436 Mon Sep 17 00:00:00 2001
+From: yuankunzhang <fmcocoa@gmail.com>
+Date: Wed, 10 Sep 2025 23:12:25 +0800
+Subject: [PATCH] mv: support moving folder containing symlinks to different
+ filesystem
+
+---
+ src/uu/mv/src/mv.rs      | 27 ++++++++++++++++---------
+ tests/by-util/test_mv.rs | 43 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 61 insertions(+), 9 deletions(-)
+
+diff --git a/src/uu/mv/src/mv.rs b/src/uu/mv/src/mv.rs
+index 820b912401..c209c4ebef 100644
+--- a/src/uu/mv/src/mv.rs
++++ b/src/uu/mv/src/mv.rs
+@@ -1044,7 +1044,11 @@ fn copy_dir_contents_recursive(
+             }
+             #[cfg(not(unix))]
+             {
+-                fs::copy(&from_path, &to_path)?;
++                if from_path.is_symlink() {
++                    rename_symlink_fallback(&from_path, &to_path)?;
++                } else {
++                    fs::copy(&from_path, &to_path)?;
++                }
+             }
+         }
+ 
+@@ -1076,14 +1080,19 @@ fn copy_file_with_hardlinks_helper(
+         return Ok(());
+     }
+ 
+-    // Regular file copy
+-    #[cfg(all(unix, not(any(target_os = "macos", target_os = "redox"))))]
+-    {
+-        fs::copy(from, to).and_then(|_| fsxattr::copy_xattrs(&from, &to))?;
+-    }
+-    #[cfg(any(target_os = "macos", target_os = "redox"))]
+-    {
+-        fs::copy(from, to)?;
++    if from.is_symlink() {
++        // Symlink copy
++        rename_symlink_fallback(from, to)?;
++    } else {
++        // Regular file copy
++        #[cfg(all(unix, not(any(target_os = "macos", target_os = "redox"))))]
++        {
++            fs::copy(from, to).and_then(|_| fsxattr::copy_xattrs(&from, &to))?;
++        }
++        #[cfg(any(target_os = "macos", target_os = "redox"))]
++        {
++            fs::copy(from, to)?;
++        }
+     }
+ 
+     Ok(())
+diff --git a/tests/by-util/test_mv.rs b/tests/by-util/test_mv.rs
+index ddb58bde57..a67e8c313e 100644
+--- a/tests/by-util/test_mv.rs
++++ b/tests/by-util/test_mv.rs
+@@ -621,6 +621,49 @@ fn test_mv_symlink_into_target() {
+     ucmd.arg("dir-link").arg("dir").succeeds();
+ }
+ 
++#[cfg(all(unix, not(target_os = "android")))]
++#[ignore = "requires sudo"]
++#[test]
++fn test_mv_broken_symlink_to_another_fs() {
++    let scene = TestScenario::new(util_name!());
++
++    scene.fixtures.mkdir("foo");
++
++    let mount = scene
++        .cmd("sudo")
++        .args(&[
++            "-E",
++            "--non-interactive",
++            "mount",
++            "none",
++            "-t",
++            "tmpfs",
++            "foo",
++        ])
++        .run();
++
++    if !mount.succeeded() {
++        print!("Test skipped; requires root user");
++        return;
++    }
++
++    scene.fixtures.mkdir("bar");
++    scene.fixtures.symlink_file("nonexistent", "bar/baz");
++
++    scene
++        .ucmd()
++        .arg("bar")
++        .arg("foo")
++        .succeeds()
++        .no_stderr()
++        .no_stdout();
++
++    scene
++        .cmd("sudo")
++        .args(&["-E", "--non-interactive", "umount", "foo"])
++        .succeeds();
++}
++
+ #[test]
+ #[cfg(all(unix, not(target_os = "android")))]
+ fn test_mv_hardlink_to_symlink() {

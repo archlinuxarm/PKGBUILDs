@@ -1,0 +1,101 @@
+From 62ae994b55da3e6602bf51de989650884ef157d8 Mon Sep 17 00:00:00 2001
+From: yuankunzhang <fmcocoa@gmail.com>
+Date: Tue, 9 Sep 2025 20:06:44 +0800
+Subject: [PATCH] mv: support moving source to a symlink directory
+
+---
+ src/uu/mv/src/mv.rs      |  6 +++++-
+ tests/by-util/test_mv.rs | 42 ++++++++++++++++++++++++++++------------
+ 2 files changed, 35 insertions(+), 13 deletions(-)
+
+diff --git a/src/uu/mv/src/mv.rs b/src/uu/mv/src/mv.rs
+index 5d487b0e193..820b912401a 100644
+--- a/src/uu/mv/src/mv.rs
++++ b/src/uu/mv/src/mv.rs
+@@ -374,8 +374,12 @@ fn handle_two_paths(source: &Path, target: &Path, opts: &Options) -> UResult<()>
+         });
+     }
+ 
+-    let target_is_dir = target.is_dir() && !target.is_symlink();
+     let source_is_dir = source.is_dir() && !source.is_symlink();
++    let target_is_dir = if target.is_symlink() {
++        fs::canonicalize(target).is_ok_and(|p| p.is_dir())
++    } else {
++        target.is_dir()
++    };
+ 
+     if path_ends_with_terminator(target)
+         && (!target_is_dir && !source_is_dir)
+diff --git a/tests/by-util/test_mv.rs b/tests/by-util/test_mv.rs
+index 7741fa8ca97..ddb58bde577 100644
+--- a/tests/by-util/test_mv.rs
++++ b/tests/by-util/test_mv.rs
+@@ -429,12 +429,11 @@ fn test_mv_replace_symlink_with_symlink() {
+ fn test_mv_replace_symlink_with_directory() {
+     let (at, mut ucmd) = at_and_ucmd!();
+ 
+-    at.mkdir("a");
++    at.touch("a");
+     at.mkdir("b");
+-    at.touch("a/empty_file_a");
+     at.touch("b/empty_file_b");
+ 
+-    at.symlink_dir("a", "symlink");
++    at.symlink_file("a", "symlink");
+ 
+     ucmd.arg("-T")
+         .arg("b")
+@@ -449,25 +448,44 @@ fn test_mv_replace_symlink_with_directory() {
+ fn test_mv_replace_symlink_with_file() {
+     let (at, mut ucmd) = at_and_ucmd!();
+ 
+-    at.mkdir("a");
+-    at.touch("a/empty_file_a");
+-    at.touch("empty_file_b");
+-
+-    at.symlink_dir("a", "symlink");
++    at.touch("a");
++    at.touch("b");
+ 
+-    assert!(at.file_exists("symlink/empty_file_a"));
++    at.symlink_file("a", "symlink");
+ 
+     ucmd.arg("-T")
+-        .arg("empty_file_b")
++        .arg("b")
+         .arg("symlink")
+         .succeeds()
+         .no_stderr();
+ 
+     assert!(at.file_exists("symlink"));
+     assert!(!at.is_symlink("symlink"));
+-    assert!(!at.file_exists("empty_file_b"));
++    assert!(!at.file_exists("b"));
++    assert!(at.file_exists("a"));
++}
++
++#[test]
++#[cfg(all(unix, not(target_os = "android")))]
++fn test_mv_file_to_symlink_directory() {
++    let (at, mut ucmd) = at_and_ucmd!();
++
++    at.mkdir("a");
++    at.touch("a/empty_file_a");
++    at.touch("b");
++
++    at.symlink_dir("a", "symlink");
++
++    assert!(at.file_exists("symlink/empty_file_a"));
++
++    ucmd.arg("b").arg("symlink").succeeds().no_stderr();
++
++    assert!(at.dir_exists("symlink"));
++    assert!(at.is_symlink("symlink"));
++    assert!(at.file_exists("symlink/b"));
++    assert!(!at.file_exists("b"));
+     assert!(at.dir_exists("a"));
+-    assert!(at.file_exists("a/empty_file_a"));
++    assert!(at.file_exists("a/b"));
+ }
+ 
+ #[test]

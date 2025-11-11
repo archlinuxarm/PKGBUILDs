@@ -1,0 +1,99 @@
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: Orhun Parmaksız <orhun@archlinux.org>
+# Maintainer: Filipe Laíns (ffy00) <lains@archlinux.org>
+# Maintainer: Tobias Powalowski <tpowa@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove invalid AArch64 linker specification
+
+_pkgname=coreutils
+pkgname=uutils-$_pkgname
+pkgver=0.4.0
+pkgrel=1
+pkgdesc='Cross-platform Rust rewrite of the GNU coreutils'
+arch=('x86_64')
+url='https://uutils.github.io/'
+_url='https://github.com/uutils/coreutils'
+license=('MIT')
+depends=(
+  gcc-libs
+  glibc
+  oniguruma
+)
+makedepends=(
+  git
+  rust
+)
+source=(
+  $pkgname::git+$_url.git#tag=${pkgver}
+  # not upstreamable patch for stty panic:
+  # https://github.com/uutils/coreutils/issues/8474
+  "glibc-2.42.patch::https://git.launchpad.net/~juliank/ubuntu/+source/rust-coreutils/plain/debian/patches/glibc-2.42.patch?h=ubuntu/devel&id=a16e77bec0546ee51770a891a24468e8048242e3"
+  nix-rust0.30.1.tar.gz::https://github.com/nix-rust/nix/archive/refs/tags/v0.30.1.tar.gz
+  # https://github.com/uutils/coreutils/issues/8586
+  uu_mv-0.2.2-fix-symlink-different-filesystem.patch
+)
+b2sums=('acd43b0e2663de16062bcef540190a185c2e08f9941a4dcbb9ccedbf0a01d6e4cdcaa851cfcc00046da0bd106296d5511859e36dfd65bde8354b755f06eaf8fb'
+        '4d9a0ff74786c55ba86f0d5a6bdf328020c0bb57fb23dc83cc5788c01ae60529cf89426e5b56366b8ed707c45a31a791023a6cd994e9892be319d19bc4df2637'
+        'dabb6f5fd9674c94ae2538bfdb2af1648aa1578ddb569283ef45a5cbc274d749958a97715615f3f01006b0d69e1bddcf858ac2e1526ed24bcde9dbdccf9c8193'
+        'd8da3df894f7081c8549a91b8cfd99426ac271840f7ed8ed5f9fb8aaccc4f7f89ed9aad0363dcb13171d0bd28c0a7af774f89e31991d6e69b486bddfa02983b6')
+
+prepare() {
+  cd $pkgname
+  # https://github.com/uutils/coreutils/issues/8586
+  patch -Np1 -i $srcdir/uu_mv-0.2.2-fix-symlink-different-filesystem.patch
+  # https://github.com/uutils/coreutils/issues/8474
+  mkdir -p rust-vendor
+  mv $srcdir/nix-0.30.1 rust-vendor/nix
+  patch -Np1 -i $srcdir/glibc-2.42.patch
+  echo -e "[patch.crates-io]\nnix = { path = \"rust-vendor/nix\" }" >>Cargo.toml
+  export RUSTONIG_DYNAMIC_LIBONIG=1
+  # remove invalid AArch64 linker specification
+  sed -i '/aarch64/d' .cargo/config.toml
+}
+
+check() {
+  cd $pkgname
+  make test \
+    PROFILE=release \
+    CARGOFLAGS=--release \
+    SKIP_UTILS="runcon chcon" \
+    TEST_NO_FAIL_FAST="-- \
+    --skip test_chgrp::test_from_with_invalid_group \
+    --skip test_chmod::test_chmod_colored_output \
+    --skip test_env::test_env_french \
+    --skip test_error_messages_french_translation \
+    --skip test_french_colored_error_messages \
+    --skip test_help_messages_french_translation \
+    --skip test_ls::test_localized_possible_values \
+    --skip test_sort::test_argument_suggestion \
+    --skip test_sort::test_clap_localization_help_message \
+    --skip test_sort::test_clap_localization_invalid_value \
+    --skip test_sort::test_clap_localization_unknown_argument \
+    --skip test_sort::test_error_colors_disabled \
+    --skip test_sort::test_error_colors_enabled \
+    --skip test_sort::test_french_translations \
+    --skip test_sort::test_help_colors_disabled \
+    --skip test_sort::test_help_colors_enabled \
+    --skip test_who::test_boot"
+}
+
+package() {
+  cd $pkgname
+  # disable selinux by excluding runcon and chcon, upstream seems broken in parameter parsing
+  # SELINUX_ENABLE=0 should not enable SELINUX but fails
+  # https://github.com/uutils/coreutils/issues/7996
+  make install \
+    DESTDIR="$pkgdir" \
+    PREFIX=/usr \
+    LIBSTDBUF_DIR=/usr/lib/uutils-coreutils \
+    PROG_PREFIX=uu- \
+    PROFILE=release \
+    SKIP_UTILS="runcon chcon" \
+    MULTICALL=y
+  install -Dm 644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+  # fix missing symlinks
+  cd "$pkgdir"/usr/bin/
+}
+
+# vim: ts=2 sw=2 et:
