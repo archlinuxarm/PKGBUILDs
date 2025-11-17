@@ -16,7 +16,7 @@
 highmem=1
 
 pkgname=chromium
-pkgver=142.0.7444.134
+pkgver=142.0.7444.162
 pkgrel=1
 _launcher_ver=8
 _manual_clone=1
@@ -49,7 +49,7 @@ source=(https://commondatastorage.googleapis.com/chromium-browser-official/chrom
         0001-widevine-support-for-arm.patch
         0002-Run-blink-bindings-generation-single-threaded.patch
         0003-Fix-eu-strip-build-for-newer-GCC.patch)
-sha256sums=('720a1196410080056cd97a1f5ec34d68ba216a281d9b5157b7ea81ea018ec661'
+sha256sums=('2e2f36e3cd1ebc4ad57fd310774a5e5e9db77883d5f9374fedeaabd3c103b819'
             '213e50f48b67feb4441078d50b0fd431df34323be15be97c55302d3fdac4483a'
             '11a96ffa21448ec4c63dd5c8d6795a1998d8e5cd5a689d91aea4d2bdd13fb06e'
             '5abc8611463b3097fc5ce58017ef918af8b70d616ad093b8b486d017d021bbdf'
@@ -130,9 +130,6 @@ prepare() {
 
   CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}" && CXXFLAGS="$CFLAGS"
 
-  # Allow build to set march and options on AArch64 (crc, crypto)
-  [[ $CARCH == "aarch64" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/-march=armv8-a//'` && CXXFLAGS="$CFLAGS"
-
   # https://crbug.com/893950
   sed -i -e 's/\<xmlMalloc\>/malloc/' -e 's/\<xmlFree\>/free/' \
          -e '1i #include <cstdlib>' \
@@ -163,10 +160,8 @@ prepare() {
   # Fixes for building with libstdc++ instead of libc++
 
   # Link to system tools required by the build
-  if (( ! _manual_clone )); then
-    mkdir third_party/node/linux/node-linux-x64/bin
-    ln -s /usr/bin/node third_party/node/linux/node-linux-x64/bin/
-  fi
+  mkdir third_party/node/linux/node-linux-x64/bin
+  ln -s /usr/bin/node third_party/node/linux/node-linux-x64/bin/
   ln -s /usr/bin/java third_party/jdk/current/bin/
 
   if (( !_system_clang )); then
@@ -308,6 +303,15 @@ build() {
 
   # https://crbug.com/957519#c122
   CXXFLAGS=${CXXFLAGS/-Wp,-D_GLIBCXX_ASSERTIONS}
+
+  if [[ $CARCH == aarch64 ]] || [[ $CARCH == riscv64 ]]; then
+    # On aarch64 and riscv64, certain files (e.g. in libvpx and libyuv) needs to
+    # be compiled with additional arch features (e.g. dotprod, sve, sme, rvv)
+    # Having an arch setting in the C(XX)FLAGS overrides those
+    # and causes compilation failure
+    CFLAGS="${CFLAGS/-march=*([^ ]) }"
+    CXXFLAGS="${CXXFLAGS/-march=*([^ ]) }"
+  fi
 
   gn gen out/Release --args="${_flags[*]}"
   ninja -C out/Release chrome chrome_sandbox chromedriver.unstripped
