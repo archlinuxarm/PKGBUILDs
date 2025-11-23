@@ -1,0 +1,81 @@
+# Maintainer: Jelle van der Waa <jelle@archlinux.org>
+# Contributor: Daniel M. Capella <polyzen@archlinux.org>
+# Contributor: Bruno Pagani <archange@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archinuxarm.org>
+#  - build v7 with -flax-vector-conversions
+
+pkgname=nodejs-lts-jod
+pkgver=22.21.1
+pkgrel=2
+pkgdesc='Evented I/O for V8 javascript (LTS release: Jod)'
+arch=(x86_64)
+url=https://nodejs.org/
+license=(MIT)
+depends=(openssl zlib icu libuv c-ares brotli libnghttp2) # http-parser v8)
+makedepends=(python procps-ng)
+optdepends=('npm: nodejs package manager')
+provides=("nodejs=$pkgver")
+conflicts=(nodejs)
+options=(!lto)
+source=("https://nodejs.org/dist/v${pkgver}/node-v${pkgver}.tar.xz")
+# https://nodejs.org/download/release/latest-jod/SHASUMS256.txt.asc
+sha256sums=('487d73fd4db00dc2420d659a8221b181a7937fbc5bc73f31c30b1680ad6ded6a')
+
+_set_flags() {
+  [[ $CARCH == "armv7h" ]] && CFLAGS+=" -flax-vector-conversions"
+  # /usr/lib/libnode.so uses malloc_usable_size, which is incompatible with fortification level 3
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+}
+
+build() {
+  _set_flags
+  cd node-v${pkgver}
+
+  ./configure \
+    --prefix=/usr \
+    --with-intl=system-icu \
+    --without-corepack \
+    --without-npm \
+    --shared-openssl \
+    --shared-zlib \
+    --shared-libuv \
+    --experimental-http-parser \
+    --shared-brotli \
+    --shared-cares \
+    --shared-nghttp2
+    # --shared-v8
+    # --shared-http-parser
+
+  make
+}
+
+check() {
+  _set_flags
+  cd node-v${pkgver}
+  rm test/parallel/test-http-outgoing-end-cork.js
+  rm test/parallel/test-http2-client-set-priority.js
+  rm test/parallel/test-http2-client-unescaped-path.js
+  rm test/parallel/test-http2-max-invalid-frames.js
+  rm test/parallel/test-http2-misbehaving-flow-control.js
+  rm test/parallel/test-http2-misbehaving-flow-control-paused.js
+  rm test/parallel/test-http2-multi-content-length.js
+  rm test/parallel/test-http2-priority-event.js
+  rm test/parallel/test-http2-reset-flood.js
+  rm test/parallel/test-tls-ocsp-callback.js
+
+  # https://github.com/nodejs/node/pull/60523
+  rm test/parallel/test-datetime-change-notify.js
+  rm test/parallel/test-icu-env.js
+
+  make test-only
+}
+
+package() {
+  _set_flags
+  cd node-v${pkgver}
+  make DESTDIR="${pkgdir}" install
+  install -Dm644 LICENSE -t "${pkgdir}"/usr/share/licenses/${pkgname}/
+}
