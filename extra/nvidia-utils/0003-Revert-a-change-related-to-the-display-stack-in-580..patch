@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Rahul Rameshbabu <rrameshbabu@nvidia.com>
+Date: Tue, 18 Nov 2025 15:20:15 -0800
+Subject: [PATCH] Revert a change related to the display stack in 580.105.08
+
+This is a clean revert to a change between 580.95.05 and 580.105.08.
+
+Signed-off-by: Rahul Rameshbabu <rrameshbabu@nvidia.com>
+---
+ src/nvidia-modeset/src/nvkms-dpy.c  | 23 -----------------------
+ src/nvidia-modeset/src/nvkms-hdmi.c |  9 +++++++++
+ 2 files changed, 9 insertions(+), 23 deletions(-)
+
+diff --git a/src/nvidia-modeset/src/nvkms-dpy.c b/src/nvidia-modeset/src/nvkms-dpy.c
+index bbdf4df50d85..dcbc4085acde 100644
+--- a/src/nvidia-modeset/src/nvkms-dpy.c
++++ b/src/nvidia-modeset/src/nvkms-dpy.c
+@@ -909,29 +909,6 @@ void nvDpyProbeMaxPixelClock(NVDpyEvoPtr pDpyEvo)
+                     pDpyEvo->maxPixelClockKHz =
+                         ((4 * 12 * 1000 * 1000 * 16) / 18);
+                 }
+-            } else {
+-                const NVParsedEdidEvoRec *pParsedEdid = &pDpyEvo->parsedEdid;
+-
+-                if (pParsedEdid->valid) {
+-                    const NVT_EDID_INFO *pEdidInfo = &pParsedEdid->info;
+-                    /* Default Maximum HDMI TMDS character rate is 165MHz. */
+-                    NvU32 maxTmdsCharRate = 33;
+-
+-                    if (pEdidInfo->ext861.valid.H20_HF_VSDB &&
+-                        (pEdidInfo->hdmiForumInfo.max_TMDS_char_rate > 0)) {
+-                        maxTmdsCharRate =
+-                            NV_MIN(pEdidInfo->hdmiForumInfo.max_TMDS_char_rate, 120);
+-                    } else if (pEdidInfo->ext861.valid.H14B_VSDB &&
+-                               (pEdidInfo->hdmiLlcInfo.max_tmds_clock > 0)) {
+-                        maxTmdsCharRate =
+-                            NV_MIN(pEdidInfo->hdmiLlcInfo.max_tmds_clock, 68);
+-                    }
+-
+-                    /* Max Pixel Rate = Max TMDS character Rate * 5MHz */
+-                    pDpyEvo->maxPixelClockKHz =
+-                        pDpyEvo->maxSingleLinkPixelClockKHz =
+-                        maxTmdsCharRate * 5000;
+-                }
+             }
+         } else {
+             /*
+diff --git a/src/nvidia-modeset/src/nvkms-hdmi.c b/src/nvidia-modeset/src/nvkms-hdmi.c
+index e7f2ca230d1a..d03f0adeb3bc 100644
+--- a/src/nvidia-modeset/src/nvkms-hdmi.c
++++ b/src/nvidia-modeset/src/nvkms-hdmi.c
+@@ -2108,18 +2108,27 @@ NvBool nvHdmiIsTmdsPossible(const NVDpyEvoRec *pDpyEvo,
+             pDpyEvo->pDispEvo->pDevEvo->caps.hdmiTmds10BpcMaxPClkMHz * 1000UL;
+         NvU32 adjustedMaxPixelClock =
+             (pDpyEvo->maxSingleLinkPixelClockKHz * 4ULL) / 5ULL;
++        NvU32 adjustedMaxEDIDPixelClock =
++            pDpyEvo->parsedEdid.valid ?
++              (pDpyEvo->parsedEdid.limits.max_pclk_10khz * 10 * 4ULL) / 5ULL : 0;
+ 
+         /* Pixel clock must satisfy hdmiTmds10BpcMaxPClkKHz, if applicable. */
+         if ((hdmiTmds10BpcMaxPClkKHz > 0) &&
+             (pixelClock > hdmiTmds10BpcMaxPClkKHz)) {
+             return FALSE;
+         }
+ 
+         /* Pixel clock must also satisfy adjustedMaxPixelClock. */
+         if (pixelClock > adjustedMaxPixelClock) {
+             return FALSE;
+         }
+ 
++        /* Pixel clock must also satisfy adjustedMaxEDIDPixelClock. */
++        if (adjustedMaxEDIDPixelClock != 0 &&
++            pixelClock > adjustedMaxEDIDPixelClock) {
++            return FALSE;
++        }
++
+         return TRUE;
+     }
+ 
