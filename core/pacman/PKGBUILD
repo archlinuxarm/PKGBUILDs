@@ -10,11 +10,11 @@
 #  - patch to fix application/gzip change in file 5.37
 
 pkgname=pacman
-pkgver=7.0.0.r6.gc685ae6
-pkgrel=6
+pkgver=7.1.0.r7.gb9f7d4a
+pkgrel=1
 # use annotated tag and patch level commit from release branch (can be empty for no patches)
-_git_tag=7.0.0
-_git_patch_level_commit=c685ae6412af04cae1eaa5d6bda8c277c7ffb8c8
+_git_tag=7.1.0
+_git_patch_level_commit=b9f7d4a5b0bea75953f5892621a2caecc5672de5
 pkgdesc="A library-based package manager with dependency support"
 arch=('x86_64')
 url="https://www.archlinux.org/pacman/"
@@ -33,6 +33,7 @@ depends=(
   openssl libcrypto.so
   pacman-mirrorlist
   systemd
+  libmakepkg-dropins
 )
 makedepends=(
   asciidoc
@@ -51,26 +52,31 @@ optdepends=(
 provides=('libalpm.so')
 backup=(etc/pacman.conf
         etc/makepkg.conf
+        etc/makepkg.conf.d/fortran.conf
         etc/makepkg.conf.d/rust.conf)
 validpgpkeys=('6645B0A8C7005E78DB1D7864F99FFE0FEAE999BD'  # Allan McRae <allan@archlinux.org>
               'B8151B117037781095514CA7BBDFFC92306B1121') # Andrew Gregory (pacman) <andrew@archlinux.org>
 source=("git+https://gitlab.archlinux.org/pacman/pacman.git#tag=v${_git_tag}?signed"
-        revertme-makepkg-remove-libdepends-and-libprovides.patch::https://gitlab.archlinux.org/pacman/pacman/-/commit/354a300cd26bb1c7e6551473596be5ecced921de.patch
+        "revertme-makepkg-remove-libdepends-and-libprovides.patch::https://gitlab.archlinux.org/pacman/pacman/-/commit/354a300cd26bb1c7e6551473596be5ecced921de.patch"
+        "patch-reproducible-builds.patch::https://gitlab.archlinux.org/pacman/pacman/-/commit/f4bdb77470528019aaba4d8b8f947e918c6db17d.patch"
         0001-Sychronize-filesystem.patch
         0002-Revert-close-stdin-before-running-install-scripts.patch
         0003-Revert-alpm_run_chroot-always-connect-parent2child-p.patch
         pacman.conf
         makepkg.conf
         alpm.sysusers
+        fortran.conf
         rust.conf)
-sha256sums=('06d082c3ce6f0811ca728515aa82d69d372800bd3ada99f5c445ef9429b6e3a6'
+sha256sums=('74cfd4b6d2b10c742f5a4a7cdaeffb01405ab897b11b80681a9063245113a308'
             'b3bce9d662e189e8e49013b818f255d08494a57e13fc264625f852f087d3def2'
-            'e055c072608bac62f6d74ab980b3851ac740ae476847de2f5dd5021fd97613ab'
-            'b36c4975286f8dea0fc3c64abf52706c31cb6d6e2c05a4983834b5417e23e802'
-            '7ea05a9457f3b6b1edd9dc82f8a1231b0b9048e8c0a7e75fb99abb330a304234'
-            'bc9fd787580f5c00c48cbab0efd8cc24fd7d33cccb8e17541528f757d729a462'
-            '1fae8471726bbda9521ce4d54f9fc646751d450cc4c9e6ebcae5eaeaf4909efe'
+            'de428b496a825772ef49ec5555a386a4b23ffa10b9dfd9907f0671d5c1dc2178'
+            '6c379199a6f5bdd64cfa7bd6b3c4acc6f34590fd1ff41e145627b113b59f9b56'
+            'c23f425e063a500fd7242bfff5a8d08ce22021e07e5383533d9f52f275160fd6'
+            'd356afdfab33b1a250c53758c20ef202d292896c7b1830899fb2040ff2127a76'
+            '531d3b472b12f1686d98ea9dcaebe7bd57cc213e46329ed1558f788aa2f1b6d9'
+            '0c95fc798d6d695d5efeb6724371cd3bb76f14bbb2515bfa39402e51f8acfeb3'
             'c8760d7ebb6c9817d508c691c67084be251cd9c8811ee1ccf92c1278bad74c1c'
+            '5e23fb1a0735f6c5101139f380c4f36cc0c9eebfcdf8bf83e9eaa609f776cdcc'
             '3d7579f4fa52ef512dc82187c010f273aa45e6e8349f8fda9839f808c7dae042')
 
 pkgver() {
@@ -89,9 +95,6 @@ prepare() {
     fi
     git rebase "${_git_patch_level_commit}"
   fi
-
-  # Initialise callback event fields
-  git cherry-pick -n '0d37c1daa0990766d12d0060a353c829bf8616eb'
 
   # handle patches
   local -a patches
@@ -141,6 +144,7 @@ package() {
   install -dm755 "$pkgdir/etc"
   install -m644 "$srcdir/pacman.conf" "$pkgdir/etc"
   install -D -m644 "$srcdir/alpm.sysusers" "${pkgdir}"/usr/lib/sysusers.d/alpm.conf
+  install -m644 "$srcdir/fortran.conf" "$pkgdir/etc/makepkg.conf.d"
   install -m644 "$srcdir/rust.conf" "$pkgdir/etc/makepkg.conf.d"
 
   case $CARCH in
@@ -152,7 +156,7 @@ package() {
     aarch64)
       mycarch="aarch64"
       mychost="aarch64-unknown-linux-gnu"
-      myflags="-march=armv8-a "
+      myflags="-march=armv8-a -mno-omit-leaf-frame-pointer "
       ;;
   esac
 
