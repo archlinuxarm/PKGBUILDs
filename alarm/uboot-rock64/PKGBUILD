@@ -3,24 +3,31 @@
 
 buildarch=8
 
-pkgname=uboot-rock64
+pkgname=('uboot-rock64'
+         'uboot-rock64-spi'
+         'uboot-rock64V2'
+         'uboot-rock64V2-spi')
 pkgver=2025.10
-pkgrel=1
+pkgrel=2
 pkgdesc="U-Boot for Rock64"
 arch=('aarch64')
 url='http://www.denx.de/wiki/U-Boot/WebHome'
 license=('GPL')
 backup=('boot/boot.txt' 'boot/boot.scr')
-makedepends=('bc' 'git' 'python' 'python-setuptools' 'python-pyelftools' 'swig' 'dtc' 'uboot-tools')
-install=${pkgname}.install
+depends=('mtd-utils')
+makedepends=('bc' 'git' 'python' 'python-setuptools' 'python-pyelftools' 'swig' 'dtc')
 source=("ftp://ftp.denx.de/pub/u-boot/u-boot-${pkgver}.tar.bz2"
         "https://github.com/ARM-software/arm-trusted-firmware/archive/v2.14.0.tar.gz"
         'boot.txt'
-        'mkscr')
+        'mkscr'
+        '0000-rock64V2-lpddr3-1333.patch'
+        '0001-store-env-in-spi-flash.patch')
 sha256sums=('b4f032848e56cc8f213ad59f9132c084dbbb632bc29176d024e58220e0efdf4a'
             'd44936677a63c5216ffc151ae7711d458c992ef159a9df271fd9429f0a1cb5e5'
-            'd0de25353f38dd633b63d7f547f0eaffe967bcd5d8c43b17897fb1c3d1f918fa'
-	    'a4fc8b6b92bc364d6542670d294aa618a8501fb8729f415cc0a3eed776ef0c8e')
+            '28d98741349f0898d6c1f76fcd20b7536cf107ad3bdaf19bd4952bb62ffbf812'
+            'a4fc8b6b92bc364d6542670d294aa618a8501fb8729f415cc0a3eed776ef0c8e'
+            'f3b0da1c910865da896d8a66673cdb93b8787797be3cf168f9442f4d9e10cf75'
+            '542ff9bed704399cc79509bf98dba92ed0548bd14b967a92ede5c2ff517ee37b')
 
 prepare() {
   export CC=cc
@@ -39,20 +46,41 @@ prepare() {
   cd ${srcdir}/u-boot-${pkgver}/configs
   echo 'CONFIG_IDENT_STRING=" Arch Linux ARM"' >> rock64-rk3328_defconfig
 
+  for i in ${pkgname[@]}; do
+    cp -r ${srcdir}/u-boot-${pkgver} ${srcdir}/u-boot-${i:6}
+  done
+
+  cd ${srcdir}/u-boot-rock64-spi
+  patch -p1 < ../0001-store-env-in-spi-flash.patch
+
+  cd ${srcdir}/u-boot-rock64V2
+  patch -p1 < ../0000-rock64V2-lpddr3-1333.patch
+
+  cd ${srcdir}/u-boot-rock64V2-spi
+  patch -p1 < ../0000-rock64V2-lpddr3-1333.patch
+  patch -p1 < ../0001-store-env-in-spi-flash.patch
+
+  rm -r ${srcdir}/u-boot-${pkgver}
+
 }
 
 build() {
-  cd ${srcdir}/u-boot-${pkgver}
+  unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
 
-  unset CLFAGS CXXFLAGS CPPFLAGS LDFLAGS
+  for i in ${pkgname[@]}; do
+    cd ${srcdir}/u-boot-${i:6}
+    make rock64-rk3328_defconfig
+    make EXTRAVERSION=-${pkgrel}
+    make EXTRAVERSION=-${pkgrel} u-boot.itb
+  done
 
-  make rock64-rk3328_defconfig
-  make EXTRAVERSION=-${pkgrel}
-  make EXTRAVERSION=-${pkgrel} u-boot.itb
+  tools/mkimage -A arm -O linux -T script -C none -n "U-Boot boot script" -d ../boot.txt ../boot.scr
 }
 
-package() {
-  cd u-boot-${pkgver}
+package_uboot-rock64() {
+  install=${pkgname}.install
+  
+  cd u-boot-${pkgname:6}
 
   mkdir -p "${pkgdir}/boot"
 
@@ -61,6 +89,53 @@ package() {
 
   cp ./u-boot.itb "${pkgdir}/boot/u-boot.itb"
 
-  tools/mkimage -A arm -O linux -T script -C none -n "U-Boot boot script" -d ../boot.txt "${pkgdir}/boot/boot.scr"
-  cp ../{boot.txt,mkscr} "${pkgdir}"/boot
+  cp ../{boot.txt,boot.scr,mkscr} "${pkgdir}"/boot
+}
+
+package_uboot-rock64-spi() {
+  pkgdesc="U-Boot for Rock64 (SPI flash)"
+  install=${pkgname}.install
+  provides=('uboot-rock64')
+  conflicts=('uboot-rock64')
+
+  cd u-boot-${pkgname:6}
+
+  mkdir -p "${pkgdir}/boot"
+
+  cp ./u-boot-rockchip-spi.bin "${pkgdir}/boot/u-boot-rockchip-spi.bin"
+
+  cp ../{boot.txt,boot.scr,mkscr} "${pkgdir}"/boot
+}
+
+package_uboot-rock64V2() {
+  pkgdesc="U-Boot for Rock64 V2"
+  install=${pkgbase}.install
+  provides=('uboot-rock64')
+  conflicts=('uboot-rock64')
+
+  cd u-boot-${pkgname:6}
+
+  mkdir -p "${pkgdir}/boot"
+
+  tools/mkimage -n rk3328 -T rksd -d ./tpl/u-boot-tpl.bin "${pkgdir}/boot/rksd_loader.img"
+  cat ./spl/u-boot-spl.bin >> "${pkgdir}/boot/rksd_loader.img"
+
+  cp ./u-boot.itb "${pkgdir}/boot/u-boot.itb"
+
+  cp ../{boot.txt,boot.scr,mkscr} "${pkgdir}"/boot
+}
+
+package_uboot-rock64V2-spi() {
+  pkgdesc="U-Boot for Rock64 V2 (SPI flash)"
+  install=${pkgbase}-spi.install
+  provides=('uboot-rock64')
+  conflicts=('uboot-rock64')
+
+  cd u-boot-${pkgname:6}
+
+  mkdir -p "${pkgdir}/boot"
+
+  cp ./u-boot-rockchip-spi.bin "${pkgdir}/boot/u-boot-rockchip-spi.bin"
+
+  cp ../{boot.txt,boot.scr,mkscr} "${pkgdir}"/boot
 }
