@@ -24,7 +24,7 @@ _majorver=8
 _minorver=472
 _updatever=08
 pkgver=${_majorver}.${_minorver}.u${_updatever}
-pkgrel=1
+pkgrel=2
 arch=('x86_64')
 url='https://openjdk.java.net/'
 license=('custom')
@@ -38,6 +38,7 @@ makedepends=(
   java-environment=8
   libcups
   libxrender
+  libxt
   libxtst
   unzip
   zip
@@ -51,16 +52,15 @@ options=(
 )
 source=(
   https://github.com/openjdk/jdk${_majorver}u/archive/refs/tags/jdk${_majorver}u${_minorver}-b${_updatever}.tar.gz
-  gcc11.patch
   8143245-pr3548.patch
 )
-b2sums=('4ce86687b29882a3e1add166c9f31818e3253f58f198f17d076acda3b15523baec7c51540aefe14ca237191656472f841eeb09cb69e59548ebc4cd5a267c04ec'
-        '9679e4dfb6027a87376081489c09810812d6849573afac4ea96abe3a3e00ca5b6af7d0ffb010c43b93cfa913f9e97fbb9f11e19fcc86a89b4548442671c32da1')
+b2sums=('4ce86687b29882a3e1add166c9f31818e3253f58f198f17d076acda3b15523baec7c51540aefe14ca237191656472f841eeb09cb69e59548ebc4cd5a267c04ec')
 
 case "${CARCH}" in
-  'x86_64') _JARCH=amd64 ; _DOC_ARCH=x86_64 ;;
-  'i686'  ) _JARCH=i386  ; _DOC_ARCH=x86    ;;
-  arm*    ) _JARCH=arm   ; _DOC_ARCH=arm    ;;
+  'x86_64'  ) _JARCH=amd64   ; _DOC_ARCH=x86_64 ;;
+  'i686'    ) _JARCH=i386    ; _DOC_ARCH=x86    ;;
+  'aarch64' ) _JARCH=aarch64 ; _DOC_ARCH=aarch64 ;;
+  arm*      ) _JARCH=arm     ; _DOC_ARCH=arm    ;;
 esac
 
 _jdkname=openjdk8
@@ -77,8 +77,21 @@ _nonheadless=(
 prepare() {
   cd jdk8u-jdk${_majorver}u${_minorver}-b${_updatever}
 
-  # Fix build with C++17 (Fedora)
-  patch -Np1 -i "${srcdir}"/gcc11.patch
+  # Do not treats warnings as errors
+  sed -E -i 's/(^WARNINGS_ARE_ERRORS = -W)(error)/\1no-\2/' \
+    hotspot/make/linux/makefiles/gcc.make
+
+  # bool is a keyword in C23.
+  install -Dm755 /dev/stdin "gcc" <<END
+#!/bin/sh
+exec /usr/bin/gcc -std=gnu17 "\$@"
+END
+
+  # The use of the "register" keyword as storage class specifier has been removed in C++17.
+  install -Dm755 /dev/stdin "g++" <<END
+#!/bin/sh
+exec /usr/bin/g++ -std=gnu++14 "\$@"
+END
 
   # Fix build with glibc 2.42 due to uabs() name collision
   # https://bugs.openjdk.org/browse/JDK-8354941
@@ -103,13 +116,11 @@ build() {
 
   # Avoid optimization of HotSpot being lowered from O3 to O2
   # -fno-exceptions for FS#73134
-  export CFLAGS="${CFLAGS//-O2/-O3} -Wno-error=nonnull -Wno-error=deprecated-declarations -Wno-error=stringop-overflow= -Wno-error=return-type -Wno-error=cpp -fno-lifetime-dse -fno-delete-null-pointer-checks -fcommon -fno-exceptions -Wno-error=format-overflow= -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
-  export CXXFLAGS="${CXXFLAGS} -fcommon -fno-exceptions"
+  export CFLAGS="${CFLAGS//-O2/-O3} -fno-lifetime-dse -fno-delete-null-pointer-checks -fno-exceptions -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
+  export CXXFLAGS="${CXXFLAGS} -fno-exceptions"
 
-  # Use custom gcc
-  #export CC="gcc-14"
-  #export CXX="g++-14"
-  #export CXXCPP="gcc-14 -E"
+  # Use gcc and g++ wrappers to set standards as CFLAGS are used when building some C++ files.
+  PATH="$PWD":$PATH
 
   install -d -m 755 "${srcdir}/${_prefix}/"
   bash configure \
