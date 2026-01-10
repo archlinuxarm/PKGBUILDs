@@ -4,6 +4,8 @@ set -e
 
 LOCALEGEN=/etc/locale.gen
 LOCALES=/usr/share/i18n/locales
+LOCALES_OVERRIDES=/usr/local/share/i18n/locales
+
 if [ -n "$POSIXLY_CORRECT" ]; then
   unset POSIXLY_CORRECT
 fi
@@ -18,25 +20,44 @@ rm -rf /usr/lib/locale/locale-archive || true
 umask 022
 
 is_entry_ok() {
-  if [ -n "$locale" -a -n "$charset" ] ; then
-    true
-  else
+  if [ -z "$locale" ] || [ -z "$charset" ]; then
     echo "error: Bad entry '$locale $charset'"
-    false
+    return 1
   fi
 }
 
 echo "Generating locales..."
-while read locale charset; do \
-	case $locale in \#*) continue;; "") continue;; esac; \
-	is_entry_ok || continue
-	echo -n "  `echo $locale | sed 's/\([^.\@]*\).*/\1/'`"; \
-	echo -n ".$charset"; \
-	echo -n `echo $locale | sed 's/\([^\@]*\)\(\@.*\)*/\2/'`; \
-	echo -n '...'; \
-        if [ -f $LOCALES/$locale ]; then input=$locale; else \
-        input=`echo $locale | sed 's/\([^.]*\)[^@]*\(.*\)/\1\2/'`; fi; \
-	localedef -i $input -c -f $charset -A /usr/share/locale/locale.alias $locale; \
-	echo ' done'; \
+while read -r locale charset; do
+  if [ -z "$locale" ] || [ "${locale#\#}" != "$locale" ]; then continue; fi
+  is_entry_ok || continue
+
+  # strip charmap and at-suffix for locale base
+  locale_base="${locale%%.*}"
+  locale_base="${locale_base%%@*}"
+
+  # optional at-suffix
+  locale_at="${locale#*@}"
+  [ "$locale_at" = "$locale" ] && locale_at= || locale_at="@$locale_at"
+
+  printf "  %s.%s%s..." "$locale_base" "$charset" "$locale_at"
+
+  # fully matching override locale
+  if [ -e "$LOCALES_OVERRIDES/$locale" ]; then
+    input="$LOCALES_OVERRIDES/$locale"
+  # fully matching vendor locale
+  elif [ -e "$LOCALES/$locale" ]; then
+    input="$locale"
+  # fallback to partial matches
+  else
+    # locale base with optional at-suffix
+    input="$locale_base$locale_at"
+    # override partial locale
+    if [ -e "$LOCALES_OVERRIDES/$input" ]; then
+      input="$LOCALES_OVERRIDES/$input"
+    fi
+  fi
+
+  localedef -i "$input" -c -f "$charset" -A /usr/share/locale/locale.alias "$locale" || :
+  echo ' done'
 done < $LOCALEGEN
 echo "Generation complete."
