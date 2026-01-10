@@ -18,7 +18,7 @@
 pkgbase='protobuf'
 pkgname=('protobuf' 'ruby-google-protobuf')
 pkgver=33.1
-pkgrel=1
+pkgrel=3
 # Note: python-protobuf needs to be updated alongside this package to the same version
 pkgdesc="Protocol Buffers - Google's data interchange format"
 arch=('x86_64')
@@ -89,6 +89,9 @@ build() {
   cd $pkgbase/ruby
   local _gemdir="$(gem env gemdir)"
   local _gemver=4.$pkgver
+  local _gemplatform=$(ruby -e "puts Gem::Platform.local")
+  local _rubyapi=$(ruby -e 'require "rbconfig"; puts RbConfig::CONFIG["RUBY_API_VERSION"]')
+
 
   PROTOC="$srcdir"/build/protoc \
     rake
@@ -103,8 +106,16 @@ build() {
     --bindir "tmp_install/usr/bin" \
     "pkg/${_gemname}-${_gemver}.gem"
 
-  install -D lib/google/protobuf_c.so \
-    "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/lib/google/$(ruby -e 'require "rbconfig"; puts RbConfig::CONFIG["RUBY_API_VERSION"]')/protobuf_c.so
+  # install shared libraries to standard location and symlink to that location from custom location Gem requires
+   install -D lib/google/protobuf_c.so \
+    "tmp_install${_gemdir}/extensions/${_gemplatform}/${_rubyapi}/${_gemname}-${_gemver}"/protobuf_c.so
+  install -d "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/lib/google/${_rubyapi}
+  ln -s "${_gemdir}/extensions/${_gemplatform}/${_rubyapi}/${_gemname}-${_gemver}"/protobuf_c.so \
+    "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/lib/google/${_rubyapi}/protobuf_c.so
+  mv "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/ext/google/protobuf_c/${_gemplatform}/libprotobuf_c_ffi.so \
+    "tmp_install${_gemdir}/extensions/${_gemplatform}/${_rubyapi}/${_gemname}-${_gemver}"
+  ln -s "${_gemdir}/extensions/${_gemplatform}/${_rubyapi}/${_gemname}-${_gemver}"/libprotobuf_c_ffi.so \
+    "tmp_install${_gemdir}/gems/${_gemname}-${_gemver}"/ext/google/protobuf_c/${_gemplatform}/libprotobuf_c_ffi.so
 
   # remove unrepreducible files
   rm --force --recursive --verbose \
