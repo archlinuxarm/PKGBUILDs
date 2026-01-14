@@ -1,0 +1,262 @@
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+# Contributor: Jan de Groot <jgc@archlinxu.org>
+# Contributor: Wael Nasreddine <gandalf@siemens-mobiles.org>
+# Contributor: Tor Krill <tor@krill.nu>
+# Contributor: Will Rea <sillywilly@gmail.com>
+# Contributor: Valentine Sinitsyn <e_val@inbox.ru>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - disable LTO
+
+pkgbase=networkmanager
+pkgname=(
+  networkmanager
+  libnm
+  nm-cloud-setup
+  networkmanager-docs
+)
+pkgver=1.54.3
+pkgrel=1
+pkgdesc="Network connection manager and user applications"
+url="https://networkmanager.dev/"
+arch=(x86_64)
+license=(LGPL-2.1-or-later)
+makedepends=(
+  audit
+  bash
+  curl
+  dhcpcd
+  dnsmasq
+  gcc-libs
+  git
+  glib2
+  glib2-devel
+  glibc
+  gobject-introspection
+  gtk-doc
+  iproute2
+  iptables
+  iwd
+  jansson
+  libmm-glib
+  libndp
+  libnewt
+  libnvme
+  libpsl
+  libteam
+  meson
+  modemmanager
+  nftables
+  nspr
+  nss
+  openresolv
+  pacrunner
+  perl-yaml
+  polkit
+  ppp
+  python-gobject
+  readline
+  systemd
+  systemd-libs
+  vala
+  vala
+  wpa_supplicant
+)
+checkdepends=(
+  libx11
+  python-dbus
+)
+source=(
+  "git+https://gitlab.freedesktop.org/NetworkManager/NetworkManager.git?signed#tag=${pkgver/[a-z]/-&}"
+)
+b2sums=('5da0800e5ea38f8eda955bf854c778b93e3a17b80da8602b48e017e66e74392caf9458701f6b7a4b9de85108d30ecd89d5491bd26123925228b6788d3b6aae32')
+validpgpkeys=(
+  3D10AD045AB4AAFF8E8F36AF9B980AC2FB874FEB # Ana Cabral <acabral@redhat.com>
+  F07F7C1EABD382F81CBFBA3B998D4828CD7E1656 # Beniamino Galvani <bgalvani@redhat.com>
+  2B5F3B2028801E15F57AAA309906C97AA15D984F # Fernando Fernandez Mancera <ffmancera@riseup.net>
+  48FD6FAE515A77B48436821C8789567B8715CEBC # Gris Ge <fge@redhat.com>
+  ACFA41513D2854D0A72F55BE9A2C77A85F2D72FE # Ján Václav <jvaclav@redhat.com>
+  4B8EF9745A973724E965939189A2DA5AF73D5E3D # Lubomir Rintel <lkundrak@v3.sk>
+  E472337703D0C46002928B5790617850A125DE59 # Stanislas FAYE <sfaye@redhat.com>
+  49EA7C670E0850E7419514F629C2366E4DFC5728 # Thomas Haller <thaller@redhat.com>
+  07F9AEC86144386D9576210B66A44781B4EBC2D0 # Íñigo Huguet <ihuguet@redhat.com>
+  8D1F4C471D38D59A56301CEBE1974C8D8DD6ED2A # Filip Pokryvka <fpokryvk@redhat.com>
+  1CFF865BDF957BE935765BBD2E1878D078DEF7C6 # Íñigo Huguet <ihuguet@riseup.net>
+)
+
+prepare() {
+  cd NetworkManager
+}
+
+build() {
+  local meson_options=(
+    # build checks this option; injecting just via *FLAGS is broken
+    -D b_lto=false
+
+    # platform
+    -D dist_version="$pkgver-$pkgrel"
+    -D session_tracking_consolekit=false
+    -D suspend_resume=systemd
+    -D modify_system=true
+    -D selinux=false
+
+    # features
+    -D iwd=true
+    -D teamdctl=true
+
+    # configuration plugins
+    -D config_plugins_default=keyfile
+    -D ifupdown=false
+
+    # handlers for resolv.conf
+    -D netconfig=no
+    -D config_dns_rc_manager_default=symlink
+
+    # miscellaneous
+    -D vapi=true
+    -D docs=true
+    -D more_asserts=no
+    -D more_logging=false
+    -D qt=false
+  )
+
+  arch-meson NetworkManager build "${meson_options[@]}"
+  meson compile -C build
+}
+
+check() {
+  NMTST_FORCE_REAL_ROOT=1 meson test -C build --print-errorlogs
+}
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_networkmanager() {
+  depends=(
+    audit
+    curl
+    gcc-libs
+    glib2
+    glibc
+    iproute2
+    jansson
+    libmm-glib
+    libndp
+    libnewt
+    libnm
+    libpsl
+    libteam
+    mobile-broadband-provider-info
+    nspr
+    nss
+    readline
+    systemd-libs
+    wpa_supplicant
+  )
+  optdepends=(
+    'bluez: Bluetooth support'
+    'dhcpcd: alternative DHCP client'
+    'dnsmasq: connection sharing'
+    'firewalld: firewall support'
+    'iptables: connection sharing'
+    'iwd: wpa_supplicant alternative'
+    'libnvme: NBFT support'
+    'modemmanager: cellular network support'
+    'nftables: connection sharing'
+    'openresolv: alternative resolv.conf manager'
+    'pacrunner: PAC proxy support'
+    'polkit: let non-root users control networking'
+    'ppp: dialup connection support'
+  )
+  backup=(etc/NetworkManager/NetworkManager.conf)
+
+  # NM wants to move to LGPL only, but there's still GPL code left
+  license+=(GPL-2.0-or-later)
+
+  meson install -C build --destdir "$pkgdir"
+
+  cd "$pkgdir"
+
+  # /etc/NetworkManager
+  install -d etc/NetworkManager/{conf,dnsmasq}.d
+  install -dm700 etc/NetworkManager/system-connections
+  install -m644 /dev/stdin etc/NetworkManager/NetworkManager.conf <<END
+# Configuration file for NetworkManager.
+# See "man 5 NetworkManager.conf" for details.
+END
+
+  # packaged configuration
+  install -Dm644 /dev/stdin usr/lib/NetworkManager/conf.d/20-connectivity.conf <<END
+[connectivity]
+uri=http://ping.archlinux.org/nm-check.txt
+END
+
+  shopt -s globstar
+
+  _pick docs usr/share/gtk-doc
+
+  _pick libnm usr/include/libnm
+  _pick libnm usr/lib/girepository-1.0/NM-*
+  _pick libnm usr/lib/libnm.*
+  _pick libnm usr/lib/nm-libnm-helper
+  _pick libnm usr/lib/pkgconfig/libnm.pc
+  _pick libnm usr/share/gir-1.0/NM-*
+  _pick libnm usr/share/vala/vapi/libnm.*
+
+  _pick cloud usr/lib/**/*nm-cloud-setup*
+  _pick cloud usr/share/man/*/nm-cloud-setup*
+
+  # Not actually packaged (https://bugs.archlinux.org/task/69138)
+  _pick ovs usr/lib/systemd/system/NetworkManager.service.d/NetworkManager-ovs.conf
+
+  # Restore empty dir
+  install -d usr/lib/NetworkManager/dispatcher.d/no-wait.d
+}
+
+package_libnm() {
+  pkgdesc="NetworkManager client library"
+  depends=(
+    gcc-libs
+    glib2
+    glibc
+    nspr
+    nss
+    systemd-libs
+    util-linux-libs
+  )
+  provides=(libnm.so)
+
+  mv libnm/* "$pkgdir"
+}
+
+package_nm-cloud-setup() {
+  pkgdesc="Automatically configure NetworkManager in cloud"
+  depends=(
+    bash
+    curl
+    gcc-libs
+    glib2
+    glibc
+    jansson
+    libnm
+    networkmanager
+  )
+
+  mv cloud/* "$pkgdir"
+}
+
+package_networkmanager-docs() {
+  pkgdesc+=" (API documentation)"
+  depends=()
+
+  mv docs/* "$pkgdir"
+}
+
+# vim:set sw=2 sts=-1 et:
