@@ -3,39 +3,34 @@
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Contributor: Jan de Groot <jgc@archlinux.org>
 # Contributor: Andreas Radke <andyrtr@archlinux.org>
-# Contributor: Dan Johansen <strit@manjaro.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - Removed Gallium3D drivers/packages for chipsets that don't exist in our ARM devices (intel, VMware svga).
-#  - added broadcom and panfrost vulkan packages
-#  - enable lto for aarch64
 #  - set -D intel-rt=disabled
-#  ALARM: John Audia <therealgraysky@proton.me>
-#  - added freedreno driver, PR#1973 and PR#1996
-
-highmem=1
+#  - set -D teflon=true
 
 pkgbase=mesa
 pkgname=(
   mesa
   opencl-mesa
   vulkan-asahi
+  vulkan-broadcom
   vulkan-dzn
   vulkan-freedreno
   vulkan-gfxstream
+  vulkan-intel
   vulkan-nouveau
+  vulkan-panfrost
+  vulkan-powervr
   vulkan-radeon
   vulkan-swrast
   vulkan-virtio
   vulkan-mesa-implicit-layers
   vulkan-mesa-layers
-  vulkan-broadcom
-  vulkan-panfrost
   mesa-docs
 )
 pkgver=25.3.3
 _pkgver=${pkgver/[a-z]/-&}
-pkgrel=1
+pkgrel=2
 epoch=1
 pkgdesc="Open-source OpenGL drivers"
 url="https://www.mesa3d.org/"
@@ -84,6 +79,7 @@ makedepends=(
   python-mako
   python-packaging
   python-ply
+  python-pycparser
   python-yaml
   rust-bindgen
   wayland-protocols
@@ -96,9 +92,6 @@ makedepends=(
   # html-docs
   python-sphinx
   python-sphinx-hawkmoth
-
-  # etnaviv deps
-  python-pycparser
 )
 options=(
   # GCC 14 LTO causes segfault in LLVM under si_llvm_optimize_module
@@ -242,26 +235,16 @@ prepare() {
   # its GPU cache; otherwise it can cause pages to render incorrectly.
   # https://bugs.launchpad.net/ubuntu/+source/chromium-browser/+bug/2020604
   echo "$_pkgver-arch$epoch.$pkgrel" >VERSION
-
-  if [[ $CARCH == "armv7h" ]]; then
-    sed -i "/c_cpp_args += '-mtls-dialect=gnu2'/d" meson.build
-  fi
 }
 
 build() {
-  case "${CARCH}" in
-    armv7h)  GALLIUM=",etnaviv,lima,panfrost,tegra,v3d,vc4" ;;
-    aarch64) GALLIUM=",ethosu,etnaviv,lima,panfrost,rocket,svga,v3d,vc4" ;;
-  esac
-
   local meson_options=(
     -D android-libbacktrace=disabled
-    #-D b_lto=$([[ $CARCH == aarch64 ]] && echo true || echo false)
     -D b_ndebug=true
-    -D gallium-drivers=asahi,d3d12,freedreno,llvmpipe,nouveau,r300,r600,radeonsi,softpipe,virgl,zink${GALLIUM}
+    -D gallium-drivers=all
     -D gallium-extra-hud=true
     -D gallium-mediafoundation=disabled
-    -D gallium-rusticl-enable-drivers=asahi,freedreno,radeonsi
+    -D gallium-rusticl-enable-drivers=all
     -D gallium-rusticl=true
     -D gles1=disabled
     -D html-docs=enabled
@@ -272,8 +255,8 @@ build() {
     -D teflon=true
     -D valgrind=enabled
     -D video-codecs=all
-    -D vulkan-drivers=amd,broadcom,freedreno,panfrost,swrast,virtio,microsoft-experimental,nouveau,asahi,gfxstream
-    -D vulkan-layers=device-select,overlay,screenshot,anti-lag,vram-report-limit
+    -D vulkan-drivers=all
+    -D vulkan-layers=device-select,intel-nullhw,overlay,screenshot,anti-lag,vram-report-limit
   )
 
   # Build only minimal debug info to reduce size
@@ -346,6 +329,9 @@ package_mesa() {
     _pick vkasahi $icddir/asahi_icd.*.json
     _pick vkasahi $libdir/libvulkan_asahi.so
 
+    _pick vkbrcom $icddir/broadcom_icd.*.json
+    _pick vkbrcom $libdir/libvulkan_broadcom.so
+
     _pick vkd3d12 $icddir/dzn_icd.*.json
     _pick vkd3d12 $libdir/libvulkan_dzn.so
     _pick vkd3d12 $libdir/libspirv_to_dxil.*
@@ -357,8 +343,17 @@ package_mesa() {
     _pick vkgfxstr $icddir/gfxstream_vk_icd.*.json
     _pick vkgfxstr $libdir/libvulkan_gfxstream.so
 
+    _pick vkintel $icddir/intel{,_hasvk}_icd.*.json
+    _pick vkintel $libdir/libvulkan_intel{,_hasvk}.so
+
     _pick vknvidia $icddir/nouveau_icd.*.json
     _pick vknvidia $libdir/libvulkan_nouveau.so
+
+    _pick vkpfrost $icddir/panfrost_icd.*.json
+    _pick vkpfrost $libdir/libvulkan_panfrost.so
+
+    _pick vkpowrvr $icddir/powervr_mesa_icd.*.json
+    _pick vkpowrvr $libdir/libvulkan_powervr_mesa.so
 
     _pick vkradeon $icddir/radeon_icd.*.json
     _pick vkradeon $libdir/libvulkan_radeon.so
@@ -377,12 +372,6 @@ package_mesa() {
     _pick vklayer $libdir/libVkLayer_*.so
     _pick vklayer usr/bin/mesa-*-control.py
     _pick vklayer usr/share/vulkan/explicit_layer.d
-
-    _pick vkbroadcom $icddir/broadcom_icd*.json
-    _pick vkbroadcom $libdir/libvulkan_broadcom.so
-
-    _pick vkpanfrost $icddir/panfrost_icd*.json
-    _pick vkpanfrost $libdir/libvulkan_panfrost.so
 
     _pick docs usr/share/doc
 
@@ -450,6 +439,34 @@ package_vulkan-asahi() {
   provides=(vulkan-driver)
 
   mv vkasahi/* "$pkgdir"
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+package_vulkan-broadcom() {
+  pkgdesc="Open-source Vulkan driver for VideoCore GPUs"
+  depends=(
+    expat
+    gcc-libs
+    glibc
+    libdisplay-info
+    libdrm
+    libx11
+    libxcb
+    libxshmfence
+    spirv-tools
+    systemd-libs
+    vulkan-icd-loader
+    vulkan-mesa-implicit-layers
+    wayland
+    xcb-util-keysyms
+    zlib
+    zstd
+  )
+  optdepends=("vulkan-mesa-layers: additional vulkan layers")
+  provides=(vulkan-driver)
+
+  mv vkbrcom/* "$pkgdir"
 
   install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
@@ -535,6 +552,34 @@ package_vulkan-gfxstream() {
   install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
 
+package_vulkan-intel() {
+  pkgdesc="Open-source Vulkan driver for Intel GPUs"
+  depends=(
+    expat
+    gcc-libs
+    glibc
+    libdisplay-info
+    libdrm
+    libx11
+    libxcb
+    libxshmfence
+    spirv-tools
+    systemd-libs
+    vulkan-icd-loader
+    vulkan-mesa-implicit-layers
+    wayland
+    xcb-util-keysyms
+    zlib
+    zstd
+  )
+  optdepends=("vulkan-mesa-layers: additional vulkan layers")
+  provides=(vulkan-driver)
+
+  mv vkintel/* "$pkgdir"
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
 package_vulkan-nouveau() {
   pkgdesc="Open-source Vulkan driver for Nvidia GPUs"
   depends=(
@@ -559,6 +604,62 @@ package_vulkan-nouveau() {
   provides=(vulkan-driver)
 
   mv vknvidia/* "$pkgdir"
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+package_vulkan-panfrost() {
+  pkgdesc="Open-source Vulkan driver for Mali GPUs"
+  depends=(
+    expat
+    gcc-libs
+    glibc
+    libdisplay-info
+    libdrm
+    libx11
+    libxcb
+    libxshmfence
+    spirv-tools
+    systemd-libs
+    vulkan-icd-loader
+    vulkan-mesa-implicit-layers
+    wayland
+    xcb-util-keysyms
+    zlib
+    zstd
+  )
+  optdepends=("vulkan-mesa-layers: additional vulkan layers")
+  provides=(vulkan-driver)
+
+  mv vkpfrost/* "$pkgdir"
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+package_vulkan-powervr() {
+  pkgdesc="Open-source Vulkan driver for PowerVR GPUs"
+  depends=(
+    expat
+    gcc-libs
+    glibc
+    libdisplay-info
+    libdrm
+    libx11
+    libxcb
+    libxshmfence
+    spirv-tools
+    systemd-libs
+    vulkan-icd-loader
+    vulkan-mesa-implicit-layers
+    wayland
+    xcb-util-keysyms
+    zlib
+    zstd
+  )
+  optdepends=("vulkan-mesa-layers: additional vulkan layers")
+  provides=(vulkan-driver)
+
+  mv vkpowrvr/* "$pkgdir"
 
   install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
@@ -681,40 +782,6 @@ package_vulkan-mesa-layers() {
   replaces=(vulkan-mesa-layer)
 
   mv vklayer/* "$pkgdir"
-
-  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
-}
-
-package_vulkan-broadcom() {
-  pkgdesc="Broadcom's Vulkan mesa driver"
-  depends=(
-    wayland
-    libdisplay-info
-    libx11
-    libxshmfence
-    libdrm
-  )
-  optdepends=("vulkan-mesa-layers: additional vulkan layers")
-  provides=(vulkan-driver)
-
-  mv vkbroadcom/* "$pkgdir"
-
-  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
-}
-
-package_vulkan-panfrost() {
-  pkgdesc="Panfrost Vulkan mesa driver"
-  depends=(
-    wayland
-    libdisplay-info
-    libx11
-    libxshmfence
-    libdrm
-  )
-  optdepends=("vulkan-mesa-layers: additional vulkan layers")
-  provides=(vulkan-driver)
-
-  mv vkpanfrost/* "$pkgdir"
 
   install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }
