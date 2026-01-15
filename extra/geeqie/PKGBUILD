@@ -1,0 +1,112 @@
+# Maintainer: AndyRTR <andyrtr@archlinux.org>
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
+# Contributor: Eric Bélanger <eric@archlinux.org>
+# Contributor: Lukas Jirkovsky <l.jirkovsky@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove makedepend on pandoc-cli
+
+pkgname=geeqie
+pkgver=2.6.1
+pkgrel=7
+pkgdesc='Lightweight image viewer'
+arch=('x86_64')
+url="http://www.geeqie.org/"
+license=('GPL-2.0-or-later')
+# https://github.com/BestImageViewer/geeqie#optional-libraries
+depends=('cairo'
+         'cfitsio'
+         'djvulibre'
+         'exiv2'
+         'ffmpegthumbnailer'
+         'gcc-libs'
+         'gdk-pixbuf2'
+         'glib2'
+         'glibc'
+         'gspell'
+         'gtk3'
+         'hicolor-icon-theme'
+         'imath'
+         'lcms2'
+         'libarchive'
+         'libheif'
+         'libjpeg-turbo'
+         'libjxl'
+         'libraw'
+         'libtiff'
+         'libunwind'
+         'libwebp'
+         'lua'
+         'openexr'
+         'openjpeg2'
+         'pango'
+         'poppler-glib'
+         'sh')
+makedepends=('evince'
+             'fbida'
+             'gawk'
+             'glib2-devel'
+             'imagemagick'
+             'intltool'
+             'librsvg'
+             'libwmf'
+             'meson'
+             'perl-image-exiftool'
+             'python'
+             # for the docs
+             'doxygen' 'yelp-tools' 'graphviz'
+             #'fop' - for pdf format but 'pdfoutline' is missing
+)
+checkdepends=('xorg-server-xvfb' 'shellcheck' 'markdownlint' 'appstream')
+optdepends=('librsvg: SVG rendering'
+            'fbida: for jpeg rotation'
+            'gawk: to use the geo-decode function'
+            'perl-image-exiftool: for the jpeg extraction plugin'
+            'gphoto2: command-line tools for various (plugin) operations'
+            'imagemagick: command-line tools for various (plugin) operations'
+            'evince: for print preview')
+source=(#"http://www.geeqie.org/${pkgname}-${pkgver}.tar.xz"{,.asc}
+        https://github.com/BestImageViewer/geeqie/releases/download/v${pkgver}/${pkgname}-${pkgver}.tar.xz{,.asc}
+        0001-Don-t-remove-PATH-from-tests.patch
+        0002-Fix-error-from-shellcheck-0.11.0.patch
+        0003-Stop-overwriting-prepared-image-data.patch)
+sha256sums=('164b768b8a387edf654112428adb8fd88c265c76b7bc84a490158e6923da3a55'
+            'SKIP'
+            '504cc1233dd5dba72c5550d6a9a569ab7a5fb8b551c1bc2a8339602aad3aa168'
+            'c6b8bce2062f1b09d2edd7a172982082b193f52f578548fa06f609de556a4310'
+            'ce5c76e0a9f03268658e58df0f38dea44b8d8b25e5e7cf4824757a14af4db335')
+validpgpkeys=('91EC400226201276E2ADCEC7D0DA6F44C936D1DA') # "Colin Clark <colin.clark@cclark.uk>"
+
+# main repo: http://www.geeqie.org/cgi-bin/gitweb.cgi?p=geeqie.git
+# bug tracker: https://github.com/BestImageViewer/geeqie/issues
+
+prepare() {
+  cd $pkgname-$pkgver
+
+  # Fix tests
+  patch -Np1 -i ../0001-Don-t-remove-PATH-from-tests.patch
+  patch -Np1 -i ../0002-Fix-error-from-shellcheck-0.11.0.patch
+
+  # https://github.com/BestImageViewer/geeqie/issues/1921
+  patch -Np1 -i ../0003-Stop-overwriting-prepared-image-data.patch
+}
+
+build() {
+  arch-meson $pkgname-$pkgver build -D gps-map=disabled
+  meson compile -C build
+}
+
+check() {
+  dbus-run-session xvfb-run -s '-nolisten local' \
+    meson test -C build --print-errorlogs
+}
+
+package(){
+  DESTDIR="$pkgdir" meson install -C build
+
+  # add Changelog listed in help menu
+  install -m644 $pkgname-$pkgver/ChangeLog.gqview "${pkgdir}/usr/share/doc/${pkgname}/ChangeLog"
+
+  # add missing html doc
+  cp -arv build/doc/html "${pkgdir}/usr/share/doc/${pkgname}/"
+}
