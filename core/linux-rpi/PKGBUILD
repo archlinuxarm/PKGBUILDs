@@ -21,8 +21,6 @@ makedepends=(
   inetutils
 )
 options=('!strip')
-source_armv7h=('config')
-source_aarch64=('config8')
 source=("linux-$pkgver-${_commit:0:10}.tar.gz::https://github.com/raspberrypi/linux/archive/${_commit}.tar.gz"
         cmdline.txt
         config.txt
@@ -38,8 +36,6 @@ sha256sums=('2923c4acbd5d5aef5a67a73e486e7ae93807d1368d0b6bb359589e5304bb124c'
             '29956d87ef394fef3dbd9e363391ba260b08369e10019be25019e311781c6476'
             '184ee4f680eb32c99f159773b711cff200426cec7a565bd04711558ca74c381e'
             '3f3df16f49bd5cffd92afa2963cdd9672036b81bffec11237c3a662554915bb3')
-sha256sums_armv7h=('0293ce058fdbe7769ba8ced5ebe5466564cb46fbf934bfe168d59129193d6898')
-sha256sums_aarch64=('16b4d356ba4917d8dfb0a5a3fa298e7cf7dafa8bd4ec27a7a1b179367ffa601a')
 
 # setup vars
 if [[ $CARCH == "armv7h" ]]; then
@@ -58,39 +54,33 @@ prepare() {
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
-  if [[ $_regen -eq 1 ]]; then
-    # useful on two point releases to keep shit straight
-    echo "Applying custom options to rpi defconfig"
-    if [[ $CARCH == "armv7h" ]]; then
-      make bcm2709_defconfig
-      cat ../archarm.diffconfig >> .config
-      make olddefconfig
-      # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16373
-      scripts/config --enable CONFIG_BCM2835_THERMAL
+  echo "Setting config..."
 
-      # re-enable LRU_GEN by default as the intial observation that it was to blame
-      # for triggering OOM was likely a false positive, see:
-      # https://github.com/raspberrypi/linux/issues/5395#issuecomment-1854410361
-      # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16377
-      scripts/config --enable CONFIG_LRU_GEN_ENABLED
-    else
-      make bcm2711_defconfig
-      cat ../archarm.diffconfig >> .config
-      make olddefconfig
-    fi
-    # bcm27xx_defconfig inserts either -v7l or -v8 for CONFIG_LOCALVERSION= so set this to null
-    sed '/^CONFIG_LOCALVERSION=/s,.*$,CONFIG_LOCALVERSION="",' .config >$startdir/newconfig.$_config
-    echo "verify that newconfig.$_config is fit for purpose then redefine $_config"
-    exit 0
-  else
-    echo "Setting config..."
-    cp ../"$_config" .config
+  # unset vendor LOCALVERSION to keep pkgver clean
+  sed -i '/^CONFIG_LOCALVERSION=/d' ./arch/arm64/configs/bcm2711_defconfig
+  sed -i '/^CONFIG_LOCALVERSION=/d' ./arch/arm/configs/bcm2709_defconfig
+
+  echo "Applying custom options to rpi defconfig"
+  if [[ $CARCH == "armv7h" ]]; then
+    make bcm2709_defconfig
+    cat ../archarm.diffconfig >> .config
+    # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16373
+    scripts/config --enable CONFIG_BCM2835_THERMAL
+
+    # re-enable LRU_GEN by default as the intial observation that it was to blame
+    # for triggering OOM was likely a false positive, see:
+    # https://github.com/raspberrypi/linux/issues/5395#issuecomment-1854410361
+    # https://archlinuxarm.org/forum/viewtopic.php?f=23&t=16377
+    scripts/config --enable CONFIG_LRU_GEN_ENABLED
     make olddefconfig
-    diff -u ../"$_config" .config || :
-
-    make -s kernelrelease > version
-    echo "Prepared $pkgbase version $(<version)"
+  else
+    make bcm2711_defconfig
+    cat ../archarm.diffconfig >> .config
+    make olddefconfig
   fi
+
+  make -s kernelrelease > version
+  echo "Prepared $pkgbase version $(<version)"
 }
 
 build() {
