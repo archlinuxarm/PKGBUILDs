@@ -10,7 +10,6 @@ pkgbase=linux-rpi-16k
 _commit=12e0359b733ee324fa53627b16c31a387da9e483
 _srcname=linux-${_commit}
 _kernelname=${pkgbase#linux}
-_regen=
 pkgver=6.18.7
 pkgrel=1
 pkgdesc='Linux'
@@ -26,7 +25,6 @@ options=('!strip')
 source=("linux-$pkgver-${_commit:0:10}.tar.gz::https://github.com/raspberrypi/linux/archive/${_commit}.tar.gz"
         cmdline.txt
         config.txt
-        config8
         0001-Make-proc-cpuinfo-consistent-on-arm64-and-arm.patch
         linux.preset
         archarm.diffconfig
@@ -34,7 +32,6 @@ source=("linux-$pkgver-${_commit:0:10}.tar.gz::https://github.com/raspberrypi/li
 sha256sums=('2923c4acbd5d5aef5a67a73e486e7ae93807d1368d0b6bb359589e5304bb124c'
             '7a84795f7c7a39e8384356ef51f47d5ddac0e44921d1bd2cbf8db7de88810ef5'
             '624a2057aa5e11624e69781c3bd5f3641134266e65f15404577b2857a509db4c'
-            '3aba69826e4453b24824ab00f3bf5528204a5a17da88d13696eec2567acc62e7'
             '29956d87ef394fef3dbd9e363391ba260b08369e10019be25019e311781c6476'
             '184ee4f680eb32c99f159773b711cff200426cec7a565bd04711558ca74c381e'
             '1255869ce1de313890a8187993d8f8fcd11db18481ab6ecbaf0753f98ba03b8f')
@@ -52,25 +49,17 @@ prepare() {
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
-  if [[ $_regen -eq 1 ]]; then
-    # useful on two point releases to keep shit straight
-    echo "Applying custom shit to bcm2712_defconfig"
-    make bcm2712_defconfig
-    cat ../archarm.diffconfig >> .config
-    make olddefconfig
-    # bcm2712_defconfig inserts a value for CONFIG_LOCALVERSION= so set this to null
-    sed '/^CONFIG_LOCALVERSION=/s,.*$,CONFIG_LOCALVERSION="",' .config >$startdir/newconfig.$_config
-    echo "verify that newconfig.$_config is fit for purpose then redefine $_config"
-    exit 0
-  else
-    echo "Setting config..."
-    cp ../"$_config" .config
-    make olddefconfig
-    diff -u ../"$_config" .config || :
+  echo "Setting config..."
 
-    make -s kernelrelease > version
-    echo "Prepared $pkgbase version $(<version)"
-  fi
+  # unset vendor LOCALVERSION to keep pkgver clean
+  sed -i '/^CONFIG_LOCALVERSION=/d' ./arch/arm64/configs/bcm2712_defconfig
+
+  make bcm2712_defconfig
+  cat ../archarm.diffconfig >> .config
+  make olddefconfig
+
+  make -s kernelrelease > version
+  echo "Prepared $pkgbase version $(<version)"
 }
 
 build() {
