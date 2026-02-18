@@ -1,4 +1,5 @@
-# Maintainer: Sven-Hendrik Haase <svenstaro@gmail.com>
+# Maintainer: Sven-Hendrik Haase <svenstaro@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
 # Contributor: David Runge <dvzrv@archlinux.org>
 # Contributor: Markus Martin <markus@archwyrm.net>
 
@@ -7,41 +8,51 @@
 
 pkgname=yaml-cpp
 pkgver=0.8.0
-pkgrel=2
+pkgrel=3
 pkgdesc="YAML parser and emitter in C++, written around the YAML 1.2 spec"
-url="https://github.com/jbeder/yaml-cpp"
 arch=('x86_64')
+url="https://github.com/jbeder/yaml-cpp"
 license=('MIT')
-depends=('gcc-libs' 'glibc')
+depends=(
+  'glibc'
+  'libgcc'
+  'libstdc++'
+)
+makedepends=(
+  'cmake'
+  'git'
+)
 provides=('libyaml-cpp.so')
-makedepends=('cmake' 'ninja')
-source=("https://github.com/jbeder/yaml-cpp/archive/${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha512sums=('aae9d618f906117d620d63173e95572c738db518f4ff1901a06de2117d8deeb8045f554102ca0ba4735ac0c4d060153a938ef78da3e0da3406d27b8298e5f38e')
+source=("git+${url}.git#tag=${pkgver}")
+b2sums=('0204d6a76cb41f387e31b5123930eda5e51fef971c99b7e2b65ee26981b7888162f2b59ef167d03a2555ceb7a66c8eaf8c27d6b62b0264941462701b284d1975')
+
+prepare() {
+  # Fix build with GCC 15
+  git -C ${pkgname} cherry-pick -n 7b469b4220f96fb3d036cf68cd7bd30bd39e61d2
+  # Don't install embedded copy of GTest
+  git -C ${pkgname} cherry-pick -n f878043f12a9434a2ef72de3992ec92e6845c889
+}
 
 build() {
-  cd ${pkgname}-${pkgver}
+  export CMAKE_POLICY_VERSION_MINIMUM=3.5
   CFLAGS+=" -fsigned-char" && CXXFLAGS="$CFLAGS"
-  cmake -GNinja \
-        -Bbuild \
-        -DYAML_CPP_BUILD_TESTS=ON \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-        -DBUILD_SHARED_LIBS=ON \
-        -DYAML_BUILD_SHARED_LIBS=ON \
-        -DCMAKE_BUILD_TYPE=Release
-  ninja -C build
+  cmake -S ${pkgname} -Bbuild \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -Wno-dev \
+    -DYAML_CPP_BUILD_TESTS=ON \
+    -DBUILD_SHARED_LIBS=ON \
+    -DYAML_BUILD_SHARED_LIBS=ON
+  cmake --build build
 }
 
 check() {
-  cd ${pkgname}-${pkgver}
-  ninja -C build test
-  build/test/yaml-cpp-tests
+  ctest --test-dir build --output-on-failure
 }
 
 package() {
-  cd ${pkgname}-${pkgver}
-  DESTDIR="${pkgdir}" ninja -C build install
+  DESTDIR="${pkgdir}" cmake --install build
+  cd ${pkgname}
   install -vDm 644 {CONTRIBUTING,README}.md -t "${pkgdir}/usr/share/doc/${pkgname}"
   install -vDm 644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
-  rm -rf "${pkgdir}"/usr/{lib,lib/pkgconfig,include}/*{gtest,gmock}*
-  rm -rf "${pkgdir}"/usr/lib/cmake/GTest
 }
