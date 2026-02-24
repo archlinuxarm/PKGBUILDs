@@ -1,11 +1,11 @@
 # Maintainer: Sébastien Luttringer
+# Maintainer: Christian Heusel <gromit@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - removed x86_energy_perf_policy and turbostat build/package, uses x86 asm
 #  - removed intel-speed-select package
 #  - removed hyperv package
 #  - removed numactl dep
-#  - use tarball source
 #  - add GPIO and IIO utilities packages
 #  - build perf with WERROR=0
 
@@ -21,8 +21,9 @@ pkgname=(
   'gpio-utils'
   'iio-utils'
 )
-pkgver=6.19
-pkgrel=2
+pkgver=6.19.3
+pkgrel=1
+_srcname=linux-${pkgver}
 license=('GPL-2.0-only')
 arch=('x86_64')
 url='https://www.kernel.org'
@@ -47,18 +48,23 @@ makedepends+=('libcap')
 # bpftool
 makedepends+=('llvm' 'clang')
 groups=("$pkgbase")
-source=("https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${pkgver}.tar.xz"
+source=(https://cdn.kernel.org/pub/linux/kernel/v${pkgver%%.*}.x/${_srcname}.tar.{xz,sign}
         'usbipd.service'
         'hv_kvp_daemon.service'
         'hv_vss_daemon.service'
 )
-sha256sums=('05c6e18573ffacca5c3ff0105090a0bb063a2927d280c5ae0372c9667a60f871'
+validpgpkeys=(
+  'ABAF11C65A2970B130ABE3C479BE3E4300411886'  # Linus Torvalds
+  '647F28654894E3BD457199BE38DBBDC86092693E'  # Greg Kroah-Hartman
+)
+sha256sums=('0e474968adfcbee32916fd01a89d8ccfd1168d8d32569e76a5c664c793198ebe'
+            'SKIP'
             '2e187734d8aec58a3046d79883510d779aa93fb3ab20bd3132c1a607ebe5498f'
             'b1315cb77a35454e1af9172f821a52e2a0cb18561be05a340d21cf337b01ae61'
             '2d5e2f8d40b6f19bf2e1dead57ca105d72098fb0b418c09ff2e0cb91089710af')
 
 prepare() {
-  cd linux-$pkgver
+  cd "$_srcname"
 
   # apply patch from the source array (should be a pacman feature)
   local src
@@ -81,7 +87,7 @@ build() {
   export CFLAGS="${CFLAGS} -Wno-error=discarded-qualifiers"
 
   echo ':: perf'
-  pushd linux-$pkgver/tools/perf
+  pushd "$_srcname"/tools/perf
   make -f Makefile.perf \
     prefix=/usr \
     lib=lib/perf \
@@ -97,12 +103,12 @@ build() {
   popd
 
   echo ':: cpupower'
-  pushd linux-$pkgver/tools/power/cpupower
+  pushd "$_srcname"/tools/power/cpupower
   make VERSION=$pkgver-$pkgrel
   popd
 
   echo ':: usbip'
-  pushd linux-$pkgver/tools/usb/usbip
+  pushd "$_srcname"/tools/usb/usbip
   # Fix gcc compilation
   sed -i 's,-Wall -Werror -Wextra,-fcommon,' configure.ac
   ./autogen.sh
@@ -111,22 +117,22 @@ build() {
   popd
 
   echo ':: tmon'
-  pushd linux-$pkgver/tools/thermal/tmon
+  pushd "$_srcname"/tools/thermal/tmon
   make
   popd
 
   echo ':: gpio'
-  pushd linux-$pkgver/tools/gpio
+  pushd "$_srcname"/tools/gpio
   make
   popd
 
   echo ':: iio'
-  pushd linux-$pkgver/tools/iio
+  pushd "$_srcname"/tools/iio
   make
   popd
 
   echo ':: bpf'
-  pushd linux-$pkgver/tools/bpf
+  pushd "$_srcname"/tools/bpf
   # doesn't compile when we don't first compile bpftool in its own directory and
   # man pages require to be also launch from the subdirectory
   make -C bpftool all doc
@@ -135,7 +141,7 @@ build() {
   popd
 
   echo ':: bootconfig'
-  pushd linux-$pkgver/tools/bootconfig
+  pushd "$_srcname"/tools/bootconfig
   make
   popd
 }
@@ -162,7 +168,7 @@ package_perf() {
            'numactl' 'audit' 'coreutils' 'glib2' 'xz' 'zlib' 'libelf' 'bash'
            'zstd' 'libcap' 'libtraceevent' 'openssl' 'llvm-libs')
 
-  cd linux-$pkgver/tools/perf
+  cd "$_srcname"/tools/perf
   make -f Makefile.perf \
     prefix=/usr \
     lib=lib/perf \
@@ -195,7 +201,7 @@ package_cpupower() {
   replaces=('cpufrequtils')
   install=cpupower.install
 
-  pushd linux-$pkgver/tools/power/cpupower
+  pushd "$_srcname"/tools/power/cpupower
   make \
     DESTDIR="$pkgdir" \
     confdir='/etc/default/' \
@@ -212,7 +218,7 @@ package_usbip() {
   pkgdesc='An USB device sharing system over IP network'
   depends=('glibc' 'glib2' 'sysfsutils' 'systemd-libs')
 
-  pushd linux-$pkgver/tools/usb/usbip
+  pushd "$_srcname"/tools/usb/usbip
   make install DESTDIR="$pkgdir"
   popd
   # module loading
@@ -226,7 +232,7 @@ package_tmon() {
   pkgdesc='Monitoring and Testing Tool for Linux kernel thermal subsystem'
   depends=('glibc' 'ncurses')
 
-  cd linux-$pkgver/tools/thermal/tmon
+  cd "$_srcname"/tools/thermal/tmon
   make install INSTALL_ROOT="$pkgdir"
 }
 
@@ -234,7 +240,7 @@ package_gpio-utils() {
   pkgdesc='GPIO character device utilities'
   depends=('glibc')
 
-  cd linux-$pkgver/tools/gpio
+  cd "$_srcname"/tools/gpio
   make install DESTDIR="$pkgdir"
 }
 
@@ -242,7 +248,7 @@ package_iio-utils() {
   pkgdesc='Industrial IO utilities'
   depends=('glibc')
 
-  cd linux-$pkgver/tools/iio
+  cd "$_srcname"/tools/iio
   make install DESTDIR="$pkgdir"
 }
 
@@ -250,7 +256,7 @@ package_bpf() {
   pkgdesc='BPF tools'
   depends=('glibc' 'readline' 'zlib' 'libelf' 'libcap' 'zstd' 'llvm-libs' 'binutils')
 
-  cd linux-$pkgver/tools/bpf
+  cd "$_srcname"/tools/bpf
   # skip runsqlower until disabled in build
   make -W runqslower_install install prefix=/usr DESTDIR="$pkgdir"
   # fix bpftool hard written path
@@ -264,7 +270,7 @@ package_bootconfig() {
   pkgdesc='Apply, delete or show boot config to initrd'
   depends=('glibc')
 
-  cd linux-$pkgver/tools/bootconfig
+  cd "$_srcname"/tools/bootconfig
   install -dm755 "$pkgdir/usr/bin"
   make install DESTDIR="$pkgdir"
 }
