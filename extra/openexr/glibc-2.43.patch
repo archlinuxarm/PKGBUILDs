@@ -1,19 +1,446 @@
+From c6e25f46d9b448cb2a3a74c76624a761212f30b3 Mon Sep 17 00:00:00 2001
+From: Cary Phillips <cary@ilm.com>
+Date: Sun, 22 Feb 2026 12:39:00 -0800
+Subject: [PATCH 1/5] Fix build failure with glibc 2.43 due to C11 threads.h
+ conflicts
+
+Fix conflicting once_flag, ONCE_FLAG_INIT, and call_once definitions
+when building with glibc 2.43, which now includes C11 <threads.h>
+support
+
+Detect <threads.h> availability and use standard C11 thread primitives
+when present, falling back to pthread or Windows implementations
+otherwise CI
+
+This also adds a new Linux build (#12) using a Fedora Rawhide container to
+test against glibc 2.43
+
+Signed-off-by: Cary Phillips <cary@ilm.com>
+---
+ .github/workflows/ci_steps.yml        | 15 +++++++++
+ .github/workflows/ci_workflow.yml     | 12 +++++++-
+ src/lib/OpenEXRCore/internal_thread.h | 44 ++++++++++++++++++++++-----
+ 3 files changed, 62 insertions(+), 9 deletions(-)
+
+diff --git a/.github/workflows/ci_steps.yml b/.github/workflows/ci_steps.yml
+index cf28a87340..54ad2adc3a 100644
+--- a/.github/workflows/ci_steps.yml
++++ b/.github/workflows/ci_steps.yml
+@@ -120,6 +120,21 @@ jobs:
+ 
+         shell: bash
+ 
++      - name: Report C Runtime Version
++        run: |
++          if [[ "$RUNNER_OS" == "Linux" ]]; then
++            ldd --version 2>&1 | head -1 || true
++          elif [[ "$RUNNER_OS" == "macOS" ]]; then
++            echo "macOS SDK: $(xcrun --show-sdk-version 2>/dev/null || echo 'unknown')"
++          fi
++        shell: bash
++
++      - name: Install Build Dependencies (Fedora)
++        if: startsWith(inputs.container, 'fedora:')
++        run: |
++          dnf install -y gcc gcc-c++ cmake make git wget libdeflate-devel
++        shell: bash
++
+       - name: Determine MSYS2 Packages
+         if: inputs.msystem != ''
+         run: |
+diff --git a/.github/workflows/ci_workflow.yml b/.github/workflows/ci_workflow.yml
+index 3dfa09d2ef..ae34cede7a 100644
+--- a/.github/workflows/ci_workflow.yml
++++ b/.github/workflows/ci_workflow.yml
+@@ -65,7 +65,7 @@ jobs:
+       build: ${{ matrix.build }}
+       # DockerHub: https://hub.docker.com/u/aswf
+       # Source: https://github.com/AcademySoftwareFoundation/aswf-docker
+-      container: aswf/ci-openexr:${{ matrix.vfx-cy || '2024' }}
++      container: ${{ matrix.container || format('aswf/ci-openexr:{0}', matrix.vfx-cy || '2024') }}
+       cmake: ${{ matrix.cmake || '3.14.7' }}
+       cxx-standard: ${{ matrix.cxx-standard || '17' }}
+       cxx-compiler: ${{ matrix.cxx-compiler || 'g++' }}
+@@ -147,6 +147,16 @@ jobs:
+             RUN_TESTING: OFF
+             validate_install: OFF
+ 
++          - build: 12
++            label: Fedora Rawhide
++            container: fedora:rawhide
++            cmake: '3.31.6'
++            OPENEXR_FORCE_INTERNAL_IMATH: 'ON'
++            OPENEXR_FORCE_INTERNAL_DEFLATE: 'OFF'
++            OPENEXR_FORCE_INTERNAL_OPENJPH: 'ON'
++            OPENEXR_INSTALL_DOCS: 'OFF'
++            validate_install: 'OFF'
++
+   macOS:
+     name: 'macOS.${{ matrix.build}}: ${{ matrix.label }}'
+     uses: ./.github/workflows/ci_steps.yml
 diff --git a/src/lib/OpenEXRCore/internal_thread.h b/src/lib/OpenEXRCore/internal_thread.h
-index 6c3c1032..e40321e1 100644
+index 6c3c1032cd..9a5c630fb3 100644
 --- a/src/lib/OpenEXRCore/internal_thread.h
 +++ b/src/lib/OpenEXRCore/internal_thread.h
-@@ -10,6 +10,7 @@
+@@ -8,15 +8,39 @@
  
- // Thread-safe single initiatization, using InitOnceExecuteOnce on Windows,
- // pthread_once elsewhere, or a simple variable if threading is completely disabled.
-+#ifndef __once_flag_defined
+ #include "openexr_config.h"
+ 
+-// Thread-safe single initiatization, using InitOnceExecuteOnce on Windows,
+-// pthread_once elsewhere, or a simple variable if threading is completely disabled.
++// Thread-safe single initiatization, using C11 threads if available,
++// InitOnceExecuteOnce on Windows, pthread_once elsewhere, or a simple
++// variable if threading is completely disabled.
++//
++// C11 threads.h is available when __STDC_NO_THREADS__ is not defined
++// (C11+) or when the system provides it (e.g., glibc 2.43+).
++
  #if ILMTHREAD_THREADING_ENABLED
- #    ifdef _WIN32
+-#    ifdef _WIN32
++
++// Check for C11 threads.h availability.
++// Exclude MSVC - its threads.h has compatibility issues with C++ compilation.
++#    if !defined(_MSC_VER) && !defined(_WIN32)
++#        if defined(__has_include)
++#            if __has_include(<threads.h>)
++#                define EXR_HAS_C11_THREADS 1
++#            endif
++#        endif
++// Also check via __STDC_NO_THREADS__ (defined when threads.h is NOT available)
++#        if !defined(EXR_HAS_C11_THREADS) && defined(__STDC_VERSION__) && \
++            __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
++#            define EXR_HAS_C11_THREADS 1
++#        endif
++#    endif
++
++#    if defined(EXR_HAS_C11_THREADS)
++#        include <threads.h>
++// C11 provides once_flag, ONCE_FLAG_INIT, and call_once - use them directly
++#    elif defined(_WIN32)
  #        include <windows.h>
-@@ -49,5 +50,5 @@ call_once (once_flag* flag, void (*func) (void))
+ #        define ONCE_FLAG_INIT INIT_ONCE_STATIC_INIT
+ typedef INIT_ONCE once_flag;
+ static BOOL CALLBACK
+-once_init_fn (PINIT_ONCE once, PVOID param, PVOID* ctx)
++exr_once_init_fn (PINIT_ONCE once, PVOID param, PVOID* ctx)
+ {
+     void (*fn) (void) = (void (*) (void)) param;
+     fn ();
+@@ -25,7 +49,7 @@ once_init_fn (PINIT_ONCE once, PVOID param, PVOID* ctx)
+ static inline void
+ call_once (once_flag* flag, void (*func) (void))
+ {
+-    InitOnceExecuteOnce (flag, once_init_fn, (PVOID) func, NULL);
++    InitOnceExecuteOnce (flag, exr_once_init_fn, (PVOID) func, NULL);
+ }
+ #    else
+ #        include <pthread.h>
+@@ -37,17 +61,21 @@ call_once (once_flag* flag, void (*func) (void))
+     (void) pthread_once (flag, func);
+ }
+ #    endif
+-#else
++
++#else /* !ILMTHREAD_THREADING_ENABLED */
++
+ #    define ONCE_FLAG_INIT 0
+ typedef int once_flag;
+ static inline void
+ call_once (once_flag* flag, void (*func) (void))
+ {
+-    if (!*flag) {
++    if (!*flag)
++    {
+         *flag = 1;
+         func ();
      }
  }
- #endif
+-#endif
++
++#endif /* ILMTHREAD_THREADING_ENABLED */
+ 
+ #endif /* OPENEXR_PRIVATE_THREAD_H */
+
+From 13ac331069d9cdc3a9df7eb4a1e5d46b21d98333 Mon Sep 17 00:00:00 2001
+From: Cary Phillips <cary@ilm.com>
+Date: Mon, 23 Feb 2026 09:39:07 -0800
+Subject: [PATCH 2/5] revert unnecessary stylistic changes
+
+Signed-off-by: Cary Phillips <cary@ilm.com>
+---
+ src/lib/OpenEXRCore/internal_thread.h | 14 +++++---------
+ 1 file changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/src/lib/OpenEXRCore/internal_thread.h b/src/lib/OpenEXRCore/internal_thread.h
+index 9a5c630fb3..e88d45781d 100644
+--- a/src/lib/OpenEXRCore/internal_thread.h
++++ b/src/lib/OpenEXRCore/internal_thread.h
+@@ -40,7 +40,7 @@
+ #        define ONCE_FLAG_INIT INIT_ONCE_STATIC_INIT
+ typedef INIT_ONCE once_flag;
+ static BOOL CALLBACK
+-exr_once_init_fn (PINIT_ONCE once, PVOID param, PVOID* ctx)
++once_init_fn (PINIT_ONCE once, PVOID param, PVOID* ctx)
+ {
+     void (*fn) (void) = (void (*) (void)) param;
+     fn ();
+@@ -49,7 +49,7 @@ exr_once_init_fn (PINIT_ONCE once, PVOID param, PVOID* ctx)
+ static inline void
+ call_once (once_flag* flag, void (*func) (void))
+ {
+-    InitOnceExecuteOnce (flag, exr_once_init_fn, (PVOID) func, NULL);
++    InitOnceExecuteOnce (flag, once_init_fn, (PVOID) func, NULL);
+ }
+ #    else
+ #        include <pthread.h>
+@@ -61,21 +61,17 @@ call_once (once_flag* flag, void (*func) (void))
+     (void) pthread_once (flag, func);
+ }
+ #    endif
 -
+-#else /* !ILMTHREAD_THREADING_ENABLED */
+-
++#else
+ #    define ONCE_FLAG_INIT 0
+ typedef int once_flag;
+ static inline void
+ call_once (once_flag* flag, void (*func) (void))
+ {
+-    if (!*flag)
+-    {
++    if (!*flag) {
+         *flag = 1;
+         func ();
+     }
+ }
+-
+-#endif /* ILMTHREAD_THREADING_ENABLED */
 +#endif
+ 
+ #endif /* OPENEXR_PRIVATE_THREAD_H */
+
+From 229db1fc2eb8cc463d9f6b823f7371e3f79665fe Mon Sep 17 00:00:00 2001
+From: Cary Phillips <cary@ilm.com>
+Date: Mon, 23 Feb 2026 17:44:05 -0800
+Subject: [PATCH 3/5] simply internal_thread.h #if logic
+
+Signed-off-by: Cary Phillips <cary@ilm.com>
+---
+ src/lib/OpenEXRCore/internal_thread.h | 43 ++++++++-------------------
+ 1 file changed, 12 insertions(+), 31 deletions(-)
+
+diff --git a/src/lib/OpenEXRCore/internal_thread.h b/src/lib/OpenEXRCore/internal_thread.h
+index e88d45781d..1aa7d5c008 100644
+--- a/src/lib/OpenEXRCore/internal_thread.h
++++ b/src/lib/OpenEXRCore/internal_thread.h
+@@ -8,34 +8,10 @@
+ 
+ #include "openexr_config.h"
+ 
+-// Thread-safe single initiatization, using C11 threads if available,
+-// InitOnceExecuteOnce on Windows, pthread_once elsewhere, or a simple
+-// variable if threading is completely disabled.
+-//
+-// C11 threads.h is available when __STDC_NO_THREADS__ is not defined
+-// (C11+) or when the system provides it (e.g., glibc 2.43+).
+-
++// Thread-safe single initiatization, using InitOnceExecuteOnce on Windows,
++// pthread_once elsewhere, or a simple variable if threading is completely disabled.
+ #if ILMTHREAD_THREADING_ENABLED
+-
+-// Check for C11 threads.h availability.
+-// Exclude MSVC - its threads.h has compatibility issues with C++ compilation.
+-#    if !defined(_MSC_VER) && !defined(_WIN32)
+-#        if defined(__has_include)
+-#            if __has_include(<threads.h>)
+-#                define EXR_HAS_C11_THREADS 1
+-#            endif
+-#        endif
+-// Also check via __STDC_NO_THREADS__ (defined when threads.h is NOT available)
+-#        if !defined(EXR_HAS_C11_THREADS) && defined(__STDC_VERSION__) && \
+-            __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
+-#            define EXR_HAS_C11_THREADS 1
+-#        endif
+-#    endif
+-
+-#    if defined(EXR_HAS_C11_THREADS)
+-#        include <threads.h>
+-// C11 provides once_flag, ONCE_FLAG_INIT, and call_once - use them directly
+-#    elif defined(_WIN32)
++#    ifdef _WIN32
+ #        include <windows.h>
+ #        define ONCE_FLAG_INIT INIT_ONCE_STATIC_INIT
+ typedef INIT_ONCE once_flag;
+@@ -51,7 +27,7 @@ call_once (once_flag* flag, void (*func) (void))
+ {
+     InitOnceExecuteOnce (flag, once_init_fn, (PVOID) func, NULL);
+ }
+-#    else
++#    elif !defined(ONCE_FLAG_INIT)
+ #        include <pthread.h>
+ #        define ONCE_FLAG_INIT PTHREAD_ONCE_INIT
+ typedef pthread_once_t once_flag;
+@@ -61,8 +37,11 @@ call_once (once_flag* flag, void (*func) (void))
+     (void) pthread_once (flag, func);
+ }
+ #    endif
+-#else
+-#    define ONCE_FLAG_INIT 0
++
++#else /* !ILMTHREAD_THREADING_ENABLED */
++
++#    ifndef ONCE_FLAG_INIT
++#        define ONCE_FLAG_INIT 0
+ typedef int once_flag;
+ static inline void
+ call_once (once_flag* flag, void (*func) (void))
+@@ -72,6 +51,8 @@ call_once (once_flag* flag, void (*func) (void))
+         func ();
+     }
+ }
+-#endif
++#    endif
++
++#endif /* ILMTHREAD_THREADING_ENABLED */
+ 
+ #endif /* OPENEXR_PRIVATE_THREAD_H */
+
+From 8c763ca5262a7453ffe7a100c318256922b61b39 Mon Sep 17 00:00:00 2001
+From: Cary Phillips <cary@ilm.com>
+Date: Thu, 26 Feb 2026 14:18:30 -0800
+Subject: [PATCH 4/5] Add #if specific to __APPLE__; add better comments
+
+Signed-off-by: Cary Phillips <cary@ilm.com>
+---
+ src/lib/OpenEXRCore/internal_thread.h | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/src/lib/OpenEXRCore/internal_thread.h b/src/lib/OpenEXRCore/internal_thread.h
+index 1aa7d5c008..2842a6f496 100644
+--- a/src/lib/OpenEXRCore/internal_thread.h
++++ b/src/lib/OpenEXRCore/internal_thread.h
+@@ -8,10 +8,11 @@
+ 
+ #include "openexr_config.h"
+ 
+-// Thread-safe single initiatization, using InitOnceExecuteOnce on Windows,
+-// pthread_once elsewhere, or a simple variable if threading is completely disabled.
+ #if ILMTHREAD_THREADING_ENABLED
+ #    ifdef _WIN32
++/* On Windows, use native InitOnceExecuteOnce, which avoids MSVC's
++ * problematic <threads.h>
++ */
+ #        include <windows.h>
+ #        define ONCE_FLAG_INIT INIT_ONCE_STATIC_INIT
+ typedef INIT_ONCE once_flag;
+@@ -27,7 +28,10 @@ call_once (once_flag* flag, void (*func) (void))
+ {
+     InitOnceExecuteOnce (flag, once_init_fn, (PVOID) func, NULL);
+ }
+-#    elif !defined(ONCE_FLAG_INIT)
++#    elif defined(__APPLE__)
++/*
++ * On macOS, use <pthreads.h> and pthread_once.
++ */
+ #        include <pthread.h>
+ #        define ONCE_FLAG_INIT PTHREAD_ONCE_INIT
+ typedef pthread_once_t once_flag;
+@@ -36,10 +40,17 @@ call_once (once_flag* flag, void (*func) (void))
+ {
+     (void) pthread_once (flag, func);
+ }
++#    else
++/*
++ * On Linux, use standard <threads.h>
++ */
++#        include <threads.h>
+ #    endif
+ 
+ #else /* !ILMTHREAD_THREADING_ENABLED */
+-
++/*
++ * Threading disabled, provide a stub call_once.
++ */
+ #    ifndef ONCE_FLAG_INIT
+ #        define ONCE_FLAG_INIT 0
+ typedef int once_flag;
+
+From 5fda77522f8eb08c43aa1f0cae150b8619c16cf4 Mon Sep 17 00:00:00 2001
+From: Cary Phillips <cary@ilm.com>
+Date: Thu, 26 Feb 2026 14:57:45 -0800
+Subject: [PATCH 5/5] replace __APPLE__ with has_include<threads.h>
+
+Signed-off-by: Cary Phillips <cary@ilm.com>
+---
+ src/lib/OpenEXRCore/internal_thread.h | 32 +++++++++++++++------------
+ 1 file changed, 18 insertions(+), 14 deletions(-)
+
+diff --git a/src/lib/OpenEXRCore/internal_thread.h b/src/lib/OpenEXRCore/internal_thread.h
+index 2842a6f496..d638c2f7f7 100644
+--- a/src/lib/OpenEXRCore/internal_thread.h
++++ b/src/lib/OpenEXRCore/internal_thread.h
+@@ -10,7 +10,8 @@
+ 
+ #if ILMTHREAD_THREADING_ENABLED
+ #    ifdef _WIN32
+-/* On Windows, use native InitOnceExecuteOnce, which avoids MSVC's
++/*
++ * On Windows, use native InitOnceExecuteOnce, which avoids MSVC's
+  * problematic <threads.h>
+  */
+ #        include <windows.h>
+@@ -28,9 +29,15 @@ call_once (once_flag* flag, void (*func) (void))
+ {
+     InitOnceExecuteOnce (flag, once_init_fn, (PVOID) func, NULL);
+ }
+-#    elif defined(__APPLE__)
++#    elif __has_include(<threads.h>)
++/*
++ * On Linux (glibc 2.28+), use standard <threads.h>
++ */
++#        include <threads.h>
++
++#    else
+ /*
+- * On macOS, use <pthreads.h> and pthread_once.
++ * No <threads.h> on macOS and older Linux distros: fall back to pthreads
+  */
+ #        include <pthread.h>
+ #        define ONCE_FLAG_INIT PTHREAD_ONCE_INIT
+@@ -40,19 +47,17 @@ call_once (once_flag* flag, void (*func) (void))
+ {
+     (void) pthread_once (flag, func);
+ }
+-#    else
+-/*
+- * On Linux, use standard <threads.h>
+- */
+-#        include <threads.h>
++
+ #    endif
+ 
+-#else /* !ILMTHREAD_THREADING_ENABLED */
++#endif /* ILMTHREAD_THREADING_ENABLED */
++
+ /*
+- * Threading disabled, provide a stub call_once.
++ * If threading is disabled, or call_once/ONCE_FLAG_INIT wasn't declared
++ * above, declare a default implementation.
+  */
+-#    ifndef ONCE_FLAG_INIT
+-#        define ONCE_FLAG_INIT 0
++#ifndef ONCE_FLAG_INIT
++#  define ONCE_FLAG_INIT 0
+ typedef int once_flag;
+ static inline void
+ call_once (once_flag* flag, void (*func) (void))
+@@ -62,8 +67,7 @@ call_once (once_flag* flag, void (*func) (void))
+         func ();
+     }
+ }
+-#    endif
++#endif
+ 
+-#endif /* ILMTHREAD_THREADING_ENABLED */
+ 
  #endif /* OPENEXR_PRIVATE_THREAD_H */
