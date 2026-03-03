@@ -9,20 +9,23 @@
 
 pkgbase=bitcoin
 pkgname=('bitcoin-daemon' 'bitcoin-qt' 'bitcoin-tx')
-pkgver=28.1
-pkgrel=2
+pkgver=30.2
+pkgrel=1
 arch=('x86_64')
 url="https://bitcoin.org/en/wallets/desktop/linux/bitcoincore/"
 makedepends=(
   boost
-  db5.3
+  capnproto
+  cmake
+  libcapnp-rpc.so
+  libcapnp.so
   libevent
-  libminiupnpc.so
   libsqlite3.so
-  libzmq.so
+  libstdc++.so
   qrencode
-  qt5-base
-  qt5-tools
+  qt6-base
+  qt6-tools
+  qt6-wayland
 )
 license=('MIT')
 source=("$pkgbase-$pkgver.tar.gz::https://bitcoincore.org/bin/bitcoin-core-$pkgver/bitcoin-$pkgver.tar.gz"
@@ -32,18 +35,18 @@ source=("$pkgbase-$pkgver.tar.gz::https://bitcoincore.org/bin/bitcoin-core-$pkgv
         "bitcoin.tmpfiles"
         "bitcoin-qt.desktop"
         "bitcoin-qt.appdata.xml")
-sha256sums=('c5ae2dd041c7f9d9b7c722490ba5a9d624f7e9a089c67090615e1ba4ad0883ba'
-            '5411f333fce232f4072e6440cc507e36a0305861414740fbbd5f5abf569c3cf4'
+sha256sums=('6fd00b8c42883d5c963901ad4109a35be1e5ec5c2dc763018c166c21a06c84cb'
+            '11113f40ed9e963fbe98e37751818929a2dd53cea0588452fc0b9fbb24bf2405'
             'SKIP'
             '7a77112fb094b9b2e6dd873e24c9a6bacb1f1c453d811a024f271f4b78f2a704'
-            'ba83570b4671b18c230f23d8d93cd8faa73179a546655448c14d1644d9b49f35'
+            '0e9dfc7ede2c30ceeedd8a73a5e0aa7047d955431a87aa72a428c4fbd7f5de4f'
             'a020897651c03690eae3411fe401100fd1a2ffaa799247165eb71124609b7959'
             '71b125555451e9bc60b54a6658d886bad63bd18c58b5d6e3bd8977b82a70da7a')
-b2sums=('bc18312b02f1c77a8914cae7ad8711ae2dcc0bc16b33aa661d8326f90947b2fbcc52b9112ec738fc228e4b9dbd591d85cbaa7a36306ecc1fa1db8ab42eebc5db'
-        'fc64a905e4b44b922b8e062d98399fb25b67d73909f70f12ef00fbcfd8cce76a4e974d127d33883215afcaf906d9061442f4d3c8ea4c47666165f1b6210f1bd5'
+b2sums=('e2ccbcdd679191eb6df545a2d49186d01809acc4ec26141d1588fa4650aa0af94d2817d126df458c629b0f4b005e9800608f88e81f8c19ef8b1065f67d1e2648'
+        '46eafdff0691e4893ef3f326535cee73115cdadc8410a3e5f69f448594e45d1aeb8fff19a5370a6e1435cb52ae1274be715c4d44ede009d474c845b0e0429a4f'
         'SKIP'
         '25166f5726b43c531b7ba5f58aaf1c0242d26b96d2057da156024a8f9fc53702ea9ef0c67290cf8d302b9fb473cb16435dc2fe4489ebc5d0eae516635fd81c0e'
-        '45d4703b78476cb1c5748f62863914e5397858c835e43cee2f4895608dbabf383993b840bb3ec2d4d2c64ca02152881ad4b495b28f94451f706687b83e99d2af'
+        'd37942205b65102b43aa6cddddbe2db9bb7dd590af685ce74956b2e5bd5df5f1036bd49707f0452e47db007678e098aa0826310717bca327c7ffc48c21851fa3'
         'f14315183b5ac6b6a9f3e4ff269be37eeb6a4529bb4c9d0cd3e1d54e3ec8052f87ba1e6591080a0d1c78daf7af40cb2ecbd11d9702e217b9c1e50d5011a8e048'
         '236a841446b905f4cf154184109451300b984694ace96bee3ec75872563313279f9c543daaceed2dd712bf56115deee538b862aa73f15dee5447d235299389c7')
 validpgpkeys=(71A3B16735405025D447E8F274810B012346C9A6
@@ -55,44 +58,56 @@ validpgpkeys=(71A3B16735405025D447E8F274810B012346C9A6
               ED9BDF7AD6A55E232E84524257FF9BDBCC301009
               D1DBF2C4B96F2DEBF4C16654410108112E7EA81F
               982A193E3CE0EED535E09023188CBB2648416AD5)
-changelog=Changelog
 
 prepare() {
   sha256sum -c --ignore-missing "$pkgbase-$pkgver.SHA256SUMS"
-  cd "$pkgbase-$pkgver"
-  autoreconf -fi
 }
 
 build() {
   cd $pkgbase-$pkgver
   [[ $CARCH == "aarch64" ]] && CFLAGS=`echo $CFLAGS | sed -e 's/-march=armv8-a/-march=armv8-a+crc+crypto/'` && CXXFLAGS="$CFLAGS"
-  #remove _FORTIFY_SOURCE from CXXFLAGS to prevent a duplicate definition warning as configure adds _FORTIFY_SOURCE itself
-  CXXFLAGS=${CXXFLAGS/-Wp,-D_FORTIFY_SOURCE=?/}
-  ./configure --prefix=/usr --with-gui=qt5 --with-incompatible-bdb BDB_LIBS="-ldb_cxx-5.3" BDB_CFLAGS="-I/usr/include/db5.3"
-  make
+  cmake -B build -DBUILD_GUI=ON -DBUILD_UTIL_CHAINSTATE=ON -DBUILD_SHARED_LIBS=ON \
+    -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBEXECDIR=lib
+  cmake --build build
+}
+
+check() {
+  cd $pkgbase-$pkgver
+  ctest --test-dir build
 }
 
 package_bitcoin-qt() {
   pkgdesc="Bitcoin is a peer-to-peer network based digital currency - Qt"
   depends=(
-    db5.3
-    gcc-libs
+    capnproto libcapnp.so libcapnp-rpc.so
     glibc
     hicolor-icon-theme
     libevent
-    libminiupnpc.so
-    libsqlite3.so
-    libzmq.so
+    libgcc
+    libstdc++ libstdc++.so
     qrencode
-    qt5-base
+    qt6-base
+    sqlite libsqlite3.so
   )
+  provides=('bitcoin-gui')
 
   cd $pkgbase-$pkgver
-  install -Dm755 src/qt/bitcoin-qt "$pkgdir"/usr/bin/bitcoin-qt
-  install -Dm644 contrib/completions/fish/bitcoin-qt.fish \
-    -t "$pkgdir/usr/share/fish/vendor_completions.d/"
-  install -Dm644 doc/man/bitcoin-qt.1 \
-    "$pkgdir"/usr/share/man/man1/bitcoin-qt.1
+  for tool in bitcoin-qt bitcoin-gui
+  do
+    DESTDIR="$pkgdir" cmake --install build --component "$tool"
+
+    # shell completions
+    if [ -f "contrib/completions/bash/$tool.bash" ]; then
+      install -Dm644 "contrib/completions/bash/$tool.bash" \
+        "$pkgdir/usr/share/bash-completion/completions/$tool"
+    fi
+    if [ -f "contrib/completions/fish/$tool.fish" ]; then
+      install -Dm644 contrib/completions/fish/$tool.fish \
+        -t "$pkgdir/usr/share/fish/vendor_completions.d/"
+    fi
+  done
+
+  # desktop files
   install -Dm644 ../bitcoin-qt.desktop \
     "$pkgdir"/usr/share/applications/bitcoin-qt.desktop
   install -Dm644 ../bitcoin-qt.appdata.xml \
@@ -105,76 +120,85 @@ package_bitcoin-qt() {
       "$pkgdir"/usr/share/icons/hicolor/${i}x${i}/apps/bitcoin-qt.png
   done
 
+  # license
   install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
 }
 
 package_bitcoin-daemon() {
   pkgdesc="Bitcoin is a peer-to-peer network based digital currency - daemon"
   depends=(
-    db5.3
-    gcc-libs
     glibc
     libevent
-    libminiupnpc.so
-    libsqlite3.so
-    libzmq.so
+    libgcc
+    libstdc++ libstdc++.so
+    sqlite libsqlite3.so
   )
   backup=('etc/bitcoin/bitcoin.conf')
   provides=('bitcoin-cli')
   replaces=('bitcoin-cli')
 
   cd $pkgbase-$pkgver
-  install -Dm755 -t "$pkgdir/usr/bin" \
-    src/bitcoind \
-    src/bitcoin-cli
+  for tool in bitcoin-cli bitcoind
+  do
+    DESTDIR="$pkgdir" cmake --install build --component "$tool"
 
-  install -Dm644 contrib/completions/bash/bitcoind.bash \
-    "$pkgdir/usr/share/bash-completion/completions/bitcoind"
-  install -Dm644 contrib/completions/bash/bitcoin-cli.bash \
-    "$pkgdir/usr/share/bash-completion/completions/bitcoin-cli"
+    # shell completions
+    if [ -f "contrib/completions/bash/$tool.bash" ]; then
+      install -Dm644 "contrib/completions/bash/$tool.bash" \
+        "$pkgdir/usr/share/bash-completion/completions/$tool"
+    fi
+    if [ -f "contrib/completions/fish/$tool.fish" ]; then
+      install -Dm644 contrib/completions/fish/$tool.fish \
+        -t "$pkgdir/usr/share/fish/vendor_completions.d/"
+    fi
+  done
 
-  install -Dm644 -t "$pkgdir/usr/share/fish/vendor_completions.d/" \
-    contrib/completions/fish/bitcoind.fish \
-    contrib/completions/fish/bitcoin-cli.fish
-
-  install -Dm644 -t "$pkgdir"/usr/share/man/man1/ \
-    doc/man/bitcoind.1 \
-    doc/man/bitcoin-cli.1
-
+  # systemd files
   install -Dm644 contrib/init/bitcoind.service \
     "$pkgdir/usr/lib/systemd/system/bitcoind.service"
   install -Dm644 "$srcdir/bitcoin.sysusers" \
     "$pkgdir/usr/lib/sysusers.d/bitcoin.conf"
   install -Dm644 "$srcdir/bitcoin.tmpfiles" \
     "$pkgdir/usr/lib/tmpfiles.d/bitcoin.conf"
+
+  # config files
+  install -dm710 "$pkgdir/etc/bitcoin"
   install -Dm644 share/examples/bitcoin.conf \
     "$pkgdir/etc/bitcoin/bitcoin.conf"
 
+  # license
   install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
 }
 
 package_bitcoin-tx() {
   pkgdesc="Bitcoin is a peer-to-peer network based digital currency - commandline tools"
   depends=(
-    db5.3
-    gcc-libs
     glibc
-    libsqlite3.so
+    libgcc
+    libstdc++ libstdc++.so
+    sqlite libsqlite3.so
+  )
+  provides=(
+    libbitcoinkernel.so
   )
 
   cd $pkgbase-$pkgver
-  for tool in bitcoin-tx bitcoin-util bitcoin-wallet; do
-    install -Dm755 "src/$tool" -t "$pkgdir/usr/bin"
+  for tool in bitcoin-tx bitcoin-util bitcoin-wallet bitcoin-chainstate libbitcoinkernel
+  do
+    DESTDIR="$pkgdir" cmake --install build --component "$tool"
+
+    # shell completions
     if [ -f "contrib/completions/bash/$tool.bash" ]; then
       install -Dm644 "contrib/completions/bash/$tool.bash" \
         "$pkgdir/usr/share/bash-completion/completions/$tool"
     fi
-    install -Dm644 contrib/completions/fish/$tool.fish \
-      -t "$pkgdir/usr/share/fish/vendor_completions.d/"
-    install -Dm644 "doc/man/$tool.1" \
-      "$pkgdir/usr/share/man/man1/$tool.1"
+    if [ -f "contrib/completions/fish/$tool.fish" ]; then
+      install -Dm644 contrib/completions/fish/$tool.fish \
+        -t "$pkgdir/usr/share/fish/vendor_completions.d/"
+    fi
   done
 
+  # license
   install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
 }
 
