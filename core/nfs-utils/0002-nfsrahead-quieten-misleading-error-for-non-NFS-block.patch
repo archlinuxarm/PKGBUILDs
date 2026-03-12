@@ -1,0 +1,46 @@
+From cbdebffd4aea72f3710b544ef57261c27fb3fb74 Mon Sep 17 00:00:00 2001
+From: Aaron Tomlin <atomlin@atomlin.com>
+Date: Mon, 9 Mar 2026 10:50:25 -0400
+Subject: [PATCH 2/2] nfsrahead: quieten misleading error for non-NFS block
+ devices
+
+When get_device_info() evaluates a physical block device via the
+fast-path rejection logic, it deliberately returns -ENODEV.
+
+Previously, main() handled this by logging a D_GENERAL error ("unable to
+find device"). Because udev invokes nfsrahead for all block devices
+across the system, this results in misleading journal spam for devices
+that were intentionally skipped, rather than genuinely missing.
+
+Update the error handling logic in main() to explicitly catch the
+-ENODEV return code. When encountered, log a more accurate "skipping
+non-NFS device" message at the D_ALL debugging level. This prevents
+unnecessary journal noise whilst maintaining the existing behaviour of
+returning the errno exit status.
+
+Signed-off-by: Aaron Tomlin <atomlin@atomlin.com>
+Tested-by: Yi Zhang <yi.zhang@redhat.com>
+---
+ tools/nfsrahead/main.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/tools/nfsrahead/main.c b/tools/nfsrahead/main.c
+index 33487f37..86c7fcc6 100644
+--- a/tools/nfsrahead/main.c
++++ b/tools/nfsrahead/main.c
+@@ -218,7 +218,11 @@ int main(int argc, char **argv)
+ 	if ((argc - optind) != 1)
+ 		xlog_err("expected the device number of a BDI; is udev ok?");
+ 
+-	if ((ret = get_device_info(argv[optind], &device)) != 0 || device.fstype == NULL) {
++	ret = get_device_info(argv[optind], &device);
++	if (ret == -ENODEV) {
++		xlog(D_ALL, "skipping non-NFS device %s\n", argv[optind]);
++		goto out;
++	} else if (ret != 0 || device.fstype == NULL) {
+ 		xlog(D_GENERAL, "unable to find device %s\n", argv[optind]);
+ 		goto out;
+ 	}
+-- 
+2.53.0
+

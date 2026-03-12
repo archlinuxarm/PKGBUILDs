@@ -1,0 +1,47 @@
+From cc2af26b0fdc54965274e68d75e2e1d59f74fbee Mon Sep 17 00:00:00 2001
+From: Aaron Tomlin <atomlin@atomlin.com>
+Date: Mon, 9 Mar 2026 10:50:24 -0400
+Subject: [PATCH 1/2] nfsrahead: zero-initialise device_info struct
+
+A recent commit introduced a fast-path rejection mechanism to prevent
+udev worker thread exhaustion. However, this optimisation exposed a bug
+in the initialisation of the device_info struct in main().
+
+When the fast-path is triggered (e.g., for a physical block device like
+8:16), get_device_info() instantly returns -ENODEV. Because this early
+exit occurs before get_mountinfo() is invoked, init_device_info() is
+never called.
+
+Consequently, the device_info struct remains populated with
+uninitialised stack memory. When main() catches the error and jumps to
+the cleanup path, free_device_info() attempts to call free() on garbage
+pointers, resulting in a glibc abort(3).
+
+Fix this by explicitly zero-initialising the device_info struct at
+declaration, preventing the cleanup path from freeing uninitialised
+memory during an early exit.
+
+Fixes: 0f5fe65d ("nfsrahead: fix udev worker exhaustion by skipping non-NFS devices")
+Reported-by: Yi Zhang <yi.zhang@redhat.com>
+Signed-off-by: Aaron Tomlin <atomlin@atomlin.com>
+Tested-by: Yi Zhang <yi.zhang@redhat.com>
+---
+ tools/nfsrahead/main.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/nfsrahead/main.c b/tools/nfsrahead/main.c
+index 78cd2581..33487f37 100644
+--- a/tools/nfsrahead/main.c
++++ b/tools/nfsrahead/main.c
+@@ -191,7 +191,7 @@ static int conf_get_readahead(const char *kind) {
+ int main(int argc, char **argv)
+ {
+ 	int ret = 0, opt;
+-	struct device_info device;
++	struct device_info device = { 0 };
+ 	unsigned int readahead = 128, log_level, log_stderr = 0;
+ 
+ 
+-- 
+2.53.0
+
