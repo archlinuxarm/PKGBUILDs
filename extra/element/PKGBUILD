@@ -6,82 +6,104 @@
 highmem=1
 
 pkgname=element
-_commit=70135d89febc8bd3a46ad874b8338350ec5e9c49  # refs/tags/0.46.6
-pkgver=0.46.6
-pkgrel=2
-pkgdesc="A modular LV2/VST3 audio plugin host"
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="A modular audio plugin host"
 arch=(x86_64)
 url="https://github.com/kushview/element"
-license=(GPL3)
+license=(GPL-3.0-or-later)
 groups=(pro-audio)
-depends=(gcc-libs glibc hicolor-icon-theme libx11 libxext)
-makedepends=(alsa-lib boost curl freetype2 git gtk3 imagemagick jack juce
-ladspa ldoc libxcomposite libxcursor libxinerama lilv lua lv2 pango readline
-serd sord sratom suil waf xorg-xrandr)
-checkdepends=(xorg-server-xvfb)
-optdepends=('lua: for LUA scripting')
-provides=(ladspa-host lv2-host vst3-host)
 options=(!distcc)
-source=(
-  https://github.com/kushview/element/releases/download/$pkgver/element-$pkgver.tar.gz
-  git+https://github.com/kushview/$pkgname#tag=$_commit?signed
-  git+https://github.com/kushview/kv-modules
-#  git+https://github.com/kushview/JUCE - no longer available
-  git+https://github.com/lvtk/jlv2
-  git+https://github.com/kushview/lua-kv
+depends=(
+  alsa-lib
+  fontconfig
+  freetype2
+  glibc
+  hicolor-icon-theme
+  libgcc
+  libstdc++
 )
-sha512sums=('aa4344137ffc12bdeca24619aeb5f752499fa83e48dbc2b7821aafc0f13861fa68db47c25986fe707bb751af8ae288901f408708c3268ce4da8bb747d0a07de9'
-            '983607476f27a2a34c555cefd490b1815b1a827113de1ef524752bceef6b75e5208ae8c1dd96c179e0a0c0c6ad8c7bf436f035123da02abda8bce606c2096092'
+makedepends=(
+  boost
+  clang
+  cmake
+  curl
+  git
+  gtk3
+  jack
+  juce
+  ladspa
+  ldoc
+  libglvnd
+  libxcomposite
+  libxcursor
+  libxinerama
+  lv2
+  ttf-roboto
+  webkit2gtk
+  xorg-xrandr
+)
+# TODO: package sol2 for lua support
+# optdepends=('lua: for LUA scripting')
+provides=(
+  ladspa-host
+  lv2-host
+  vst3-host
+)
+source=(
+  git+https://github.com/kushview/$pkgname#tag=$pkgver
+  git+https://github.com/free-audio/clap-juce-extensions.git
+  git+https://github.com/free-audio/clap.git  # submodule of clap-juce-extensions
+  git+https://github.com/free-audio/clap-helpers.git  # submodule of clap-juce-extensions
+)
+sha512sums=('288ecdfffe85edbfd5841e6323c347a574ebcba4f5c454f4825c7f249f4895487bedbca8093f67f6b187fe52f0120b3cd7eee22e978f224a7c163fe475e2babc'
             'SKIP'
             'SKIP'
             'SKIP')
-b2sums=('392c1f7899cb68416489e5831dd5e288f9eaed2778b624593fceb7e7126f10c4dc08aeba7e267944e36b07dcbe0ea7dd0db3ed7064d9499253f921350e89e8b8'
-        'e2d1a0e3dce088c1b4c3309c9c05ab0f51d455b5764cc04a879fce26c2b694f7b09e3f984ad50602f03fffd76955daf8c53e4769f03e2609bee9fb1f260efb20'
+b2sums=('78b7839e1274898775a3268a5b87b5e90f3cfe0ef59e1d31d0d94599d7633e030277c4e9d91da33bd7d6cb583e5f383fbc44569cb042c5052487ffa32a1444d7'
         'SKIP'
         'SKIP'
         'SKIP')
-validpgpkeys=('52CB000FABB9DBE345CD478980A5F4BE60360CDE') # Michael Fisher <mfisher@kushview.net>
 
 prepare() {
   cd $pkgname
   git submodule init
-  git submodule deinit "libs/JUCE"
-  git config submodule.libs/kv.url "$srcdir/kv-modules"
-#  git config submodule.libs/JUCE.url "$srcdir/JUCE"
-  cp -r "$srcdir"/$pkgname-$pkgver/libs/JUCE libs
-  git config submodule.libs/jlv2.url "$srcdir/jlv2"
-  git config submodule.libs/lua-kv.url "$srcdir/lua-kv"
+  git config submodule.deps/clap-juce-extensions.url "$srcdir/clap-juce-extensions"
+  git config submodule.deps/clap-juce-extensions.url "$srcdir/clap-juce-extensions"
   git -c protocol.file.allow=always submodule update
 
-  rm -frv waflib
+  cd deps/clap-juce-extensions
+  git submodule init
+  git config submodule.clap-libs/clap.url "$srcdir/clap"
+  git config sbumodule.clap-libs/clap-helpers.url "$srcdir/clap-helpers"
+  git -c protocol.file.allow=always submodule update
 }
 
 build() {
-  export LINKFLAGS="$LDFLAGS"
-  CFLAGS+=" -I/usr/share/juce/modules/"
+  local cmake_options=(
+    -B build
+    -D CMAKE_BUILD_TYPE=None
+    -D CMAKE_INSTALL_PREFIX=/usr
+    -S $pkgname
+    -W no-dev
+  )
 
-  cd $pkgname
-  waf configure \
-    --prefix=/usr \
-    --enable-docking \
-    --juce-path "/usr/share/juce/modules/" \
-    --test
-  waf build -vv
+  cmake "${cmake_options[@]}"
+  cmake --build build --verbose
 }
 
 check() {
-  cd $pkgname
-  LD_LIBRARY_PATH="$PWD/build/lib:$LD_LIBRARY_PATH" xvfb-run waf check \
-  || echo "Known issues with LUA related tests: https://github.com/kushview/Element/issues/439"
+  local ctest_flags=(
+    --test-dir build
+    # show the stdout and stderr when the test fails
+    --output-on-failure
+    # execute tests in parallel
+    --parallel "$(nproc)"
+  )
+  ctest "${ctest_flags[@]}"
 }
 
 package() {
-  depends+=(libasound.so libcurl.so libfreetype.so libjack.so liblilv-0.so
-  libsuil-0.so)
-
-  cd $pkgname
-  waf install --destdir="$pkgdir"
-  install -vDm 644 {AUTHORS,CODE_OF_CONDUCT,CONTRIBUTING,README}.md -t "$pkgdir/usr/share/doc/$pkgname/"
-  install -vDm 644 docs/*.md -t "$pkgdir/usr/share/doc/$pkgname/docs"
-  install -vDm 644 docs/img/*.png -t "$pkgdir/usr/share/doc/$pkgname/docs/img"
+  DESTDIR="$pkgdir" cmake --install build
+  install -vDm 644 $pkgname/{AUTHORS,CHANGELOG,CODE_OF_CONDUCT,CONTRIBUTING,README}.md -t "$pkgdir/usr/share/doc/$pkgname/"
 }
