@@ -1,0 +1,52 @@
+diff --git a/external/skia/UnpackedTarball_skia.mk b/external/skia/UnpackedTarball_skia.mk
+index cf2cd6c99..6c49d3f35 100644
+--- a/external/skia/UnpackedTarball_skia.mk
++++ b/external/skia/UnpackedTarball_skia.mk
+@@ -42,6 +42,7 @@ skia_patches := \
+ 	0002-loong64-Honor-existing-LASX-LSX-settings.patch \
+ 	0003-loong64-Fix-missing-rounding-in-loong64-scaled_mult-.patch \
+ 	0004-loong64-Fix-the-remaining-implicit-vector-casts.patch \
++	fix_skia_module_build_with_latest_clang_llvm.patch \
+ 
+ ifneq ($(MSYSTEM),)
+ # use binary flag so patch from git-bash won't choke on mixed line-endings in patches
+diff --git a/external/skia/fix_skia_module_build_with_latest_clang_llvm.patch b/external/skia/fix_skia_module_build_with_latest_clang_llvm.patch
+new file mode 100644
+index 000000000..4410da69b
+--- /dev/null
++++ b/external/skia/fix_skia_module_build_with_latest_clang_llvm.patch
+@@ -0,0 +1,34 @@
++From 135488419331644e59091ecc73e682299d3937a4 Mon Sep 17 00:00:00 2001
++From: Devon Loehr <dloehr@google.com>
++Date: Fri, 15 Aug 2025 14:31:27 +0000
++Subject: [PATCH] Change use of removed intrinsic
++
++A recent LLVM change removed the __builtin_ia32_vcvtph2ps256 intrinsic
++because it can be implemented using __builtin_shufflevector and/or
++__builtin_convertvector. This CL changes skia to use convertvector as
++to match.
++
++Bug: chromium:438445382
++Change-Id: I2ed16cd507d7feeafba4c082b3840cbdd6368dd9
++Reviewed-on: https://skia-review.googlesource.com/c/skcms/+/1038217
++Reviewed-by: Ben Wagner <bungeman@google.com>
++Commit-Queue: Ben Wagner <bungeman@google.com>
++Auto-Submit: Devon Loehr <dloehr@google.com>
++---
++
++diff --git a/modules/skcms/src/Transform_inl.h b/modules/skcms/src/Transform_inl.h
++index bc10e7d..99faf25 100644
++--- a/modules/skcms/src/Transform_inl.h
+++++ b/modules/skcms/src/Transform_inl.h
++@@ -156,8 +156,8 @@
++ #elif defined(USING_AVX512F)
++     return (F)_mm512_cvtph_ps((__m256i)half);
++ #elif defined(USING_AVX_F16C)
++-    typedef int16_t __attribute__((vector_size(16))) I16;
++-    return __builtin_ia32_vcvtph2ps256((I16)half);
+++    typedef _Float16 __attribute__((vector_size(16))) F16;
+++    return __builtin_convertvector((F16)half, F);
++ #else
++     U32 wide = cast<U32>(half);
++     // A half is 1-5-10 sign-exponent-mantissa, with 15 exponent bias.
++
