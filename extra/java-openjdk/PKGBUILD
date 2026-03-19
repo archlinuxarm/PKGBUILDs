@@ -4,22 +4,12 @@
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - drop pandoc makedepend
-#  - specify ARM _JARCH's
-#  - use zero on ARMv5, adjusted _imgdir
-#  - don't build docs, removed docs package; takes a day to build
-#  - replace --with-num-cores with --with-jobs
-#  - remove --enable-jvm-feature-zgc from configure, not supported on ARM
+#  - specify ARM _JARCH
+#  - don't build docs, removed docs package
+#  - don't build zgc, shenandoahgc features for ARMv7
 #  - set --with-native-debug-symbols=none, OOM
 
 # TODO add test, see about packaging jtreg and using it here
-# TODO see about building with OpenJDK10
-# TODO add javazi
-# TODO when IcedTea provides it, package icedtea-web and add it as optdepends
-# TODO package OpenJFX for OpenJDK10 and add it as optdepends
-
-## EXPLORATIONS
-# TODO extract a jmods package from jdk10-openjdk?
-# TODO extract a jdk-headless package?
 
 pkgbase=java-openjdk
 pkgname=(
@@ -92,11 +82,7 @@ esac
 
 _jvmdir=/usr/lib/jvm/java-${_majorver}-openjdk
 _jdkdir=jdk${_majorver}u-${_git_tag//+/-}
-if [[ $CARCH == "arm" ]]; then
-  _imgdir=${_jdkdir}/build/linux-${_JARCH}-zero-release/images
-else
-  _imgdir=${_jdkdir}/build/linux-${_JARCH}-server-release/images
-fi
+_imgdir=${_jdkdir}/build/linux-${_JARCH}-server-release/images
 
 _nonheadless=(
   lib/libawt_xawt.so
@@ -126,8 +112,6 @@ _commondeps=(
 build() {
   cd ${_jdkdir}
 
-  [[ $CARCH != "aarch64" ]] && export MAKEFLAGS="-j2"
-
   # remove -j from MAKEFLAGS to prevent build fail
   local MAKEFLAG_J=$(echo ${MAKEFLAGS} | sed -En 's/.*-j([0-9]+).*/\1/p')
   export MAKEFLAGS=${MAKEFLAGS/-j${MAKEFLAG_J}/}
@@ -156,11 +140,12 @@ build() {
   unset CXXFLAGS
   unset LDFLAGS
 
-  if [[ $CARCH == "arm" ]]; then
-    _variants='zero'
-  else
-    _variants='server'
+  if check_option "lto" "y"; then
+    jvm_features="zgc,shenandoahgc,link-time-opt"
+  elif [[ $CARCH != "armv7h" ]]; then
+    jvm_features="zgc,shenandoahgc"
   fi
+
 
   bash configure \
     --with-version-string="${_majorver}.${_minorver}.${_securityver}" \
@@ -174,10 +159,10 @@ build() {
     --with-lcms=system \
     --with-zlib=system \
     --with-harfbuzz=system \
+    --with-jvm-features="${jvm_features}" \
     --with-native-debug-symbols=none \
     --enable-unlimited-crypto \
     --disable-warnings-as-errors \
-    --with-jvm-variants=$_variants \
     --with-vendor-name="Arch Linux"
 
   make images legacy-jre-image
