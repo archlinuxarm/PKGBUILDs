@@ -8,9 +8,10 @@
 
 pkgbase='grpc'
 pkgname=('grpc' 'python-grpcio' 'python-grpcio-tools' 'php-grpc' 'php-legacy-grpc' 'grpc-cli')
-pkgver=1.78.1
+pkgver=1.80.0
 _gtestver=2dd1c131950043a8ad5ab0d2dda0e0970596586a
-pkgrel=2
+pkgrel=1
+_protobuf_ver=34.1
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
 arch=('x86_64')
 url='https://grpc.io'
@@ -37,24 +38,26 @@ makedepends=(
 )
 source=("https://github.com/grpc/grpc/archive/v$pkgver/$pkgbase-$pkgver.tar.gz"
         "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
-        "fix-trigraph-warnings.patch::https://github.com/grpc/grpc/commit/c11767fda5516f9d02ba96e9d8dac82769a5ef02.patch"
+        "https://github.com/protocolbuffers/protobuf/archive/v${_protobuf_ver}/protobuf-${_protobuf_ver}.tar.gz"
+        "protobuf-34-build-fix.patch"
         "fix-python-system-abseil.patch")
-sha256sums=('961a44a2a5a50670e58f5e887c17fe70529253da23802245326d681f6d8d1ba6'
+sha256sums=('38f58596277fa632064cc0719b9ece4381c8c77461cb51e9b66ca149574b7865'
             '31bf78bd91b96dd5e24fab3bb1d7f3f7453ccbaceec9afb86d6e4816a15ab109'
-            '5220ab11208d3e6a71d15a9a8bd6e4e5a669f09495d87301937340d422f37c7f'
+            'a83103b7ed3afaeedee9a212c8f65825444f58144f5e075b73c83f2b4ff27b62'
+            '2c126e40c54bdc88ab57fad12cbd860fc999aceb0e2787263edcbf024097ecec'
             '24a8dc761deff4a39b5fc9a7fb2b65c049e600b14c548a28f52376b98c456a7e')
 
 prepare() {
   cd "$srcdir/$pkgbase-$pkgver"
 
-  patch -p1 -i "$srcdir/fix-trigraph-warnings.patch"
+  patch -p1 -i "$srcdir/protobuf-34-build-fix.patch"
   patch -p1 -i "$srcdir/fix-python-system-abseil.patch"
 
   ln -sf "$srcdir/googletest-$_gtestver/"{googlemock,googletest} \
     third_party/googletest
 
   # CMake only downloads third party depends when folder does not exist
-  rmdir third_party/{envoy-api,xds,googleapis,protoc-gen-validate}
+  rmdir third_party/{cel-spec,envoy-api,xds,googleapis,protoc-gen-validate}
 
   cp -a src/php{,-legacy}
 
@@ -63,6 +66,7 @@ prepare() {
       -e '/^CC_FILES=\[/,/\]/{/^CC_FILES=\[/n;/\]/!d;}' \
       -e '/^CC_INCLUDES=\[/,/\]/{/^CC_INCLUDES=\[/n;/\]/!d;}' \
       -e "s@^(PROTO_INCLUDE=')[^']+'@\1/usr/include'@" \
+      -e "s@^(\s*').*/(google/protobuf/.*\.proto',?)\$@\1\2@" \
       -e '/^PROTOBUF_SUBMODULE_VERSION=/d' \
       tools/distrib/python/grpcio_tools/protoc_lib_deps.py
   ln -s ../../../.. tools/distrib/python/grpcio_tools/grpc_root
@@ -74,6 +78,13 @@ prepare() {
 }
 
 build() {
+  # Workaround for protobuf 34.0+ until https://github.com/grpc/grpc/issues/41755 has been fixed.
+  if [[ "$(pacman -Q protobuf | grep -Po '[0-9.]+(?=-)')" != "$_protobuf_ver" ]]; then
+    echo 'error: protobuf version mismatch, please update $_protobuf_ver in the PKGBUILD' >&2
+    exit 1
+  fi
+  export CXXFLAGS+=" -isystem${srcdir}/protobuf-${_protobuf_ver}/src"
+
   cd "$srcdir/$pkgbase-$pkgver"
   cmake -Bbuild \
     -DCMAKE_BUILD_TYPE=None \
