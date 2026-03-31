@@ -4,13 +4,13 @@
 buildarch=4
 
 pkgbase=linux-am33x
-_srcname=linux-6.13
+_srcname=linux-6.19.6
 _kernelname=${pkgbase#linux}
 _desc="TI AM335x Beaglebone (Black)"
-pkgver=6.13.1
+pkgver=6.19.6
 pkgrel=2
-rcnver=6.13.1
-rcnrel=bone8
+rcnver=6.19.6
+#rcnrel=bone11
 arch=('armv7h')
 url="https://www.kernel.org/"
 license=('GPL-2.0-only')
@@ -18,20 +18,18 @@ makedepends=('xmlto' 'docbook-xsl' 'kmod' 'inetutils' 'bc' 'git' 'dtc')
 options=('!strip')
 source=("https://www.kernel.org/pub/linux/kernel/v6.x/${_srcname}.tar.xz"
         "https://www.kernel.org/pub/linux/kernel/v6.x/patch-${pkgver}.xz"
-        "https://rcn-ee.com/deb/sid-armhf/v${rcnver}-${rcnrel}/patch-${rcnver%.0}-${rcnrel}.diff.gz"
-        "git+https://github.com/RobertCNelson/bb.org-overlays.git"
-        '0001-add-lcd-cape-for-chiliboard.patch'
+        "git+https://github.com/beagleboard/BeagleBoard-DeviceTrees.git"
         'config'
         'linux.preset'
-        '99-linux.hook')
-md5sums=('7a1ec5edbbdcaad287ca3c16f71abaa6'
-         '23a2e52531e25edba1cad2c86e319d73'
-         'c905949dbeac7a93c79898383b42f9c1'
+        '99-linux.hook'
+	'firmware.tar.xz')
+md5sums=('c00a6855cf3e68ce5b34983a1b7bcc13'
+         'a118e1ebc53c4023fc2b267069bb67c3'
          'SKIP'
-         'c42062d774d69f8f38e98fab987746ad'
-         '1ae2c32a0f5f9942a3d8b49dc198b9ab'
+         '904f864a06c2489813b65e53a916430c'
          'c733051a2f80ac8f250c8ce2338175b1'
-         '79fa396e3f9a09a85156d6d7c2d34b58')
+         '79fa396e3f9a09a85156d6d7c2d34b58'
+	 '1722d286e6a9bdd50c49b33774f32900')
 
 prepare() {
   cd "${srcdir}/${_srcname}"
@@ -40,10 +38,10 @@ prepare() {
   git apply --whitespace=nowarn "${srcdir}/patch-${pkgver}"
 
   # RCN patch
-  git apply ../patch-${rcnver%.0}-${rcnrel}.diff
+  # git apply ../patch-${rcnver%.0}-${rcnrel}.diff
 
   # ALARM patches
-  git apply ../0001-add-lcd-cape-for-chiliboard.patch
+  # git apply ../0001-add-lcd-cape-for-chiliboard.patch
 
   cat "${srcdir}/config" > ./.config
 
@@ -52,6 +50,8 @@ prepare() {
 
   # don't run depmod on 'make install'. We'll do this ourselves in packaging
   sed -i '2iexit 0' scripts/depmod.sh
+
+  #  ln -s "${srcdir}/firmware" firmware
 }
 
 build() {
@@ -81,10 +81,10 @@ build() {
   #yes "" | make config
 
   # build!
-  make ${MAKEFLAGS} zImage modules dtbs
+  XZ_DEFAULTS=--memlimit=300MiB make ${MAKEFLAGS} zImage modules
 
   # build overlays
-  cd "${srcdir}/bb.org-overlays"
+  cd "${srcdir}/BeagleBoard-DeviceTrees"
   make DTC=/usr/bin/dtc
 }
 
@@ -107,9 +107,9 @@ _package() {
   _basekernel=${_kernver%%-*}
   _basekernel=${_basekernel%.*}
 
-  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware}
+  mkdir -p "${pkgdir}"/{lib/modules,lib/firmware,boot}
   make INSTALL_MOD_PATH="${pkgdir}" modules_install
-  make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
+#  make INSTALL_DTBS_PATH="${pkgdir}/boot/dtbs" dtbs_install
   cp arch/$KARCH/boot/zImage "${pkgdir}/boot/zImage"
 
   # set correct depmod command for install
@@ -146,10 +146,14 @@ _package() {
   mkdir -p "${pkgdir}/usr"
   mv "$pkgdir/lib" "$pkgdir/usr"
 
-  # install overlays
-  cd "${srcdir}/bb.org-overlays"
-  mkdir -p "${pkgdir}/usr/lib/firmware"
-  cp src/arm/*.dtbo "${pkgdir}/usr/lib/firmware"
+  # install device tree + overlays
+  cd "${srcdir}/BeagleBoard-DeviceTrees"
+  pwd
+  mkdir -p "${pkgdir}/boot/dtbs/overlays"
+  ls src/arm/ti/omap/*.dtb src/arm/overlays/*.dtbo
+  ls "${pkgdir}/boot/dtbs" "${pkgdir}/boot/dtbs/overlays"
+  cp src/arm/ti/omap/*.dtb  "${pkgdir}/boot/dtbs"
+  cp src/arm/overlays/*.dtbo  "${pkgdir}/boot/dtbs/overlays"
 }
 
 _package-headers() {
