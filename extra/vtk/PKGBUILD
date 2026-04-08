@@ -7,7 +7,7 @@
 # Contributor: Thomas Dziedzic <gostrc at gmail>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - remove make/optdepends on adios2, openimagedenoise, ospray
+#  - remove make/optdepends on adios2, openimagedenoise, ospray, onnxruntime
 #  - add makedepend on tbb, previously pulled in by ospray
 #  - add makedepend on nlohmann-json, previously pulled in by adios2
 #  - explicitly disable the fides, adios2 modules due to -DVTK_BUILD_ALL_MODULES=ON
@@ -19,25 +19,26 @@
 
 pkgname=vtk
 # May need bootstrapping on upgrades due to circular vtk <-> opencascade dependency
-pkgver=9.5.2
-pkgrel=9
+pkgver=9.6.1
+pkgrel=1
 pkgdesc="Software system for 3D computer graphics, image processing, and visualization"
 arch=(x86_64)
 url="https://www.vtk.org"
 license=(BSD-3-Clause)
 depends=(
-  gcc-libs  # used by >400 libs
-  glibc     # used by >400 libs
-  onetbb    # used by 43 direct libs, 381 total libs
-  double-conversion       # libvtkCommonCore.so (1 direct lib, 380 total libs)
+  glibc                   # used by >400 libs
+  libstdc++               # used by >300 libs
+  libgcc                  # used by >250 libs
+  fmt                     # 46 direct libs, 385 total libs
+  libgomp                 # 6 direct libs, 385 total libs
+  onetbb                  # 45 direct libs, 385 total libs
   verdict                 # libvtkFiltersVerdict.so (1 direct lib, 194 total libs)
-  fmt                     # 8 direct libs, 191 total libs
   libarchive              # libvtkCommonArchive.so (1 direct lib, 2 total libs)
   # dependencies of libvtkCommonDataModel.so and libvtkIOCore.so
-  lz4                     # 1 direct lib, 178 total libs
-  pugixml                 # 4 direct libs, 359 total libs
-  xz                      # 1 direct lib, 178 total libs
-  zlib                    # 5 direct libs, 206 total libs
+  lz4                     # 1 direct lib, 207 total libs
+  pugixml                 # 4 direct libs, 361 total libs
+  xz                      # 1 direct lib, 207 total libs
+  zlib                    # 5 direct libs, 208 total libs
   # dependencies of libvtkIOImage.so
   libjpeg-turbo           # 1 direct lib, 95 total libs
   libpng                  # 1 direct lib, 95 total libs
@@ -63,7 +64,7 @@ makedepends=(
   tk                      # libvtkRenderingTk.so (1 direct lib, 1 total lib)
   # direct dependencies of "some" VTK libs/modules
   freetype2               # libvtkRenderingFreeType.so, libvtkRenderingFreeTypeFontConfig.so (2 direct libs, 87 total libs)
-  openmpi                 # 13 direct libs, 67 total libs
+  openmpi                 # 11 direct libs, 67 total libs
   libx11                  # libvtkRenderingTk.so, libvtkRenderingOpenGL2.so, libvtkglad.so, libvtkRenderingUI.so (4 direct libs, 54 total libs)
   libxcursor              # libvtkRenderingOpenGL2.so (1 direct lib, 45 total libs)
   hdf5                    # 14 direct libs, 33 total libs
@@ -157,10 +158,10 @@ source=(
   fmt-12.patch
   xdmf3_32bit.patch
 )
-sha256sums=('cee64b98d270ff7302daf1ef13458dff5d5ac1ecb45d47723835f7f7d562c989'
+sha256sums=('47ca9af899165a33b935533046acce7c0aa3c007f0b57880665bb89d9986543f'
             '9c9adccbe548ec28fab5799576520fa583511a5b4b4fd4512636022b239b47c3'
             'a764632efa1d164aede69c95e6c113d2001046247d27103945679bd2c839d153')
-b2sums=('6e7dab56c4f48d066ca44637f8839e9abc973d2831381ef5aec860aa1daa49ac9beca223e439c12dda2c33056b45395043f2edc54f55f9d169719b6c96499f40'
+b2sums=('101cb9adea4355aaa81688ee2c9824df4882b14e05f57dcb93c58de33bea22ba6a2af9dc0039f8f4f5822d0cb9242ef7807cfebbd4a6f098bb12135e704a2e12'
         'd31e69469782fac0507536c5aeb2ca08944eefec47bb989a85adcc701ea62c32b1ae36f282ccad4c665bcd50dcfb88b81237ce7536c85f4603ebe5d8e8c393cf'
         '039de3d55fcb09a22ee6491c8f96b8ffe1d3a6bee3dc4315dec44d28ba1d06d937c8704ca6d356ac67a0807245f550b264238747cc14885f245739595473954b')
 
@@ -171,8 +172,6 @@ prepare() {
 # Use cmake's FindHDF5
   rm CMake/patches/99/FindHDF5.cmake
   sed -e '/FindHDF5/d' -i CMake/vtkInstallCMakePackage.cmake
-# Fix build with fmt 12
-  patch -d ThirdParty/ioss/vtkioss -p6 < ../fmt-12.patch
 # Fix build on 32-bit
   patch -p2 -i ../xdmf3_32bit.patch
 }
@@ -182,46 +181,55 @@ build() {
   export JAVA_HOME=/usr/lib/jvm/default
   # To set tcl lib path
   local _tkver=$(echo 'puts $tcl_version' | tclsh)
-  cmake -B build -S ${pkgname^^}-${pkgver} -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_LICENSEDIR=share/licenses/vtk \
-    -DCMAKE_SKIP_RPATH=OFF \
-    -DCMAKE_SKIP_INSTALL_RPATH=ON \
-    -DBUILD_SHARED_LIBS=ON \
-    -DVTK_BUILD_ALL_MODULES=ON \
-    -DVTK_ENABLE_CATALYST=ON \
-    -DVTK_MODULE_ENABLE_VTK_IOADIOS2=NO \
-    -DVTK_MODULE_ENABLE_VTK_fides=NO \
-    -DVTK_MODULE_ENABLE_VTK_RenderingAnari=NO \
-    -DVTK_INSTALL_TCL_DIR=/usr/lib/tcl${_tkver}/vtk/ \
-    -DVTK_LEGACY_REMOVE=ON \
-    -DVTK_SMP_ENABLE_OPENMP=ON \
-    -DVTK_SMP_IMPLEMENTATION_TYPE=TBB \
-    -DVTK_PYTHON_VERSION=3 \
-    -DVTK_QT_VERSION=6 \
-    -DVTK_USE_64BIT_IDS=ON \
-    -DVTK_USE_MPI=ON \
-    -DVTK_USE_TK=ON \
-    -DVTK_VERSIONED_INSTALL=OFF \
-    -DVTK_WRAP_JAVA=ON \
-    -DVTK_WRAP_PYTHON=ON \
-    -DVTKOSPRAY_ENABLE_DENOISER=OFF \
-    -DVTK_ENABLE_OSPRAY=OFF \
-    -DVTK_USE_EXTERNAL=ON \
-    -DVTK_MODULE_USE_EXTERNAL_VTK_exprtk=OFF \
-    -DVTK_MODULE_USE_EXTERNAL_VTK_ioss=OFF \
-    -DVTK_MODULE_USE_EXTERNAL_VTK_pegtl=OFF \
-    -DVTK_MODULE_USE_EXTERNAL_VTK_scn=OFF \
-    -DVTK_MODULE_USE_EXTERNAL_VTK_token=OFF \
-    -DVTK_MODULE_ENABLE_VTK_DomainsMicroscopy=NO \
-    -DVTK_MODULE_ENABLE_VTK_FiltersOpenTURNS=NO \
-    -DVTK_MODULE_ENABLE_VTK_IOCatalystConduit=YES \
-    -DHDF5_NO_FIND_PACKAGE_CONFIG_FILE=ON \
-    -DHDF5_C_COMPILER_EXECUTABLE=h5hlcc \
-    -DHDF5_CXX_COMPILER_EXECUTABLE=h5hlc++ \
+
+  local cmake_options=(
+    -B build
+    -S ${pkgname^^}-${pkgver}
+    -G Ninja
     -Wno-dev
-#    -DFIDES_USE_EXTERNAL_RAPIDJSON=ON \
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_CXX_FLAGS="$CXXFLAGS"
+    -DCMAKE_INSTALL_PREFIX=/usr
+    -DCMAKE_INSTALL_LICENSEDIR=share/licenses/vtk
+    -DCMAKE_SKIP_RPATH=OFF
+    -DCMAKE_SKIP_INSTALL_RPATH=ON
+    -DBUILD_SHARED_LIBS=ON
+    -DVTK_BUILD_ALL_MODULES=ON
+    -DVTK_ENABLE_CATALYST=ON
+    -DVTK_INSTALL_TCL_DIR=/usr/lib/tcl${_tkver}/vtk/
+    -DVTK_LEGACY_REMOVE=ON
+    -DVTK_SMP_ENABLE_OPENMP=ON
+    -DVTK_SMP_IMPLEMENTATION_TYPE=TBB
+    -DVTK_PYTHON_VERSION=3
+    -DVTK_QT_VERSION=6
+    -DVTK_USE_MPI=ON
+    -DVTK_USE_TK=ON
+    -DVTK_VERSIONED_INSTALL=OFF
+    -DVTK_WRAP_JAVA=ON
+    -DVTK_WRAP_PYTHON=ON
+    -DVTKOSPRAY_ENABLE_DENOISER=OFF
+    -DVTK_ENABLE_OSPRAY=OFF
+    -DVTK_USE_EXTERNAL=ON
+    #-DFIDES_USE_EXTERNAL_RAPIDJSON=ON
+    -DVTK_MODULE_USE_EXTERNAL_VTK_exprtk=OFF
+    -DVTK_MODULE_USE_EXTERNAL_VTK_ioss=OFF
+    -DVTK_MODULE_USE_EXTERNAL_VTK_pegtl=OFF
+    -DVTK_MODULE_USE_EXTERNAL_VTK_scn=OFF
+    -DVTK_MODULE_USE_EXTERNAL_VTK_token=OFF
+    # building with the usd package does not work: https://gitlab.archlinux.org/archlinux/packaging/packages/usd/-/issues/7
+    -DVTK_MODULE_ENABLE_VTK_IOUSD=NO
+    -DVTK_MODULE_ENABLE_VTK_DomainsMicroscopy=NO
+    -DVTK_MODULE_ENABLE_VTK_FiltersOpenTURNS=NO
+    -DVTK_MODULE_ENABLE_VTK_FiltersONNX=NO
+    -DVTK_MODULE_ENABLE_VTK_IOCatalystConduit=YES
+    -DVTK_MODULE_ENABLE_VTK_IOADIOS2=NO
+    -DVTK_MODULE_ENABLE_VTK_fides=NO
+    -DVTK_MODULE_ENABLE_VTK_RenderingAnari=NO
+    -DHDF5_NO_FIND_PACKAGE_CONFIG_FILE=ON
+    -DHDF5_C_COMPILER_EXECUTABLE=h5hlcc
+    -DHDF5_CXX_COMPILER_EXECUTABLE=h5hlc++
+  )
+  cmake "${cmake_options[@]}"
   cmake --build build
 }
 
