@@ -1,0 +1,38 @@
+From 2e620c8c91682d659188afd9f1b1956871e2d27f Mon Sep 17 00:00:00 2001
+From: graysky <therealgraysky AT proton DOT me>
+Date: Sat, 11 Apr 2026 10:06:33 -0400
+Subject: [PATCH] backport: [NFS] replace nfs_create with nfs_open2
+
+This should fix builds against libnfs 6.x.
+
+Minor optimisation to remove a reduntant close and reopen call.
+---
+ xbmc/filesystem/NFSFile.cpp | 12 ++++--------
+ 1 file changed, 4 insertions(+), 8 deletions(-)
+
+diff --git a/xbmc/filesystem/NFSFile.cpp b/xbmc/filesystem/NFSFile.cpp
+index 2f9891529b11..becb40bb0aed 100644
+--- a/xbmc/filesystem/NFSFile.cpp
++++ b/xbmc/filesystem/NFSFile.cpp
+@@ -943,14 +943,10 @@ bool CNFSFile::OpenForWrite(const CURL& url, bool bOverWrite)
+   {
+     CLog::Log(LOGWARNING, "FileNFS::OpenForWrite() called with overwriting enabled! - {}",
+               filename);
+-    //create file with proper permissions
+-    ret = nfs_creat(m_pNfsContext, filename.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &m_pFileHandle);
+-    //if file was created the file handle isn't valid ... so close it and open later
+-    if(ret == 0)
+-    {
+-      nfs_close(m_pNfsContext,m_pFileHandle);
+-      m_pFileHandle = NULL;
+-    }
++    // nfs_open2 handles both creation and open atomically;
++    const int flags = bOverWrite ? O_CREAT | O_RDWR | O_EXCL : O_RDWR;
++    const int mode = bOverWrite ? S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH : 0;
++    ret = nfs_open2(m_pNfsContext, filename.c_str(), flags, mode, &m_pFileHandle);
+   }
+ 
+   ret = nfs_open(m_pNfsContext, filename.c_str(), O_RDWR, &m_pFileHandle);
+-- 
+2.53.0
+
