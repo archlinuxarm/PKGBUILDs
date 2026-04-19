@@ -5,41 +5,41 @@
 
 pkgbase=opencc
 pkgname=(opencc opencc-doc)
-pkgver=1.2.0
-pkgrel=3
+pkgver=1.3.0
+pkgrel=1
 pkgdesc="Library for Open Chinese Convert"
 url="https://github.com/BYVoid/OpenCC"
 arch=('x86_64')
 license=('Apache-2.0')
-makedepends=('git' 'chrpath' 'cmake' 'darts' 'doxygen' 'marisa' 'pybind11' 'python-setuptools'
+makedepends=('git' 'chrpath' 'cmake' 'cppjieba' 'darts' 'doxygen' 'marisa' 'pybind11' 'python-setuptools'
              'python-build' 'python-installer' 'python-wheel' 'rapidjson' 'tclap' 'gtest')
 source=("git+https://github.com/BYVoid/OpenCC.git#tag=ver.$pkgver"
         8f3a5b4b201f091713cb4e2b1b5883a4b12d10b2.patch)
-sha512sums=('59e0ebf97ff630f10c46e594715cdf91629b053d23417df6d86bb3f051f17e3570b3d989420d03346efceeeb0bedd4cc37bdb4562e3342c818e2b1393e75b4f8'
+sha512sums=('e903ebe4de803002c17a18e50737f16b64c271ce5018ebc1ab18af3b1c6de9452570ec672dd49c3c6dbed11993716236a98c94104b1fde506e37482cda751527'
             'febade61cc1734db891234484893128519dffc198f80883fc4838534684f91db2a21641252615820ae9bedffce52451535ea2717a40958b80ea82590850b90ac')
 
 prepare() {
   cd OpenCC
   rm -r deps
 
-  # as of opencc 1.1.8 there is no clean way to disable duplicated building of the clib again. plus, the installation is broken as well.
-  # let's revert the offending commit for now.
-  patch -Rp1 -i ../8f3a5b4b201f091713cb4e2b1b5883a4b12d10b2.patch
+  # Package jieba plugin dictionaries from system cppjieba.
+  sed -i 's|${CMAKE_CURRENT_SOURCE_DIR}/deps/cppjieba/dict/|/usr/share/cppjieba/dict/|g' plugins/jieba/CMakeLists.txt
 
-  # Fix: GNUInstallDirs sets CMAKE_INSTALL_LIBDIR to relative "lib", causing DIR_LIBRARY to be "lib" instead of "/usr/lib"
-  sed -i 's/set (DIR_LIBRARY ${LIB_INSTALL_DIR})/set (DIR_LIBRARY ${DIR_PREFIX}\/${LIB_INSTALL_DIR})/' CMakeLists.txt
+  # Reuse prebuilt python extension in wheel flow, avoid a second CMake build.
+  sed -i 's|import os|import glob\nimport os|' setup.py
+  sed -i 's|^            build_libopencc(output_path)$|            os.makedirs(output_path, exist_ok=True)\n            shutil.copy2(glob.glob(os.path.join(_this_dir, "opencc_clib.*.so"))[0], output_path)|' setup.py
 }
 
 build() {
   cd OpenCC
   cmake -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_DOCUMENTATION:BOOL=ON -DBUILD_PYTHON:BOOL=ON \
+        -DBUILD_OPENCC_JIEBA_PLUGIN:BOOL=ON \
         -DUSE_SYSTEM_MARISA:BOOL=ON -DUSE_SYSTEM_PYBIND11:BOOL=ON -DUSE_SYSTEM_RAPIDJSON:BOOL=ON \
         -DUSE_SYSTEM_TCLAP:BOOL=ON -DUSE_SYSTEM_DARTS:BOOL=ON -DENABLE_GTEST:BOOL=ON \
         -DUSE_SYSTEM_GTEST:BOOL=ON -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
   make
 
-  cp opencc_clib.*.so python/opencc/clib/
-  python -m build --wheel --no-isolation
+  VERSION="$pkgver" python -m build --wheel --no-isolation
 }
 
 check() {
