@@ -1,0 +1,95 @@
+# Maintainer: David Runge <dvzrv@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - old version 4 for 32-bit ARM
+
+buildarch=4
+
+_name=pmix
+pkgbase=openpmix4
+_pkgbase=openpmix
+pkgname=(
+  openpmix4
+  openpmix4-docs
+)
+# NOTE: keep in sync with openmpi major versions
+pkgver=4.2.6
+pkgrel=2
+pkgdesc="Extended version of the PMI standard"
+arch=(x86_64)
+url="https://github.com/openpmix/openpmix"
+license=(BSD-3-Clause)
+makedepends=(
+  glibc
+  hwloc
+  perl
+  libevent
+  libevent
+  python
+  zlib
+)
+source=($url/releases/download/v$pkgver/$_name-$pkgver.tar.gz)
+sha512sums=('66150f966f79a707702a20e0f0a8a77b9f4f90005c69fd1b338d19737cac25b7d674db0097f1d26684223a45ed9f2c9617b0d2ee264f2f9393f45fc71dd4d44e')
+b2sums=('0a96d80b47d3bcc167e77223fbb3918e69bd0a9fc7b9d37393207883dbe53f9f48e95703bd993224f8257b3a86ac8954d9c2081eb55e3219ecfc910bf212d9f7')
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#$pkgdir/}"
+    mkdir -p "$(dirname "$d")"
+    mv "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+prepare() {
+  cd $_name-$pkgver
+  ./autogen.pl
+}
+
+build() {
+  local configure_options=(
+    --prefix=/usr
+    --sysconfdir=/etc/$_pkgbase
+  )
+
+  cd $_name-$pkgver
+  CFLAGS+=" -Wno-incompatible-pointer-types"
+  ./configure "${configure_options[@]}"
+  # prevent excessive overlinking due to libtool
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+  make V=1
+}
+
+check() {
+  make -k check -C $_name-$pkgver
+}
+
+package_openpmix4() {
+  depends=(
+    glibc
+    hwloc
+    libevent libevent_{core,pthreads}-2.1.so
+    zlib
+  )
+  optdepends=(
+    'openpmix-docs: for documentation'
+  )
+  provides=(openpmix libpmix.so pmix)
+  backup=(etc/$_pkgbase/pmix-mca-params.conf)
+
+  make DESTDIR="$pkgdir" install -C $_name-$pkgver
+
+  (
+    cd "$pkgdir"
+    _pick $pkgname-docs usr/share/doc/
+  )
+
+  install -vDm 644 $_name-$pkgver/LICENSE -t "$pkgdir/usr/share/licenses/$_pkgbase/"
+}
+
+package_openpmix4-docs() {
+  pkgdesc+=" - documentation"
+
+  mv -v $pkgname/* "$pkgdir/"
+}
