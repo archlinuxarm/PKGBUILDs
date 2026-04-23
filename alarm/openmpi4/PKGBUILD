@@ -1,0 +1,100 @@
+# Maintainer: Levente Polyak <anthraxx[at]archlinux[dot]org>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor: Anatol Pomozov <anatol dot pomozov at gmail>
+# Contributor: Stéphane Gaudreault <stephane@archlinux.org>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove make/optdepend on cuda and configure option
+#  - old version 4 for 32-bit ARM
+
+buildarch=4
+
+pkgname=openmpi4
+_pkgname=openmpi
+pkgver=4.1.8
+pkgrel=1
+pkgdesc='High performance message passing library (MPI)'
+arch=(x86_64)
+url='https://www.open-mpi.org'
+license=('custom:OpenMPI')
+depends=(
+  gcc-libs
+  glibc
+  hwloc
+  libevent
+  libnl
+  openpmix
+  openssh
+  zlib
+)
+makedepends=(
+  gcc-fortran
+  valgrind
+)
+optdepends=(
+  'gcc-fortran: fortran support'
+  'perl: for aggregate_profile.pl and profile2mat.pl'
+)
+provides=(
+  openmpi
+  libmca_common_monitoring.so
+  libmca_common_ompio.so
+  libmca_common_sm.so
+  libmpi.so
+  libmpi_cxx.so
+  libmpi_mpifh.so
+  libmpi_usempi_ignore_tkr.so
+  libmpi_usempif08.so
+  libompitrace.so
+  libopen-pal.so
+  libopen-rte.so
+)
+source=(
+  https://www.open-mpi.org/software/ompi/v${pkgver%.*}/downloads/$_pkgname-$pkgver.tar.bz2)
+sha256sums=('466f68e3132a1dc02710cc2011fafced8336d98359fa2dae4dddcfd5719f12a9')
+b2sums=('04d89a1de092801b7ffe08edb27656be07dd5d3ab4876a5c3c663bf3f92d3c1579007fc3b8e5389b6bf97479b19d231c02500ef0adecd07595a343bdf8f8eda4')
+
+build() {
+  local configure_options=(
+    --prefix=/usr
+    --enable-builtin-atomics
+    --enable-memchecker
+    --enable-mpi-cxx
+    --enable-mpi-fortran=all
+    --enable-pretty-print-stacktrace
+    --libdir=/usr/lib
+    --sysconfdir=/etc/$_pkgname
+    --with-hwloc=external
+    --with-libevent=external
+    --with-pmix=external
+    --with-valgrind
+  )
+  cd $_pkgname-$pkgver
+
+  export CFLAGS+=" -Wno-incompatible-pointer-types"
+
+  # set environment variables for reproducible build
+  # see https://github.com/open-mpi/ompi/blob/main/docs/release-notes/general.rst
+  export HOSTNAME=buildhost
+  export USER=builduser
+
+  # TODO: depend on prrte with openmpi >= 5
+  # TODO: remove ac_cv_func_sem_open=no when there is a glibc release fixing https://sourceware.org/bugzilla/show_bug.cgi?id=30789
+  ac_cv_func_sem_open=no ./configure "${configure_options[@]}"
+  # prevent excessive overlinking due to libtool
+  sed -i -e 's/ -shared / -Wl,-O1,--as-needed\0/g' libtool
+  make V=1
+}
+
+check() {
+  make check -C $_pkgname-$pkgver
+}
+
+package() {
+  depends+=(libpmix.so)
+
+  make DESTDIR="$pkgdir" install -C $_pkgname-$pkgver
+  install -Dm 644 $_pkgname-$pkgver/LICENSE -t "$pkgdir/usr/share/licenses/$_pkgname/"
+}
+
+# vim: ts=2 sw=2 et:
