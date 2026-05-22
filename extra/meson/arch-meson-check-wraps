@@ -1,0 +1,138 @@
+#!/usr/bin/python
+
+from argparse import ArgumentParser
+from configparser import ConfigParser, Error as ConfigError, SectionProxy
+from pathlib import Path
+from subprocess import check_output, CalledProcessError
+import os, sys
+
+COLOR = sys.stderr.isatty()
+
+
+def msg(message="", attr=""):
+    if attr and COLOR:
+        print(f"\033\133{attr}m{message}\033\1330m", file=sys.stderr)
+    else:
+        print(message, file=sys.stderr)
+
+
+def exit(message="", attr: str | None = None, code=1):
+    if attr is None:
+        attr = "97" if code == 0 else "91"
+    msg(message, attr)
+    sys.exit(code)
+
+
+parser = ArgumentParser(
+    description="Inspect wrap files and validate injections, if any.",
+)
+parser.add_argument("sourcedir", type=Path, help="Meson source directory")
+args = parser.parse_args()
+
+srcdir: Path = args.sourcedir
+
+if not srcdir.is_dir():
+    exit(f"{srcdir} is not a directory")
+if not (srcdir / "meson.build").is_file():
+    exit(f"{srcdir} is not a Meson source directory")
+
+subdir = srcdir / "subprojects"
+wrapfiles = sorted(f for f in subdir.glob("*.wrap") if f.is_file())
+if not wrapfiles:
+    exit(f"{srcdir.name} has no wrap files", code=0)
+
+cachedir_env = os.getenv("MESON_PACKAGE_CACHE_DIR")
+if cachedir_env:
+    cachedir = Path(cachedir_env)
+    if not cachedir.is_dir():
+        exit(f"{cachedir} is not a directory")
+else:
+    cachedir = subdir / "packagecache"
+
+wraps: list[tuple[str, str, Path, SectionProxy]] = []
+
+for wrapfile in wrapfiles:
+    config = ConfigParser(interpolation=None)
+    try:
+        config.read(wrapfile, encoding="utf-8")
+        section = config[config.sections()[0]]
+    except (ConfigError, LookupError) as e:
+        msg(f"Failed to parse {wrapfile}: {e!s}", attr="93")
+        continue
+
+    directory = Path(section.get("directory", wrapfile.name[:-5]))
+    if len(directory.parts) != 1 or directory.parts[0] == "..":
+        msg(f"Bad directory in {wrapfile}: {directory}", attr="93")
+        continue
+
+    wraptype = section.name[5:]
+    wraps.append((wrapfile.name, wraptype, directory, section))
+
+if not wraps:
+    exit(f"{srcdir.name} has no valid wrap files", attr="93", code=0)
+
+repos: list[tuple[str, Path, SectionProxy]] = []
+name_max = max(len(wrapname) for wrapname, _, _, _ in wraps)
+type_max = max(len(wraptype) for _, wraptype, _, _ in wraps)
+msg("\nWrap files:", attr="97")
+
+for wrapname, wraptype, directory, section in wraps:
+    projdir = subdir / directory
+    pkgdir = cachedir / directory
+    wrapdesc = f"Wrap {wrapname:{name_max}} type {wraptype:>{type_max}}"
+
+    if projdir.exists():
+        msg(f"{wrapdesc} in source tree: {projdir}", attr="94")
+    elif pkgdir.exists():
+        msg(f"{wrapdesc} in cache dir: {pkgdir}", attr="92")
+        if wraptype == "git":
+            repos.append((wrapname, pkgdir, section))
+    else:
+        msg(f"{wrapdesc} not found: {directory}", attr="90")
+
+if not repos:
+    exit(code=0)
+
+success = True
+pkgdir_name_max = max(len(str(pkgdir.name)) for _, pkgdir, _ in repos)
+msg("\nRepos:", attr="97")
+
+for wrapname, pkgdir, section in repos:
+    want_ref = section.get("revision", "")
+    if not want_ref:
+        msg(f"Wrap file {wrapname} has no revision", attr="93")
+        continue
+    if want_ref == "head":
+        want_ref = "origin/HEAD"
+
+    if not (pkgdir / ".git").exists():
+        msg(f"Cached dir {pkgdir} is not a git worktree", attr="93")
+        continue
+
+    try:
+        have_rev = check_output(
+            ["git", "-C", pkgdir, "rev-parse", "-q", "--verify", "HEAD"], text=True
+        ).strip()
+    except CalledProcessError:
+        have_rev = None
+
+    try:
+        want_rev = check_output(
+            ["git", "-C", pkgdir, "rev-parse", "-q", "--verify", want_ref], text=True
+        ).strip()
+    except CalledProcessError:
+        want_rev = None
+
+    repodesc = f"Repo {pkgdir.name:{pkgdir_name_max}}"
+
+    if want_rev == have_rev:
+        msg(f"{repodesc} is at {have_rev}", attr="92")
+    elif want_rev == want_ref:
+        # revision specified a full revision, enforce
+        msg(f"{repodesc} is at {have_rev}, but need {want_rev}", attr="91")
+        success = False
+    else:
+        # revision specified something else
+        msg(f"{repodesc} is at {have_rev}, but want {want_ref} ({want_rev})", attr="93")
+
+exit(code=0 if success else 1)
