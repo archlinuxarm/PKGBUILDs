@@ -3,7 +3,6 @@
 # Contributor: Tobias Powalowski <tpowa@archlinux.org>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - remove -DCPU_BASELINE_{ENABLE,DISABLE} flags for SSE
 #  - remove cudnn makedepends
 #  - remove opencv-cuda package
 #  - remove python-opencv-cuda package
@@ -12,8 +11,8 @@ pkgbase=opencv
 pkgname=(opencv
          opencv-samples
          python-opencv)
-pkgver=4.13.0
-pkgrel=12
+pkgver=5.0.0
+pkgrel=1
 pkgdesc='Open Source Computer Vision Library'
 arch=(x86_64)
 license=(Apache-2.0)
@@ -72,19 +71,12 @@ source=(git+https://github.com/opencv/opencv#tag=$pkgver
         git+https://github.com/opencv/opencv_contrib#tag=$pkgver
         vtk9.patch
         fix-cuda-flags.patch
-        fix-cudacodec-dependencies.patch
-        fix-cccl-namespace.patch
-        fix-std.patch
-        fix-thrust-tuple.patch)
-sha256sums=('efc754fc3888944007586133fc225f0136d1767020564b81e4d90f51e9d68b60'
-            '3fc521a16314978de02d5b33e657a09a9567429d5801d3fb94e35581ea44d729'
+        fix-std.patch)
+sha256sums=('e123822b57aa5b1cec7802cb53b302ab181a32f91a61060079a65a2fc4de1efe'
+            'b5ee0c286208a092199afe457093c601c73f9efc41c88e8fa0ee821985300c33'
             'f35a2d4ea0d6212c7798659e59eda2cb0b5bc858360f7ce9c696c77d3029668e'
             '95472ecfc2693c606f0dd50be2f012b4d683b7b0a313f51484da4537ab8b2bfe'
-            'fbb10b75ca7849f85ea2f118aa017f00e34445d80ed76619f13ae1e4e9504ae4'
-            'b757be8df583cb3fa0059e47594eeb680638c572d3ae02bc1a5f7636e71ce5be'
-            'c05fe7572ee5193cf3de7f02a500f446f3457ec20c315590a326bf1bfb5552cc'
-            '6379b0f23ba4068d2daa43ec158e515f58ef36242138eb10f752a93dc1cec375')
-options=(!lto) # https://gitlab.archlinux.org/archlinux/packaging/packages/kdenlive/-/issues/8
+            'c05fe7572ee5193cf3de7f02a500f446f3457ec20c315590a326bf1bfb5552cc')
 
 prepare() {
   pushd opencv
@@ -95,15 +87,12 @@ prepare() {
   # OpenCV passes all CXXFLAGS to nvcc through -Xcompiler, which does not work for '-Wp,something' flags
   # We remove the -Xcompiler and pass our CXXFLAGS through cmake's CUDAFLAGS
   patch -p1 < ../fix-cuda-flags.patch
+  git cherry-pick -n a18356853d99a67e432e818cf0328b4690d68833 # https://github.com/opencv/opencv/issues/29292
+  git cherry-pick -n 142801f769ed4946a161f62738bac5a5fe56a60f # https://github.com/opencv/opencv/issues/29291
   popd
 
   pushd opencv_contrib
-  patch -p1 -i ../fix-cudacodec-dependencies.patch # https://github.com/opencv/opencv_contrib/issues/4045
-  patch -p1 -i ../fix-cccl-namespace.patch # https://github.com/opencv/opencv_contrib/pull/4097
-  patch -p1 -i ../fix-std.patch
-
-  # Fix build failure regarding tuple
-  patch -p1 -i ../fix-thrust-tuple.patch
+  patch -p1 < ../fix-std.patch
 }
 
 build() {
@@ -112,7 +101,6 @@ build() {
     -DWITH_OPENCL=ON
     -DWITH_OPENGL=ON
     -DOpenGL_GL_PREFERENCE=LEGACY
-    -DCMAKE_CXX_STANDARD=17
     -DWITH_TBB=ON
     -DWITH_VULKAN=ON
     -DWITH_QT=ON
@@ -139,6 +127,14 @@ build() {
     -DHDF5_NO_FIND_PACKAGE_CONFIG_FILE=ON
   )
 
+  if [[ ${CARCH} == x86_64* ]]; then
+    cmake_options+=(
+      -DCPU_BASELINE_DISABLE=SSE3
+      -DCPU_BASELINE_REQUIRE=SSE2
+    )
+
+  fi
+
   cmake -B build -S $pkgname "${cmake_options[@]}" \
     -DBUILD_WITH_DEBUG_INFO=OFF
   cmake --build build
@@ -148,10 +144,10 @@ package_opencv() {
   DESTDIR="$pkgdir" cmake --install build
 
   # separate samples package
-  mv "$pkgdir"/usr/share/opencv4/samples "$srcdir"
+  mv "$pkgdir"/usr/share/opencv5/samples "$srcdir"
 
   # Add java symlinks expected by some binary blobs
-  ln -sr "$pkgdir"/usr/share/java/{opencv4/opencv-${pkgver//./},opencv}.jar
+  ln -sr "$pkgdir"/usr/share/java/{opencv5/opencv-${pkgver//./},opencv}.jar
   ln -sr "$pkgdir"/usr/lib/{libopencv_java${pkgver//./},libopencv_java}.so
 
   # Split Python bindings
@@ -163,8 +159,8 @@ package_opencv-samples() {
   depends=(opencv)
   unset optdepends
 
-  mkdir -p "$pkgdir"/usr/share/opencv4
-  mv samples "$pkgdir"/usr/share/opencv4
+  mkdir -p "$pkgdir"/usr/share/opencv5
+  mv samples "$pkgdir"/usr/share/opencv5
 }
 
 package_python-opencv() {
