@@ -1,0 +1,101 @@
+diff --git a/scripts/wrap/parse.py b/scripts/wrap/parse.py
+index c3bd1278c..57b5b62be 100644
+--- a/scripts/wrap/parse.py
++++ b/scripts/wrap/parse.py
+@@ -118,6 +118,10 @@ def get_members( type_or_cursor, include_empty=False):
+         assert 0
+     if cursor.type.kind in (state.clang.cindex.TypeKind.TYPEDEF, state.clang.cindex.TypeKind.ELABORATED):
+         cursor2 = cursor.underlying_typedef_type.get_declaration()
++        if not cursor2.is_definition():
++            definition = cursor2.get_definition()
++            if definition:
++                cursor2 = definition
+     else:
+         cursor2 = cursor
+ 
+@@ -252,6 +256,10 @@ def has_refs( tu, type_):
+                     if verbose:
+                         jlib.log( 'There is a keep() fn for this type so it uses reference counting: {keep_name=}')
+                     base_type_cursor = get_base_type( type_).get_declaration()
++                    if not base_type_cursor.is_definition():
++                        definition = base_type_cursor.get_definition()
++                        if definition:
++                            base_type_cursor = definition
+                     if base_type_cursor.is_definition():
+                         if verbose:
+                             jlib.log( 'Type definition is available so we look for .refs member: {key=} {type_.spelling=} {fileline(base_type_cursor)=}')
+@@ -954,39 +962,41 @@ def find_struct( tu, structname, require_definition=True):
+ def find_name( cursor, name, nest=0):
+     '''
+     Returns cursor for specified name within <cursor>, or None if not found.
+-
+-    name:
+-        Name to search for. Can contain '.' characters; we look for each
+-        element in turn, calling ourselves recursively.
+-
+-    cursor:
+-        Item to search.
++    Handles dot-notation (e.g., 'u.t.first_line') and ignores modern Clang
++    anonymous struct/union wrappers cleanly.
+     '''
+-    assert cursor.spelling != ''
+-    if cursor.spelling == '':
+-        # Anonymous item; this seems to occur for (non-anonymous) unions.
+-        #
+-        # We recurse into children directly.
+-        #
+-        for c in get_members(cursor):
+-            ret = find_name_internal( c, name, nest+1)
+-            if ret:
+-                return ret
+-
+-    d = name.find( '.')
+-    if d >= 0:
+-        head, tail = name[:d], name[d+1:]
+-        # Look for first element then for remaining.
+-        c = find_name( cursor, head, nest+1)
+-        if not c:
+-            return
+-        ret = find_name( c, tail, nest+2)
+-        return ret
+-
++    # Clean up names from dot formatting or empty entries
++    if not name:
++        return None
++
++    # Handle dot separation immediately at the top level
++    if '.' in name:
++        head, tail = name.split('.', 1)
++        # Look for the head element (e.g., 'u')
++        head_cursor = find_name(cursor, head, nest + 1)
++        if not head_cursor:
++            return None
++        # Recurse deep into the head element for the tail (e.g., 't.first_line')
++        return find_name(head_cursor, tail, nest + 1)
++
++    # Search through members for the base target name
+     for c in get_members(cursor):
+-        if c.spelling == '':
+-            ret = find_name( c, name, nest+1)
+-            if ret:
+-                return ret
++        # 1. Direct Name Match
+         if c.spelling == name:
+             return c
++            
++        # 2. Match Anonymous/Unnamed layers
++        # Newer Clang versions use empty string or descriptive tags for anonymous nested definitions
++        is_anonymous = (
++            c.spelling == '' or 
++            'anonymous' in getattr(c, 'spelling', '').lower() or
++            'unnamed' in getattr(c, 'spelling', '').lower()
++        )
++        
++        if is_anonymous:
++            # Look inside the anonymous block to see if the target (or next path node) lives inside it
++            ret = find_name(c, name, nest + 1)
++            if ret:
++                return ret
++
++    return None
+

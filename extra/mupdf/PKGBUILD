@@ -11,13 +11,13 @@
 
 pkgbase=mupdf
 pkgname=('libmupdf' 'mupdf' 'mupdf-gl' 'mupdf-tools' 'python-mupdf')
-pkgver=1.27.2
-pkgrel=2
+pkgver=1.28.0
+pkgrel=1
 pkgdesc="Lightweight PDF and XPS viewer"
 url="https://mupdf.com"
 arch=('x86_64')
 license=('AGPL-3.0-or-later')
-makedepends=('brotli' 'clang' 'curl' 'desktop-file-utils' 'freeglut' 'freetype2' 'git' 'glu' 'gumbo-parser' 'harfbuzz' 'jbig2dec' 'leptonica'
+makedepends=('brotli' 'clang' 'cmark-gfm' 'curl' 'desktop-file-utils' 'freeglut' 'freetype2' 'git' 'glu' 'gumbo-parser' 'harfbuzz' 'jbig2dec' 'leptonica'
              'libjpeg-turbo' 'libx11' 'libxext' 'mesa-libgl' 'openjpeg2' 'openssl' 'python' 'swig' 'tesseract' 'unzip' 'zint' 'zlib' 'zxing-cpp')
 options=('staticlibs')
 source=("git+https://github.com/ArtifexSoftware/mupdf.git#tag=${pkgver}"
@@ -28,8 +28,10 @@ source=("git+https://github.com/ArtifexSoftware/mupdf.git#tag=${pkgver}"
         "${pkgbase}.xpm"
         "${pkgbase}.pc"
         "${pkgbase}-1.23.9-cpp_ldflags.patch"
-        "${pkgbase}-1.23.9-install_targets.patch")
-sha256sums=('7bb1b1417b1c735a3c80d6d6e6a4614d68a98ec5a2d068d274fc8bcac29c8381'
+        "${pkgbase}-1.23.9-install_targets.patch"
+        "${pkgbase}-1.28.0-system-cmark-gfm.patch"
+        "${pkgbase}-1.28.0-fix-build-with-recent-clang.patch")
+sha256sums=('a3991708570c9589a1704f39afda0611fcd31c34659051d3c58492da3a69b073'
             'SKIP'
             'SKIP'
             'SKIP'
@@ -37,7 +39,9 @@ sha256sums=('7bb1b1417b1c735a3c80d6d6e6a4614d68a98ec5a2d068d274fc8bcac29c8381'
             'a435f44425f5432c074dee745d8fbaeb879038ec1f1ec64f037c74662f09aca8'
             'bb797ac84edc9856fa828f87e9be684714b7ab2c8bca3372a81fbfa0da018ac4'
             '782745085168ebb7f06bf6330ff49897dbeae7d20a9e242fe98bf434f7eb82f0'
-            '16a193a735e44fefca7d7fbea97823840cfead6b9123898e7ee486c7e08f1528')
+            '16a193a735e44fefca7d7fbea97823840cfead6b9123898e7ee486c7e08f1528'
+            'd7b012ce911f16a0a53a4098d18d2f4c49578d150632321eece9cbd7a0b360d2'
+            'ca21020ac45c23cb5155025827d6aafb61f8701a6c6f10e418b7b824ae7a45f8')
 
 prepare() {
 	# Upstream does not provide a pkg-config integration
@@ -49,11 +53,18 @@ prepare() {
 	# Alter install-shared-* targets to not call one another (which fails on installing headers twice) and install libmupdfcpp.so
 	# with soname postfix
 	patch -Np1 -i "${srcdir}/${pkgbase}-1.23.9-install_targets.patch"
+	# Allow building against the system cmark-gfm package instead of the vendored thirdparty dependency
+	# (wires up the upstream USE_SYSTEM_CMARK_GFM path, which is incomplete in 1.28)
+	# Patch taken from OpenSuse at https://build.opensuse.org/requests/1362065/changes
+	patch -Np1 -i "${srcdir}/${pkgbase}-1.28.0-system-cmark-gfm.patch"
+	# Allow building against recent clang
+	patch -Np1 -i "${srcdir}/${pkgbase}-1.28.0-fix-build-with-recent-clang.patch"
 
 	# Init submodules and disable the ones we don't need, we want our system libraries instead
 	git submodule init
-	rm -rvf thirdparty/{brotli,curl,freeglut,freetype,gumbo-parser,harfbuzz,jbig2dec,leptonica,libjpeg,openjpeg,tesseract,zint,zlib,zxing-cpp}
+	rm -rvf thirdparty/{brotli,cmark-gfm,curl,freeglut,freetype,gumbo-parser,harfbuzz,jbig2dec,leptonica,libjpeg,openjpeg,tesseract,zint,zlib,zxing-cpp}
 	git submodule deinit thirdparty/brotli
+	git submodule deinit thirdparty/cmark-gfm
 	git submodule deinit thirdparty/curl
 	git submodule deinit thirdparty/freeglut
 	git submodule deinit thirdparty/freetype
@@ -76,6 +87,7 @@ prepare() {
 
 	{
 	  printf "LINUX_OR_OPENBSD := yes\n"  # required so that Makefile sets soname symlink
+	  printf "USE_SYSTEM_CMARK_GFM := yes\n"
 	  printf "USE_SYSTEM_CURL := yes\n"
 	  printf "USE_SYSTEM_FREETYPE := yes\n"
 	  printf "USE_SYSTEM_GLUT := yes\n"
@@ -103,7 +115,7 @@ build() {
 
 package_libmupdf() {
 	pkgdesc="Library for Lightweight PDF and XPS viewer"
-	depends=('brotli' 'freetype2' 'glibc' 'gumbo-parser' 'harfbuzz' 'jbig2dec' 'leptonica' 'libgcc' 'libstdc++' 'libjpeg-turbo' 'openjpeg2' 'tesseract' 'zlib')
+	depends=('brotli' 'cmark-gfm' 'freetype2' 'glibc' 'gumbo-parser' 'harfbuzz' 'jbig2dec' 'leptonica' 'libgcc' 'libstdc++' 'libjpeg-turbo' 'openjpeg2' 'tesseract' 'zlib')
 
 	cd "${pkgbase}"
 	make prefix=/usr DESTDIR="${pkgdir}" SO_INSTALL_MODE=755 install-shared-c install-shared-c++
