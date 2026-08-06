@@ -15,8 +15,8 @@ _myver=${pkgver/_rel*}
 pkgrel=1
 arch=('x86_64')
 makedepends=('cmake' 'zlib' 'lz4' 'zstd' 'libaio' 'systemd-tools' 'pam' 'numactl' 'jemalloc' 'openssl'
-             'rpcsvc-proto' 'doxygen' 'graphviz' 'libevent' 'libfido2') # 'boost'
-license=('GPL')
+             'rpcsvc-proto' 'doxygen' 'graphviz' 'libevent' 'libfido2' 'protobuf' 'editline')
+license=('GPL-2.0-only')
 url="https://www.percona.com/software/mysql-database/percona-server"
 source=("https://www.percona.com/downloads/Percona-Server-${pkgver%.*_*}/Percona-Server-$_pkgver/source/tarball/percona-server-$_pkgver.tar.gz"
         'gcc-14.patch'
@@ -42,12 +42,16 @@ prepare() {
 	       -i cmake/install_layout.cmake
 
 	for svcfile in mysqld{,@}.service.in; do
-		sed '/^PrivateTmp=/ a StateDirectory=mysql mysql-files\nRuntimeDirectory=mysqld' \
-		    -i scripts/systemd/$svcfile
+		sed -e '/^PrivateTmp=/ a StateDirectory=mysql mysql-files\nRuntimeDirectory=mysqld' \
+		    -e 's@/etc/sysconfig/@/etc/conf.d/@' \
+		    -i "scripts/systemd/$svcfile"
 	done
 
 	sed '/^PrivateTmp=/ a StateDirectory=mysqlrouter\nRuntimeDirectory=mysqlrouter' \
 		-i scripts/systemd/mysqlrouter.service.in
+
+  # Remove flags that are already set
+	sed 's/-DNDEBUG -D_FORTIFY_SOURCE=2//' -i CMakeLists.txt
 
 	patch -p1 -i ../gcc-14.patch # Fix build with GCC 14
 
@@ -96,6 +100,8 @@ build() {
 		-DWITH_SSL=system \
 		-DWITH_ICU=system \
 		-DWITH_FIDO=system \
+		-DWITH_PROTOBUF=system \
+    -DWITH_EDITLINE=system \
 		-DWITH_ENCRYPTION_UDF=ON \
 		-DWITH_LIBWRAP=OFF \
 		-DWITH_MECAB=OFF \
@@ -106,24 +112,33 @@ build() {
 		-DWITH_ROCKSDB=ON \
 		-DROCKSDB_DISABLE_AVX2=1 \
 		-DROCKSDB_DISABLE_MARCH_NATIVE=1 \
+		-DWITH_AUTHENTICATION_CLIENT_PLUGINS=1 \
 		-DWITH_VALGRIND=OFF \
 		-DDEBUG_EXTNAME=OFF \
 		-DBUILD_TESTING=OFF \
 		-DWITH_UNIT_TESTS=OFF \
 		-DWITH_SYSTEMD=1 \
 		-DCMAKE_EXE_LINKER_FLAGS='-ljemalloc' \
+		-DWITH_LTO=ON \
+		-DUSE_LD_LLD=0 \
 		-DWITH_NUMA=ON
 
 	make
 }
 
-package_libperconaserverclient() {
-	pkgdesc='Percona Server client libraries'
-	depends=('zlib' 'zstd' 'openssl' 'libfido2')
-	optdepends=('libsasl: authentication_ldap_sasl_client plugin')
+package_percona-server-clients() {
+	pkgdesc='Percona Server client tools'
+	depends=('glibc' 'libgcc' 'libstdc++' 'zlib' 'zstd' 'openssl' 'jemalloc' 'libfido2' 'libedit')
+	replaces=('libperconaserverclient')
+	conflicts=('mysql-clients' 'libperconaserverclient')
+	provides=("mysql-clients=$_myver" "mariadb-clients=$_myver")
+	optdepends=(
+		'libsasl: authentication_ldap_sasl_client plugin'
+		'krb5: authentication_kerberos_client plugin'
+	)
 
 	cd build
-	for dir in include libmysql libservices; do
+	for dir in client include libmysql libservices; do
 		make -C $dir DESTDIR="$pkgdir" install
 	done
 
@@ -135,16 +150,6 @@ package_libperconaserverclient() {
 
 	install -D -m0644 scripts/perconaserverclient.pc "$pkgdir"/usr/lib/pkgconfig/perconaserverclient.pc
 	install -D -m0644 "$srcdir/$pkgbase-$_pkgver/support-files/mysql.m4" "$pkgdir"/usr/share/aclocal/perconaserverclient.m4
-}
-
-package_percona-server-clients() {
-	pkgdesc='Percona Server client tools'
-	depends=('libperconaserverclient' 'zlib' 'zstd' 'lz4' 'openssl' 'jemalloc' 'readline')
-	conflicts=('mysql-clients')
-	provides=("mysql-clients=$_myver" "mariadb-clients=$_myver")
-
-	cd build
-	make -C client DESTDIR="$pkgdir" install
 
 	# install man pages
 	install -d "$pkgdir"/usr/share/man/man1
@@ -158,9 +163,9 @@ package_percona-server-clients() {
 
 package_percona-server() {
 	pkgdesc='Drop-in replacement for MySQL that provides improved performance, diagnostics, instrumentation and MyRocks storage engine'
-	backup=('etc/mysql/my.cnf' 'etc/mysqlrouter/mysqlrouter.conf')
-	depends=('libaio' 'systemd-tools' 'pam' 'jemalloc' 'numactl' 'lz4' 'zstd' 'openssl' 'libtirpc' 'curl'
-	         'libevent' 'icu')
+	backup=('etc/mysql/my.cnf' 'etc/mysqlrouter/mysqlrouter.conf' 'etc/conf.d/mysql')
+	depends=('glibc' 'libgcc' 'libstdc++' 'libaio' 'systemd-tools' 'pam' 'jemalloc' 'numactl' 'lz4' 'zstd' 'openssl'
+	         'libtirpc' 'curl' 'libevent' 'icu' 'protobuf' 'zlib' 'libldap')
 	optdepends=('perl-dbd-mysql')
 	conflicts=('mysql')
 	provides=("mysql=$_myver" "mariadb=$_myver")
@@ -173,15 +178,17 @@ package_percona-server() {
 	install -Dm644 "$srcdir/my.cnf" etc/mysql/my.cnf
 	install -Dm644 "$srcdir/mysql-user.conf" usr/lib/sysusers.d/mysql.conf
 
-	install -dm755 etc/mysqlrouter
+	install -dm755 etc/mysqlrouter etc/conf.d
 	sed -e 's:@ROUTER_RUNTIMEDIR@:/run/mysqlrouter:' \
 		-e 's:^logging_folder.*:logging_folder =:' \
 		"$srcdir/$pkgbase-$_pkgver/packaging/rpm-common/mysqlrouter.conf.in" \
 		> etc/mysqlrouter/mysqlrouter.conf
 	install -Dm644 "$srcdir/mysqlrouter-user.conf" usr/lib/sysusers.d/mysqlrouter.conf
 
+	echo MYSQLD_OPTS= > etc/conf.d/mysql
+
 	chmod 755 usr
-	rm -vrf usr/{cmake,lib/perconaserver/plugin/debug,lib/tmpfiles.d/mysql{,router}.conf}
+	rm -vrf usr/{cmake,lib/perconaserver/plugin/debug,lib/tmpfiles.d}
 
 	# Move documentation
 	if [ -f usr/PATENTS ]; then
@@ -189,16 +196,14 @@ package_percona-server() {
 		rm usr/COPYING.*
 	fi
 
-	# provided by libperconaserverclient
+	# provided by percona-server-clients
 	rm usr/bin/mysql_config
 	rm usr/lib/libperconaserverclient*
 	rm -r usr/include/
 	rm usr/share/man/man1/mysql_config.1
 	rm -r usr/share/aclocal usr/lib/pkgconfig
-
-	# provided by percona-server-clients
 	rm usr/bin/mysql{,admin,check,dump,import,show,slap,binlog,test,_migrate_keyring}
-	rm usr/lib/perconaserver/plugin/authentication_*_client.so
+	rm usr/lib/perconaserver/plugin/{authentication_*_client,mysql_native_password,dialog}.so
 	rm usr/share/man/man1/mysql{,admin,check,dump,import,show,slap,binlog}.1
 
 	# not needed
