@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jesse Schwartzentruber <truber@mozilla.com>
+Date: Tue, 28 Jul 2026 17:26:38 +0000
+Subject: [PATCH] Bug 2053518 - Handle the *-oe-linux-* rust targets added in
+ rustc 1.98 in rust target detection.
+ r=firefox-build-system-reviewers,glandium
+
+Differential Revision: https://phabricator.services.mozilla.com/D311145
+---
+ build/moz.configure/rust.configure            | 29 ++++++++++++++++---
+ .../configure/test_toolchain_configure.py     | 15 ++++++++++
+ 2 files changed, 40 insertions(+), 4 deletions(-)
+
+diff --git a/build/moz.configure/rust.configure b/build/moz.configure/rust.configure
+index a89585f6f81d..aad2cbd379ca 100644
+--- a/build/moz.configure/rust.configure
++++ b/build/moz.configure/rust.configure
+@@ -300,6 +300,10 @@ def detect_rustc_target(
+         elif not candidates:
+             return None
+ 
++        # config.guess uses the "pc" vendor for x86/x86_64 where rust uses its
++        # generic "unknown" vendor; normalize so we correlate on the right one.
++        vendor = "unknown" if host_or_target.vendor == "pc" else host_or_target.vendor
++
+         # We have multiple candidates. There are two cases where we can try to
+         # narrow further down using extra information from the build system.
+         # - For windows targets, correlate with the C compiler type
+@@ -367,11 +371,19 @@ def detect_rustc_target(
+             else:
+                 suffix = ""
+             for p in prefixes:
+-                for c in candidates:
+-                    if c.rust_target.startswith(
+-                        "{}-".format(p)
+-                    ) and c.rust_target.endswith(suffix):
++                matches = [
++                    c
++                    for c in candidates
++                    if c.rust_target.startswith("{}-".format(p))
++                    and c.rust_target.endswith(suffix)
++                ]
++                if not matches:
++                    continue
++                # As below, correlate on the (normalized) vendor.
++                for c in matches:
++                    if c.target.vendor == vendor:
+                         return c.rust_target
++                return matches[0].rust_target
+ 
+         # See if we can narrow down on the exact alias.
+         # We use the sub_configure_alias to keep support mingw32 triplets as input.
+@@ -400,6 +412,15 @@ def detect_rustc_target(
+             elif narrowed:
+                 candidates = narrowed
+ 
++        # Correlate on the (normalized) vendor, so vendor-specific targets (e.g.
++        # the *-oe-linux-gnu targets added in rust 1.98) don't shadow the
++        # generic ones for aliases whose vendor doesn't match a rust target.
++        narrowed = [c for c in candidates if c.target.vendor == vendor]
++        if len(narrowed) == 1:
++            return narrowed[0].rust_target
++        elif narrowed:
++            candidates = narrowed
++
+         # See if we can narrow down with the raw OS and raw CPU
+         narrowed = [
+             c
+diff --git a/python/mozbuild/mozbuild/test/configure/test_toolchain_configure.py b/python/mozbuild/mozbuild/test/configure/test_toolchain_configure.py
+index 58a736ee85fc..7dfb0efb9201 100644
+--- a/python/mozbuild/mozbuild/test/configure/test_toolchain_configure.py
++++ b/python/mozbuild/mozbuild/test/configure/test_toolchain_configure.py
+@@ -1779,6 +1779,15 @@ def gen_invoke_rustc(version, rustup_wrapper=False):
+                 "xtensa-esp32s3-espidf",
+                 "xtensa-esp32s3-none-elf",
+             ]
++            # Additional targets from 1.98
++            if Version(version) >= "1.98.0":
++                rust_targets += [
++                    "aarch64-oe-linux-gnu",
++                    "armv7-oe-linux-gnueabihf",
++                    "i686-oe-linux-gnu",
++                    "riscv64-oe-linux-gnu",
++                    "x86_64-oe-linux-gnu",
++                ]
+             return 0, "\n".join(sorted(rust_targets)), ""
+         if (
+             len(args) == 6
+@@ -1869,6 +1878,7 @@ class RustTest(BaseConfigureTest):
+             ("x86_64-unknown-linux-android", "x86_64-linux-android"),
+             ("x86_64-unknown-linux-android21", "x86_64-linux-android"),
+             ("x86_64-pc-linux-gnu", "x86_64-unknown-linux-gnu"),
++            ("riscv64-unknown-linux-gnu", "riscv64gc-unknown-linux-gnu"),
+             ("sparcv9-sun-solaris2", "sparcv9-sun-solaris"),
+             ("x86_64-sun-solaris2", "x86_64-pc-solaris"),
+             ("x86_64-apple-darwin23.3.0", "x86_64-apple-darwin"),
+@@ -1970,5 +1980,10 @@ class RustTest(BaseConfigureTest):
+         self.assertEqual(self.get_rust_target("wasm32-unknown-wasi"), "wasm32-wasip1")
+ 
+ 
++# Exercises the vendor-specific *-oe-linux-* targets added in rust 1.98.
++class Rust198Test(RustTest):
++    VERSION = "1.98.0"
++
++
+ if __name__ == "__main__":
+     main()
