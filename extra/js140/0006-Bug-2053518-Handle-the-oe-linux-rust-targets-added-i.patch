@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jesse Schwartzentruber <truber@mozilla.com>
+Date: Tue, 28 Jul 2026 17:26:38 +0000
+Subject: [PATCH] Bug 2053518 - Handle the *-oe-linux-* rust targets added in
+ rustc 1.98 in rust target detection.
+ r=firefox-build-system-reviewers,glandium
+
+Differential Revision: https://phabricator.services.mozilla.com/D311145
+---
+ build/moz.configure/rust.configure | 29 +++++++++++++++++++++++++----
+ 1 file changed, 25 insertions(+), 4 deletions(-)
+
+diff --git a/build/moz.configure/rust.configure b/build/moz.configure/rust.configure
+index b92c26dcab0c..b7c77887ce23 100644
+--- a/build/moz.configure/rust.configure
++++ b/build/moz.configure/rust.configure
+@@ -302,6 +302,10 @@ def detect_rustc_target(
+         elif not candidates:
+             return None
+ 
++        # config.guess uses the "pc" vendor for x86/x86_64 where rust uses its
++        # generic "unknown" vendor; normalize so we correlate on the right one.
++        vendor = "unknown" if host_or_target.vendor == "pc" else host_or_target.vendor
++
+         # We have multiple candidates. There are two cases where we can try to
+         # narrow further down using extra information from the build system.
+         # - For windows targets, correlate with the C compiler type
+@@ -369,11 +373,19 @@ def detect_rustc_target(
+             else:
+                 suffix = ""
+             for p in prefixes:
+-                for c in candidates:
+-                    if c.rust_target.startswith(
+-                        "{}-".format(p)
+-                    ) and c.rust_target.endswith(suffix):
++                matches = [
++                    c
++                    for c in candidates
++                    if c.rust_target.startswith("{}-".format(p))
++                    and c.rust_target.endswith(suffix)
++                ]
++                if not matches:
++                    continue
++                # As below, correlate on the (normalized) vendor.
++                for c in matches:
++                    if c.target.vendor == vendor:
+                         return c.rust_target
++                return matches[0].rust_target
+ 
+         # See if we can narrow down on the exact alias.
+         # We use the sub_configure_alias to keep support mingw32 triplets as input.
+@@ -402,6 +414,15 @@ def detect_rustc_target(
+             elif narrowed:
+                 candidates = narrowed
+ 
++        # Correlate on the (normalized) vendor, so vendor-specific targets (e.g.
++        # the *-oe-linux-gnu targets added in rust 1.98) don't shadow the
++        # generic ones for aliases whose vendor doesn't match a rust target.
++        narrowed = [c for c in candidates if c.target.vendor == vendor]
++        if len(narrowed) == 1:
++            return narrowed[0].rust_target
++        elif narrowed:
++            candidates = narrowed
++
+         # See if we can narrow down with the raw OS and raw CPU
+         narrowed = [
+             c
