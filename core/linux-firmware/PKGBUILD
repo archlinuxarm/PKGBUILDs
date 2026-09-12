@@ -12,6 +12,7 @@ pkgname=(
 
   # Splits
   amd-ucode
+  linux-firmware-amd
   linux-firmware-amdgpu
   linux-firmware-atheros
   linux-firmware-broadcom
@@ -27,9 +28,10 @@ pkgname=(
   linux-firmware-qlogic
   linux-firmware-radeon
   linux-firmware-realtek
+  linux-firmware-ti
 )
-pkgver=20260810
-pkgrel=2
+pkgver=20260910
+pkgrel=1
 pkgdesc="Firmware files for Linux"
 url="https://gitlab.com/kernel-firmware/linux-firmware"
 license=(LicenseRef-WHENCE)
@@ -45,15 +47,12 @@ options=(
   !strip
 )
 source=("git+$url.git?signed#tag=${pkgver}")
-b2sums=('96b1388d651acf67c1a6d9ad3761403791a85ebffbc0847d95e5b7c01461febf998ab05455acc13fc8bd74256ee0c7a971a7465f199e8a06aa2a5ce0ef21e97b')
+b2sums=('edb6c64cb4c839dba1330e0929d8b82ea67a55f8016c0c914deb5fbc2db201cd898d18753a0867aabbf2f6f066cec2d4a78f7cf0940c692d1e75674c79e9a6ba')
 validpgpkeys=(
   4CDE8575E547BF835FE15807A31B6BD72486CFD6 # Josh Boyer <jwboyer@fedoraproject.org>
 )
 
 _backports=(
-  # amdgpu crashes
-  # https://gitlab.archlinux.org/archlinux/packaging/packages/linux-firmware/-/work_items/50
-  9305ccd3e07e6c5c2a34f84fb4a056fc47840ad3
 )
 
 _reverts=(
@@ -71,11 +70,6 @@ prepare() {
     echo Reverting $(git log --oneline -1 "${c}")
     git revert -n "${c}"
   done
-
-  # amdgpu decoding glitches
-  # https://gitlab.archlinux.org/archlinux/packaging/packages/linux-firmware/-/work_items/49
-  git checkout 20260622 amdgpu/*vcn*
-  git diff --staged --stat
 }
 
 build() {
@@ -109,6 +103,7 @@ package_linux-firmware() {
   pkgdesc+=" - Default set"
   license=(CC0-1.0)
   depends=(
+    linux-firmware-amd
     linux-firmware-amdgpu
     linux-firmware-atheros
     linux-firmware-broadcom
@@ -119,6 +114,7 @@ package_linux-firmware() {
     linux-firmware-other
     linux-firmware-radeon
     linux-firmware-realtek
+    linux-firmware-ti
   )
   optdepends=(
     'linux-firmware-liquidio: Firmware for Cavium LiquidIO server adapters'
@@ -145,15 +141,18 @@ package_linux-firmware-other() {
   # split
   _pick amd-ucode "${fwdir}"/amd-ucode
 
+  _pick amd "${fwdir}"/amd{,npu,tee}
+
   _pick amdgpu "${fwdir}"/amdgpu
 
   _pick atheros "${fwdir}"/{ar[0-9]*,ath*,carl9170*,htc_*,qca,wil6210*}
 
   _pick broadcom "${fwdir}"/{bnx2*,brcm,cypress,tigon}
 
-  _pick cirrus "${fwdir}"/{cirrus,cs42l43*}
+  _pick cirrus "${fwdir}"/{cirrus,cs42l43*,sdca}
 
   _pick intel "${fwdir}"/{e100,hfi1_*,i915,intel,isci,iwlwifi*,ixp4xx,qat_*,xe}
+  _pick intel "${fwdir}"/*/ish
 
   _pick liquidio "${fwdir}"/liquidio
 
@@ -175,6 +174,8 @@ package_linux-firmware-other() {
 
   _pick realtek "${fwdir}"/{realtek,rtlwifi,rtw8*,rtl_*}
 
+  _pick ti "${fwdir}"/{ti_*,ti,ti-connectivity,tas*,INT8*,TAS2*,TI*,TX*,????-*-0x?.*}
+
   # dedup after splitting
   make -C ${pkgbase} FIRMWAREDIR="${pkgdir}/usr/lib/firmware" dedup
 
@@ -191,6 +192,18 @@ package_amd-ucode() {
 
   install -Dm644 amd-ucode.img -t "${pkgdir}/boot"
   install -Dm644 ${_licdir}/LICENSE.amd-ucode \
+    -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+package_linux-firmware-amd() {
+  pkgdesc+=" - Firmware for non-GPU AMD devices"
+  license+=(LicenseRef-amd)
+  depends=(linux-firmware-whence)
+
+  mv -v ${pkgname#linux-firmware-}/* "${pkgdir}"
+  make -C ${pkgbase} FIRMWAREDIR="${pkgdir}/usr/lib/firmware" dedup
+
+  install -Dm644 ${_licdir}/LICENSE.amd{npu,_pmf,-sev} \
     -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
@@ -266,10 +279,10 @@ package_linux-firmware-intel() {
   make -C ${pkgbase} FIRMWAREDIR="${pkgdir}/usr/lib/firmware" dedup
 
   install -Dm644 \
-    ${_licdir}/LICENCE.{IntcSST2,adsp_sst,e100,fw_sst_0f28} \
+    ${_licdir}/LICENCE.{HP,IntcSST2,adsp_sst,e100,fw_sst_0f28,lenovo} \
     ${_licdir}/LICENCE.{ibt,iwlwifi,qat}_firmware \
     ${_licdir}/LICENSE.{hfi1,ipu3}_firmware \
-    ${_licdir}/LICENSE.{i915,ice*,intel*,ivsc,ixp4xx,xe} \
+    ${_licdir}/LICENSE.{dell,i915,ice*,intel*,ivsc,ixp4xx,xe} \
     -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
@@ -395,6 +408,21 @@ package_linux-firmware-realtek() {
   make -C ${pkgbase} FIRMWAREDIR="${pkgdir}/usr/lib/firmware" dedup
 
   install -Dm644 ${_licdir}/LICENCE.rtlwifi_firmware.txt \
+    -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}
+
+package_linux-firmware-ti() {
+  pkgdesc+=" - Firmware for Texas Instruments devices"
+  license+=(
+    GPL-2.0-or-later
+    LicenseRef-ti
+  )
+  depends=(linux-firmware-whence)
+
+  mv -v ${pkgname#linux-firmware-}/* "${pkgdir}"
+  make -C ${pkgbase} FIRMWAREDIR="${pkgdir}/usr/lib/firmware" dedup
+
+  install -Dm644 ${_licdir}/LICENCE.{ti-connectivity,ti-tspa,wl1251} \
     -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
 
