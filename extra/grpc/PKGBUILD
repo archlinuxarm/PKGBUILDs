@@ -8,9 +8,8 @@
 
 pkgbase='grpc'
 pkgname=('grpc' 'python-grpcio' 'python-grpcio-tools' 'php-grpc' 'php-legacy-grpc' 'grpc-cli')
-pkgver=1.83.1
-_gtestver=2dd1c131950043a8ad5ab0d2dda0e0970596586a
-pkgrel=2
+pkgver=1.84.0
+pkgrel=1
 _protobuf_ver=36.1
 pkgdesc="High performance, open source, general RPC framework that puts mobile and HTTP/2 first."
 arch=('x86_64')
@@ -24,6 +23,7 @@ makedepends=(
   'cmake'
   'cython'
   'cython'
+  'git'
   'ninja'
   'openssl'
   'php'
@@ -37,22 +37,29 @@ makedepends=(
   're2'
   're2c'
 )
-source=("https://github.com/grpc/grpc/archive/v$pkgver/$pkgbase-$pkgver.tar.gz"
-        "https://github.com/google/googletest/archive/$_gtestver/googletest-$_gtestver.tar.gz"
-        "https://github.com/protocolbuffers/protobuf/archive/v${_protobuf_ver}/protobuf-${_protobuf_ver}.tar.gz"
-        "fix-python-system-abseil.patch")
-sha256sums=('60caa8397426d8a500e3e57ab6a49d1cb5aa62a36f2591eb9da3d77fa38ad8c9'
-            '31bf78bd91b96dd5e24fab3bb1d7f3f7453ccbaceec9afb86d6e4816a15ab109'
+source=(
+    "$pkgbase::git+https://github.com/grpc/grpc.git#tag=v$pkgver"
+    "${pkgname}-grpc-proto::git+https://github.com/grpc/grpc-proto.git"
+    "${pkgname}-googletest::git+https://github.com/google/googletest.git"
+    "https://github.com/protocolbuffers/protobuf/archive/v${_protobuf_ver}/protobuf-${_protobuf_ver}.tar.gz"
+    "fix-python-system-abseil.patch"
+)
+sha256sums=('1c63b6bb0b846345491c00e00db11694a78a9e61f24f580252fa2e1ffbad056f'
+            'SKIP'
+            'SKIP'
             '7a7baff8207a57f3fe5c233d432a09eba67bdfb55a3145839d0817cae8e807a4'
             '24a8dc761deff4a39b5fc9a7fb2b65c049e600b14c548a28f52376b98c456a7e')
 
 prepare() {
-  cd "$srcdir/$pkgbase-$pkgver"
+  cd "$pkgbase"
+
+  git submodule init
+
+  git config submodule."third_party/googletest".url "${srcdir}/${pkgname}"-googletest
+  git config submodule."third_party/grpc-proto".url "${srcdir}/${pkgname}"-grpc-proto
+  git -c protocol.file.allow=always submodule update --init -- third_party/grpc-proto third_party/googletest
 
   patch -p1 -i "$srcdir/fix-python-system-abseil.patch"
-
-  ln -sf "$srcdir/googletest-$_gtestver/"{googlemock,googletest} \
-    third_party/googletest
 
   # CMake only downloads third party depends when folder does not exist
   rmdir third_party/{cel-spec,envoy-api,xds,googleapis,protoc-gen-validate}
@@ -83,7 +90,7 @@ build() {
   fi
   export CXXFLAGS+=" -isystem${srcdir}/protobuf-${_protobuf_ver}/src"
 
-  cd "$srcdir/$pkgbase-$pkgver"
+  cd "$pkgbase"
   cmake -Bbuild \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_CXX_FLAGS="${CXXFLAGS} -DNDEBUG -trigraphs -Wno-attributes -Wno-deprecated-declarations -Wno-return-type -Wno-non-virtual-dtor" \
@@ -116,15 +123,15 @@ build() {
   export LDFLAGS="$LDFLAGS -L$PWD"
 
   # PHP
-  cd "$srcdir/$pkgbase-$pkgver/src/php/ext/$pkgbase"
+  cd "$srcdir/$pkgbase/src/php/ext/$pkgbase"
   phpize
-  ./configure --enable-grpc="$srcdir/$pkgbase-$pkgver"
+  ./configure --enable-grpc="$srcdir/$pkgbase"
   make
 
   # PHP Legacy
-  cd "$srcdir/$pkgbase-$pkgver/src/php-legacy/ext/$pkgbase"
+  cd "$srcdir/$pkgbase/src/php-legacy/ext/$pkgbase"
   phpize-legacy
-  ./configure --enable-grpc="$srcdir/$pkgbase-$pkgver"
+  ./configure --enable-grpc="$srcdir/$pkgbase"
   make
 
   # Python
@@ -138,7 +145,7 @@ build() {
   export GRPC_PYTHON_BUILD_WITH_SYSTEMD=1
   export GRPC_BUILD_WITH_BORING_SSL_ASM=0
 
-  cd "$srcdir/$pkgbase-$pkgver"
+  cd "$srcdir/$pkgbase"
   GRPC_PYTHON_CFLAGS="-fvisibility=hidden -fno-wrapv -fno-exceptions $(pkg-config --cflags protobuf) -std=c++17" \
   python -m build --wheel --no-isolation
 
@@ -150,7 +157,7 @@ build() {
 }
 
 check() {
-  cd "$srcdir/$pkgbase-$pkgver"
+  cd "$srcdir/$pkgbase"
   local _pyver=$(python -c "import sys; print('{0}{1}'.format(*sys.version_info[:2]))")
   PYTHONPATH="pyb/lib.linux-$CARCH-cpython-$_pyver" python -c 'import grpc'
 }
@@ -172,7 +179,7 @@ package_grpc() {
     'libaddress_sorting.so'
   )
 
-  cd "$srcdir/$pkgbase-$pkgver/build"
+  cd "$srcdir/$pkgbase/build"
   DESTDIR="$pkgdir" cmake --install .
   install -Dm644 ../LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
@@ -193,7 +200,7 @@ package_python-grpcio() {
     'python-typing_extensions'
     )
 
-  cd "$srcdir/$pkgbase-$pkgver"
+  cd "$srcdir/$pkgbase"
   python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
@@ -202,7 +209,7 @@ package_python-grpcio-tools() {
   pkgdesc='Python protobuf generator for GRPC'
   depends=('glibc' 'libgcc' 'libstdc++' 'protobuf' 'python' 'python-setuptools' 'python-protobuf' 'python-typing_extensions')
 
-  cd "$srcdir/$pkgbase-$pkgver"
+  cd "$srcdir/$pkgbase"
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 
   cd tools/distrib/python/grpcio_tools
@@ -215,14 +222,14 @@ package_php-grpc() {
   backup=('etc/php/conf.d/grpc.ini')
 
   # Install PHP extension.
-  cd "$srcdir/$pkgbase-$pkgver/src/php/ext/$pkgbase"
+  cd "$srcdir/$pkgbase/src/php/ext/$pkgbase"
   make install "INSTALL_ROOT=$pkgdir"
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 
   # Remove RPATH
   chrpath -d "$pkgdir/usr/lib/php/modules/grpc.so"
 
-  echo ';extension=grpc.so' >grpc.ini
+  echo ';extension=grpc.so' > grpc.ini
   install -Dm644 grpc.ini "$pkgdir/etc/php/conf.d/grpc.ini"
 }
 
@@ -232,7 +239,7 @@ package_php-legacy-grpc() {
   backup=('etc/php-legacy/conf.d/grpc.ini')
 
   # Install PHP extension.
-  cd "$srcdir/$pkgbase-$pkgver/src/php-legacy/ext/$pkgbase"
+  cd "$srcdir/$pkgbase/src/php-legacy/ext/$pkgbase"
   make install "INSTALL_ROOT=$pkgdir"
   install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 
@@ -247,7 +254,7 @@ package_grpc-cli() {
   pkgdesc='gRPC protocol buffers cli'
   depends=('glibc' 'libgcc' 'libstdc++' 'grpc' 'protobuf' 'abseil-cpp')
 
-  cd "$srcdir/$pkgbase-$pkgver"
+  cd "$srcdir/$pkgbase"
   install -dm0755 "$pkgdir/usr/lib"
 
   # Remove RPATH
