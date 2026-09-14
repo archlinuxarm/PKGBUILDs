@@ -1,0 +1,78 @@
+# Maintainer: Christian Rebischke <chris.rebischke at archlinux.org>
+# Maintainer: David Runge <dvzrv@archlinux.org>
+# Contributor:  kpcyrd <git@rxv.cc>
+# Contributor: Jonathan Steel <jsteel at archlinux.org>
+# Contributor: Daniel Wallace <danielwallace at gtmanfred dot com>
+# Contributor: flaccid aka Chris Fordham <chris@fordham.id.au>
+# Contributor: Sparadox <etienne.lafarge at gmail.com>
+
+# ALARM: Dr. Zee <arch-ami@drzee.net>
+#  - moved netplan to optdepends - according to documentation netplan is optional and cloud-init works fine without https://cloudinit.readthedocs.io/en/latest/topics/network-config-format-v2.html (with some limiations). Limiations do not impact Arch Linux. 
+#  - added '--distro arch' in build and package step to force cloud-init to build for arch linux architectire. The autodetection of the linuix variant returns 'unknown' and does not recognize Arch for ARM as Arch Linux, thus we force it.
+#  - added fix to etc/cloud/cloud.conf to change user arch to alarm
+
+buildarch=8
+
+pkgname=cloud-init
+pkgver=22.1
+pkgrel=1.1
+pkgdesc="Cloud instance initialization"
+arch=(any)
+url="https://cloud-init.io"
+license=(GPL3)
+depends=(dhclient python-configobj python-jinja
+python-jsonpatch python-jsonschema python-netifaces python-oauthlib
+python-requests python-yaml sudo systemd)
+makedepends=(python-setuptools)
+checkdepends=(python-httpretty python-prettytable python-pytest)
+optdepends=('cloud-guest-utils: for growpart'
+            'netplan: for full netplan support - https://cloudinit.readthedocs.io/en/latest/topics/network-config-format-v2.html')
+backup=(
+  etc/cloud/cloud.cfg
+  etc/cloud/cloud.cfg.d/05_logging.cfg
+)
+source=(
+  https://launchpad.net/$pkgname/trunk/$pkgver/+download/$pkgname-$pkgver.tar.gz
+  $pkgname-22.1-lib_dir.patch
+  $pkgname-22.1-python-configobj.patch
+)
+sha512sums=('485e358777379a22dd2b0f6aa7afb1751eb44831c6e03ecbbd9c6823eaa20535e6e83fc245818ce1bb207425976839b356dadcfa3cfe62385b9d340b08ff21ab'
+            '32b7521f0ae4d61a4d86f2f840fb0670e2cdc7bab708fc7b7676b5178b6d660beb3a46b803f5bcd7e0f18c6d6339fc96e20a951dfafadbb0312e4a0cafce325f'
+            '16e414661be0fc382d25ff18fd35147bf6115e64984d8a7e83c479f206a8d20ba0da1901a69eee9e07fe3d7b3c7cebc5702b2932f1847e19b43eccb5c89fa63b')
+b2sums=('ca55378db822cdf58808de1bd2b519861c50ad8b08ed699212827833e0134fdc0968b76a4c2a13f39eae1d20ef8b22a99ff99b85ef77e496fd41593f4e2f2d55'
+        '4e03bd647ca9e1bc3d9c507824d43e4013a20d5bbcb7215755b427d0c7ded9ee48dbfb9faaae703ab2d519aee7c48a40277603c8f874347b574b7ac2b1e1a9fd'
+        'e3470a365ecf7b5fe0ce0df30fab4160770ec128904a36ad57676af3c2c3a6730290a379c623d10fde588378149ef9c1b936f7f01f06fdb524a3f3d12f8d5112')
+
+prepare() {
+  cd $pkgname-$pkgver
+  # we use /usr/lib
+  patch -Np1 -i ../$pkgname-22.1-lib_dir.patch
+  # we have python-configobj > 5.0.6, which does not provide ConfigObj._a_to_u() anymore
+  patch -Np1 -i ../$pkgname-22.1-python-configobj.patch
+}
+
+build() {
+  cd $pkgname-$pkgver
+  python setup.py build --distro arch
+}
+
+check() {
+  cd $pkgname-$pkgver
+  export PYTHONPATH="build:$PYTHONPATH"
+  pytest -v
+}
+
+package() {
+  cd $pkgname-$pkgver
+  python setup.py install --optimize=1 --init-system=systemd --root="$pkgdir" --distro arch
+
+  # Replace user arch with alarm in cloud.conf
+  sed -i 's/name: arch/name: alarm/' "$pkgdir"/etc/cloud/cloud.cfg
+  
+  
+  # /etc/systemd is for administrative purposes, not for vendoring purposes
+  mv -v "$pkgdir/"{etc,usr/lib}/systemd/system/sshd-keygen@.service.d/
+  rm -rf "$pkgdir/etc/systemd"
+}
+
+
