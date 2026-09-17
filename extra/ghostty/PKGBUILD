@@ -1,0 +1,94 @@
+# Maintainer: Caleb Maclennan <caleb@alerque.com>
+# Maintainer: Peter Jung <ptr1337@archlinux.org>
+#
+# ALARM: Piero Giusti <pierophp@gmail.com>
+#  - build only for AArch64
+#  - use the upstream release source tarball and pinned Zig 0.15.2: Ghostty
+#    1.3.x cannot build with Arch Linux ARM's current Zig 0.16
+#  - skip generated manpages because pandoc-cli is unavailable on ALARM
+
+buildarch=8
+
+pkgbase=ghostty
+pkgname=(ghostty ghostty-shell-integration ghostty-terminfo ghostty-nautilus)
+pkgver=1.3.1
+pkgrel=1
+pkgdesc='Fast, native, feature-rich terminal emulator pushing modern features'
+arch=(aarch64)
+url="https://github.com/ghostty-org/$pkgbase"
+license=(MIT)
+depends=(bzip2 fontconfig freetype2 glib2 glibc gtk4 gtk4-layer-shell harfbuzz libadwaita libpng oniguruma pixman wayland zlib)
+makedepends=(blueprint-compiler curl gettext pkgconf)
+_zigver=0.15.2
+_archive="$pkgbase-$pkgver"
+source=(
+  "https://release.files.ghostty.org/$pkgver/$_archive.tar.gz"
+  "https://ziglang.org/download/$_zigver/zig-aarch64-linux-$_zigver.tar.xz"
+)
+sha256sums=(
+  '3349d25600ffbda281197a18314f7d18791969cffe9474f0ff16a45a9ebfccdb'
+  '958ed7d1e00d0ea76590d27666efbf7a932281b3d7ba0c6b01b0ff26498f667f'
+)
+
+prepare() {
+  cd "$_archive"
+  PATH="$srcdir/zig-aarch64-linux-$_zigver:$PATH" \
+    ZIG_GLOBAL_CACHE_DIR="$srcdir/zig-global-cache" \
+    ./nix/build-support/fetch-zig-cache.sh
+}
+
+build() {
+  cd "$_archive"
+  PATH="$srcdir/zig-aarch64-linux-$_zigver:$PATH" \
+    DESTDIR=build \
+    zig build \
+      --prefix /usr \
+      --system "$srcdir/zig-global-cache/p" \
+      -Doptimize=ReleaseFast \
+      -Dgtk-x11=true \
+      -Dcpu=baseline \
+      -Dpie=true \
+      -Demit-docs=false \
+      -Dversion-string="$pkgver-$pkgrel" \
+      --build-id=sha1
+}
+
+package_ghostty() {
+  depends+=(ghostty-shell-integration ghostty-terminfo)
+  optdepends=('ghostty-nautilus: Open in Ghostty context menu in GNOME Files')
+
+  cd "$_archive"
+  cp -a build/* "$pkgdir/"
+  install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/ghostty/LICENSE"
+  rm -r "$pkgdir/usr/share/terminfo" \
+    "$pkgdir/usr/share/ghostty/shell-integration" \
+    "$pkgdir/usr/share/nautilus-python"
+}
+
+package_ghostty-shell-integration() {
+  pkgdesc='Shell integration scripts for Ghostty'
+  depends=()
+
+  cd "$_archive"
+  install -d "$pkgdir/usr/share/ghostty/shell-integration"
+  cp -a build/usr/share/ghostty/shell-integration/. "$pkgdir/usr/share/ghostty/shell-integration/"
+}
+
+package_ghostty-terminfo() {
+  pkgdesc='Terminfo for Ghostty'
+  depends=()
+
+  cd "$_archive"
+  install -d "$pkgdir/usr/share/terminfo"
+  cp -a build/usr/share/terminfo/x "$pkgdir/usr/share/terminfo/"
+}
+
+package_ghostty-nautilus() {
+  pkgdesc='Open in Ghostty for GNOME Files'
+  depends=(ghostty nautilus-python)
+  license=(GPL-2.0-or-later)
+
+  cd "$_archive"
+  install -d "$pkgdir/usr/share/nautilus-python"
+  cp -a build/usr/share/nautilus-python/. "$pkgdir/usr/share/nautilus-python/"
+}
