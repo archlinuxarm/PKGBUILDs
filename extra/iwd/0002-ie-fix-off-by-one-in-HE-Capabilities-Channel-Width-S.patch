@@ -1,0 +1,37 @@
+From 7640005e483115e30448ed5767a58db39cbe3222 Mon Sep 17 00:00:00 2001
+From: Abhinav Agarwal <abhinavagarwal1996@gmail.com>
+Date: Thu, 21 May 2026 07:53:46 -0700
+Subject: [PATCH 2/4] ie: fix off-by-one in HE Capabilities Channel Width Set
+ validation
+
+ie_validate_he_capabilities() reads the Channel Width Set from PHY
+Capabilities byte 1 (ptr + 7), but per IEEE 802.11ax-2021
+Section 9.4.2.248.3 the Channel Width Set occupies bits B1-B7 of PHY
+Capabilities byte 0 (ptr + 6).
+
+band_estimate_he_rx_rate() and wiphy.c both correctly read byte 0.
+The one-byte offset in the validator means a crafted IE can bypass
+the length check, causing a heap out-of-bounds read in the rate
+estimator when processing 160 MHz or 80+80 MHz MCS maps.
+
+Fixes: 53988a728533 ("ie: add validation for HE Capabilities element")
+---
+ src/ie.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/ie.c b/src/ie.c
+index c8bb70b9..526fafa8 100644
+--- a/src/ie.c
++++ b/src/ie.c
+@@ -2711,7 +2711,7 @@ bool ie_validate_he_capabilities(const void *data, size_t len)
+ 	if (len < 22)
+ 		return false;
+ 
+-	width_set = bit_field((ptr + 7)[0], 1, 7);
++	width_set = bit_field((ptr + 6)[0], 1, 7);
+ 
+ 	/* B0 indicates support for 40MHz, but only in 2.4GHz band */
+ 	freq_2_4 = test_bit(&width_set, 0);
+-- 
+2.39.5 (Apple Git-154)
+

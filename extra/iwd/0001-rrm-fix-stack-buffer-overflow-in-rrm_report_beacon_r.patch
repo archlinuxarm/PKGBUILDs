@@ -1,0 +1,67 @@
+From 3d3f131b747791edd836d515c45c60289233522a Mon Sep 17 00:00:00 2001
+From: Abhinav Agarwal <abhinavagarwal1996@gmail.com>
+Date: Sat, 1 Aug 2026 14:29:58 -0700
+Subject: [PATCH] rrm: fix stack buffer overflow in rrm_report_beacon_results
+
+rrm_report_beacon_results() builds a Radio Measurement Report into
+a fixed 512-byte stack buffer.  The loop appends one 31-byte record
+per matching BSS with no bounds check.  With enough matching BSSes
+the write goes past frame[] and can reach saved control data,
+depending on compiler and architecture stack layout.
+
+The overflow is triggerable in connected state by an adjacent node
+that injects a spoofed 802.11k Radio Measurement Request (category=5,
+action=0) with wildcard BSSID and mode=TABLE.  The source check at
+rrm.c:733 is a plain MAC comparison with no MFP verification, so the
+frame is spoofable on any WPA2 network without PMF.
+
+On embedded ARM builds without stack protector/PIE/ASLR the overflow
+can overwrite saved LR with attacker-controlled bytes from BSS BSSID
+fields.  On hardened builds the canary triggers an immediate abort.
+
+Fix: check remaining space before each write; break when insufficient.
+
+report_len is narrowed from size_t to uint32_t so the bounds check
+does not compare an unsigned size_t against the signed ptrdiff_t from
+(end - ptr), which triggers -Wsign-compare.  build_report_for_bss()
+returns sizeof(struct rrm_beacon_report), so the value always fits.
+
+Fixes: 1f01819c701e ("rrm: add radio resource management module")
+---
+ src/rrm.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/rrm.c b/src/rrm.c
+index e5118a99..cee2e4e9 100644
+--- a/src/rrm.c
++++ b/src/rrm.c
+@@ -332,6 +332,7 @@ static bool rrm_report_beacon_results(struct rrm_state *rrm,
+ 	bool wildcard = util_is_broadcast_address(beacon->bssid);
+ 	const struct l_queue_entry *entry;
+ 	uint8_t frame[512];
++	const uint8_t *end = frame + sizeof(frame);
+ 	uint8_t *ptr = frame;
+ 
+ 	*ptr++ = 0x05; /* Category: Radio Measurement */
+@@ -342,7 +343,7 @@ static bool rrm_report_beacon_results(struct rrm_state *rrm,
+ 							entry = entry->next) {
+ 		struct scan_bss *bss = entry->data;
+ 		uint8_t report[257];
+-		size_t report_len;
++		uint32_t report_len;
+ 
+ 		/* If request included a specific BSSID match only this BSS */
+ 		if (!wildcard && memcmp(bss->addr, beacon->bssid, 6) != 0)
+@@ -364,6 +365,9 @@ static bool rrm_report_beacon_results(struct rrm_state *rrm,
+ 
+ 		report_len = build_report_for_bss(beacon, bss, report);
+ 
++		if (report_len + 5 > end - ptr)
++			break;
++
+ 		rrm_build_measurement_report(&beacon->info, report,
+ 						report_len, ptr);
+ 
+-- 
+2.39.5 (Apple Git-154)
+

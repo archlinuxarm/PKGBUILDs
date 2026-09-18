@@ -1,0 +1,55 @@
+From c9c9798f2c6285a2d393acc20e8ef7bfd26c9c69 Mon Sep 17 00:00:00 2001
+From: Abhinav Agarwal <abhinavagarwal1996@gmail.com>
+Date: Thu, 21 May 2026 07:54:09 -0700
+Subject: [PATCH 3/4] ft: fix mde_equal() self-comparison and type mismatch
+
+mde_equal() has three bugs in one line:
+
+1. memcmp(mde1, mde1, ...) compares the first argument to itself,
+   so the function always returns true regardless of mde2.
+
+2. mde1[1] is used as a length, but mde1 is a raw 3-byte MDE payload
+   (MDID_low, MDID_high, FT_cap) -- mde1[1] is the MDID high byte,
+   not a length field.
+
+3. mde1 (raw payload, no IE header) and mde2 (full IE with tag+length
+   header) have different layouts at byte 0, so a naive mde1-vs-mde2
+   memcmp would always mismatch.
+
+Fix: validate mde2 payload length is 3 (per 802.11-2020 Section
+9.4.2.47), then compare the 3-byte payload portions directly.
+
+Fixes: 2c0234e161ea ("ft: rework ft_parse_ies")
+---
+ src/ft.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/src/ft.c b/src/ft.c
+index c646ef8a..58a16cc1 100644
+--- a/src/ft.c
++++ b/src/ft.c
+@@ -376,13 +376,16 @@ static bool mde_equal(const uint8_t *mde1, const uint8_t *mde2)
+ 		return false;
+ 
+ 	/*
+-	 * Check for an MD IE identical to the one we sent in message 1
++	 * mde1 is the raw 3-byte MDE payload from struct ft_info.
++	 * mde2 is a full IE pointer from parse_ies() (tag + length + payload).
+ 	 *
+-	 * 12.8.3: "The MDE shall contain the MDID and FT Capability and
+-	 * Policy fields. This element shall be the same as the MDE
+-	 * advertised by the target AP in Beacon and Probe Response frames."
++	 * Compare the 3-byte payload portions.  Validate mde2[1] == 3
++	 * (mandatory MDE payload length per 802.11-2020 Section 9.4.2.47).
++	 *
++	 * 12.8.3: "This element shall be the same as the MDE advertised by
++	 * the target AP in Beacon and Probe Response frames."
+ 	 */
+-	return memcmp(mde1, mde1, mde1[1] + 2) == 0;
++	return mde2[1] == 3 && memcmp(mde1, mde2 + 2, 3) == 0;
+ }
+ 
+ static int ft_over_ds_parse_action_response(const uint8_t *frame,
+-- 
+2.39.5 (Apple Git-154)
+

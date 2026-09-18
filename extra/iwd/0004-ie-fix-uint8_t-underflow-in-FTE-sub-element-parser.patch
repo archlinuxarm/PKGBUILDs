@@ -1,0 +1,39 @@
+From 44193605b2f5c8c578e6acc1edda4f6c9f89c7f3 Mon Sep 17 00:00:00 2001
+From: Abhinav Agarwal <abhinavagarwal1996@gmail.com>
+Date: Thu, 21 May 2026 07:54:27 -0700
+Subject: [PATCH 4/4] ie: fix uint8_t underflow in FTE sub-element parser
+
+In ie_parse_fast_bss_transition() the inner loop subtracts
+(subelem_len + 2) from the uint8_t variable len.  If subelem_len
+exceeds the remaining bytes, the subtraction wraps and the loop
+continues reading out of bounds -- subsequent iterations read OOB
+subelement header bytes.
+
+The FTE is parsed before the MIC is verified (ft.c:513 vs ft.c:524),
+so the OOB read is reachable with a crafted FT auth/association
+response before any cryptographic check.
+
+Fix: guard subelem_len against remaining length before processing.
+
+Fixes: e4c168cc3b67 ("ie: Fast BSS Transition IE utilities")
+---
+ src/ie.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/ie.c b/src/ie.c
+index 526fafa8..89922412 100644
+--- a/src/ie.c
++++ b/src/ie.c
+@@ -1861,6 +1861,9 @@ int ie_parse_fast_bss_transition(struct ie_tlv_iter *iter, uint32_t mic_len,
+ 		subelem_id = *data++;
+ 		subelem_len = *data++;
+ 
++		if (subelem_len > len - 2)
++			return -EINVAL;
++
+ 		switch (subelem_id) {
+ 		case 1:
+ 			if (subelem_len != 6)
+-- 
+2.39.5 (Apple Git-154)
+
