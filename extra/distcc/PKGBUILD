@@ -13,7 +13,7 @@
 
 pkgname=distcc
 pkgver=3.4
-pkgrel=15
+pkgrel=16
 pkgdesc='Distributed compilation service for C, C++ and Objective-C'
 arch=(x86_64)
 url='https://github.com/distcc/distcc'
@@ -28,11 +28,13 @@ source=("git+$url?signed#tag=v$pkgver"
         distccd.conf.d
         distccd.service
         sysusers.conf
+        distccmon-gnome-segfault.patch
         allow-zero-timeout.patch)
 b2sums=('8843f1d2ad3cb8d761644ffd19fa2868843c2f0c6b3dc5471c88ed34de0425b78193a3f01539c5c581eaf7c947a39e87f2bace80571cc54e7e0201ad5004e3cc'
         '60982843dc2dd42f0a461edda7df6966e5d7cae0088a942ecb473a8a47db65879d5b6025f5b1da621b1c43c92902dd29b9fa9e799853058e897d0e143e8b3537'
         '9b6ffc02e9360fd92f7595e96ef2d69b5f6d72acf343009375fa081f86b26f51960b139c4f6e0e3c8befa37eba4894d61351bbfab6386389c262db0cc01a8b8e'
         '69971bcf3577e1da86613e0f57d4923be627d2cc6227cd86fef3be4bbd2e688570005816e8ed2b909a4d3ff0a77fdccebaa3f74d000d65d67cd97ccd0a74a3bd'
+        'a6eca046fb6ee7381a6e0a2e3b8e553497e58cd0e41861ea6a2b9c455c95aac53594c2b39f2181fb59e3e4679cab30ee05b5ae6dbe131aa1919399f8b4f21293'
         '9fb83627feffba4093ea68f31cdd9257d0626f1c97aff4cd55ab74d02aceabc763e1fc59c35ddc042b61113c081b1f4cc64b8021e7ae8a5883641e7cc488f7ec')
 validpgpkeys=(30782E2BE4EB9FD5B293D3DA6D100BF096B8A005) # Shawn Landden
 
@@ -41,6 +43,12 @@ prepare() {
 
   # meson triple fix, ref FS#78800
   git cherry-pick --no-commit 850db9eec0d5dd7f47ade8ffca91b679081f6d85
+
+  # clang --target=X fix, ref distcc issue #2
+  git cherry-pick --no-commit 7f0d80dfe16577f55822ba86a1539e53f9d54417
+
+  # distccmon-gnome segfault fix, ref distcc issue #1
+  patch -Np1 -i ../distccmon-gnome-segfault.patch
 
   patch -p1 -i ../allow-zero-timeout.patch
 
@@ -52,9 +60,9 @@ build() {
   cd $pkgname
 
   # ref https://github.com/distcc/distcc/issues/454#issuecomment-1087865811
-  export CFLAGS+=' -DPY_SSIZE_T_CLEAN -fcommon'
+  export CFLAGS+=' -DPY_SSIZE_T_CLEAN -fcommon -w'
 
-  # causes buffer overflow check to occur
+  # less strict buffer overflow check
   export CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
 
   ./configure \
@@ -71,8 +79,8 @@ build() {
 
 package() {
   make -C $pkgname \
-    DESTDIR="$pkgdir" \
     INCLUDESERVER_PYTHON=/usr/bin/python \
+    DESTDIR="$pkgdir" \
     install
 
   install -Dm644 distccd.conf.d "$pkgdir/etc/conf.d/distccd"
