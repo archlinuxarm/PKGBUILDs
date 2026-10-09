@@ -19,8 +19,13 @@
 
 pkgname=vtk
 # May need bootstrapping on upgrades due to circular vtk <-> opencascade dependency
-pkgver=9.6.2
-pkgrel=7
+pkgver=9.7.1
+pkgrel=1
+# Remote modules pinned by VTK's Remote/*.remote.cmake files
+# See https://gitlab.kitware.com/vtk/vtk/-/tree/master/Remote
+_vtk_module_MomentInvariants_commit=ccb44911b7e1ccf99a36fe4ca6b7755ac4c87743
+_vtk_module_RenderingLookingGlass_commit=56105797c066dfd54a5bad08e1aee223297470d9
+_vtk_module_DICOM_commit=2160aadbd7bd89430370848dca42142769aeb04c
 pkgdesc="Software system for 3D computer graphics, image processing, and visualization"
 arch=(x86_64)
 url="https://www.vtk.org"
@@ -52,6 +57,7 @@ makedepends=(
   # build system
   cmake
   ninja
+  git                     # for fetching remote module sources
   # bindings
   java-environment=11
   python
@@ -155,33 +161,66 @@ optdepends=(
 options=(staticlibs)
 source=(
   $url/files/release/${pkgver%.*}/VTK-$pkgver.tar.gz
-  gdal-3.13.patch
+  # Remote modules pinned in Remote/*.remote.cmake (full clones so that vtk_fetch_module can verify the commit without network access)
+  vtkMomentInvariants::git+https://gitlab.kitware.com/vtk/MomentInvariants.git#commit=$_vtk_module_MomentInvariants_commit
+  vtkRenderingLookingGlass::git+https://github.com/Kitware/LookingGlassVTKModule.git#commit=$_vtk_module_RenderingLookingGlass_commit
+  vtkDICOM::git+https://github.com/dgobbi/vtk-dicom.git#commit=$_vtk_module_DICOM_commit
   fmt-12.2.patch
+  anari-1.1-light-extensions.patch
+  anari-pre-1.1-sdk-detection.patch
+  openvdb-13.patch
   xdmf3_32bit.patch
 )
-sha256sums=('aed12cec12a9609179bf66329070266627ca64244a10856a452b2a17ffb04a1d'
-            'b56f176de0fdf233f37d61bc41514ede03492987c50dc7cdb633adaa5d9f433c'
+sha256sums=('cae04fd355004cb916a409db79d53a208f1221e975aeacc7540ee67b148ee91a'
+            'c8d1d88b802db3d4b9cea9e0f1601448b1a7572cf3514c5d25a235cb1de4903a'
+            '2ae8f72be112973460b402e75b2e05c01a5b950c7303431bcd02ab8c7a93f99a'
+            'd0812d560e44cd73ad742fddce5589a340f83eecabc09ccdd284cd516114a3ec'
             'b784782cac02e11a129da68cc9feef2175b1cabb9dcc7b6c036f60becf77d8f6'
+            '7504559c00ae9d5cd2cc5cefde8960eb4cd9b307617b072758f68767f6842c55'
+            '73997f77f94fb0c76094aeffaff4d3fa61105a7c08c80cdf5cc16584e53db329'
+            'ad13bcfc0f104ef27c8bb6e59939353d1efc4c06ad675243c9cf136f8bdd9259'
             '9608f47137dbeb049c564a0df828172611ce7d019b705820075919f04c511d4f')
-b2sums=('343e3ee333ec0f5541014faf07fb66ac00f935e389af3dc588e1d75a023b77b2ecb2b57d8522ef46f77f0060811ee7c1c417becca5b605282704bcdf2bc750db'
-        '3492d04286f15ed5978bb7c39fcdf0e9a4922b57c580da8056ffc10c38226c01abfb6dc5d1018db4fab51896ed1d298330a1ab96e40ce33803fdb59caf11d770'
+b2sums=('f9885d14329b7d64c0d95179338609d701e205b209b89b344df9342101a005ed09b2ae23ee6efba1d454606fc1e401885e2a67ea43472e680f437616d83bbdbf'
+        '58abd3c54c8313f7e25da5a6064ea0f61c44e788d0c251958a7c1d3a89e8d5e429e2fb5c795d6b6377df55c1824d0910065ed6733b52717477b58c9227e91223'
+        '33de2b697708b87f7a4adbe4d7370cdd3eb990fe80b874fb86d1d37546323d76c19ad9c1ff2cd9169f5093f390732457988dc83f916f9bdc2fefafb93353ff0d'
+        '1e93c576f1d0d72497b18a62a4676c83cb28dd70299c8ad3a02653f95b87c23270056e6826c2f2a5fe9a1edbda920431d4cadb1feb41c33e3490a94d27046372'
         'db47a96696f124de4588b289d01f01d1fb28c6b2408d68b505cb59f38244ae2c2e75787a9f43d4820441bf074e3f47246d7a5de9248cb8d3ff2dcaaa0b545640'
+        'f98b67541284ec7bc453b3f775f45adda51517e9c2bba4f611f092489ca5f8e361ec26dfc7c8f551aa46574293b7b9b80877912db8467e3c3751837071dcbaf2'
+        'e8f92dba20383f513e80db51b197ccb5d2535883ca26222685e88ed623308cf019fa551dd3bc354032c5fedea3c1d972e3867eddb34fd9bc26bb17b89086ee03'
+        'e78ec1168eaf6205365e6ad891d80f118b344cff518dac007f404a1d1bf74608d6c1de0795117ddc9449c84c23635e22d2bb3538f32b91af9ae0d22578b2a059'
         'c6e9a7ef25e4d31687423b8399c0eccd09eb9c1654e709ccaad460454611c62a3b547291e76ebb18dc835ff755d52f0407ded9182be46008b196de3b00a3b99a')
 
 prepare() {
   cd ${pkgname^^}-${pkgver}
+  # Point VTK's remote modules at the prefetched clones.
+  # NOTE: the directory names must match the first argument of each
+  # vtk_fetch_module() call in Remote/*.remote.cmake
+  ln -snfv "$srcdir"/vtkMomentInvariants Remote/MomentInvariants
+  ln -snfv "$srcdir"/vtkRenderingLookingGlass Remote/RenderingLookingGlass
+  ln -snfv "$srcdir"/vtkDICOM Remote/DICOM
+
   _fast_float_version=$(pacman -Q fast_float | sed -e 's/.* //; s/-.*//g')
   sed -i "s|7.0.0|${_fast_float_version}|" ThirdParty/fast_float/CMakeLists.txt
-# Use cmake's FindHDF5
+  # Use cmake's FindHDF5
   rm CMake/patches/99/FindHDF5.cmake
   sed -e '/FindHDF5/d' -i CMake/vtkInstallCMakePackage.cmake
-# Fix build on 32-bit
-  patch -p1 -i ../xdmf3_32bit.patch
 
-  patch -p1 -i ../gdal-3.13.patch # Fix build with GDAL 3.13
+  # Fix build on 32-bit
+  patch -p1 -i ../xdmf3_32bit.patch
 
   # Fix build with fmt 12.2.0 https://gitlab.kitware.com/vtk/vtk/-/work_items/20092
   patch -p1 -i ../fmt-12.2.patch
+
+  # Backport ANARI 1.1 (SDK 0.16) support: KHR_AREA_LIGHTS was removed from the
+  # specification https://gitlab.kitware.com/vtk/vtk/-/commit/c02fc7daf3790e48c07628c5096867b1eb272d77
+  patch -p1 -i ../anari-1.1-light-extensions.patch
+  # Support ANARI SDKs that predate KHR_LIGHT_PRIMARY_VISIBILITY as well
+  # https://gitlab.kitware.com/vtk/vtk/-/commit/7b88eefcbfa22442052d2c8a1790b5000cbce975
+  patch -p1 -i ../anari-pre-1.1-sdk-detection.patch
+
+  # Fix vtkNanoVDBWriter with OpenVDB 12+: nanovdb::tools::build namespace
+  # https://gitlab.kitware.com/vtk/vtk/-/issues/20171
+  patch -p1 -i ../openvdb-13.patch
 }
 
 build() {
@@ -215,12 +254,14 @@ build() {
     -DVTK_VERSIONED_INSTALL=OFF
     -DVTK_WRAP_JAVA=ON
     -DVTK_WRAP_PYTHON=ON
+    -DVTK_ENABLE_OSPRAY=OFF
     -DVTKOSPRAY_ENABLE_DENOISER=OFF
     -DVTK_ENABLE_OSPRAY=OFF
     -DVTK_USE_EXTERNAL=ON
     -DVTK_USE_64BIT_IDS=ON
     #-DFIDES_USE_EXTERNAL_RAPIDJSON=ON
     -DVTK_MODULE_USE_EXTERNAL_VTK_exprtk=OFF
+    -DVTK_MODULE_USE_EXTERNAL_VTK_fides=OFF
     -DVTK_MODULE_USE_EXTERNAL_VTK_ioss=OFF
     -DVTK_MODULE_USE_EXTERNAL_VTK_pegtl=OFF
     -DVTK_MODULE_USE_EXTERNAL_VTK_scn=OFF
@@ -229,6 +270,13 @@ build() {
     -DVTK_MODULE_ENABLE_VTK_IOUSD=NO
     -DVTK_MODULE_ENABLE_VTK_DomainsMicroscopy=NO
     -DVTK_MODULE_ENABLE_VTK_FiltersOpenTURNS=NO
+    # requires IfcOpenShell which is not packaged
+    -DVTK_MODULE_ENABLE_VTK_IOIFC=NO
+    # remote modules prefetched in prepare()
+    -DVTK_MODULE_ENABLE_VTK_MomentInvariants=YES
+    -DVTK_MODULE_ENABLE_VTK_DICOM=YES
+    # requires the HoloPlay SDK which is not packaged
+    -DVTK_MODULE_ENABLE_VTK_RenderingLookingGlass=NO
     -DVTK_MODULE_ENABLE_VTK_FiltersONNX=NO
     -DVTK_MODULE_ENABLE_VTK_IOCatalystConduit=YES
     -DVTK_MODULE_ENABLE_VTK_IOADIOS2=NO

@@ -1,0 +1,98 @@
+From 7b88eefcbfa22442052d2c8a1790b5000cbce975 Mon Sep 17 00:00:00 2001
+From: Sankhesh Jhaveri <sankhesh.jhaveri@kitware.com>
+Date: Tue, 8 Sep 2026 09:32:02 -0400
+Subject: [PATCH] Fix anari build against SDKs that predate
+ KHR_LIGHT_PRIMARY_VISIBILITY
+
+Detect the extension instead of testing the SDK version.
+---
+ .../release/dev/anari-light-extensions.md     |  3 ++
+ Rendering/ANARI/vtkAnariLightNode.cxx         | 41 ++++++++++++++++---
+ 2 files changed, 38 insertions(+), 6 deletions(-)
+
+diff --git a/Documentation/release/dev/anari-light-extensions.md b/Documentation/release/dev/anari-light-extensions.md
+index f50029cfaea..e10590df071 100644
+--- a/Documentation/release/dev/anari-light-extensions.md
++++ b/Documentation/release/dev/anari-light-extensions.md
+@@ -7,3 +7,6 @@ specification 1.1. The parameters have been moved to the extensions that define
+ lights (which are free to ignore them if soft shadows are not supported).
+ 
+ The ANARI 1.1 specification was first supported by the ANARI SDK version 0.16.
++
++VTK works with either specification: it detects at compile time whether the ANARI SDK it is
++built against provides `KHR_LIGHT_PRIMARY_VISIBILITY` or the older `KHR_AREA_LIGHTS` extension.
+diff --git a/Rendering/ANARI/vtkAnariLightNode.cxx b/Rendering/ANARI/vtkAnariLightNode.cxx
+index 6cb20ef1e2d..402c51d3fd3 100644
+--- a/Rendering/ANARI/vtkAnariLightNode.cxx
++++ b/Rendering/ANARI/vtkAnariLightNode.cxx
+@@ -20,12 +20,45 @@
+ #include <anari/anari_cpp.hpp>
+ #include <anari/anari_cpp/ext/std.h>
+ 
++#include <type_traits>
+ #include <vector>
+ 
+ using vec3 = anari::std_types::vec3;
+ 
+ VTK_ABI_NAMESPACE_BEGIN
+ 
++namespace
++{
++
++// The ANARI 1.0 specification's KHR_AREA_LIGHTS extension for light visibility was removed in
++// ANARI 1.1.
++template <typename ExtensionsT, typename = void>
++struct AnariHasPrimaryVisibility : std::false_type
++{
++};
++
++template <typename ExtensionsT>
++struct AnariHasPrimaryVisibility<ExtensionsT,
++  decltype(void(std::declval<const ExtensionsT&>().ANARI_KHR_LIGHT_PRIMARY_VISIBILITY))>
++  : std::true_type
++{
++};
++
++template <typename ExtensionsT>
++bool AnariSupportsLightVisibility(const ExtensionsT& extensions)
++{
++  if constexpr (AnariHasPrimaryVisibility<ExtensionsT>::value)
++  {
++    return extensions.ANARI_KHR_LIGHT_PRIMARY_VISIBILITY != 0;
++  }
++  else
++  {
++    return extensions.ANARI_KHR_AREA_LIGHTS != 0;
++  }
++}
++
++} // anonymous namespace
++
+ struct vtkAnariLightNodeInternals
+ {
+   vtkAnariSceneGraph* RendererNode{ nullptr };
+@@ -397,11 +430,7 @@ void vtkAnariLightNode::Synchronize(bool prepass)
+     // All light sources accept the following parameters
+     anari::setParameter(anariDevice, anariLight, "color", lightColor);
+ 
+-#if ((ANARI_SDK_VERSION_MAJOR * 100) + ANARI_SDK_VERSION_MINOR) >= 16
+-    if (anariExtensions.ANARI_KHR_LIGHT_PRIMARY_VISIBILITY)
+-#else
+-    if (anariExtensions.ANARI_KHR_AREA_LIGHTS)
+-#endif
++    if (::AnariSupportsLightVisibility(anariExtensions))
+     {
+       bool isVisible = light->GetSwitch() ? true : false;
+       anari::setParameter(anariDevice, anariLight, "visible", isVisible);
+@@ -409,7 +438,7 @@ void vtkAnariLightNode::Synchronize(bool prepass)
+     else
+     {
+       this->Internals->RendererNode->WarningMacroOnce(
+-        this, " doesn't support KHR_LIGHT_PRIMARY_VISIBILITY::visible");
++        this, " doesn't support light visibility (KHR_LIGHT_PRIMARY_VISIBILITY::visible).");
+     }
+ 
+     anari::commitParameters(anariDevice, anariLight);
+-- 
+GitLab
+
