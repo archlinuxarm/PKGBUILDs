@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Reilly Brogan <reilly@reillybrogan.com>
+Date: Sun, 11 Oct 2026 12:00:00 -0500
+Subject: [PATCH] Build shared libraries
+
+Upstream only builds static libraries. Build shared library versions of
+libjbig/libjbig85 and link the pbm tools against them.
+
+Origin: vendor
+Forwarded: not-needed
+Last-Update: 2026-10-11
+---
+ Makefile          |  5 +++--
+ libjbig/Makefile  | 22 ++++++++++++----------
+ pbmtools/Makefile | 26 +++++++++++++-------------
+ 3 files changed, 28 insertions(+), 25 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 79f7ba5..ff5515f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -4,12 +4,13 @@
+ CC = gcc
+ 
+ # Options for the compiler: A high optimization level is suggested
+-CFLAGS = -O2 -W
++CFLAGS = $(EXTRA_CFLAGS) -W
+ # CFLAGS = -O -g -W -Wall -ansi -pedantic # -DDEBUG
+ 
+-export CC CFLAGS
++export CC CFLAGS EXTRA_CFLAGS
+ 
+ VERSION=2.2
++export VERSION
+ 
+ all: lib pbm
+ 	@echo "Enter 'make test' in order to start some automatic tests."
+diff --git a/libjbig/Makefile b/libjbig/Makefile
+index 10362bc..244f836 100644
+--- a/libjbig/Makefile
++++ b/libjbig/Makefile
+@@ -4,9 +4,10 @@
+ CC = gcc
+ 
+ # Options for the compiler: A high optimization level is suggested
+-CFLAGS = -g -O -W -Wall -ansi -pedantic # --coverage
++CFLAGS = $(EXTRA_CFLAGS) -W -Wall -ansi -pedantic # --coverage
++PICFLAGS := -fPIC -DPIC
+ 
+-all: libjbig.a libjbig85.a tstcodec tstcodec85 tstjoint
++all: libjbig.so.$(VERSION) tstcodec tstcodec85 tstjoint
+ 
+ tstcodec: tstcodec.o jbig.o jbig_ar.o
+ 	$(CC) $(LDFLAGS) $(CFLAGS) -o tstcodec tstcodec.o jbig.o jbig_ar.o
+@@ -18,15 +19,16 @@ tstjoint: tstjoint.o jbig.o jbig85.o jbig_ar.o
+ 	$(CC) $(LDFLAGS) $(CFLAGS) -o tstjoint \
+ 	  tstjoint.o jbig.o jbig85.o jbig_ar.o
+ 
+-libjbig.a: jbig.o jbig_ar.o
+-	rm -f libjbig.a
+-	ar rc libjbig.a jbig.o jbig_ar.o
+-	-ranlib libjbig.a
++%.so: %.so.$(VERSION)
++	ln -sf $< $@
+ 
+-libjbig85.a: jbig85.o jbig_ar.o
+-	rm -f libjbig85.a
+-	ar rc libjbig85.a jbig85.o jbig_ar.o
+-	-ranlib libjbig85.a
++libjbig.so.$(VERSION): jbig.o jbig_ar.o
++	$(CC) $(CFLAGS) $(LDFLAGS) -shared -Wl,-soname,$@ -o $@ $^
++
++libjbig85.so.$(VERSION): jbig85.o jbig_ar.o
++	$(CC) $(CFLAGS) $(LDFLAGS) -shared -Wl,-soname,$@ -o $@ $^
++
++jbig.o jbig85.o jbig_ar.o: CFLAGS += $(PICFLAGS)
+ 
+ jbig.o: jbig.c jbig.h jbig_ar.h
+ jbig85.o: jbig85.c jbig85.h jbig_ar.h
+diff --git a/pbmtools/Makefile b/pbmtools/Makefile
+index 16285e0..a7ac4f1 100644
+--- a/pbmtools/Makefile
++++ b/pbmtools/Makefile
+@@ -6,7 +6,7 @@
+ CC = gcc
+ 
+ # Options for the compiler
+-CFLAGS = -g -O -W -Wall -ansi -pedantic # --coverage
++CFLAGS = $(EXTRA_CFLAGS) -W -Wall -ansi -pedantic # --coverage
+ CPPFLAGS = -I../libjbig
+ LDFLAGS = -L../libjbig
+ 
+@@ -18,30 +18,30 @@ txt: pbmtojbg.txt jbgtopbm.txt pbm.txt pgm.txt
+ 
+ pdf: pbmtojbg.pdf jbgtopbm.pdf pbm.pdf pgm.pdf
+ 
+-pbmtojbg: pbmtojbg.o ../libjbig/libjbig.a
+-	$(CC) $(LDFLAGS) $(CFLAGS) -o pbmtojbg pbmtojbg.o -ljbig
++pbmtojbg: pbmtojbg.o ../libjbig/libjbig.so
++	$(CC) $(CFLAGS) -o pbmtojbg pbmtojbg.o -L../libjbig -ljbig $(LDFLAGS)
+ 
+-jbgtopbm: jbgtopbm.o ../libjbig/libjbig.a
+-	$(CC) $(LDFLAGS) $(CFLAGS) -o jbgtopbm jbgtopbm.o -ljbig
++jbgtopbm: jbgtopbm.o ../libjbig/libjbig.so
++	$(CC) $(CFLAGS) -o jbgtopbm jbgtopbm.o -L../libjbig -ljbig $(LDFLAGS)
+ 
+-pbmtojbg85: pbmtojbg85.o ../libjbig/libjbig85.a
+-	$(CC) $(LDFLAGS) $(CFLAGS) -o pbmtojbg85 pbmtojbg85.o -ljbig85
++pbmtojbg85: pbmtojbg85.o ../libjbig/libjbig85.so
++	$(CC) $(CFLAGS) -o pbmtojbg85 pbmtojbg85.o -L../libjbig -ljbig85 $(LDFLAGS)
+ 
+-jbgtopbm85: jbgtopbm85.o ../libjbig/libjbig85.a
+-	$(CC) $(LDFLAGS) $(CFLAGS) -o jbgtopbm85 jbgtopbm85.o -ljbig85
++jbgtopbm85: jbgtopbm85.o ../libjbig/libjbig85.so
++	$(CC) $(CFLAGS) -o jbgtopbm85 jbgtopbm85.o -L../libjbig -ljbig85 $(LDFLAGS)
+ 
+ jbgtopbm.o: jbgtopbm.c ../libjbig/jbig.h
+ pbmtojbg.o: pbmtojbg.c ../libjbig/jbig.h
+ jbgtopbm85.o: jbgtopbm85.c ../libjbig/jbig85.h
+ pbmtojbg85.o: pbmtojbg85.c ../libjbig/jbig85.h
+ 
+-../libjbig/libjbig.a: ../libjbig/jbig.c ../libjbig/jbig.h \
++../libjbig/libjbig.so: ../libjbig/jbig.c ../libjbig/jbig.h \
+ 	../libjbig/jbig_ar.c ../libjbig/jbig_ar.h
+-	$(MAKE) -C ../libjbig libjbig.a
++	$(MAKE) -C ../libjbig libjbig.so
+ 
+-../libjbig/libjbig85.a: ../libjbig/jbig85.c ../libjbig/jbig85.h \
++../libjbig/libjbig85.so: ../libjbig/jbig85.c ../libjbig/jbig85.h \
+ 	../libjbig/jbig_ar.c ../libjbig/jbig_ar.h
+-	$(MAKE) -C ../libjbig libjbig85.a
++	$(MAKE) -C ../libjbig libjbig85.so
+ 
+ analyze:
+ 	clang $(CPPFLAGS) --analyze *.c
