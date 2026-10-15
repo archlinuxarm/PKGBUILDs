@@ -1,0 +1,51 @@
+From becdcf162590f630ebb09b6b0aa258756f2f0775 Mon Sep 17 00:00:00 2001
+From: Christian Hesse <mail@eworm.de>
+Date: Thu, 15 Oct 2026 10:08:48 +0200
+Subject: [PATCH 1/1] libalpm: use curl's effective url without authentication
+ only
+
+With curl 8.23.0 the credentials are stripped from effective url. So do
+not use the effective url to download the signature when authentication
+was used.
+
+https://github.com/curl/curl/commit/7a6bd027d0de2b6857472d35da090ef60cc29f19
+
+Signed-off-by: Christian Hesse <mail@eworm.de>
+---
+ lib/libalpm/dload.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/lib/libalpm/dload.c b/lib/libalpm/dload.c
+index 87b3df6f..6cdae97f 100644
+--- a/lib/libalpm/dload.c
++++ b/lib/libalpm/dload.c
+@@ -507,6 +507,7 @@ static int curl_check_finished_download(alpm_handle_t *handle, CURLM *curlm, CUR
+ 	curl_off_t remote_size;
+ 	curl_off_t bytes_dl = 0;
+ 	long remote_time = -1;
++	long auth = CURLAUTH_NONE;
+ 	struct stat st;
+ 	char hostname[HOSTNAME_SIZE];
+ 	int ret = -1;
+@@ -609,6 +610,7 @@ static int curl_check_finished_download(alpm_handle_t *handle, CURLM *curlm, CUR
+ 	curl_easy_getinfo(curl, CURLINFO_SIZE_DOWNLOAD_T, &bytes_dl);
+ 	curl_easy_getinfo(curl, CURLINFO_CONDITION_UNMET, &timecond);
+ 	curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective_url);
++	curl_easy_getinfo(curl, CURLINFO_HTTPAUTH_USED, &auth);
+ 
+ 	/* Let's check if client requested downloading accompanion *.sig file */
+ 	if(!payload->signature && payload->download_signature && curlerr == CURLE_OK && payload->respcode < 400) {
+@@ -629,8 +631,11 @@ static int curl_check_finished_download(alpm_handle_t *handle, CURLM *curlm, CUR
+ 			query[0] = '\0';
+ 		}
+ 
+-		/* Only use the effective url for sig downloads if the effective_url contains .dbext or .pkg */
+-		if(strstr(effective_filename, dbext) || strstr(effective_filename, ".pkg")) {
++		/* Only use the effective url for sig downloads if the effective_url contains .dbext or .pkg
++		   Also do *NOT* use the effective url when authentication was used (mirror with username and
++		   passwort, e.g. packagers' tier0) as curl strips credentials! */
++		if((strstr(effective_filename, dbext) || strstr(effective_filename, ".pkg"))
++				&& auth == CURLAUTH_NONE) {
+ 			url = effective_url;
+ 		}
+ 
