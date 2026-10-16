@@ -1,0 +1,84 @@
+From b5a34a397a495fed4e6db431945f3c000ae91b03 Mon Sep 17 00:00:00 2001
+From: Evangelos Foutras <evangelos@foutras.com>
+Date: Sun, 30 Jun 2024 08:51:20 +0000
+Subject: [PATCH] Enable -fstack-protector-strong by default
+
+---
+ clang/lib/Driver/ToolChains/Linux.h      |  5 +++++
+ clang/test/Driver/fsanitize-safe-stack.c |  6 +++---
+ clang/test/Driver/stack-protector.c      |  4 ++--
+ clang/test/Driver/linux-musl-ssp.c       |  3 ++-
+ 4 files changed, 13 insertions(+), 6 deletions(-)
+
+--- a/clang/lib/Driver/ToolChains/Linux.h
++++ b/clang/lib/Driver/ToolChains/Linux.h
+@@ -10,6 +10,7 @@
+ #define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_LINUX_H
+ 
+ #include "Gnu.h"
++#include "clang/Basic/LangOptions.h"
+ #include "clang/Driver/ToolChain.h"
+ 
+ namespace clang {
+@@ -51,6 +52,10 @@
+   IsAArch64OutlineAtomicsDefault(const llvm::opt::ArgList &Args) const override;
+   bool isPIEDefault(const llvm::opt::ArgList &Args) const override;
+   bool IsMathErrnoDefault() const override;
++  LangOptions::StackProtectorMode
++  GetDefaultStackProtectorLevel(bool KernelOrKext) const override {
++    return LangOptions::SSPStrong;
++  }
+   SanitizerMask
+   getSupportedSanitizers(BoundArch BA,
+                          Action::OffloadKind DeviceOffloadKind) const override;
+--- a/clang/test/Driver/fsanitize-safe-stack.c
++++ b/clang/test/Driver/fsanitize-safe-stack.c
+@@ -1,12 +1,12 @@
+ // RUN: %clang -fno-sanitize=safe-stack -### %s 2>&1 | FileCheck %s -check-prefix=NOSP
+ // NOSP-NOT: "-fsanitize=safe-stack"
+ 
+-// RUN: %clang --target=x86_64-linux-gnu -fsanitize=safe-stack -### %s 2>&1 | FileCheck %s -check-prefix=NO-SP
++// RUN: %clang --target=x86_64-linux-gnu -fsanitize=safe-stack -### %s 2>&1 | FileCheck %s -check-prefix=SP
+ // RUN: not %clang --target=x86_64-linux-gnu -fsanitize=address,safe-stack -### %s 2>&1 | FileCheck %s -check-prefix=SP-ASAN
+ // RUN: %clang --target=x86_64-linux-gnu -fstack-protector -fsanitize=safe-stack -### %s 2>&1 | FileCheck %s -check-prefix=SP
+ // RUN: %clang --target=x86_64-linux-gnu -fsanitize=safe-stack -fstack-protector-all -### %s 2>&1 | FileCheck %s -check-prefix=SP
+-// RUN: %clang --target=arm-linux-androideabi -fsanitize=safe-stack -### %s 2>&1 | FileCheck %s -check-prefix=NO-SP
+-// RUN: %clang --target=aarch64-linux-android -fsanitize=safe-stack -### %s 2>&1 | FileCheck %s -check-prefix=NO-SP
++// RUN: %clang --target=arm-linux-androideabi -fsanitize=safe-stack -### %s 2>&1 | FileCheck %s -check-prefix=SP
++// RUN: %clang --target=aarch64-linux-android -fsanitize=safe-stack -### %s 2>&1 | FileCheck %s -check-prefix=SP
+ // NO-SP-NOT: stack-protector
+ // NO-SP: "-fsanitize=safe-stack"
+ // SP-ASAN: error: invalid argument '-fsanitize=safe-stack' not allowed with '-fsanitize=address'
+--- a/clang/test/Driver/stack-protector.c
++++ b/clang/test/Driver/stack-protector.c
+@@ -3,11 +3,11 @@
+ // NOSSP-NOT: "-stack-protector-buffer-size" 
+ 
+ // RUN: %clang -target i386-unknown-linux -fstack-protector -### %s 2>&1 | FileCheck %s -check-prefix=SSP
+-// SSP: "-stack-protector" "1"
++// SSP: "-stack-protector" "2"
+ // SSP-NOT: "-stack-protector-buffer-size" 
+ 
+ // RUN: %clang -target i386-unknown-linux -fstack-protector --param ssp-buffer-size=16 -### %s 2>&1 | FileCheck %s -check-prefix=SSP-BUF
+-// SSP-BUF: "-stack-protector" "1"
++// SSP-BUF: "-stack-protector" "2"
+ // SSP-BUF: "-stack-protector-buffer-size" "16" 
+ 
+ // RUN: %clang -target i386-pc-openbsd -### %s 2>&1 | FileCheck %s -check-prefix=OPENBSD
+--- a/clang/test/Driver/linux-musl-ssp.c
++++ b/clang/test/Driver/linux-musl-ssp.c
+@@ -10,9 +10,10 @@
+ // RUN:   | FileCheck --check-prefix=NOSSP %s
+ // NOSSP-NOT: "-lssp_nonshared"
+ 
+-// Not without any stack protector flag.
++// Enabled without any stack protector flag: Arch enables
++// -fstack-protector-strong by default.
+ // RUN: %clang -### --target=i686-unknown-linux-musl --sysroot=%S/Inputs/musl_ssp_tree %s 2>&1 \
+-// RUN:   | FileCheck --check-prefix=NOSSP %s
++// RUN:   | FileCheck --check-prefix=SSP %s
+ 
+ // Not on glibc: libc_nonshared.a is linked via the libc.so linker script.
+ // RUN: %clang -### --target=i686-unknown-linux-gnu --sysroot=%S/Inputs/musl_ssp_tree -fstack-protector-strong %s 2>&1 \
+--
+2.51.0

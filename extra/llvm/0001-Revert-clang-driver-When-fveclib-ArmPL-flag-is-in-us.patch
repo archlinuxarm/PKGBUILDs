@@ -1,0 +1,110 @@
+From 3dce461bebb180514927e62d78fcfefb9fa6a19d Mon Sep 17 00:00:00 2001
+From: Sergiu Deitsch <sergiu.deitsch@gmail.com>
+Date: Sat, 13 Sep 2025 00:20:51 +0200
+Subject: [PATCH] Revert "[clang][driver] When -fveclib=ArmPL flag is in use,
+ always link against libamath (#116432)"
+
+This reverts commit 03019c687f00cdd9d05fc1ace329a438c3ff6364.
+---
+ clang/lib/Driver/ToolChains/CommonArgs.cpp | 35 ----------------------
+ clang/lib/Driver/ToolChains/MSVC.cpp       |  6 ----
+ clang/test/Driver/fveclib.c                | 23 --------------
+ 3 files changed, 64 deletions(-)
+
+diff --git a/clang/lib/Driver/ToolChains/CommonArgs.cpp b/clang/lib/Driver/ToolChains/CommonArgs.cpp
+index 8d3775de9be5..af3fab68a0c6 100644
+--- a/clang/lib/Driver/ToolChains/CommonArgs.cpp
++++ b/clang/lib/Driver/ToolChains/CommonArgs.cpp
+@@ -501,41 +501,6 @@ void tools::AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
+     else
+       A.renderAsInput(Args, CmdArgs);
+   }
+-  if (const Arg *A = Args.getLastArg(options::OPT_fveclib)) {
+-    const llvm::Triple &Triple = TC.getTriple();
+-    StringRef V = A->getValue();
+-    if (V == "ArmPL" && (Triple.isOSLinux() || Triple.isOSDarwin())) {
+-      // To support -fveclib=ArmPL we need to link against libamath. Some of the
+-      // libamath functions depend on libm, at the same time, libamath exports
+-      // its own implementation of some of the libm functions. These are faster
+-      // and potentially less accurate implementations, hence we need to be
+-      // careful what is being linked in. Since here we are interested only in
+-      // the subset of libamath functions that is covered by the veclib
+-      // mappings, we need to prioritize libm functions by putting -lm before
+-      // -lamath (and then -lm again, to fulfill libamath requirements).
+-      //
+-      // Therefore we need to do the following:
+-      //
+-      // 1. On Linux, link only when actually needed.
+-      //
+-      // 2. Prefer libm functions over libamath (when no -nostdlib in use).
+-      //
+-      // 3. Link against libm to resolve libamath dependencies.
+-      //
+-      if (Triple.isOSLinux()) {
+-        CmdArgs.push_back(Args.MakeArgString("--push-state"));
+-        CmdArgs.push_back(Args.MakeArgString("--as-needed"));
+-      }
+-      if (!Args.hasArg(options::OPT_nostdlib))
+-        CmdArgs.push_back(Args.MakeArgString("-lm"));
+-      CmdArgs.push_back(Args.MakeArgString("-lamath"));
+-      if (!Args.hasArg(options::OPT_nostdlib))
+-        CmdArgs.push_back(Args.MakeArgString("-lm"));
+-      if (Triple.isOSLinux())
+-        CmdArgs.push_back(Args.MakeArgString("--pop-state"));
+-      addArchSpecificRPath(TC, Args, CmdArgs);
+-    }
+-  }
+ }
+ 
+ const char *tools::getLDMOption(const llvm::Triple &T, const ArgList &Args) {
+diff --git a/clang/lib/Driver/ToolChains/MSVC.cpp b/clang/lib/Driver/ToolChains/MSVC.cpp
+index 7d31eea60308..00525de6c037 100644
+--- a/clang/lib/Driver/ToolChains/MSVC.cpp
++++ b/clang/lib/Driver/ToolChains/MSVC.cpp
+@@ -78,12 +78,6 @@
+     CmdArgs.push_back("-machine:arm64x");
+   else if (TC.getTriple().isWindowsArm64EC())
+     CmdArgs.push_back("-machine:arm64ec");
+-
+-  if (const Arg *A = Args.getLastArg(options::OPT_fveclib)) {
+-    StringRef V = A->getValue();
+-    if (V == "ArmPL")
+-      CmdArgs.push_back(Args.MakeArgString("--dependent-lib=amath"));
+-  }
+ 
+   // SYCL requires dynamic CRT because STL objects cross DLL boundaries.
+   // Library dependency is added via --dependent-lib at compiler stage.
+diff --git a/clang/test/Driver/fveclib.c b/clang/test/Driver/fveclib.c
+index c57e9aa7a3cc..4e278285c925 100644
+--- a/clang/test/Driver/fveclib.c
++++ b/clang/test/Driver/fveclib.c
+@@ -130,26 +130,3 @@
+ /* Verify no warning when math-errno is re-enabled for a different veclib (that does not imply -fno-math-errno). */
+ // RUN: %clang -### --target=aarch64-linux-gnu -fveclib=ArmPL -fmath-errno -fveclib=Accelerate %s 2>&1 | FileCheck --check-prefix=CHECK-REPEAT-VECLIB %s
+ // CHECK-REPEAT-VECLIB-NOT: math errno enabled
+-
+-/// Verify that vectorized routines library is being linked in.
+-// RUN: %clang -### --target=aarch64-pc-windows-msvc -fveclib=ArmPL %s 2>&1 | FileCheck --check-prefix=CHECK-LINKING-ARMPL-MSVC %s
+-// RUN: %clang -### --target=aarch64-linux-gnu -fveclib=ArmPL %s 2>&1 | FileCheck --check-prefix=CHECK-LINKING-ARMPL-LINUX %s
+-// RUN: %clang -### --target=aarch64-linux-gnu -fveclib=ArmPL %s -nostdlib 2>&1 | FileCheck --check-prefix=CHECK-LINKING-ARMPL-NOSTDLIB-LINUX %s
+-// RUN: %clang -### --target=aarch64-linux-gnu -fveclib=ArmPL %s -lamath 2>&1 | FileCheck --check-prefix=CHECK-LINKING-AMATH-BEFORE-ARMPL-LINUX %s
+-// RUN: %clang -### --target=arm64-apple-darwin -fveclib=ArmPL %s 2>&1 | FileCheck --check-prefix=CHECK-LINKING-ARMPL-DARWIN %s
+-// RUN: %clang -### --target=arm64-apple-darwin -fveclib=ArmPL -nostdlib %s 2>&1 | FileCheck --check-prefix=CHECK-LINKING-ARMPL-NOSTDLIB-DARWIN %s
+-// RUN: %clang -### --target=arm64-apple-darwin -fveclib=ArmPL %s -lamath 2>&1 | FileCheck --check-prefix=CHECK-LINKING-AMATH-BEFORE-ARMPL-DARWIN %s
+-// CHECK-LINKING-ARMPL-LINUX: "--push-state" "--as-needed" "-lm" "-lamath" "-lm" "--pop-state"
+-// CHECK-LINKING-ARMPL-NOSTDLIB-LINUX: "--push-state" "--as-needed" "-lamath" "--pop-state"
+-// CHECK-LINKING-ARMPL-NOSTDLIB-LINUX-NOT: "-lm"
+-// CHECK-LINKING-ARMPL-DARWIN: "-lm" "-lamath" "-lm"
+-// CHECK-LINKING-ARMPL-NOSTDLIB-DARWIN: "-lamath"
+-// CHECK-LINKING-ARMPL-NOSTDLIB-DARWIN-NOT: "-lm"
+-// CHECK-LINKING-ARMPL-MSVC: "--dependent-lib=amath"
+-// CHECK-LINKING-AMATH-BEFORE-ARMPL-LINUX: "-lamath" {{.*}}"--push-state" "--as-needed" "-lm" "-lamath" "-lm" "--pop-state"
+-// CHECK-LINKING-AMATH-BEFORE-ARMPL-DARWIN: "-lamath" {{.*}}"-lm" "-lamath" "-lm"
+-
+-/// Verify that the RPATH is being set when needed.
+-// RUN: %clang -### --target=aarch64-linux-gnu -resource-dir=%S/../../../clang/test/Driver/Inputs/resource_dir_with_arch_subdir -frtlib-add-rpath -fveclib=ArmPL %s 2>&1 | FileCheck --check-prefix=CHECK-RPATH-ARMPL %s
+-// CHECK-RPATH-ARMPL: "--push-state" "--as-needed" "-lm" "-lamath" "-lm" "--pop-state"
+-// CHECK-RPATH-ARMPL-SAME: "-rpath"
+-- 
+2.51.0
+
