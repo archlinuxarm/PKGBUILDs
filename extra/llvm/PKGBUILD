@@ -9,9 +9,9 @@
 #  - disable libfuzzer on ARMv7
 
 pkgbase=llvm
-pkgname=('llvm' 'llvm-libs' 'llvm-lit' 'clang' 'compiler-rt' 'lld' 'lldb' 'polly' 'openmp' 'offload' 'libc++' 'libc++abi' 'libclc')
+pkgname=('llvm' 'llvm-libs' 'llvm-lit' 'clang' 'compiler-rt' 'lld' 'lldb' 'polly' 'llvm-bolt' 'openmp' 'offload' 'libc++' 'libc++abi' 'libclc')
 pkgver=23.1.3
-pkgrel=2
+pkgrel=3
 arch=('x86_64')
 url="https://llvm.org/"
 license=('Apache-2.0 WITH LLVM-exception')
@@ -89,6 +89,10 @@ _llvm_components() {
         ;;
       # belongs to polly's scope
       [Pp]olly*|docs-polly-man)
+        continue
+        ;;
+      # belongs to bolt's scope
+      bolt*|llvm-bolt*|perf2bolt|merge-fdata)
         continue
         ;;
       # compiler-rt/openmp/offload install directly via their own
@@ -197,8 +201,22 @@ _polly_components() {
   echo LLVMPolly
 }
 
+_bolt_components() {
+  local target
+  ninja -C "$srcdir/llvm-project-$pkgver.src/build" -t targets | grep -Po 'install-\K.*(?=-stripped:)' | while read -r target; do
+    case $target in
+      bolt*|llvm-bolt*|perf2bolt|merge-fdata)
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    echo $target
+  done
+}
+
 _get_distribution_components() {
-  { _llvm_components; _clang_components; _lld_components; _lldb_components; _polly_components; } | sort -u
+  { _llvm_components; _clang_components; _lld_components; _lldb_components; _polly_components; _bolt_components; } | sort -u
 }
 
 prepare() {
@@ -254,7 +272,7 @@ build() {
     -DLLVM_ENABLE_BINDINGS=OFF
     -DLLVM_ENABLE_CURL=ON
     -DLLVM_ENABLE_FFI=ON
-    -DLLVM_ENABLE_PROJECTS='clang;clang-tools-extra;lld;lldb;polly'
+    -DLLVM_ENABLE_PROJECTS='clang;clang-tools-extra;lld;lldb;polly;bolt'
     -DLLVM_POLLY_LINK_INTO_TOOLS=OFF
     -DLLVM_ENABLE_RTTI=ON
     -DLLVM_ENABLE_RUNTIMES='compiler-rt;openmp;offload;libcxx;libcxxabi'
@@ -647,6 +665,18 @@ package_polly() {
     -exec cp -a {} "$pkgdir/usr/lib/cmake/polly/" \;
 
   install -Dm644 polly/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_llvm-bolt() {
+  pkgdesc="Post-link optimizer developed to speed up large applications"
+  depends=('glibc' 'libgcc' 'libstdc++' 'zlib' 'zstd')
+
+  cd llvm-project-$pkgver.src
+
+  # everything (tools, symlinks, runtime) installs as the "bolt" component
+  DESTDIR="$pkgdir" ninja -C build install-bolt
+
+  install -Dm644 bolt/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
 package_libc++ () {
