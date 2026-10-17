@@ -4,11 +4,12 @@
 # Contributor: Jan "heftig" Steffens <jan.steffens@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - remove wasi packages
 #  - set -DLLVM_PARALLEL_TABLEGEN_JOBS=1 for armv7 to lower RAM utilization
 #  - disable libfuzzer on ARMv7
 
 pkgbase=llvm
-pkgname=('llvm' 'llvm-libs' 'llvm-lit' 'clang' 'compiler-rt' 'lld' 'lldb' 'polly' 'openmp' 'offload' 'libc++' 'libc++abi' 'libclc' 'wasi-compiler-rt' 'wasi-libc++' 'wasi-libc++abi')
+pkgname=('llvm' 'llvm-libs' 'llvm-lit' 'clang' 'compiler-rt' 'lld' 'lldb' 'polly' 'openmp' 'offload' 'libc++' 'libc++abi' 'libclc')
 pkgver=23.1.3
 pkgrel=2
 arch=('x86_64')
@@ -18,7 +19,7 @@ makedepends=('cmake' 'ninja' 'zlib' 'zstd' 'curl' 'libffi' 'libedit' 'libxml2' '
              'xz' 'ncurses' 'swig' 'libelf'
              'python-setuptools' 'python-psutil' 'python-sphinx'
              'python-myst-parser' 'python-build' 'python-installer' 'python-wheel'
-             'spirv-llvm-translator' 'wasi-libc' 'wasm-component-ld')
+             'spirv-llvm-translator')
 # Build 32-bit compiler-rt libraries on x86_64 (FS#41911)
 makedepends_x86_64=('lib32-gcc-libs')
 checkdepends=('llvm-libs')
@@ -332,127 +333,6 @@ build() {
       -DCMAKE_CXX_COMPILER="$_host_bin/clang++" \
       -DLLVM_DEFAULT_TARGET_TRIPLE="$_target"
     PATH="$_host_bin:$PATH" cmake --build "build-libclc-$_target"
-  done
-
-  # wasi-compiler-rt: baremetal compiler-rt for wasm32)
-  mkdir -p compiler-rt/build-wasi compiler-rt/build-wasi-threads
-  local _wasi_rt_args=(
-    -G Ninja
-    -DCMAKE_AR="$_host_bin/llvm-ar"
-    -DCMAKE_ASM_COMPILER="$_host_bin/clang"
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo
-    -DCMAKE_CXX_COMPILER="$_host_bin/clang++"
-    -DCMAKE_CXX_COMPILER_WORKS=ON
-    -DCMAKE_CXX_FLAGS=-fno-exceptions
-    -DCMAKE_CXX_LINKER_DEPFILE_SUPPORTED=OFF
-    -DCMAKE_C_COMPILER="$_host_bin/clang"
-    -DCMAKE_C_COMPILER_WORKS=ON
-    -DCMAKE_C_FLAGS=-fno-exceptions
-    -DCMAKE_C_LINKER_DEPFILE_SUPPORTED=OFF
-    -DCMAKE_INSTALL_PREFIX=/usr
-    -DCMAKE_RANLIB="$_host_bin/llvm-ranlib"
-    -DCMAKE_SYSROOT=/usr/share/wasi-sysroot
-    -DCMAKE_SYSTEM_NAME=WASI
-    -DCMAKE_SYSTEM_PROCESSOR=wasm32
-    -DCMAKE_SYSTEM_VERSION=1
-    # wasm-ld doesn't understand several host LDFLAGS so clear them explicitly
-    -DCMAKE_EXE_LINKER_FLAGS=
-    -DCMAKE_SHARED_LINKER_FLAGS=
-    -DCMAKE_MODULE_LINKER_FLAGS=
-    -DCOMPILER_RT_BAREMETAL_BUILD=ON
-    -DCOMPILER_RT_BUILD_CTX_PROFILE=OFF
-    -DCOMPILER_RT_BUILD_GWP_ASAN=OFF
-    -DCOMPILER_RT_BUILD_LIBFUZZER=OFF
-    -DCOMPILER_RT_BUILD_MEMPROF=OFF
-    -DCOMPILER_RT_BUILD_ORC=OFF
-    -DCOMPILER_RT_BUILD_PROFILE=OFF
-    -DCOMPILER_RT_BUILD_SANITIZERS=OFF
-    -DCOMPILER_RT_BUILD_XRAY=OFF
-    -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON
-    -DCOMPILER_RT_HAS_FPIC_FLAG=OFF
-    -DCOMPILER_RT_INCLUDE_TESTS=OFF
-    -DCOMPILER_RT_INSTALL_PATH="$resource_dir"
-    -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON
-  )
-  cmake -S compiler-rt -B compiler-rt/build-wasi "${_wasi_rt_args[@]}" \
-    -DCMAKE_{ASM,CXX,C}_COMPILER_TARGET=wasm32-wasip1
-  ninja -C compiler-rt/build-wasi
-  cmake -S compiler-rt -B compiler-rt/build-wasi-threads "${_wasi_rt_args[@]}" \
-    -DCMAKE_{ASM,CXX,C}_COMPILER_TARGET=wasm32-wasip1-threads
-  ninja -C compiler-rt/build-wasi-threads
-
-  local _rt_libdir="$PWD/build/lib/clang/${pkgver%%.*}/lib"
-  install -d "$_rt_libdir"
-  cp -a compiler-rt/build-wasi/lib/wasm32-unknown-wasip1 "$_rt_libdir/"
-  cp -a compiler-rt/build-wasi-threads/lib/wasm32-unknown-wasip1-threads "$_rt_libdir/"
-  (cd "$_rt_libdir" && ln -s wasm32-unknown-{wasip1,wasi} && ln -s wasm32-unknown-{wasip1,wasip2})
-
-  # wasi-libc++/wasi-libc++abi: libcxx/libcxxabi for wasm32, same toolchain
-  local _wasi_cxx_targets=(wasm32-wasi wasm32-wasip1 wasm32-wasip1-threads wasm32-wasip2)
-  local _wasi_pic_flag _wasi_cflags
-  for _target in "${_wasi_cxx_targets[@]}"; do
-    _wasi_pic_flag=ON
-    _wasi_cflags="-Wno-deprecated -fno-exceptions --target=$_target --sysroot /usr/share/wasi-sysroot"
-    if [[ $_target == *threads* ]]; then
-      _wasi_pic_flag=OFF
-      _wasi_cflags+=" -pthread"
-    fi
-    PATH="$_host_bin:$PATH" cmake -S runtimes -B "build-wasi-$_target" \
-      -G Ninja \
-      -DCMAKE_AR="$_host_bin/llvm-ar" \
-      -DCMAKE_ASM_COMPILER="$_host_bin/clang" \
-      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-      -DCMAKE_CXX_COMPILER="$_host_bin/clang++" \
-      -DCMAKE_CXX_COMPILER_WORKS=ON \
-      -DCMAKE_CXX_LINKER_DEPFILE_SUPPORTED=OFF \
-      -DCMAKE_C_COMPILER="$_host_bin/clang" \
-      -DCMAKE_C_COMPILER_WORKS=ON \
-      -DCMAKE_C_LINKER_DEPFILE_SUPPORTED=OFF \
-      -DCMAKE_INSTALL_PREFIX=/usr/share/wasi-sysroot \
-      -DCMAKE_RANLIB="$_host_bin/llvm-ranlib" \
-      -DCMAKE_SYSROOT=/usr/share/wasi-sysroot \
-      -DCMAKE_SYSTEM_NAME=WASI \
-      -DCMAKE_SYSTEM_PROCESSOR=wasm32 \
-      -DCMAKE_SYSTEM_VERSION=1 \
-      -DCMAKE_ASM_COMPILER_TARGET=$_target \
-      -DCMAKE_CXX_COMPILER_TARGET=$_target \
-      -DCMAKE_C_COMPILER_TARGET=$_target \
-      -DCMAKE_INSTALL_INCLUDEDIR=/usr/share/wasi-sysroot/include/$_target \
-      -DCMAKE_STAGING_PREFIX=/usr/share/wasi-sysroot \
-      -DCMAKE_POSITION_INDEPENDENT_CODE=$_wasi_pic_flag \
-      -DLIBCXX_ENABLE_THREADS=ON \
-      -DLIBCXX_HAS_PTHREAD_API=ON \
-      -DLIBCXX_HAS_EXTERNAL_THREAD_API=OFF \
-      -DLIBCXX_HAS_WIN32_THREAD_API=OFF \
-      -DLLVM_COMPILER_CHECKED=ON \
-      -DLIBCXX_ENABLE_SHARED=$_wasi_pic_flag \
-      -DLIBCXX_ENABLE_EXCEPTIONS=OFF \
-      -DLIBCXX_ENABLE_FILESYSTEM=ON \
-      -DLIBCXX_ENABLE_ABI_LINKER_SCRIPT=OFF \
-      -DLIBCXX_CXX_ABI=libcxxabi \
-      -DLIBCXX_HAS_MUSL_LIBC=OFF \
-      -DLIBCXX_ABI_VERSION=2 \
-      -DLIBCXXABI_ENABLE_EXCEPTIONS=OFF \
-      -DLIBCXXABI_ENABLE_SHARED=$_wasi_pic_flag \
-      -DLIBCXXABI_SILENT_TERMINATE=ON \
-      -DLIBCXXABI_ENABLE_THREADS=ON \
-      -DLIBCXXABI_HAS_PTHREAD_API=ON \
-      -DLIBCXXABI_HAS_EXTERNAL_THREAD_API=OFF \
-      -DLIBCXXABI_HAS_WIN32_THREAD_API=OFF \
-      -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
-      -DUNIX=ON \
-      -DCMAKE_C_FLAGS="$_wasi_cflags" \
-      -DCMAKE_ASM_FLAGS="$_wasi_cflags" \
-      -DCMAKE_CXX_FLAGS="$_wasi_cflags" \
-      -DCMAKE_EXE_LINKER_FLAGS= \
-      -DCMAKE_SHARED_LINKER_FLAGS= \
-      -DCMAKE_MODULE_LINKER_FLAGS= \
-      -DLIBCXX_LIBDIR_SUFFIX=/$_target \
-      -DLIBCXXABI_LIBDIR_SUFFIX=/$_target \
-      -DLIBCXX_INCLUDE_TESTS=OFF \
-      -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
-      -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi"
-    PATH="$_host_bin:$PATH" ninja -C "build-wasi-$_target"
   done
 }
 
@@ -836,65 +716,6 @@ Version: $pkgver
 END
 
   install -Dm644 LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-}
-
-package_wasi-compiler-rt() {
-  pkgdesc="Compiler runtime libraries for clang (WASI)"
-  depends=('wasi-libc')
-
-  cd llvm-project-$pkgver.src/compiler-rt
-
-  DESTDIR="$pkgdir" ninja -C build-wasi install
-  DESTDIR="$pkgdir" ninja -C build-wasi-threads install
-
-  local resource_dir="$pkgdir/usr/lib/clang/${pkgver%%.*}/lib"
-  cd "$resource_dir"
-  ln -s wasm32-unknown-{wasip1,wasi}
-  ln -s wasm32-unknown-{wasip1,wasip2}
-
-  install -Dm644 "$srcdir/llvm-project-$pkgver.src/compiler-rt/LICENSE.TXT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-}
-
-package_wasi-libc++ () {
-  pkgdesc="LLVM C++ standard library (WASI)"
-  depends=('wasi-libc' 'wasi-compiler-rt' "wasi-libc++abi=$pkgver-$pkgrel")
-
-  cd llvm-project-$pkgver.src
-
-  local _target
-  local _wasi_cxx_targets=(wasm32-wasi wasm32-wasip1 wasm32-wasip1-threads wasm32-wasip2)
-
-  mkdir -p "$pkgdir/usr/share/wasi-sysroot/include/c++/v1"
-
-  for _target in "${_wasi_cxx_targets[@]}"; do
-    DESTDIR="$pkgdir" ninja -C "build-wasi-$_target" install-cxx
-  done
-
-  # reduce duplication
-  hardlink -c "$pkgdir/usr/share/wasi-sysroot"
-
-  install -Dm644 libcxx/CREDITS.TXT "$pkgdir/usr/share/licenses/$pkgname/CREDITS"
-  install -Dm644 libcxx/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-}
-
-package_wasi-libc++abi() {
-  pkgdesc="Low level support for the LLVM C++ standard library (WASI)"
-  depends=('wasi-libc' 'wasi-compiler-rt')
-
-  cd llvm-project-$pkgver.src
-
-  local _target
-  local _wasi_cxx_targets=(wasm32-wasi wasm32-wasip1 wasm32-wasip1-threads wasm32-wasip2)
-
-  for _target in "${_wasi_cxx_targets[@]}"; do
-    DESTDIR="$pkgdir" ninja -C "build-wasi-$_target" install-cxxabi
-  done
-
-  # reduce duplication
-  hardlink -c "$pkgdir/usr/share/wasi-sysroot"
-
-  install -Dm644 libcxxabi/CREDITS.TXT "$pkgdir/usr/share/licenses/$pkgname/CREDITS"
-  install -Dm644 libcxxabi/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
 # vim:set ts=2 sw=2 et:
