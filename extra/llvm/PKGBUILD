@@ -6,7 +6,7 @@
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
 #  - remove wasi packages
 #  - set -DLLVM_PARALLEL_TABLEGEN_JOBS=1 for armv7 to lower RAM utilization
-#  - disable libfuzzer on ARMv7
+#  - disable libfuzzer and sanitizers on ARMv7
 
 pkgbase=llvm
 pkgname=('llvm' 'llvm-libs' 'llvm-lit' 'clang' 'compiler-rt' 'lld' 'lldb' 'polly' 'llvm-bolt' 'openmp' 'offload' 'libc++' 'libc++abi' 'libclc')
@@ -301,7 +301,7 @@ build() {
     -DCOMPILER_RT_INSTALL_PATH=/usr/lib/clang/${pkgver%%.*}
   )
 
-  [[ $CARCH == "armv7h" ]] && cmake_args+=(-DLLVM_PARALLEL_TABLEGEN_JOBS=1 -DCOMPILER_RT_BUILD_LIBFUZZER=OFF)
+  [[ $CARCH == "armv7h" ]] && cmake_args+=(-DLLVM_PARALLEL_TABLEGEN_JOBS=1 -DCOMPILER_RT_BUILD_LIBFUZZER=OFF -DCOMPILER_RT_BUILD_SANITIZERS=OFF)
 
   cmake -S llvm -B build "${cmake_args[@]}"
   local distribution_components=$(cd build && _get_distribution_components | paste -sd\;)
@@ -549,7 +549,7 @@ package_openmp() {
 
   DESTDIR="$pkgdir" ninja -C build install-openmp
   install -Dm644 openmp/LICENSE.TXT "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  install -Dm755 "$(find build -name libompd.so -print -quit)" "$pkgdir/usr/lib/$CHOST/libompd.so"
+  [[ $CARCH != "armv7h" ]] && install -Dm755 "$(find build -name libompd.so -print -quit)" "$pkgdir/usr/lib/$CHOST/libompd.so"
   rm -f "$pkgdir/usr/lib/$CHOST/libarcher_static.a"
 
   # The runtimes build puts omp.h & co. into clang's resource dir;
@@ -575,6 +575,8 @@ package_offload() {
               'hsa-rocr: offloading to AMD GPUs')
 
   cd llvm-project-$pkgver.src
+
+  [[ $CARCH == "armv7h" ]] && return 0
 
   DESTDIR="$pkgdir" ninja -C build install-offload
 
