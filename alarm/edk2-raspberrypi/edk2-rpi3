@@ -1,0 +1,107 @@
+#!/usr/bin/bash
+
+# Needs files list from stdin.
+# Should be triggered by pacman hook.
+# Arguments:
+# --install:    Sync files
+# --uninstall:  Remove files
+
+declare target
+for target in efi boot boot/efi
+do
+    if [[ -d "$target/EFI" ]]
+    then
+        break
+    fi
+done
+if [[ -z "$target" ]]
+then
+    echo "Unable to detect EFI mountpoint, using fallback value..."
+    target=boot
+fi
+readonly target
+
+declare file sync_target
+while read -r file
+do
+    case "$file" in
+        usr/share/edk2/aarch64/RPi3_EFI.fd)
+            sync_target="$target/RPI_EFI.fd"
+            if [[ "$1" == "--install" ]]
+            then
+                if [[ ! -f "$sync_target" ]]
+                then
+                    cp "$file" "$sync_target"
+                else
+                    echo "Existing $sync_target is found, saving to pacnew..."
+                    cp "$file" "$sync_target.pacnew"
+                fi
+            elif [[ "$1" == "--uninstall" ]]
+            then
+                if [[ -f "$sync_target" ]]
+                then
+                    echo "Saving $sync_target to pacsave..."
+                    mv "$sync_target" "$sync_target.pacsave"
+                else
+                    echo "$sync_target is not found."
+                fi
+            fi
+            ;;
+        boot/config.txt)
+            if [[ "$target" != "boot" ]]
+            then
+                sync_target="$target/config.txt"
+                if [[ "$1" == "--install" ]]
+                then
+                    if [[ ! -f "$sync_target" ]]
+                    then
+                        cp "$file" "$sync_target"
+                    else
+                        echo "Existing $sync_target is found, skipping..."
+                    fi
+                elif [[ "$1" == "--uninstall" ]]
+                then
+                    if [[ -f "$sync_target" ]]
+                    then
+                        rm "$sync_target"
+                    else
+                        echo "$sync_target is not found."
+                    fi
+                fi
+            fi
+            ;;
+        boot/dtbs/broadcom/bcm2711-rpi-3*.dtb|boot/dtbs/broadcom/bcm2710-rpi-2-b.dtb|boot/dtbs/broadcom/bcm2710-rpi-cm3.dtb)
+            sync_target="$target/$(basename "$file")"
+            if [[ "$1" == "--install" ]]
+            then
+                cp "$file" "$sync_target"
+            elif [[ "$1" == "--uninstall" ]]
+            then
+                if [[ -f "$sync_target" ]]
+                then
+                    rm "$sync_target"
+                else
+                    echo "$sync_target is not found."
+                fi
+            fi
+            ;;
+        boot/*)
+            if [[ "$target" != "boot" ]]
+            then
+                sync_target="$target/$(cut -d / -f 2- <<< "$file")"
+                if [[ "$1" == "--install" ]]
+                then
+                    cp -r "$file" "$sync_target"
+                elif [[ "$1" == "--uninstall" ]]
+                then
+                    if [[ -e "$sync_target" ]]
+                    then
+                        rm -r "$sync_target"
+                    else
+                        echo "$sync_target is not found."
+                    fi
+                fi
+            fi
+            ;;
+    esac
+done
