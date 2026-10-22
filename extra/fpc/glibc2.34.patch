@@ -1,0 +1,188 @@
+Description: Adjust startup code for glibc 2.34
+ Based on the corresponding changes made in glibc:
+ https://sourceware.org/git/?p=glibc.git;a=commit;h=035c012e32c11e84d64905efaf55e74f704d3668
+Bug: https://gitlab.com/freepascal.org/fpc/source/-/issues/39295
+Author: Graham Inggs <ginggs@debian.org>
+Last-Update: 2022-08-12
+
+--- a/fpcsrc/rtl/linux/powerpc64/cprt0.as
++++ b/fpcsrc/rtl/linux/powerpc64/cprt0.as
+@@ -351,8 +351,8 @@
+ start_addresses:
+     .quad   0 /* was _SDA_BASE_  but not in 64-bit ABI*/
+     .quad   main_stub
+-    .quad   __libc_csu_init
+-    .quad   __libc_csu_fini
++    .quad   0
++    .quad   0
+     .size   start_adresses, .-start_addresses
+ 
+ /*
+--- a/fpcsrc/rtl/linux/powerpc64/gprt0.as
++++ b/fpcsrc/rtl/linux/powerpc64/gprt0.as
+@@ -351,8 +351,8 @@
+ start_addresses:
+     .quad   0 /* was _SDA_BASE_  but not in 64-bit ABI*/
+     .quad   main_stub
+-    .quad   __libc_csu_init
+-    .quad   __libc_csu_fini
++    .quad   0
++    .quad   0
+     .size   start_adresses, .-start_addresses
+ 
+ /*
+--- a/fpcsrc/rtl/linux/aarch64/cprt0.as
++++ b/fpcsrc/rtl/linux/aarch64/cprt0.as
+@@ -41,10 +41,8 @@
+ 	                     init, fini, rtld_fini, stack_end) */
+ 	adrp	x0,:got:PASCALMAIN
+ 	ldr	x0,[x0,#:got_lo12:PASCALMAIN]
+-	adrp	x3,:got:__libc_csu_init
+-	ldr	x3,[x3,#:got_lo12:__libc_csu_init]
+-	adrp	x4,:got:__libc_csu_fini
+-	ldr	x4,[x4,#:got_lo12:__libc_csu_fini]
++	mov	x3, #0
++	mov	x4, #0
+ 	bl	__libc_start_main
+ 
+ 	/* This should never happen */
+--- a/fpcsrc/rtl/linux/i386/si_c21.inc
++++ b/fpcsrc/rtl/linux/i386/si_c21.inc
+@@ -35,8 +35,6 @@
+ 
+ {$asmmode att}
+ 
+-procedure __libc_csu_init; cdecl; external;
+-procedure __libc_csu_fini; cdecl; external;
+ procedure libc_start_main; external name '__libc_start_main';
+ procedure libc_exit(code: longint); cdecl; external name 'exit';
+ 
+@@ -93,8 +91,8 @@
+         pushl %esp   			{ stack_end }
+         pushl %edx   			{ function to be registered with
+                       			  atexit(), passed by loader }
+-        pushl $__libc_csu_fini
+-        pushl $__libc_csu_init
++        pushl $0
++        pushl $0
+         pushl %esi                      { Push second argument: argv.  }
+         pushl %ecx                      { Push first argument: argc.  }
+ 
+--- a/fpcsrc/rtl/linux/x86_64/cprt0.as
++++ b/fpcsrc/rtl/linux/x86_64/cprt0.as
+@@ -61,9 +61,8 @@
+ 	   which grow downwards).  */
+ 	pushq %rsp
+ 
+-	/* Pass address of our own entry points to .fini and .init.  */
+-	movq __libc_csu_init@GOTPCREL(%rip), %rcx
+-	movq __libc_csu_fini@GOTPCREL(%rip), %r8
++	xorl %r8d, %r8d
++	xorl %ecx, %ecx
+ 
+ 	movq main_stub@GOTPCREL(%rip), %rdi
+ 
+--- a/fpcsrc/rtl/linux/arm/cprt0.as
++++ b/fpcsrc/rtl/linux/arm/cprt0.as
+@@ -82,10 +82,10 @@
+ 
+         /* Set up the other arguments in registers */
+         ldr a1, =PASCALMAIN
+-        ldr a4, =_init
++        ldr a4, = #0
+ 
+         /* Push fini */
+-        str ip, [sp, #-4]!
++        str a4, [sp, #-4]!
+ 
+         /* __libc_start_main (main, argc, argv, init, fini, rtld_fini, stack_end) */
+ 
+--- a/fpcsrc/rtl/linux/powerpc64/si_g.inc
++++ b/fpcsrc/rtl/linux/powerpc64/si_g.inc
+@@ -657,9 +657,6 @@
+                           Process start/halt
+  ******************************************************************************}
+ 
+-procedure __libc_csu_init; cdecl; external;
+-procedure __libc_csu_fini; cdecl; external;
+-
+ procedure __libc_start_main(r3,r4,r5,r6,r7,r8,r9: pointer); cdecl; external;
+ 
+ type
+@@ -745,8 +742,8 @@
+   end
+   = (sda_base: nil; {* was _SDA_BASE_  but not in 64-bit ABI }
+      main: @main_stub;
+-     libc_csu_init: @__libc_csu_init;
+-     libc_csu_fini: @__libc_csu_fini
++     libc_csu_init: pointer(0);
++     libc_csu_fini: pointer(0)
+     );
+ 
+ procedure call_libc_start_main(r3,r4,r5,r6,r7,r8,r9: pointer); cdecl;
+--- a/fpcsrc/rtl/linux/powerpc64/si_c.inc
++++ b/fpcsrc/rtl/linux/powerpc64/si_c.inc
+@@ -657,9 +657,6 @@
+                           Process start/halt
+  ******************************************************************************}
+ 
+-procedure __libc_csu_init; cdecl; external;
+-procedure __libc_csu_fini; cdecl; external;
+-
+ procedure __libc_start_main(r3,r4,r5,r6,r7,r8,r9: pointer); cdecl; external;
+ 
+ var
+@@ -724,8 +721,8 @@
+   end
+   = (sda_base: nil; {* was _SDA_BASE_  but not in 64-bit ABI }
+      main: @main_stub;
+-     libc_csu_init: @__libc_csu_init;
+-     libc_csu_fini: @__libc_csu_fini
++     libc_csu_init: pointer(0);
++     libc_csu_fini: pointer(0)
+     );
+ 
+ 
+--- a/fpcsrc/rtl/linux/powerpc/cprt0.as
++++ b/fpcsrc/rtl/linux/powerpc/cprt0.as
+@@ -35,8 +35,8 @@
+ start_addresses:
+     .long     _SDA_BASE_
+     .long     main_stub
+-    .long     __libc_csu_init
+-    .long     __libc_csu_fini
++    .long     0
++    .long     0
+     .size   start_adresses, .-start_addresses
+ 
+     .section ".text"
+--- a/fpcsrc/rtl/linux/mips/cprt0.as
++++ b/fpcsrc/rtl/linux/mips/cprt0.as
+@@ -113,10 +113,9 @@
+  and $29, -2 * 4
+  subu $29, 32
+ 
+- lw $7,%got(__libc_csu_init)($gp) /* init */
+- lw $8,%got(__libc_csu_fini)($gp) /* fini */
++ move $7, $0
+ 
+- sw $8, 16($29)				/* fini */
++ sw $0, 16($29)
+  sw $2, 20($29)				/* rtld_fini */
+  sw $29, 24($29)			/* stack_end */
+ 
+--- a/fpcsrc/rtl/linux/m68k/cprt0.as
++++ b/fpcsrc/rtl/linux/m68k/cprt0.as
+@@ -41,8 +41,10 @@
+ 
+         pea      (%sp)         /* highest available stack address */
+         pea      (%a1)         /* termination function provided by kernel */
+-        pea      __libc_csu_fini
+-        pea      __libc_csu_init
++
++        clr.l    -(%sp)
++        clr.l    -(%sp)
++
+         pea      (%a0)         /* argv */
+         move.l   %d0,-(%sp)    /* argc */
+         pea      PASCALMAIN
