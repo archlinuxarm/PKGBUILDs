@@ -1,0 +1,70 @@
+# Maintainer: Jelle van der Waa <jelle@archlinux.org>
+# Maintainer: Carl Smedstad <carsme@archlinux.org>
+# Contributor: Sergej Pupykin <pupykin.s+arch@gmail.com>
+# Contributor: Mathijs Kadijk <maccain13@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - build with setuptools instead of uv
+
+pkgname=python-dnspython
+pkgver=2.9.0
+pkgrel=1
+epoch=1
+pkgdesc="A DNS toolkit for Python"
+arch=('any')
+url="http://www.dnspython.org"
+license=('ISC')
+depends=('python')
+makedepends=(
+  'python-build'
+  'python-setuptools'
+  'python-installer'
+  'python-wheel'
+)
+checkdepends=(
+  'python-cryptography'
+  'python-idna'
+  'python-pytest'
+  'python-trio'
+)
+optdepends=(
+  'python-cryptography: DNSSEC support'
+  'python-httpx2: DoH support'
+  'python-aioquic: DNS-over-QUIC support'
+  'python-idna: support for updated IDNA 2008'
+  'python-curio: async support'
+  'python-trio: async support'
+  'python-sniffio: async support'
+)
+source=("https://github.com/rthalley/dnspython/archive/v$pkgver/dnspython-$pkgver.tar.gz")
+sha256sums=('e4e013282359619999b7b79e96734d07e6684c56db8f9f7828efd18b0bbc7dcc')
+
+build() {
+  cd ${pkgname#python-}-$pkgver
+
+  # Rewrite the backend to standard setuptools
+  sed -i 's/requires = \["uv_build.*"\]/requires = ["setuptools", "wheel"]/' pyproject.toml
+  sed -i 's/build-backend = "uv_build"/build-backend = "setuptools.build_meta"/' pyproject.toml
+
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd ${pkgname#python-}-$pkgver
+
+  # Disable tests which depends on external DNS servers
+  local pytest_options=(
+    --deselect tests/test_async.py::AsyncTests::testQueryUDPFallback
+    --deselect tests/test_async.py::TrioAsyncTests::testQueryUDPFallback
+    --deselect tests/test_query.py::QueryTests::testQueryUDPFallback
+    --deselect tests/test_query.py::QueryTests::testQueryUDPFallbackWithSocket
+  )
+
+  pytest "${pytest_options[@]}"
+}
+
+package() {
+  cd ${pkgname#python-}-${pkgver}
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -vDm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+}
