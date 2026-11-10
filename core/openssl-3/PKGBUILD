@@ -1,0 +1,64 @@
+# Maintainer: Pierre Schmitz <pierre@archlinux.de>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - set ARM architecture targets
+
+pkgname=openssl-3
+_pkgname=openssl
+pkgver=3.5.9
+pkgrel=2
+pkgdesc='The Open Source toolkit for cryptography and Transport Layer Security; Version 3.5 LTS'
+arch=('x86_64')
+url='https://www.openssl.org'
+license=('Apache-2.0')
+depends=('brotli' 'glibc' 'zlib' 'zstd')
+makedepends=('perl')
+provides=('libcrypto.so' 'libssl.so')
+source=("https://github.com/${_pkgname}/${_pkgname}/releases/download/${_pkgname}-${pkgver}/${_pkgname}-${pkgver}.tar.gz"{,.asc})
+sha256sums=('603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a'
+            'SKIP')
+validpgpkeys=('B146647E45A7B33947AB226B2A2C87D161692D40')
+
+build() {
+	cd "$srcdir/$_pkgname-$pkgver"
+
+	if [ "${CARCH}" == 'armv7h' ]; then
+		openssltarget='linux-armv4'
+		optflags=''
+	elif [ "${CARCH}" == 'aarch64' ]; then
+		openssltarget='linux-aarch64'
+		optflags='no-afalgeng enable-ec_nistp_64_gcc_128'
+	fi
+
+	./Configure --prefix=/usr --openssldir=/etc/ssl --libdir=lib/openssl-3 \
+		shared enable-ktls enable-brotli enable-zlib enable-zstd \
+		${optflags} "${openssltarget}" \
+		no-docs
+
+	make depend
+	make build_libs
+	make build_modules
+}
+
+package() {
+	cd "$srcdir/$_pkgname-$pkgver"
+
+	make DESTDIR="$pkgdir" install_dev
+	make DESTDIR="$pkgdir" install_modules
+
+	# Move some files around
+	install -m755 -d "$pkgdir/usr/include/openssl-3"
+	mv "$pkgdir/usr/include/openssl" "$pkgdir/usr/include/openssl-3/"
+	mv "$pkgdir/usr/lib/openssl-3/libcrypto.so.3" "$pkgdir/usr/lib/"
+	mv "$pkgdir/usr/lib/openssl-3/libssl.so.3" "$pkgdir/usr/lib/"
+	ln -sf ../libssl.so.3 "$pkgdir/usr/lib/openssl-3/libssl.so"
+	ln -sf ../libcrypto.so.3 "$pkgdir/usr/lib/openssl-3/libcrypto.so"
+
+	# Update header paths
+	sed -e 's|/include[[:blank:]]*$|/include/openssl-3|' \
+		-i "$pkgdir"/usr/lib/openssl-3/pkgconfig/*.pc
+	sed -e 's|/include"|/include/openssl-3"|' \
+		-i "$pkgdir/usr/lib/openssl-3/cmake/OpenSSL/OpenSSLConfig.cmake"
+
+	install -D -m644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE.txt"
+}
