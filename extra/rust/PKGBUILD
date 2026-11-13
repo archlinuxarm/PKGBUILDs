@@ -19,9 +19,10 @@ pkgbase=rust
 pkgname=(
   rust
   rust-src
+  rustc-dev
 )
 pkgver=1.99.1
-pkgrel=2
+pkgrel=4
 epoch=1
 pkgdesc="Systems programming language focused on safety, speed and concurrency"
 url=https://www.rust-lang.org/
@@ -42,12 +43,13 @@ depends=(
   libssh2
   libstdc++
   lld
+  llvm # for llvm-objcopy
   llvm-libs
   openssl
   sqlite
   zlib
 )
-_llvmver=23.1.3
+_llvmver=23.1.5
 makedepends=(
   "clang=$_llvmver"
   "llvm=$_llvmver"
@@ -61,7 +63,6 @@ makedepends=(
 )
 checkdepends=(
   gdb
-  openssl-3
   procps-ng
 )
 source=(
@@ -90,7 +91,7 @@ source=(
 )
 b2sums=('b200e9114673449d5a3d227289e308f1a55450b3e887f7322324f2d9098407e03308eabc15084f90d3798f7af4a8c395da4a7973a23858af05a1f3b1de949cca'
         'SKIP'
-        '1ce328590eb86e5a8d117a1d5c2c4b691d9c1a897f239ba197e14f47b660e927313133e94a518c43ceed163fc081760d5d33e2685a94af1031184a0960ffb5c7'
+        '1e6000c921501053cd59171120c90ae39c901cdb3e667e6598f33a3f07569c811c5c73c9d772ce782a77663ef1cc1328086021bb487b45aac5ebd5d6409e752d'
         '3736aa3f6f891cb94dbe549d5b2c74bc56e9d484a1598c2a446fbfd4db10a90a34f2e371c65743cf01e1266470fd6fe2fc52cbc365564c62ba61e20ea11c8e22'
         'eb57683802be1114452d0864bdabd1f2a42f83c0c45532ff968c693cb98dd5cf61342880bd75e731e91fde318b0f61cc30183374348a56db883ba32c900a4949'
         'd39a31a9260ba1e60e34f2481a4ef19ce18178736539450e57df19b9a3364a35f23b9055eecb36175de0e01a154b04f86c2645cffc7d637aab8b38dbf2eb0832'
@@ -249,6 +250,15 @@ build() {
   export RUST_BACKTRACE=1
   unset CFLAGS CXXFLAGS LDFLAGS
 
+  local host_tuple do_pgo=0
+  case $CARCH in
+    aarch64|x86_64) host_tuple=$CARCH-unknown-linux-gnu ;;
+    armv7h) host_tuple=armv7-unknown-linux-gnueabihf ;;
+    loong64) host_tuple=loongarch64-unknown-linux-gnu ;;
+    riscv64) host_tuple=riscv64gc-unknown-linux-gnu ;;
+    *) host_tuple=$CARCH-unknown-linux-gnu ;;
+  esac
+
   DESTDIR="$srcdir/dest-rust" python ./x.py install -j $jobs
 
   cd ../dest-rust
@@ -262,7 +272,7 @@ build() {
   local ldir="usr/share/licenses/rust" f d
   mkdir -p "$ldir"
   for f in usr/share/doc/*/{COPYRIGHT,LICENSE}*; do
-    d="$(dirname "$f")"
+    d="${f%/*}"
     case $f in
       */LICENSE-APACHE) rm -v "$f" ;;
       *) mv -v "$f" "$ldir/${f##*/}.${d##*/}" ;;
@@ -270,15 +280,27 @@ build() {
     rmdir -p --ignore-fail-on-non-empty "$d"
   done
 
-  # rustbuild always installs copies of the shared libraries to /usr/lib,
-  # overwrite them with symlinks to the per-architecture versions
-  #mkdir -pv usr/lib32
-  #ln -srvft usr/lib   usr/lib/rustlib/x86_64-unknown-linux-gnu/lib/*.so
-  #ln -srvft usr/lib32 usr/lib/rustlib/i686-unknown-linux-gnu/lib/*.so
 
-  #_pick dest-i686 usr/lib/rustlib/i686-unknown-linux-gnu usr/lib32
-  #_pick dest-musl usr/lib/rustlib/x86_64-unknown-linux-musl
-  #_pick dest-wasm usr/lib/rustlib/wasm32-*
+  for f in usr/lib/rustlib/$host_tuple/lib/*.so; do
+    if [[ -e usr/lib/${f##*/} || -e ${f%.so}.rlib ]]; then
+      # replace library copies with symlinks
+      ln -srvft usr/lib "$f"
+    else
+      # move unpaired libraries to rustc-dev
+      _pick dest-dev "$f"
+    fi
+  done
+  for f in usr/lib/rustlib/$host_tuple/lib/*.rlib; do
+    if [[ ! -e ${f%.rlib}.rmeta ]]; then
+      _pick dest-dev "$f"
+    fi
+  done
+  for f in usr/lib/rustlib/$host_tuple/lib/*.rmeta; do
+    if [[ ! -e ${f%.rmeta}.rlib ]]; then
+      _pick dest-dev "$f"
+    fi
+  done
+
   _pick dest-src  usr/lib/rustlib/src
 }
 
@@ -324,4 +346,19 @@ package_rust-src() {
     rustc-$pkgver-src/{COPYRIGHT,LICENSE-MIT}
 }
 
-# vim:set ts=2 sw=2 et:
+package_rustc-dev() {
+  pkgdesc="Compiler libraries for Rust"
+  depends=(
+    glibc
+    libgcc
+    rust
+  )
+
+  cp -a dest-dev/* "$pkgdir"
+  _install_licenses
+
+  cd "$pkgdir"
+  ln -srvft usr/lib usr/lib/rustlib/*/lib/*.so
+}
+
+# vim:set sw=2 sts=-1 et:
