@@ -5,12 +5,7 @@
 # Contributor: userwithuid <userwithuid@gmail.com>
 
 # ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
-#  - remove lib32, musl, and wasm packages and related bits
-#  - remove wasm-component-ld from makedepends
-#  - add a link to g++ to compensate for broken cross-compiler decisions
-#  - build v6/v7 with -j2 - RAM constraints
-#  - set llvm-config in config.toml for ARM architectures
-#  - set debuginfo-level = 0 in config.toml - RAM constraints
+#  - v7: bootstrap.armv7h.toml, host_tuple, _pick dest-musl switch, build -j2
 #  - build aarch64 with 16k page support
 
 highmem=1
@@ -18,20 +13,31 @@ highmem=1
 pkgbase=rust
 pkgname=(
   rust
+  rust-musl
   rust-src
+  rust-wasm
   rustc-dev
+
+  # x86_64 only
+  lib32-rust-libs
+
+  # cross targets
+  rust-aarch64-gnu
+  rust-aarch64-musl
 )
 pkgver=1.100.0
-pkgrel=1
+pkgrel=1.1
 epoch=1
 pkgdesc="Systems programming language focused on safety, speed and concurrency"
 url=https://www.rust-lang.org/
-arch=(x86_64)
-license=("Apache-2.0 OR MIT")
-options=(
-  !emptydirs
-  !lto
+arch=(
+  aarch64
+  armv7h
+  loong64
+  riscv64
+  x86_64
 )
+license=("Apache-2.0 OR MIT")
 depends=(
   bash
   compiler-rt
@@ -60,10 +66,35 @@ makedepends=(
   perl
   python
   rust
+  wasi-libc
+  wasm-component-ld
+)
+makedepends_loong64=(
+  aarch64-linux-gnu-gcc
+  aarch64-linux-gnu-glibc
+  musl-aarch64
+  musl-x86_64
+)
+makedepends_riscv64=(
+  aarch64-linux-gnu-gcc
+  aarch64-linux-gnu-glibc
+  musl-aarch64
+  musl-x86_64
+)
+makedepends_x86_64=(
+  aarch64-linux-gnu-gcc
+  aarch64-linux-gnu-glibc
+  lib32-gcc-libs
+  lib32-glibc
+  musl-aarch64
 )
 checkdepends=(
   gdb
   procps-ng
+)
+options=(
+  !emptydirs
+  !lto
 )
 source=(
   "https://static.rust-lang.org/dist/rustc-$pkgver-src.tar.xz"{,.asc}
@@ -86,9 +117,20 @@ source=(
   # Use our ld.lld
   0005-compiler-Use-ld.lld-by-default.patch
 
+  # Use our target-specific GCCs, like aarch64-linux-gnu-gcc
+  0006-compiler-Use-target-specific-GCC-linkers.patch
+
+  # Make the riscv64 musl target behave like the x86_64 musl target
+  0007-compiler-Link-riscv64-musl-statically.patch
+
   # Prefer "lib" over "lib64"
   0008-compiler-Swap-primary-and-secondary-lib-dirs.patch
 )
+source_aarch64=(bootstrap.aarch64.toml)
+source_armv7h=(bootstrap.armv7h.toml)
+source_loong64=(bootstrap.loong64.toml)
+source_riscv64=(bootstrap.riscv64.toml)
+source_x86_64=(bootstrap.x86_64.toml)
 b2sums=('c811adbb95b83365f1394ac9f419e5e10eba010b4eed539d2dc6d0f2e61511a9cdf9990fc1cb61d8c2d543e47e28067eb91a5c8ca2b8d9f163102d0189bd1cbb'
         'SKIP'
         '1e6000c921501053cd59171120c90ae39c901cdb3e667e6598f33a3f07569c811c5c73c9d772ce782a77663ef1cc1328086021bb487b45aac5ebd5d6409e752d'
@@ -97,7 +139,14 @@ b2sums=('c811adbb95b83365f1394ac9f419e5e10eba010b4eed539d2dc6d0f2e61511a9cdf9990
         '3b7a1f621e231f1e4b378b783a515188da7b16d925584a5bc42cd9327394b72c8305cb1365fa37ef411384a2719f895ecfed71e0c01dc37a450a477ed01be0bd'
         'b5a7180c7d4a380e2aaa056951f0d800bbf8b97748ed963bbbf234bdd82b2cae0f80a3f03476f8c23dddce4179c7f0804762746075a8bac95f6ab7b726a0c98f'
         '5c92e308451a30f0d5e46a742766f5893b8d4e95fdcf72ef1bd71fa98bab1866e72a76943e8d9a570c225388dda61bd9aad6ad5f69a470289f8861ed0d3f5bc4'
+        '859806770bed41dca2c48e7ac01f0fe31b9c4811e76eab173a9cac254a8cdfda0c85ae4a01dd7238fa0018d06721bf3bda5d74348e5c296a19ec534c1b8763c9'
+        '9e51e3442da85211165afce6c6eef3a89e5ce8d2b026d373a19c533b3ad99efdb7cc60668580536c2e52e8dc58c1a96cd8d2733ffa6f1b438db5df8d495042b6'
         'd5fcda00c46e1e1ea9ed1d269d3ef549d4ad96148d7d0744acd673de802b3bf3747ceec1fa506d3e7c128cdff742410b1e69218d59ef20a5f246755c1bd02694')
+b2sums_aarch64=('e7a799ed47c2fd4e5fb8af8a12511ac720765cc56fffd43817b203f953d8d5e7bee89d87e995f4fab9fbaab426cb796497bdb049b1006abd6cb5ac5640a5ad9c')
+b2sums_armv7h=('b1134caded4c3589842b240300ddaeb624c48f69a17bf557f548b69ccb3b5e8f7c1c737a13eb47ed759dbc1b286045e2bd966446bd8ebb5d2564708242207031')
+b2sums_loong64=('836768f9f8139a2725746d282bdd66034ba42757f093e602485eeafd614d2ff5ecc5f8691c56ebc9ff6b9b2e125c6e351d56d59cb322e785214e2d0ae37ce584')
+b2sums_riscv64=('9680f59ebac22c2918d276b6eed6edace14699dcb1c0fc53149ae87653ffa9409b58c6dbb3713b9faf5ea8e2de1ead562446b955fac8a89b6b89706e30d49931')
+b2sums_x86_64=('77d719756f62ea48f56c9f3d26856ff4cc6d8e3f237d290816ee63ac9cd5d7f5d20ec93bf28711fbce276165f9d6d3fff6629f2fed2d35cf08f9120810eb2283')
 validpgpkeys=(
   108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE  # Rust Language (Tag and Release Signing Key) <rust-key@rust-lang.org>
 )
@@ -123,112 +172,9 @@ prepare() {
 
   local clangdir
   clangdir="$(clang -print-resource-dir)"
-
-  cat >bootstrap.toml <<END
-# see src/bootstrap/defaults/
-profile = "dist"
-
-# see src/bootstrap/src/utils/change_tracker.rs
-change-id = 162423
-
-
-[llvm]
-download-ci-llvm = false
-link-shared = true
-
-[gcc]
-download-ci-gcc = false
-
-[build]
-description = "Arch Linux $pkgbase $epoch:$pkgver-$pkgrel"
-cargo = "/usr/bin/cargo"
-rustc = "/usr/bin/rustc"
-rustfmt = "/usr/bin/rustfmt"
-locked-deps = true
-vendor = true
-tools = [
-  "cargo",
-  "clippy",
-  "rustdoc",
-  "rustfmt",
-  "rust-analyzer-proc-macro-srv",
-  "analysis",
-  "rust-src",
-  "rustc-dev",
-]
-sanitizers = false
-profiler = true
-
-# Generating docs fails with the wasm32-* targets
-docs = false
-
-[install]
-prefix = "/usr"
-
-[rust]
-codegen-units = 16
-codegen-units-std = 1
-debuginfo-level = 0
-debuginfo-level-std = 0
-channel = "stable"
-rpath = false
-lld = false
-bootstrap-override-lld = "external"
-llvm-bitcode-linker = false
-deny-warnings = false
-backtrace-on-ice = true
-parallel-frontend-threads = 0
-
-[dist]
-compression-formats = ["gz"]
-compression-profile = "fast"
-
-[target.x86_64-unknown-linux-gnu]
-cc = "/usr/bin/gcc"
-cxx = "/usr/bin/g++"
-ar = "/usr/bin/gcc-ar"
-ranlib = "/usr/bin/gcc-ranlib"
-llvm-config = "/usr/bin/llvm-config"
-optimized-compiler-builtins = "$clangdir/lib/linux/libclang_rt.builtins-x86_64.a"
-
-[target.i686-unknown-linux-gnu]
-cc = "/usr/bin/gcc"
-cxx = "/usr/bin/g++"
-ar = "/usr/bin/gcc-ar"
-ranlib = "/usr/bin/gcc-ranlib"
-optimized-compiler-builtins = "$clangdir/lib/linux/libclang_rt.builtins-i386.a"
-
-[target.aarch64-unknown-linux-gnu]
-cc = "/usr/bin/gcc"
-cxx = "/usr/bin/g++"
-ar = "/usr/bin/gcc-ar"
-ranlib = "/usr/bin/gcc-ranlib"
-llvm-config = "/usr/bin/llvm-config"
-optimized-compiler-builtins = "$clangdir/lib/aarch64-unknown-linux-gnu/libclang_rt.builtins.a"
-
-[target.armv7-unknown-linux-gnueabihf]
-cc = "/usr/bin/gcc"
-cxx = "/usr/bin/g++"
-ar = "/usr/bin/gcc-ar"
-ranlib = "/usr/bin/gcc-ranlib"
-llvm-config = "/usr/bin/llvm-config"
-
-[target.arm-unknown-linux-gnueabihf]
-cc = "/usr/bin/gcc"
-cxx = "/usr/bin/g++"
-ar = "/usr/bin/gcc-ar"
-ranlib = "/usr/bin/gcc-ranlib"
-llvm-config = "/usr/bin/llvm-config"
-END
-
-  if [[ $CARCH == armv7h ]]; then
-    mkdir path
-    ln -s /usr/bin/g++ path/arm-linux-gnueabihf-g++
-    export PATH="$srcdir/path:$PATH"
-    jobs="2"
-  else
-    jobs="$(nproc)"
-  fi
+  sed -e "s|%description%|Arch Linux $pkgbase $epoch:$pkgver-$pkgrel|g" \
+      -e "s|%clangdir%|$clangdir|g" \
+      "$srcdir/bootstrap.${CARCH}.toml" > bootstrap.toml
 }
 
 _pick() {
@@ -251,16 +197,65 @@ build() {
   export RUST_BACKTRACE=1
   unset CFLAGS CXXFLAGS LDFLAGS
 
+  if [[ $CARCH == armv7h ]]; then
+    jobs="2"
+  else
+    jobs="$(nproc)"
+  fi
+
+  local xpy_options=(
+    -j "$jobs"
+  )
+
   local host_tuple do_pgo=0
   case $CARCH in
-    aarch64|x86_64) host_tuple=$CARCH-unknown-linux-gnu ;;
+    aarch64|x86_64) host_tuple=$CARCH-unknown-linux-gnu; do_pgo=1 ;;
     armv7h) host_tuple=armv7-unknown-linux-gnueabihf ;;
     loong64) host_tuple=loongarch64-unknown-linux-gnu ;;
     riscv64) host_tuple=riscv64gc-unknown-linux-gnu ;;
     *) host_tuple=$CARCH-unknown-linux-gnu ;;
   esac
 
-  DESTDIR="$srcdir/dest-rust" python ./x.py install -j $jobs
+  if (( do_pgo )); then
+    local profraw="$PWD/build/profiles"
+    mkdir -p "$profraw"
+
+    cp bootstrap.toml bootstrap.toml.nopgo
+    cat >bootstrap.toml bootstrap.toml.nopgo - <<END
+[pgo]
+rustc.generate = "$profraw"
+END
+
+    echo "Building instrumented compiler..."
+    python ./x.py build sysroot "${xpy_options[@]}"
+
+    # Building cargo is our workload for profiling
+    echo "Profiling instrumented compiler..."
+    local stage2="$PWD/build/$host_tuple/stage2"
+    LLVM_PROFILE_FILE="$profraw/default_%m_%p.profraw" \
+      LD_LIBRARY_PATH="$stage2/lib" RUSTC="$stage2/bin/rustc" \
+      cargo build --manifest-path=src/tools/cargo/Cargo.toml
+
+    # Merge the profile data
+    local profdata="$PWD/build/rustc.profdata"
+    llvm-profdata merge -o "$profdata" "$profraw"
+
+    stat -c "Profile data found (%s bytes)" "$profdata"
+    test -s "$profdata"
+
+    # Clean up profraw and instrumented stage2 artifacts
+    echo "Removing instrumented compiler..."
+    rm -r "$profraw" "$stage2"*/
+
+    cat >bootstrap.toml bootstrap.toml.nopgo - <<END
+[pgo]
+rustc.use = "$profdata"
+END
+    rm bootstrap.toml.nopgo
+  fi
+
+  echo "Building optimized compiler..."
+  DESTDIR="$srcdir/dest-rust" python ./x.py install "${xpy_options[@]}"
 
   cd ../dest-rust
 
@@ -281,6 +276,11 @@ build() {
     rmdir -p --ignore-fail-on-non-empty "$d"
   done
 
+  # Symlink the "self-contained" linker to our system lld
+  mkdir -pv usr/lib/rustlib/$host_tuple/bin/gcc-ld
+  ln -srvf  usr/bin/lld          usr/lib/rustlib/$host_tuple/bin/rust-lld
+  ln -srvf  usr/bin/llvm-objcopy usr/lib/rustlib/$host_tuple/bin/rust-objcopy
+  ln -srvft usr/lib/rustlib/$host_tuple/bin/gcc-ld usr/bin/{ld.lld,ld64.lld,lld-link,wasm-ld}
 
   for f in usr/lib/rustlib/$host_tuple/lib/*.so; do
     if [[ -e usr/lib/${f##*/} || -e ${f%.so}.rlib ]]; then
@@ -302,7 +302,25 @@ build() {
     fi
   done
 
+  if [[ $CARCH == armv7h ]]; then
+    _pick dest-musl usr/lib/rustlib/armv7-unknown-linux-musleabihf
+  else
+    _pick dest-musl usr/lib/rustlib/${host_tuple%-gnu}-musl
+  fi
+  _pick dest-wasm usr/lib/rustlib/wasm32{,v1}-*
   _pick dest-src  usr/lib/rustlib/{src,rustc-src}
+
+  case $CARCH in
+    x86_64)
+      _pick dest-i686 usr/lib/rustlib/i686-unknown-linux-gnu
+      _pick dest-aarch64-gnu usr/lib/rustlib/aarch64-unknown-linux-gnu
+      _pick dest-aarch64-musl usr/lib/rustlib/aarch64-unknown-linux-musl
+      ;;
+    loong64|riscv64)
+      _pick dest-aarch64-gnu usr/lib/rustlib/aarch64-unknown-linux-gnu
+      _pick dest-aarch64-musl usr/lib/rustlib/aarch64-unknown-linux-musl
+      ;;
+  esac
 }
 
 _install_licenses() {
@@ -342,14 +360,31 @@ package_rust() {
   cp -a dest-rust/* "$pkgdir"
 }
 
+package_rust-musl() {
+  pkgdesc="Musl target for Rust"
+  depends=(rust)
+
+  cp -a dest-musl/* "$pkgdir"
+  _install_licenses
+}
+
 package_rust-src() {
   pkgdesc="Source code for the Rust standard library"
   depends=(rust)
 
   cp -a dest-src/* "$pkgdir"
+  _install_licenses
+}
 
-  install -Dt "$pkgdir/usr/share/licenses/$pkgname" -m644 \
-    rustc-$pkgver-src/{COPYRIGHT,LICENSE-MIT}
+package_rust-wasm() {
+  pkgdesc="WebAssembly targets for Rust"
+  depends=(
+    rust
+    wasm-component-ld
+  )
+
+  cp -a dest-wasm/* "$pkgdir"
+  _install_licenses
 }
 
 package_rustc-dev() {
@@ -365,6 +400,59 @@ package_rustc-dev() {
 
   cd "$pkgdir"
   ln -srvft usr/lib usr/lib/rustlib/*/lib/*.so
+}
+
+package_lib32-rust-libs() {
+  pkgdesc="32-bit target and libraries for Rust"
+  arch=(x86_64)
+  depends=(
+    lib32-gcc-libs
+    lib32-glibc
+    rust
+  )
+  provides=(lib32-rust)
+  conflicts=(lib32-rust)
+  replaces=(lib32-rust)
+
+  cp -a dest-i686/* "$pkgdir"
+  _install_licenses
+
+  cd "$pkgdir"
+  mkdir -pv usr/lib32
+  ln -srvft usr/lib32 usr/lib/rustlib/i686-unknown-linux-gnu/lib/*.so
+}
+
+package_rust-aarch64-gnu() {
+  pkgdesc="AArch64 GNU target for Rust"
+  arch=(
+    loong64
+    riscv64
+    x86_64
+  )
+  depends=(
+    aarch64-linux-gnu-gcc
+    aarch64-linux-gnu-glibc
+    rust
+  )
+
+  cp -a dest-aarch64-gnu/* "$pkgdir"
+  _install_licenses
+}
+
+package_rust-aarch64-musl() {
+  pkgdesc="AArch64 Musl target for Rust"
+  arch=(
+    loong64
+    riscv64
+    x86_64
+  )
+  depends=(
+    aarch64-linux-gnu-gcc
+    rust
+  )
+
+  cp -a dest-aarch64-musl/* "$pkgdir"
+  _install_licenses
 }
 
 # vim:set sw=2 sts=-1 et:
