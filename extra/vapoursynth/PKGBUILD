@@ -1,0 +1,68 @@
+# Maintainer: Maxime Gauduin <alucryd@archlinux.org>
+# Contributor: sl1pkn07 <sl1pkn07@gmail.com>
+# Contributor: jackoneill <cantabile.desu@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archlinuxarm.org>
+#  - disable lto on v7
+
+pkgname=vapoursynth
+pkgver=81
+pkgrel=1
+pkgdesc='A video processing framework with the future in mind'
+arch=(x86_64)
+url=http://www.vapoursynth.com/
+license=(
+  LGPL-2.1-or-later
+  OFL-1.1
+)
+depends=(
+  glibc
+  libgcc
+  libstdc++
+  libzimg.so
+  python
+)
+makedepends=(
+  cython
+  git
+  meson-python
+  python-build
+  python-installer
+)
+source=(
+  git+https://github.com/vapoursynth/vapoursynth.git#tag=R${pkgver}
+  vapoursynth.xml
+)
+b2sums=('0c9ff92027e59979e37c40e0b173cc3c78fb81b842e31d5f67584f1cbdbce9efb0ec36350f630f81389bd6d5a575aac8d76f58292aac732fd23c953a99a910f9'
+        'feae23a22f8589177f30c36bdf21bab93d55a786194d3e0e958537016630d075b82178f60ac840f30ae316a8f87d3fb01f371211f62d1fee9850ee5063561747')
+
+build() {
+  cd vapoursynth
+  [[ $CARCH == armv7h ]] && sed -i 's/b_lto=true/b_lto=false/' meson.build
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  python -m installer --destdir="$pkgdir" vapoursynth/dist/*.whl
+
+  local _sitepkgs
+  _sitepkgs="$(python -c 'import site; print(site.getsitepackages()[0])')"
+  ln -sr "${pkgdir}${_sitepkgs}/vapoursynth/libvapoursynth.so.4" "${pkgdir}/usr/lib/libvapoursynth.so.4"
+  ln -sr "${pkgdir}/usr/lib/libvapoursynth.so.4" "${pkgdir}/usr/lib/libvapoursynth.so"
+  ln -sr "${pkgdir}${_sitepkgs}/vapoursynth/libvsscript.so" "${pkgdir}/usr/lib/libvapoursynth-script.so.0"
+  ln -sr "${pkgdir}/usr/lib/libvapoursynth-script.so.0" "${pkgdir}/usr/lib/libvapoursynth-script.so"
+
+  install -d -m755 "${pkgdir}/usr"/{include,lib/pkgconfig}
+  ln -sr "${pkgdir}${_sitepkgs}/vapoursynth/include" "${pkgdir}/usr/include/vapoursynth"
+  ln -sr "${pkgdir}${_sitepkgs}/vapoursynth/pkgconfig/vapoursynth.pc" "${pkgdir}/usr/lib/pkgconfig/vapoursynth.pc"
+
+  install -d -m755 "${pkgdir}${_sitepkgs}/vapoursynth/plugins"
+  install -Dm 644 vapoursynth/src/core/ter-116n.ofl.txt -t "${pkgdir}/usr/share/licenses/vapoursynth"
+  install -Dm 644 vapoursynth.xml -t "${pkgdir}/usr/share/mime/packages"
+
+  local _libvsscript="${_sitepkgs}/vapoursynth/libvsscript.so"
+  printf "export VSSCRIPT_PATH='%s'\n" "${_libvsscript}" \
+    | install -Dm 644 /dev/stdin "${pkgdir}/etc/profile.d/vapoursynth.sh"
+  printf "set --export --global VSSCRIPT_PATH '%s'\n" "${_libvsscript}" \
+    | install -Dm 644 /dev/stdin "${pkgdir}/usr/share/fish/vendor_conf.d/vapoursynth.fish"
+}
