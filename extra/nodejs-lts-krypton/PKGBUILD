@@ -1,0 +1,135 @@
+# Maintainer: Daniel M. Capella <polyzen@archlinux.org>
+# Contributor: Felix Yan <felixonmars@archlinux.org>
+# Contributor  Bartłomiej Piotrowski <bpiotrowski@archlinux.org>
+# Contributor: Thomas Dziedzic < gostrc at gmail >
+# Contributor: James Campos <james.r.campos@gmail.com>
+# Contributor: BlackEagle < ike DOT devolder AT gmail DOT com >
+# Contributor: Dongsheng Cai <dongsheng at moodle dot com>
+# Contributor: Masutu Subric <masutu.arch at googlemail dot com>
+# Contributor: TIanyi Cui <tianyicui@gmail.com>
+
+# ALARM: Kevin Mihelich <kevin@archinuxarm.org>
+#  - build v7 with vfpv3, neon FTBFS without -flax-vector-conversions and breaks https
+#  - removed --enable-lto
+#  - fix for v7 FTBFS with newer gcc
+
+pkgname=nodejs-lts-krypton
+pkgver=24.22.3
+pkgrel=2
+pkgdesc='Evented I/O for V8 javascript ("Active LTS" release: Krypton)'
+arch=(x86_64)
+url=https://nodejs.org/
+license=(MIT)
+depends=(
+  ada
+  brotli
+  c-ares
+  icu
+  libnghttp2
+  libnghttp3
+  libngtcp2
+  libuv
+#  llhttp
+  openssl
+  simdjson
+#  simdutf
+#  v8
+  zlib
+  zstd
+)
+makedepends=(
+  git
+  ninja
+  procps-ng
+  python
+)
+optdepends=('npm: nodejs package manager')
+provides=(
+  "nodejs=$pkgver"
+  nodejs-lts
+)
+conflicts=(nodejs)
+source=(
+  "git+https://github.com/nodejs/node.git#tag=v$pkgver?signed"
+)
+b2sums=('fbbbf9db63aa3e1f239e1be2c734e773c662bcee9951a3ac69d199dd0459f29952334dda9332e7d0a74d91f1c91c6e66c490e5f556efeb64ad61ff5704f3f6b9')
+validpgpkeys=(
+  8FCCA13FEF1D0C2E91008E09770F7A9A5AE15600 # Michaël Zasso (Targos) <targos@protonmail.com>
+  890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4 # RafaelGSS <rafael.nunu@hotmail.com>
+  C82FA3AE1CBEDC6BE46B9360C43CEC45C17AB93C # Richard Lau <rlau@redhat.com>
+  C0D6248439F1D5604AAFFB4021D900FFDB233756 # Antoine du Hamel <duhamelantoine1995@gmail.com>
+  5BE8A3F6C8A5C01D106C0AD820B1A390B168D356 # Antoine du Hamel <antoine.duhamel@rosa.be>
+  CC68F5A3106FF448322E48ED27F5E38D5B0A215F # marco-ippolito <marcoippolito54@gmail.com>
+  108F52B48DB57BB0CC439B2997B01419BD92F80A # Ruy Adorno <ruyadorno@hotmail.com>
+  DD792F5973C6DE52C432CBDAC77ABFA00DDBF2B7 # Juan José Arboleda <soyjuanarbol@gmail.com>
+)
+
+prepare() {
+  cd node
+  # Adjust test expectations for OpenSSL 4.x: https://github.com/nodejs/node/pull/66775
+  git cherry-pick -n c61ba86ed02dc0c80c51b9333d3fe9e3e4e2f887
+  # Limit GC test connections to avoid ECONNRESET: https://github.com/nodejs/node/pull/44146
+  sed -i "s/require('os').availableParallelism()/Math.min(8, require('os').availableParallelism())/" \
+    test/sequential/test-gc-http-client-onerror.js
+  # Fix GCC 16 template disambiguation in 32-bit Turboshaft lowering
+  sed -i 's/\b__ Tuple<Word32, Word32>(/__ template Tuple<Word32, Word32>(/g' \
+    deps/v8/src/compiler/turboshaft/int64-lowering-reducer.h
+}
+
+_set_flags() {
+  [[ $CARCH == "armv7h" ]] && CFLAGS=`echo "$CFLAGS" | sed -e 's/neon/vfpv3/'` && CXXFLAGS="$CFLAGS"
+  # /usr/lib/libnode.so uses malloc_usable_size, which is incompatible with fortification level 3
+  CFLAGS="${CFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+  CXXFLAGS="${CXXFLAGS/_FORTIFY_SOURCE=3/_FORTIFY_SOURCE=2}"
+}
+
+build() {
+  _set_flags
+  cd node
+
+  ./configure \
+    --ninja \
+    --prefix=/usr \
+    --with-intl=system-icu \
+    --without-corepack \
+    --without-npm \
+    --shared-ada \
+    --shared-brotli \
+    --shared-cares \
+    --shared-libuv \
+    --shared-nghttp2 \
+    --shared-nghttp3 \
+    --shared-ngtcp2 \
+    --shared-openssl \
+    --shared-simdjson \
+    --shared-zlib \
+    --shared-zstd
+    # --shared-http-parser
+    # --shared-simdutf
+    # --shared-v8
+
+  make
+}
+
+check() {
+  _set_flags
+  cd node
+  rm test/parallel/test-http2-client-set-priority.js
+  rm test/parallel/test-http2-client-unescaped-path.js
+  rm test/parallel/test-http2-max-invalid-frames.js
+  rm test/parallel/test-http2-misbehaving-flow-control.js
+  rm test/parallel/test-http2-misbehaving-flow-control-paused.js
+  rm test/parallel/test-http2-multi-content-length.js
+  rm test/parallel/test-http2-priority-event.js
+  rm test/parallel/test-http2-reset-flood.js
+  rm test/parallel/test-tls-ocsp-callback.js
+
+  make test-only
+}
+
+package() {
+  _set_flags
+  cd node
+  make DESTDIR="$pkgdir" install
+  install -Dm644 LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname
+}
