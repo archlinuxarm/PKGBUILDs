@@ -29,3 +29,7 @@ Pull requests that fail to meet these requirements may be summarily closed witho
 * If the change increases the version of the package, ensure `pkgver` is updated and `pkgrel` is reset to 1.
 * Otherwise, increment `pkgrel` by 1.
 * If the package is only supposed to be built for specific architectures, ensure the `buildarch` variable is set correctly (see [the README](https://github.com/archlinuxarm/PKGBUILDs/blob/master/README.md))
+
+### Arch Linux ARM kernel packages
+* If the PR modifies the kernel config, run `make olddefconfig` against the modified config in a native build environment for the target architecture (not a cross-compile), and commit the resulting config.
+* Update the checksums in the PKGBUILD to match the new config.  Running `updpkgsums` in the package directory will do this.
